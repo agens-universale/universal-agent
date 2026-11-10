@@ -87,7 +87,6 @@ def test_preserved_batch_keeps_both_real_and_technical():
         current_messages=current,
         mode="user_ask",
         state_messages=current,
-        message_keys_already_persisted=None,
     )
     assert real in out
     assert tech in out

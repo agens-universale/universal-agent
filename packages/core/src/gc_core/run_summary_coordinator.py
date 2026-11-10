@@ -159,9 +159,6 @@ class RunSummaryCoordinator:
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False
         self._blind_token_trigger_warned = False
-        # Ключи треда на начало шага цикла: всё, что записано позже (реплика,
-        # подсказка, сообщения плагинов), — вход этого шага.
-        self._keys_at_step_start: frozenset[str] | None = None
 
     def _refresh_limits(self) -> None:
         """Пороги срабатывания на момент проверки: от провайдера модели истории;
@@ -508,7 +505,6 @@ class RunSummaryCoordinator:
             current_messages=batch,
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=self._keys_at_step_start,
         )
 
     async def _areattach_preserved_batch(
@@ -562,14 +558,6 @@ class RunSummaryCoordinator:
             summary_trigger_tokens=self._summary_trigger_tokens,
             tags=self._projection_tags(),
             strip_think=True,
-        )
-
-    def mark_step_start(self) -> None:
-        """Начало шага цикла: запомнить ключи, уже известные треду. Батч
-        шага при сжатии режется по ним, сколько бы записей ни было в шаге."""
-        session = self._thread_session
-        self._keys_at_step_start = (
-            None if session is None else frozenset(session.known_message_keys)
         )
 
     def _restore_after_failed_compaction(

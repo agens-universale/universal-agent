@@ -1878,7 +1878,6 @@ class AgentExecutor:
                         thread_session, active
                     )
                 ),
-                mark_step_start=summary.mark_step_start,
             )
             loop_finished = True
             self.last_response, self.loop_finished = response, True
