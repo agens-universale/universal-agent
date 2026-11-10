@@ -512,7 +512,7 @@
     "additionalProperties": false,
     "properties": {
      "add_line_numbers": {
-      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "description": "Optional (default false). When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
       "type": "boolean"
      },
      "encoding": {
@@ -533,8 +533,7 @@
      }
     },
     "required": [
-     "path",
-     "add_line_numbers"
+     "path"
     ],
     "type": "object"
    },
@@ -1679,7 +1678,7 @@
     "additionalProperties": false,
     "properties": {
      "add_line_numbers": {
-      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "description": "Optional (default false). When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
       "type": "boolean"
      },
      "encoding": {
@@ -1700,8 +1699,7 @@
      }
     },
     "required": [
-     "path",
-     "add_line_numbers"
+     "path"
     ],
     "type": "object"
    },
@@ -3024,7 +3022,7 @@
     "additionalProperties": false,
     "properties": {
      "add_line_numbers": {
-      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "description": "Optional (default false). When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
       "type": "boolean"
      },
      "encoding": {
@@ -3045,8 +3043,7 @@
      }
     },
     "required": [
-     "path",
-     "add_line_numbers"
+     "path"
     ],
     "type": "object"
    },
@@ -4139,7 +4136,7 @@
     "additionalProperties": false,
     "properties": {
      "add_line_numbers": {
-      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "description": "Optional (default false). When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
       "type": "boolean"
      },
      "encoding": {
@@ -4160,8 +4157,7 @@
      }
     },
     "required": [
-     "path",
-     "add_line_numbers"
+     "path"
     ],
     "type": "object"
    },

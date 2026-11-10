@@ -71,9 +71,7 @@ def _read(call_id):
         "status": "completed",
         "call_id": call_id,
         "name": "fs_read_file",
-        "arguments": json.dumps(
-            {"path": f"src/{call_id}.py", "add_line_numbers": False}
-        ),
+        "arguments": json.dumps({"path": f"src/{call_id}.py"}),
     }
 
 
