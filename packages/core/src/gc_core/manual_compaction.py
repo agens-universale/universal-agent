@@ -5,7 +5,8 @@ state под компакцию, зовёт RunSummaryCoordinator.aforce_compact
 Сосед run_summary_coordinator.py; из контроллера AgentExecutor вынесено.
 
 Форма одна — асинхронная (``acompact_thread``). Синхронного имени нет:
-из синхронного кода ведут своим ``asyncio.run`` (так делает TUI).
+из синхронного кода ведут своим ``asyncio.run`` (TUI отдаёт корутину
+циклу агента окна).
 """
 
 from __future__ import annotations
