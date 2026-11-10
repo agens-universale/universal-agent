@@ -94,11 +94,14 @@ def platform_skip_reason(entry: MCPEntry) -> str | None:
 
 def _short_reason(exc: Exception) -> str:
     if isinstance(exc, subprocess.CalledProcessError):
-        # Шагов установки несколько (pip, npm, npx) — называем упавший.
+        # Шагов установки несколько (pip, npm, npx) — называем упавший:
+        # первые аргументы говорят, что за шаг, последний — что ставили.
         name, *args = exc.cmd
-        shown = [Path(name).name, *args[:3]]
-        if len(args) > 3:
+        head, tail = args[:3], args[3:]
+        shown = [Path(name).name, *head]
+        if len(tail) > 1:
             shown.append("…")
+        shown += tail[-1:]
         command = " ".join(shown)
         return f"команда «{command}» завершилась с кодом {exc.returncode}"
     return str(exc) or exc.__class__.__name__
@@ -255,10 +258,9 @@ def install_entry(
     repo_ref: str | None = None,
 ) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
-    if not _platform_supported(entry):
-        print(
-            f"[skip] {entry.name}: platform {sys.platform!r} not in {list(entry.install.platforms)}"
-        )
+    reason = platform_skip_reason(entry)
+    if reason:
+        print(f"[skip] {entry.name}: {reason}")
         return
 
     pkg_path = (root / entry.path).resolve()

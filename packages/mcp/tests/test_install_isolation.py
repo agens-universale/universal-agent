@@ -65,7 +65,15 @@ def test_failure_reason_names_the_command_that_failed():
         ],
     )
     assert inst._short_reason(exc) == (
-        "команда «npx -y @playwright/mcp@0.0.70 install-browser …» "
+        "команда «npx -y @playwright/mcp@0.0.70 install-browser … chromium» "
+        "завершилась с кодом 1"
+    )
+    # Последний аргумент — что ставили: у pip без него причина безлика.
+    pip = subprocess.CalledProcessError(
+        1, ["/venv/bin/python", "-m", "pip", "install", "office-mcp==0.3.0"]
+    )
+    assert inst._short_reason(pip) == (
+        "команда «python -m pip install office-mcp==0.3.0» "
         "завершилась с кодом 1"
     )
     short = subprocess.CalledProcessError(2, ["/usr/bin/npm", "ls"])
