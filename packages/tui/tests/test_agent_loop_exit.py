@@ -29,7 +29,13 @@ class _DeafExecutor:
         pass
 
 
-def test_deaf_turn_is_cancelled_by_shutdown(agent_loop):
+def test_deaf_turn_is_cancelled_by_shutdown(agent_loop, monkeypatch):
+    thread_errors: list = []
+    monkeypatch.setattr(
+        threading,
+        "excepthook",
+        lambda args: thread_errors.append(args.exc_type),
+    )
     executor = _DeafExecutor()
     runner = AgentRunner(executor=executor, loop=agent_loop)
     assert runner.start(query="q", thread_id="t1")
@@ -39,3 +45,4 @@ def test_deaf_turn_is_cancelled_by_shutdown(agent_loop):
     runner.wait(5.0)
     assert not agent_loop.thread.is_alive()
     assert not runner.is_running()
+    assert thread_errors == []

@@ -12,7 +12,6 @@ TUI держит один исполнитель на сессию. Сообще
 
 from gc_testkit.settings import make_settings
 import asyncio
-import concurrent.futures
 import importlib
 import logging
 import threading
@@ -178,10 +177,9 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     monkeypatch.setattr(
         ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
     )
-    # Отмена завершает рабочий поток, как и до правки: раннер её не глушит.
     # Ход идёт на общем цикле агента, и до воркера отмена доходит отменённым
-    # future — `concurrent.futures.CancelledError`. Перехватываем, чтобы
-    # отличить от постороннего исключения.
+    # future — `concurrent.futures.CancelledError`. Раннер глушит её: поток
+    # уходит молча, без трейсбэка. Перехватываем, чтобы убедиться в этом.
     thread_errors: list = []
     monkeypatch.setattr(
         threading,
@@ -206,9 +204,7 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     assert _dropped(caplog) == [(ending, 1)], (
         f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
     )
-    assert thread_errors == (
-        [concurrent.futures.CancelledError] if ending == "cancelled" else []
-    )
+    assert thread_errors == []
 
 
 def test_message_during_compaction_does_not_start_a_parallel_run():

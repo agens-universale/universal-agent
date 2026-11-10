@@ -354,7 +354,7 @@ class _RunnerOnLoop:
             return real(runner, executor, ending=ending, lost=lost)
 
         monkeypatch.setattr(AgentRunner, "_close_or_take_tail", _spy)
-        # Отмена завершает поток воркера, как и до общего цикла.
+        # Отмена не должна ронять поток воркера с трейсбэком.
         self.thread_errors: list[type] = []
         monkeypatch.setattr(
             threading,
@@ -370,7 +370,7 @@ class _RunnerOnLoop:
         self.runner.wait(5.0)
         assert not self.runner.is_running()
         assert self.errors == []
-        assert self.thread_errors == [concurrent.futures.CancelledError]
+        assert self.thread_errors == []
         return SimpleNamespace(outcome=self.endings[-1])
 
     def run_plain_turn(self) -> None:
@@ -570,7 +570,7 @@ def test_cancelled_compact_is_not_a_runner_error(agent_loop, monkeypatch):
     assert runner.compact_now("t1", "cli")
     runner.wait(5.0)
     assert errors == []
-    assert thread_errors == [concurrent.futures.CancelledError]
+    assert thread_errors == []
 
 
 def test_cancelled_warm_build_is_not_a_runner_error(agent_loop, monkeypatch):
@@ -590,4 +590,4 @@ def test_cancelled_warm_build_is_not_a_runner_error(agent_loop, monkeypatch):
     for thread in [t for t in threading.enumerate() if t.name == "gc-ua-warm"]:
         thread.join(5.0)
     assert errors == []
-    assert thread_errors == [concurrent.futures.CancelledError]
+    assert thread_errors == []

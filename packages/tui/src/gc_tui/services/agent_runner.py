@@ -324,8 +324,9 @@ class AgentRunner:
                 self._ensure_executor()
             except _CANCELLED:
                 # Сборку отменили на выходе: это не ошибка раннера и не
-                # отказ для предохранителя.
-                raise
+                # отказ для предохранителя; трейсбэк из потока в уже
+                # восстановленный терминал не нужен.
+                return
             except Exception as exc:
                 self._emit_error(exc)
             finally:
@@ -483,7 +484,9 @@ class AgentRunner:
                         executor.acompact_thread(thread_id, system=system)
                     )
                 except _CANCELLED:
-                    raise  # отмена на выходе — не ошибка раннера
+                    # Отмена на выходе — не ошибка раннера; поток уходит
+                    # молча, без трейсбэка в восстановленный терминал.
+                    return
                 except Exception as exc:
                     self._emit_error(exc)
                 finally:
@@ -690,12 +693,13 @@ class AgentRunner:
                     system=system,
                 )
         except _CANCELLED:
-            # Задачу хода отменили на цикле агента — future воркера отменён.
-            # Отмена завершает поток, как и раньше; здесь только помечаем
-            # исход для хвоста. `concurrent.futures.CancelledError` —
-            # подкласс `Exception`, поэтому ветка стоит раньше общей.
+            # Задачу хода отменили на цикле агента (обычно закрытием на
+            # выходе) — future воркера отменён. Это не ошибка раннера и не
+            # повод печатать трейсбэк в восстановленный терминал: помечаем
+            # исход для хвоста, `finally` ниже завершает работу штатно.
+            # `concurrent.futures.CancelledError` — подкласс `Exception`,
+            # поэтому ветка стоит раньше общей.
             ending = "cancelled"
-            raise
         except Exception as exc:
             self._emit_error(exc)
         finally:
