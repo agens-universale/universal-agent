@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import sys
 import time
 
@@ -273,6 +274,79 @@ async def test_user_stop_kills_hook_without_failure(tmp_path):
     res = await asyncio.wait_for(task, timeout=5)
     assert res == HookResult(plugin="demo")
     assert await _wait_dead(pid)
+
+
+@_posix_only
+async def test_user_stop_during_spawn_kills_hook(tmp_path, monkeypatch):
+    real_spawn = asyncio.create_subprocess_exec
+    stop = _bound_stop()
+    spawned = []
+
+    async def _spawn_then_stop(*args, **kwargs):
+        proc = await real_spawn(*args, **kwargs)
+        spawned.append(proc.pid)
+        stop.request()
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn_then_stop)
+    with bind_user_stop(stop):
+        res = await _run(tmp_path, "sleep 600")
+    assert res == HookResult(plugin="demo")
+    assert await _wait_dead(spawned[0])
+
+
+def _detached_child_command(pid_file) -> str:
+    """Потомок уходит в свою сессию, вне группы хука, и держит stdout."""
+    child = _cmd("import os, time; os.setsid(); time.sleep(600)")
+    return f"{child} & echo $! > {pid_file}; sleep 600"
+
+
+async def _detached_child(pid_file) -> int:
+    pid = await _read_pid(pid_file)
+    deadline = time.monotonic() + 5
+    while os.getsid(pid) != pid:
+        assert time.monotonic() < deadline, "потомок не ушёл в свою сессию"
+        await asyncio.sleep(0.02)
+    return pid
+
+
+@_posix_only
+async def test_user_stop_releases_hook_held_by_detached_child(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(command=_detached_child_command(pid_file))
+    stop = _bound_stop()
+    with bind_user_stop(stop):
+        task = asyncio.create_task(
+            run_hook(
+                plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30
+            )
+        )
+    child = await _detached_child(pid_file)
+    try:
+        stop.request()
+        res = await asyncio.wait_for(task, timeout=10)
+        assert res == HookResult(plugin="demo")
+    finally:
+        os.kill(child, signal.SIGKILL)
+
+
+@_posix_only
+async def test_timeout_releases_hook_held_by_detached_child(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(
+        command=_detached_child_command(pid_file), timeout_sec=1
+    )
+    task = asyncio.create_task(
+        run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
+    )
+    child = await _detached_child(pid_file)
+    try:
+        res = await asyncio.wait_for(task, timeout=10)
+        assert res.failed
+    finally:
+        os.kill(child, signal.SIGKILL)
 
 
 async def test_hook_does_not_start_after_user_stop(tmp_path):

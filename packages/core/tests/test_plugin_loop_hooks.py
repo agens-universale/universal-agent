@@ -852,7 +852,8 @@ async def test_stop_kills_running_session_start_hook(tmp_path, monkeypatch):
         {"SessionStart": f"sleep 600 & echo $! > {pid_file}; wait"},
     )
     backend = install(monkeypatch, ScriptedBackend(_finish_turn()))
-    ctx = await _ctx(tmp_path, monkeypatch, [root])
+    # Уведомление о сбое хука видно только в TUI.
+    ctx = await _ctx(tmp_path, monkeypatch, [root], is_tui=True)
     executor = AgentExecutor(ctx)
 
     async def _stop_when_hook_runs():
@@ -862,10 +863,17 @@ async def test_stop_kills_running_session_start_hook(tmp_path, monkeypatch):
 
     stopper = asyncio.create_task(_stop_when_hook_runs())
     await asyncio.wait_for(executor.arun(["один"], thread_id="t1"), timeout=10)
-    await stopper
+    await asyncio.wait_for(stopper, timeout=1)
 
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_file.read_text()), 0)
+    child = int(pid_file.read_text())
+    for _ in range(100):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.02)
+    else:
+        pytest.fail("процесс хука пережил стоп")
     assert backend.calls == []
     assert _disk(ctx) == [("user", "один")]
     assert _notice_codes() == []

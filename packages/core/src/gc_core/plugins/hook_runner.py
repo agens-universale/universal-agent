@@ -15,8 +15,9 @@
   останавливается (fail-open), в лог уходит предупреждение.
 * Контекст и причина отказа ограничены ``MAX_CONTEXT_CHARS``, длиннее —
   обрезаются с пометкой.
-* Стоп хода убивает группу процессов идущего хука, а следующий хук не
-  запускает. Это не сбой: результат пустой, ход кончается стопом.
+* Стоп хода убивает идущий хук (в POSIX — всю группу его процессов), а
+  следующий хук не запускает. Это не сбой: результат пустой, ход
+  кончается стопом.
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_CHARS = 10_000
 _TRUNCATED_MARK = "\n[вывод хука обрезан до 10 000 символов]"
+#: Сколько ждать выхода убитого хука, прежде чем закрыть его трубы.
+_EXIT_GRACE_SEC = 2.0
 _bash_warned = False
 
 
@@ -95,7 +98,11 @@ def _warn_no_bash_once() -> None:
 
 
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
-    """Убить хук вместе с потомками и дождаться завершения."""
+    """Убить хук вместе с потомками и дождаться завершения.
+
+    ``wait()`` ждёт ещё и EOF труб, а их держит потомок, ушедший из группы
+    (``setsid``; на Windows — любой потомок bash). Тогда после короткой
+    грации трубы закрываются: ни стоп, ни таймаут на нём не висят."""
     if sys.platform == "win32" and proc.returncode is not None:
         return
     try:
@@ -105,7 +112,18 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
             os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-    await proc.wait()
+    try:
+        await asyncio.wait_for(proc.wait(), _EXIT_GRACE_SEC)
+    except TimeoutError:
+        _close_pipes(proc)
+
+
+def _close_pipes(proc: asyncio.subprocess.Process) -> None:
+    """Закрыть наши концы труб хука — ``communicate`` получит EOF.
+    Транспорт у asyncio приватный: нет его — закрывать нечего."""
+    transport = getattr(proc, "_transport", None)
+    if transport is not None:
+        transport.close()
 
 
 def _stop_requested() -> bool:
@@ -120,6 +138,7 @@ async def _acommunicate(
     stop = current_user_stop()
     if stop is None:
         return await asyncio.wait_for(proc.communicate(data), timeout)
+    armed = None
     try:
         async with stop.arm(
             kind="hook", release=lambda: _terminate(proc)
@@ -127,6 +146,11 @@ async def _acommunicate(
             out = await asyncio.wait_for(proc.communicate(data), timeout)
     except UserStopInterrupt:
         await _terminate(proc)
+        return None
+    except TimeoutError:
+        # Стоп успел раньше таймаута: хук снят, это не сбой.
+        if armed is None or not armed.fired:
+            raise
         return None
     return None if armed.fired else out
 
