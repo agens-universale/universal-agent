@@ -102,9 +102,22 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
 
     ``wait()`` ждёт ещё и EOF труб, а их держит потомок, ушедший из группы
     (``setsid``; на Windows — любой потомок bash). Тогда после короткой
-    грации трубы закрываются: ни стоп, ни таймаут на нём не висят."""
-    if sys.platform == "win32" and proc.returncode is not None:
-        return
+    грации трубы закрываются: ни стоп, ни таймаут, ни отмена на нём не
+    висят."""
+    if not (sys.platform == "win32" and proc.returncode is not None):
+        _kill(proc)
+    exited = False
+    try:
+        await asyncio.wait_for(proc.wait(), _EXIT_GRACE_SEC)
+        exited = True
+    except TimeoutError:
+        pass
+    finally:
+        if not exited:
+            _close_pipes(proc)
+
+
+def _kill(proc: asyncio.subprocess.Process) -> None:
     try:
         if sys.platform == "win32":
             proc.kill()
@@ -112,18 +125,19 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
             os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-    try:
-        await asyncio.wait_for(proc.wait(), _EXIT_GRACE_SEC)
-    except TimeoutError:
-        _close_pipes(proc)
 
 
 def _close_pipes(proc: asyncio.subprocess.Process) -> None:
     """Закрыть наши концы труб хука — ``communicate`` получит EOF.
     Транспорт у asyncio приватный: нет его — закрывать нечего."""
     transport = getattr(proc, "_transport", None)
-    if transport is not None:
+    if transport is None:
+        return
+    try:
         transport.close()
+    except OSError:
+        # Трубы уже закрыты; не вышло только добить живой процесс (EPERM).
+        pass
 
 
 def _stop_requested() -> bool:

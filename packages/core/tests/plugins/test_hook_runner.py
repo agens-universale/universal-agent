@@ -336,7 +336,7 @@ async def test_timeout_releases_hook_held_by_detached_child(tmp_path):
     plugin = load_plugin(_make_plugin(tmp_path))
     pid_file = tmp_path / "pid"
     hook = HookCommand(
-        command=_detached_child_command(pid_file), timeout_sec=1
+        command=_detached_child_command(pid_file), timeout_sec=2
     )
     task = asyncio.create_task(
         run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
@@ -347,6 +347,33 @@ async def test_timeout_releases_hook_held_by_detached_child(tmp_path):
         assert res.failed
     finally:
         os.kill(child, signal.SIGKILL)
+
+
+@_posix_only
+async def test_unsignalable_hook_still_fails_open(tmp_path, monkeypatch):
+    """Хуку нельзя слать сигналы (EPERM): таймаут всё равно даёт сбой хука,
+    а не исключение из ``run_hook``."""
+    real_killpg = os.killpg
+
+    def _eperm(*_args):
+        raise PermissionError
+
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(
+        command=f"echo $$ > {pid_file}; sleep 600", timeout_sec=1
+    )
+    task = asyncio.create_task(
+        run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
+    )
+    group = await _read_pid(pid_file)
+    monkeypatch.setattr(os, "killpg", _eperm)
+    monkeypatch.setattr(os, "kill", _eperm)
+    try:
+        res = await asyncio.wait_for(task, timeout=10)
+        assert res.failed
+    finally:
+        real_killpg(group, signal.SIGKILL)
 
 
 async def test_hook_does_not_start_after_user_stop(tmp_path):
