@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -66,6 +67,8 @@ _MANIFEST_NAME = "pyproject.toml"
 
 NODE_VERSION = "24.22.2"
 _NODE_DIST_BASE = "https://nodejs.org/dist"
+# Ниже Node 24 не запускается (требование её сборки под macOS).
+_NODE_MIN_MACOS = (13, 5)
 
 
 class InstallError(RuntimeError):
@@ -600,6 +603,21 @@ def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
     return result.returncode == 0
 
 
+def _require_node_capable_os() -> None:
+    """Отказ до загрузки, если пиннутая Node здесь не запустится: иначе
+    архив качается, проверка версии падает, и так на каждом повторе."""
+    if sys.platform != "darwin":
+        return
+    release = platform.mac_ver()[0]
+    parts = tuple(int(p) for p in release.split(".")[:2] if p.isdigit())
+    if parts and parts < _NODE_MIN_MACOS:
+        need = ".".join(map(str, _NODE_MIN_MACOS))
+        raise InstallError(
+            f"Node v{NODE_VERSION} требует macOS {need}+, здесь {release} — "
+            "npx-рецепты на этой системе не ставятся"
+        )
+
+
 def _verify_existing_node(paths: dict[str, Path]) -> bool:
     """True, если все три бинаря на месте и `node --version` совпадает с NODE_VERSION."""
     if not (
@@ -685,6 +703,7 @@ def _ensure_cached_node(agent_dep_dir: Path) -> dict[str, Path]:
         print(f"[npx] cached Node v{NODE_VERSION} already at {paths['root']}")
         return paths
 
+    _require_node_capable_os()
     archive_filename, ext = _node_archive_basename()
     expected_sha = _fetch_expected_sha256(archive_filename)
 
