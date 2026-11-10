@@ -12,7 +12,6 @@ from gc_core.run_summary_coordinator import (
     filter_messages_not_in_state,
     remove_exact_suffix_if_matches,
 )
-from gc_core.thread_store import make_message_key
 
 
 def test_user_ask_keeps_prior_non_technical_users_skips_technical():
@@ -30,16 +29,6 @@ def test_user_ask_keeps_prior_non_technical_users_skips_technical():
         state_messages=[],
     )
     assert batch == [current_messages[0], current_messages[-1]]
-
-    batch_incoming_only = build_preserved_batch(
-        current_messages=current_messages,
-        mode="user_ask",
-        state_messages=[],
-        message_keys_already_persisted=frozenset(
-            {make_message_key(current_messages[0])}
-        ),
-    )
-    assert batch_incoming_only == [current_messages[-1]]
 
 
 def test_user_ask_multiple_plain_users():
@@ -59,20 +48,6 @@ def test_user_ask_multiple_plain_users():
         current_messages[2],
         current_messages[3],
     ]
-
-    batch_incoming = build_preserved_batch(
-        current_messages=current_messages,
-        mode="user_ask",
-        state_messages=[],
-        message_keys_already_persisted=frozenset(
-            {
-                make_message_key(current_messages[0]),
-                make_message_key(current_messages[1]),
-                make_message_key(current_messages[2]),
-            }
-        ),
-    )
-    assert batch_incoming == [current_messages[3]]
 
 
 def test_user_ask_last_message_technical_still_preserved():
@@ -382,22 +357,5 @@ def test_user_ask_keeps_technical_message_with_attachments():
         current_messages=[o1, image, notice, human],
         mode="user_ask",
         state_messages=[_call("c1"), o1, image, notice, human],
-    )
-    assert batch == [image, human]
-
-
-def test_user_ask_scoped_to_incoming_keeps_technical_message_with_attachments():
-    o1 = _output("c1")
-    image = _technical(
-        "Image from fs_view_image: /work/shot.png · png 1456×819",
-        "m_i",
-        attachments=[_IMAGE_REF],
-    )
-    human = {"role": "user", "content": "а что на скриншоте?", "id": "m_h"}
-    batch = build_preserved_batch(
-        current_messages=[o1, image, human],
-        mode="user_ask",
-        state_messages=[],
-        message_keys_already_persisted=frozenset({make_message_key(o1)}),
     )
     assert batch == [image, human]

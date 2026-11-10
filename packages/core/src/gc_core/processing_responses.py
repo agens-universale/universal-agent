@@ -3158,7 +3158,7 @@ class _AgentLoop:
     живёт на объекте; ``arun`` — тот же while-цикл, что был в ``arun_agent``.
     """
 
-    def __init__(  # noqa: PLR0913  # S107: зеркало входа arun_agent
+    def __init__(
         self,
         state: State,
         ctx: Any,
@@ -3174,7 +3174,6 @@ class _AgentLoop:
         session_meta,
         mark_finalizing,
         mark_finish_gate_checking,
-        mark_step_start=None,
     ) -> None:
         self.state = state
         self.ctx = ctx
@@ -3192,7 +3191,6 @@ class _AgentLoop:
         self.session_meta = session_meta
         self.mark_finalizing = mark_finalizing
         self.mark_finish_gate_checking = mark_finish_gate_checking
-        self.mark_step_start = mark_step_start
 
         self.tool_error_cnt = 0
         self.context_overflow_retries = 0
@@ -3279,10 +3277,6 @@ class _AgentLoop:
         всё ещё только в ``state``. Дописываем его здесь, пока ссылку не
         затёр следующий ``arm_prepare``.
         """
-        # Повтор после переполнения окна — тот же шаг: его вход уже записан
-        # (компакция возвращает его в историю), начало шага не сдвигаем.
-        if self.mark_step_start is not None and not self._repeat_request:
-            self.mark_step_start()
         raised = False
         try:
             return await self._astep_once(messages, backend_mode)
@@ -4463,7 +4457,6 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     session_meta: Optional[Dict[str, Any]] = None,
     mark_finalizing: Optional[Callable[[bool], None]] = None,
     mark_finish_gate_checking: Optional[Callable[[bool], None]] = None,
-    mark_step_start: Optional[Callable[[], None]] = None,
 ) -> Union[str, None]:
     loop = _AgentLoop(
         state,
@@ -4479,6 +4472,5 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         session_meta=session_meta,
         mark_finalizing=mark_finalizing,
         mark_finish_gate_checking=mark_finish_gate_checking,
-        mark_step_start=mark_step_start,
     )
     return await loop.arun(messages)
