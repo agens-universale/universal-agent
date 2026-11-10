@@ -169,11 +169,11 @@ def _plugin_roles(
     plugins: tuple[Plugin, ...],
     mcp_keys: Mapping[tuple[str, str], str],
 ) -> tuple[tuple[Any, ...], tuple[str, ...]]:
-    """Роли плагинов, переведённые в определения субагентов (§6), и их
+    """Субагенты плагинов, переведённые в определения (§6), и их
     диагностика."""
     if not any(p.agents for p in plugins):
         return (), ()
-    # Перевод тянет пакет тулов (~1.4 с) — только когда роли есть.
+    # Перевод тянет пакет тулов (~1.4 с) — только когда субагенты есть.
     from gc_core.plugins.agents import translate_role
     from gc_core.tools.registry import all_builtin_tool_names
 

@@ -599,7 +599,7 @@ async def test_worker_settings_have_empty_snapshot(
     tmp_path, monkeypatch, caplog
 ):
     """Плагинов под воркером нет по построению: снимок приложения в рантайме
-    профиля не доезжает (иначе роли и skills брались бы с диска хоста
+    профиля не доезжает (иначе субагенты и skills брались бы с диска хоста
     воркера); заданные в профиле плагины — строка в лог."""
     from gc_core.plugins.snapshot import PluginSnapshot
     from gc_core.settings import RuntimeEnv, runtime_of

@@ -46,7 +46,7 @@ class RuntimeEnv:
     #: ограничения) и дополнительные запреты поверх глобального ``stop_tools``.
     subagent_tools_allow: Optional[tuple[str, ...]] = None
     subagent_tools_stop: tuple[str, ...] = ()
-    #: MCP-разрешения роли плагина: «(ключ сервера, инструмент или None =
+    #: MCP-разрешения субагента плагина: «(ключ сервера, инструмент или None =
     #: все)» — сверяются с полями записи инструмента, дополняют белый список.
     subagent_mcp_allow: tuple[tuple[str, Optional[str]], ...] = ()
     #: Вид OS-бэкенда, выбранный встраивающим (``local``/``harbor``); None — local.

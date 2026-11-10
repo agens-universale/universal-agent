@@ -3174,7 +3174,7 @@ class _AgentLoop:
         session_meta,
         mark_finalizing,
         mark_finish_gate_checking,
-        step_start_hook=None,
+        mark_step_start=None,
     ) -> None:
         self.state = state
         self.ctx = ctx
@@ -3192,7 +3192,7 @@ class _AgentLoop:
         self.session_meta = session_meta
         self.mark_finalizing = mark_finalizing
         self.mark_finish_gate_checking = mark_finish_gate_checking
-        self.step_start_hook = step_start_hook
+        self.mark_step_start = mark_step_start
 
         self.tool_error_cnt = 0
         self.context_overflow_retries = 0
@@ -3281,8 +3281,8 @@ class _AgentLoop:
         """
         # Повтор после переполнения окна — тот же шаг: его вход уже записан
         # (компакция возвращает его в историю), начало шага не сдвигаем.
-        if self.step_start_hook is not None and not self._repeat_request:
-            self.step_start_hook()
+        if self.mark_step_start is not None and not self._repeat_request:
+            self.mark_step_start()
         raised = False
         try:
             return await self._astep_once(messages, backend_mode)
@@ -4463,7 +4463,7 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     session_meta: Optional[Dict[str, Any]] = None,
     mark_finalizing: Optional[Callable[[bool], None]] = None,
     mark_finish_gate_checking: Optional[Callable[[bool], None]] = None,
-    step_start_hook: Optional[Callable[[], None]] = None,
+    mark_step_start: Optional[Callable[[], None]] = None,
 ) -> Union[str, None]:
     loop = _AgentLoop(
         state,
@@ -4479,6 +4479,6 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         session_meta=session_meta,
         mark_finalizing=mark_finalizing,
         mark_finish_gate_checking=mark_finish_gate_checking,
-        step_start_hook=step_start_hook,
+        mark_step_start=mark_step_start,
     )
     return await loop.arun(messages)

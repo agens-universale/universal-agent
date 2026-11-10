@@ -114,7 +114,7 @@ MAX_TOOL_NAME_LEN = 64
 def shorten_tool_name(name: str, limit: int = MAX_TOOL_NAME_LEN) -> str:
     """Имя тула не длиннее ``limit``: длинное — укорочено с хешем полного
     имени (разные длинные имена не сливаются). Один помощник на весь агент:
-    MCP-тулы и роли плагинов."""
+    MCP-тулы и субагенты плагинов."""
     if len(name) <= limit:
         return name
     digest = hashlib.sha256(name.encode()).hexdigest()[:8]

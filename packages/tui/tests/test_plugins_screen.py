@@ -22,7 +22,7 @@ def _card(name, enabled=True, **kw):
         "roles": [
             {
                 "name": "helper",
-                "status": "все инструменты · недоступна: субагенты "
+                "status": "все инструменты · недоступен: субагенты "
                 "выключены: включите agent.use_local_subagents",
                 "ok": False,
                 "notes": [],
@@ -96,13 +96,13 @@ async def test_plugins_screen_expand_shows_components_roles_and_problems(
     async with app.run_test() as pilot:
         await _push(app, pilot, scr)
         collapsed = _text(scr)
-        assert "⚠ 2" in collapsed  # хуки Stop + недоступная роль
+        assert "⚠ 2" in collapsed  # хуки Stop + недоступный субагент
         assert "one:review" not in collapsed
         await pilot.press("enter")
         text = _text(scr)
         assert "one:review" in text
         assert "PreToolUse" in text
-        assert "роль helper: все инструменты · недоступна:" in text
+        assert "субагент helper: все инструменты · недоступен:" in text
         assert "use_local_subagents" in text
         assert "⚠ хуки Stop будут поддержаны после middleware" in text
         assert "· MCP-сервер srv плагина one заменён записью" in text
@@ -310,8 +310,8 @@ def test_plugin_card_roles_availability_rights_and_broken_header(
     )
     plugin = Plugin("p", "1", Path("/p"), (), agents=agents)
     notices = [
-        "Роль p:rw: инструменты отброшены: Foo.",
-        "Роль p:bad не подключена: шапка не разобралась.",
+        "Субагент p:rw: инструменты отброшены: Foo.",
+        "Субагент p:bad не подключён: шапка не разобралась.",
     ]
     settings = _snapshot_settings(
         [plugin], notices, [_role("rw"), _role("ro"), _role("lim")]
@@ -327,13 +327,13 @@ def test_plugin_card_roles_availability_rights_and_broken_header(
         {"name": "ro", "status": "только чтение", "ok": True, "notes": []},
         {
             "name": "lim",
-            "status": "все инструменты · недоступна: превышен лимит",
+            "status": "все инструменты · недоступен: превышен лимит",
             "ok": False,
             "notes": [],
         },
         {
             "name": "bad",
-            "status": "не подключена: шапка не разобралась.",
+            "status": "не подключён: шапка не разобралась.",
             "ok": False,
             "notes": [],
         },

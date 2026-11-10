@@ -1,7 +1,7 @@
 """Данные карточек экрана ``/plugins`` по снимку набора (§12).
 
-Состав плагина, его диагностика из снимка (свои строки у ролей), а у
-подключённых ролей — доступность при текущих настройках и права. Читает
+Состав плагина, его диагностика из снимка (свои строки у субагентов), а
+у подключённых субагентов — доступность при текущих настройках и права. Читает
 диск и обходит определения субагентов — звать вне цикла интерфейса.
 Своих решений о плагинах не принимает: причины дают снимок и функции ядра.
 """
@@ -20,9 +20,9 @@ from gc_core.settings import runtime_of
 from gc_core.tools.subagents.role_info import role_availability, role_rights
 
 _LOAD_FAILED = "не загружен (см. лог)"
-# Диагностика снимка по плагинам: роль, команда, хуки, MCP-сервер.
+# Диагностика снимка по плагинам: субагент, команда, хуки, MCP-сервер.
 _OWNER = re.compile(
-    r"^(?:Роль (?P<role>[^\s:]+):"
+    r"^(?:Субагент (?P<role>[^\s:]+):"
     r"|Команда плагина (?P<command>[^\s:]+):"
     r"|Хуки плагина (?P<hooks>\S+) "
     r"|MCP-сервер .+? плагина (?P<mcp>\S+) )"
@@ -122,23 +122,23 @@ def _rights_text(settings: Any, role: Any) -> str:
 def _role_entry(
     settings: Any, agent: PluginAgent, role: Any, notes: list[str]
 ) -> dict:
-    """Строка роли: права и доступность у подключённой; у неподключённой
+    """Строка субагента: права и доступность у подключённого; у неподключённого
     (битая шапка, ничего не переведено) — причина из диагностики."""
     if role is None:
         fallback = (
-            f"не подключена: {agent.problem}"
+            f"не подключён: {agent.problem}"
             if agent.problem
-            else "не подключена"
+            else "не подключён"
         )
         head = next(
-            (n for n in notes if n.startswith("не подключена")), fallback
+            (n for n in notes if n.startswith("не подключён")), fallback
         )
         rest = [n for n in notes if n != head]
         return {"name": agent.name, "status": head, "ok": False, "notes": rest}
     status = _rights_text(settings, role)
     reason = role_availability(settings, role.name)
     if reason:
-        status += f" · недоступна: {reason}"
+        status += f" · недоступен: {reason}"
     return {
         "name": agent.name,
         "status": status,
@@ -148,8 +148,8 @@ def _role_entry(
 
 
 def _role_notes(plugin: str, agent: str, notices: list[str]) -> list[str]:
-    """Диагностика роли без префикса «Роль <плагин>:<роль>»."""
-    label = f"Роль {plugin}:{agent}"
+    """Диагностика субагента без префикса «Субагент <плагин>:<имя>»."""
+    label = f"Субагент {plugin}:{agent}"
     return [
         n[len(label) :].lstrip(": ")
         for n in notices
@@ -170,7 +170,7 @@ def _plugin_card(settings: Any, plugin: Plugin, item: Any) -> dict:
         )
         for agent in plugin.agents
     ]
-    rest = [n for n in own if not n.startswith(f"Роль {plugin.name}:")]
+    rest = [n for n in own if not n.startswith(f"Субагент {plugin.name}:")]
     from_store = item is not None and _is_installed_path(plugin.root)
     return {
         "name": plugin.name,

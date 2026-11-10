@@ -1,14 +1,15 @@
-"""Роли плагинов: ``agents/*.md`` в определения кастомных субагентов (§6).
+"""Субагенты плагинов: ``agents/*.md`` в определения кастомных субагентов
+(§6).
 
 Перевод делается при сборке снимка набора (``plugins.catalog``); в снимок
 кладётся готовое ``SubagentDefinition``. Правило инструментов (§6.2):
 
 * ключа ``tools`` нет — все инструменты;
 * ``tools`` пуст (или ``null`` / неверного типа, с диагностикой) — только
-  служебные; роль подключается;
+  служебные; субагент подключается;
 * непустой список — переведённое, отброшенное в диагностику; не перевелось
-  ничего — роль не подключается;
-* битая шапка — роль не подключается.
+  ничего — субагент не подключается;
+* битая шапка — субагент не подключается.
 
 Имена (§6.3): таблица ``TOOL_ALIASES``; ``snake_case`` — только встроенный
 инструмент агента; ``mcp__<сервер>[__<тул>|__*]`` и
@@ -61,7 +62,7 @@ def subagent_name(plugin: str, agent: str) -> str:
 
 
 def _mcp_pair(raw: str, plugin: str, mcp_keys: _Keys) -> McpAllow | None:
-    """MCP-имя роли в пару «(ключ, инструмент или None)»; сервер не этого
+    """MCP-имя субагента в пару «(ключ, инструмент или None)»; сервер не этого
     плагина или не в действующих — ``None``."""
     server, _, tool = raw[len(_MCP_PREFIX) :].partition("__")
     prefixed = f"plugin_{plugin}_"
@@ -83,7 +84,7 @@ def _builtin_name(raw: str, builtin: set[str]) -> str | None:
 def _translate(
     names: tuple[str, ...], plugin: str, builtin: set[str], mcp_keys: _Keys
 ) -> tuple[tuple[str, ...], tuple[McpAllow, ...], list[str]]:
-    """Имена роли: (встроенные, MCP-пары, отброшенные)."""
+    """Имена субагента: (встроенные, MCP-пары, отброшенные)."""
     tools: dict[str, None] = {}
     mcp: dict[McpAllow, None] = {}
     dropped: list[str] = []
@@ -117,12 +118,13 @@ def _listed_scope(
     builtin: set[str],
     mcp_keys: _Keys,
 ) -> tuple[tuple[str, ...], tuple[McpAllow, ...], list[str]] | None:
-    """Область роли с непустым списком; ``None`` — не перевелось ничего."""
+    """Область субагента с непустым списком; ``None`` — не перевелось
+    ничего."""
     tools, mcp, dropped = _translate(agent.tools, plugin, builtin, mcp_keys)
     if not tools and not mcp:
         return None
     notices = (
-        [f"Роль {label}: инструменты отброшены: {', '.join(dropped)}."]
+        [f"Субагент {label}: инструменты отброшены: {', '.join(dropped)}."]
         if dropped
         else []
     )
@@ -136,32 +138,32 @@ def translate_role(
     builtin: set[str],
     mcp_keys: _Keys,
 ) -> tuple[SubagentDefinition | None, tuple[str, ...]]:
-    """Роль плагина в определение субагента и её диагностика.
+    """Субагент плагина в определение субагента и его диагностика.
 
     ``builtin`` — имена встроенных инструментов агента
     (``all_builtin_tool_names``), ``mcp_keys`` — «(плагин, сервер) →
-    действующий ключ» из снимка. ``None`` — роль не подключается."""
+    действующий ключ» из снимка. ``None`` — субагент не подключается."""
     label = f"{plugin.name}:{agent.name}"
     if agent.header_broken:
-        return None, (f"Роль {label} не подключена: {agent.problem}.",)
+        return None, (f"Субагент {label} не подключён: {agent.problem}.",)
     notices: list[str] = []
     if agent.model and agent.model != _MODEL_INHERIT:
         notices.append(
-            f"Роль {label}: поле model проигнорировано, модель роли "
-            "задаёт реестр моделей."
+            f"Субагент {label}: поле model проигнорировано, модель "
+            "субагента задаёт реестр моделей."
         )
     tools: tuple[str, ...] | None = agent.tools
     mcp: tuple[McpAllow, ...] = ()
     if agent.problem:
         notices.append(
-            f"Роль {label}: {agent.problem}; доступны только служебные "
+            f"Субагент {label}: {agent.problem}; доступны только служебные "
             "инструменты."
         )
     elif agent.tools:
         scope = _listed_scope(plugin.name, agent, label, builtin, mcp_keys)
         if scope is None:
             notices.append(
-                f"Роль {label} не подключена: ни один инструмент из списка "
+                f"Субагент {label} не подключён: ни один инструмент из списка "
                 f"не переведён ({', '.join(agent.tools)})."
             )
             return None, tuple(notices)
