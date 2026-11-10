@@ -1,8 +1,8 @@
-"""Доступность роли и её права — без раннера.
+"""Доступность субагента и его права — без раннера.
 
-Для сводки установки плагина и карточки ``/plugins``: показать, почему роль
-сейчас не вызвать и что ей разрешено, не запуская субагента. Решения те же,
-что у реестра сабагентов (``registry``) и дискавери определений.
+Для сводки установки плагина и карточки ``/plugins``: показать, почему
+субагента сейчас не вызвать и что ему разрешено, не запуская его. Решения
+те же, что у реестра сабагентов (``registry``) и дискавери определений.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ _CHAT_COMPLETIONS = "chat_completions"
 
 @dataclass(frozen=True)
 class RoleRights:
-    """Что роли разрешено: правка файлов, команды, все тулы, MCP."""
+    """Что субагенту разрешено: правка файлов, команды, все тулы, MCP."""
 
     edit: bool
     exec: bool
@@ -70,7 +70,7 @@ def _taken_reason(settings: Any, name: str) -> str | None:
 
 
 def role_availability(settings: Any, name: str) -> str | None:
-    """Почему роль ``name`` сейчас недоступна; ``None`` — доступна."""
+    """Почему субагент ``name`` сейчас недоступен; ``None`` — доступен."""
     agent = settings_of(settings).agent
     if not subagents_enabled(agent.use_local_subagents):
         return "субагенты выключены: включите agent.use_local_subagents"
@@ -82,11 +82,12 @@ def role_availability(settings: Any, name: str) -> str | None:
     allowed = subagents_allowlist(agent.use_local_subagents)
     if allowed is not None and name not in allowed:
         return (
-            f"роли нет в agent.use_local_subagents: добавьте {name} в список"
+            f"субагента нет в agent.use_local_subagents: добавьте {name} в "
+            "список"
         )
     if name not in resolve_subagent_definitions(settings):
         return (
-            "превышен agent.subagents_max_count: роль не поместилась "
+            "превышен agent.subagents_max_count: субагент не поместился "
             "в лимит, увеличьте его"
         )
     return None
@@ -104,7 +105,7 @@ def _has_category(
 
 
 def role_rights(settings: Any, definition: SubagentDefinition) -> RoleRights:
-    """Права роли по категориям встроенных тулов и ``mcp_allow``.
+    """Права субагента по категориям встроенных тулов и ``mcp_allow``.
 
     ``tools is None`` — доступны все тулы: правка и команды тогда разрешены,
     если такие встроенные тулы вообще есть.

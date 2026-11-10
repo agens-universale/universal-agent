@@ -1,4 +1,5 @@
-"""Роли плагинов под воркером: набор хоста воркера в ребёнка не попадает."""
+"""Субагенты плагинов под воркером: набор хоста воркера в ребёнка не
+попадает."""
 
 import json
 
@@ -41,7 +42,7 @@ def test_worker_host_plugin_role_not_in_child_definitions(
             {"agent": {"use_local_subagents": True}}
         )
     )
-    # Контроль: со снимком хоста роль есть — тест не пустой.
+    # Контроль: со снимком хоста субагент есть — тест не пустой.
     host = with_plugin_snapshot(loaded, clone=False)
     assert ROLE in resolve_subagent_definitions(host)
 

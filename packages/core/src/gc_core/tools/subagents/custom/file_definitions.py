@@ -71,7 +71,7 @@ class SubagentDefinition:
     tools: Optional[Tuple[str, ...]]
     stop_tools: Tuple[str, ...]
     source_path: str
-    #: Разрешения MCP роли плагина: «(ключ сервера, инструмент или None =
+    #: Разрешения MCP субагента плагина: «(ключ сервера, инструмент или None =
     #: все)»; сверяются с полями записи инструмента, не с его именем.
     mcp_allow: Tuple[Tuple[str, Optional[str]], ...] = ()
 
@@ -291,8 +291,8 @@ async def adiscover_subagent_definitions(
             continue
         taken[definition.name] = definition
 
-    # Роли плагинов из снимка набора идут после папки: её определения
-    # побеждают. Без настроек (``None``) снимок пуст — ролей нет.
+    # Субагенты плагинов из снимка набора идут после папки: её определения
+    # побеждают. Без настроек (``None``) снимок пуст — субагентов нет.
     for definition in runtime_of(settings).plugins.roles:
         if _name_collides(
             definition,

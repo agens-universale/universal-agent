@@ -58,7 +58,8 @@ def _row(p: installed.InstalledPlugin) -> str:
 
 
 def _role_settings(prepared: installed.PreparedInstall) -> object | None:
-    """Настройки для прав ролей в сводке; без ролей не загружаются."""
+    """Настройки для прав субагентов в сводке; без субагентов не
+    загружаются."""
     if not prepared.plugin.agents:
         return None
     from gc_core.config import load_settings

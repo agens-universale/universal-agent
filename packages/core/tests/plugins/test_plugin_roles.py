@@ -1,4 +1,4 @@
-"""Роли плагинов: правило инструментов, перевод имён, MCP ребёнка (§6)."""
+"""Субагенты плагинов: правило инструментов, перевод имён, MCP ребёнка (§6)."""
 
 import inspect
 import json
@@ -81,7 +81,7 @@ def test_dropped_tools_reported_with_role_name():
 
 def test_nothing_translated_reported():
     _, notices = translate(("WebSearch",))
-    assert any("p:r" in n and "не подключена" in n for n in notices)
+    assert any("p:r" in n and "не подключён" in n for n in notices)
 
 
 def test_null_or_wrong_type_gives_service_tools_and_notice():

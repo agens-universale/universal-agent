@@ -1,4 +1,4 @@
-"""Доступность роли и её права без раннера (§6.5, §12)."""
+"""Доступность субагента и его права без раннера (§6.5, §12)."""
 
 from gc_core.config_modules.root import AppConfig
 from gc_core.plugins.snapshot import PluginSnapshot

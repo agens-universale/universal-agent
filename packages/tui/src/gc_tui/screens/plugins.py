@@ -40,7 +40,7 @@ def _warning_count(info: dict) -> int:
 def _append_roles(t: Text, roles: list[dict]) -> None:
     for role in roles:
         t.append(
-            f"\n    роль {role['name']}: {role['status']}",
+            f"\n    субагент {role['name']}: {role['status']}",
             style=_DEEP_DIM if role["ok"] else _WARN,
         )
         for note in role["notes"]:
@@ -92,7 +92,7 @@ class PluginCard(ServerCard):
 
 
 class PluginsScreen(Screen):
-    """Карточки строятся после показа экрана: чтение диска и обход ролей
+    """Карточки строятся после показа экрана: чтение диска и обход субагентов
     (доступность, права) — вне цикла интерфейса, один раз на открытие."""
 
     def __init__(self, *, settings=None) -> None:

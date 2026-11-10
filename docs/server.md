@@ -490,7 +490,7 @@ agent_overrides:
 ```
 
 Оверрайд выключает все компоненты установленных плагинов: skills, команды,
-роли, MCP-серверы и хуки. Плагины из `plugins.paths` и `plugins.sources` в
+субагенты, MCP-серверы и хуки. Плагины из `plugins.paths` и `plugins.sources` в
 `config.yml` работают. Чтобы серверу достались и установленные, уберите
 строку или задайте `true` — в общих `agent_overrides` или в
 `agent_overrides` нужной поверхности.

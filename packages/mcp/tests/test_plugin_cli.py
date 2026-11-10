@@ -250,8 +250,8 @@ def test_install_summary_shows_role_rights_and_unsupported(
     _tty(monkeypatch, ["n"])
     assert cli.main(["install", str(src)]) == 1
     out = capsys.readouterr().out
-    assert "роль reviewer: запускает команды" in out
-    assert "роль reviewer: правит файлы" not in out
+    assert "субагент reviewer: запускает команды" in out
+    assert "субагент reviewer: правит файлы" not in out
     assert "хуки PreToolUse будут поддержаны после middleware" in out
 
 
@@ -260,7 +260,7 @@ def test_install_summary_marks_read_only_role(tmp_path, monkeypatch, capsys):
     src = _role_plugin(tmp_path, "Read, Grep")
     _tty(monkeypatch, ["n"])
     assert cli.main(["install", str(src)]) == 1
-    assert "роль reviewer: только чтение" in capsys.readouterr().out
+    assert "субагент reviewer: только чтение" in capsys.readouterr().out
 
 
 def test_update_with_new_writing_role_asks_confirmation(
@@ -278,7 +278,7 @@ def test_update_with_new_writing_role_asks_confirmation(
     )
     assert cli.main(["update", "grow"]) == 1
     assert len(asked) == 1
-    assert "роль writer: правит файлы" in capsys.readouterr().out
+    assert "субагент writer: правит файлы" in capsys.readouterr().out
 
 
 def _git(cwd, *args):

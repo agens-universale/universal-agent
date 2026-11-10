@@ -168,7 +168,7 @@ class PreparedInstall:
         буквально (раскрытые значения могут быть секретами и уйти в лог CI);
         значения ``env`` и ``headers`` не попадают. Пропущенные серверы MCP
         идут отдельными строками с причиной. С ``settings`` добавляются
-        права каждой роли и то, что в ней не переведено.
+        права каждого субагента и то, что в нём не переведено.
         """
         plugin = self.plugin
         lines = [
@@ -254,10 +254,11 @@ _RIGHTS_TEXT = (
 
 
 def _role_lines(plugin: Plugin, settings: Any) -> list[str]:
-    """Права ролей плагина и диагностика их перевода; без настроек пусто."""
+    """Права субагентов плагина и диагностика их перевода; без настроек
+    пусто."""
     if settings is None or not plugin.agents:
         return []
-    # Перевод и реестр тулов тянут пакет тулов: только когда роли есть.
+    # Перевод и реестр тулов тянут пакет тулов: только когда субагенты есть.
     from gc_core.plugins.agents import translate_role
     from gc_core.tools.registry import all_builtin_tool_names
     from gc_core.tools.subagents.role_info import role_rights
@@ -274,11 +275,11 @@ def _role_lines(plugin: Plugin, settings: Any) -> list[str]:
             continue
         rights = role_rights(settings, role)
         granted = [
-            f"роль {agent.name}: {text}"
+            f"субагент {agent.name}: {text}"
             for attr, text in _RIGHTS_TEXT
             if getattr(rights, attr)
         ]
-        lines.extend(granted or [f"роль {agent.name}: только чтение"])
+        lines.extend(granted or [f"субагент {agent.name}: только чтение"])
     return lines
 
 
