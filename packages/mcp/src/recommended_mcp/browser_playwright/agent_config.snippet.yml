@@ -1,4 +1,4 @@
-# Скопируй этот блок в секцию mcp-servers: своего config.yml агента.
+# Скопируй этот блок в секцию mcp: → servers: своего config.yml агента.
 # Работает с persistent_session: true — один процесс npx и один Chromium
 # живут весь цикл работы агента (см. src/tools/connect_mcp/persistent_stdio.py).
 #

@@ -52,17 +52,18 @@ python recommended_mcp/install.py
 
 ## Подключение к агенту
 
-Скопируй блок из `agent_config.snippet.yml` в секцию `mcp-servers:` своего
+Скопируй блок из `agent_config.snippet.yml` в секцию `mcp:` → `servers:` своего
 `config.yml`, либо возьми путь из строк `[paths] config command:` в выводе
 `install.py`. Пример (Linux):
 
 ```yaml
-mcp-servers:
-  browser_playwright:
-    transport: stream_stdio
-    command: ~/.local/share/gc/node/v24.22.2/bin/npx
-    args: ["-y", "@playwright/mcp@0.0.70", "--browser", "chromium", "--output-dir", "~/.cache/gc/playwright-mcp"]
-    persistent_session: true
+mcp:
+  servers:
+    browser_playwright:
+      transport: stream_stdio
+      command: ~/.local/share/gc/node/v24.22.2/bin/npx
+      args: ["-y", "@playwright/mcp@0.0.70", "--browser", "chromium", "--output-dir", "~/.cache/gc/playwright-mcp"]
+      persistent_session: true
 ```
 
 ## Альтернатива: запуск в Docker
@@ -107,7 +108,7 @@ docker compose -f recommended_mcp/browser_playwright/docker-compose.yml down
 ### 3. Поменяй snippet в `config.yml` агента на HTTP/SSE
 
 При docker-режиме stdio не работает — агент общается с контейнером по
-сети. Замени блок `browser_playwright` в своём `mcp-servers:` на:
+сети. Замени блок `browser_playwright` в секции `mcp:` → `servers:` на:
 
 ```yaml
 browser_playwright:

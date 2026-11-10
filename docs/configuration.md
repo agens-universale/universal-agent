@@ -1679,7 +1679,7 @@ uv run python -m recommended_mcp.install
 `install.py` только ставит пакеты, в конфиг он ничего не пишет — этим и
 отличается от `gc-mcp install`. После него сниппеты переносятся руками:
 скопировать `packages/mcp/src/recommended_mcp/<name>/agent_config.snippet.yml`
-в секцию `mcp-servers:` своего `config.yml`. Доступны:
+в секцию `mcp:` → `servers:` своего `config.yml`. Доступны:
 
 - **`computer`** — управление Windows GUI через UI Automation (запуск
   приложений, клики, ввод, чтение состояния окон). Только Windows
@@ -1708,7 +1708,7 @@ gc-mcp install --editable
 ### Ручная установка (для MCP не из курируемого набора)
 
 Если нужный MCP не входит в набор `gc-mcp` — ставь как обычный пакет
-и подключай через `mcp-servers:`. Пример с DDGS-поиском:
+и подключай через секцию `mcp:` → `servers:`. Пример с DDGS-поиском:
 
 ```bash
 python3 -m pip install ddgs-mcp
