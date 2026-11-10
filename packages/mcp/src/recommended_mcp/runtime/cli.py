@@ -199,9 +199,10 @@ def _install_all(entries, root, dep, editable, repo_url, repo_ref) -> int:
 
 
 def installable_names(config: Optional[str] = None) -> list:
-    """Имена MCP из курируемого манифеста (для онбординг-визарда)."""
+    """Имена MCP из курируемого манифеста, которые ставятся на этой ОС
+    (онбординг, /settings): рецепт чужой ОС установка пропустит."""
     entries, _ = _load_manifest_entries(config)
-    return [e.name for e in entries]
+    return [e.name for e in entries if _inst().platform_skip_reason(e) is None]
 
 
 def descriptions(config: Optional[str] = None) -> dict:

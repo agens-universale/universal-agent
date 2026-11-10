@@ -14,6 +14,19 @@ def test_installable_names_from_bundled_manifest():
     assert "office" in names  # из recommended_mcp/config.yml
 
 
+def test_installable_names_skip_recipes_of_other_os(monkeypatch):
+    """Рецепт не для этой ОС не предлагается: установка его пропустит, и
+    строка «не установлен» висела бы вечно."""
+    from recommended_mcp import install
+
+    monkeypatch.setattr(install.sys, "platform", "linux")
+    names = mcp.installable_names()
+    assert "computer" not in names  # platforms: [win32]
+    assert "office" in names
+    monkeypatch.setattr(install.sys, "platform", "win32")
+    assert "computer" in mcp.installable_names()
+
+
 def test_install_delegates(monkeypatch):
     """Check that install() delegates to _cmd_install with correct arguments."""
     called = {}
