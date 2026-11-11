@@ -1155,6 +1155,69 @@ async def test_stop_during_transport_retry_pause_ends_request(monkeypatch):
     )
 
 
+async def test_late_stop_in_transport_pause_ends_request_and_spares_turn(
+    monkeypatch,
+):
+    """Стоп нажат в паузе ретрая запроса к модели, а снятие дошло до loop
+    уже после её конца: запрос кончается остановкой без новой попытки, а
+    следующая работа хода — запись итога — не обрывается."""
+    from transport_fakes import install_transport
+
+    spy = install_transport(
+        monkeypatch, lambda _request: httpx.Response(503, json={})
+    )
+    loop = asyncio.get_running_loop()
+    gate = _stop()
+    held: list = []
+
+    async def pause_with_late_stop(delay, *_args, **_kwargs):
+        if delay:
+            loop.call_soon_threadsafe = lambda cb, *a: held.append((cb, a))
+            try:
+                gate.request()
+            finally:
+                del loop.call_soon_threadsafe
+        await _REAL_SLEEP(0)
+
+    monkeypatch.setattr("asyncio.sleep", pause_with_late_stop)
+    with bind_user_stop(gate):
+        with pytest.raises(ModelRequestStopped):
+            await arequest_backend_chat_completions(
+                {"model": "m", "messages": []},
+                {},
+                "http://model/v1/chat/completions",
+                use_retry=True,
+            )
+        assert len(held) == 1
+        for callback, args in held:
+            callback(*args)
+        await gate.await_settled(1)
+        await _REAL_SLEEP(0.01)  # запись итога хода
+    assert len(spy.requests) == 1
+
+
+async def test_release_after_the_work_left_is_skipped():
+    """Снятие дошло до loop, когда работа уже вышла из блока: снимать
+    нечего — release не зовётся, «снято» в лог не пишется."""
+    log = _Log()
+    gate = _stop(log)
+    loop = asyncio.get_running_loop()
+    held: list = []
+    released: list = []
+    async with gate.arm(kind="exec", release=lambda: released.append(1)):
+        loop.call_soon_threadsafe = lambda cb, *a: held.append((cb, a))
+        try:
+            gate.request(log)
+        finally:
+            del loop.call_soon_threadsafe
+    for callback, args in held:
+        callback(*args)
+    await gate.await_settled(1)
+    assert len(held) == 1
+    assert released == []
+    assert log.events("user_stop_killed") == []
+
+
 async def test_stop_during_adaptive_retry_pause_ends_request(monkeypatch):
     await _stop_during_retry_pause(monkeypatch, _policy_request)
 

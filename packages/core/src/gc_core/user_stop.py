@@ -234,8 +234,12 @@ class UserStop:
 
         Ошибка ``release`` процессом не считается: в лог идёт другое событие,
         ``_settled`` открывается, когда исходное ожидание само вышло.
+        Работа вышла из блока раньше, чем снятие дошло до loop, — снимать
+        нечего: ``release`` не зовётся, в лог ничего не пишем.
         """
         try:
+            if arm.left.is_set():
+                return
             if arm.release is not None:
                 result = arm.release()
                 if hasattr(result, "__await__"):
