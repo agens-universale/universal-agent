@@ -16,6 +16,7 @@ import pytest
 from gc_core.tools.connect_mcp import registry as reg
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.call_errors import (
+    McpCallOutcomeUnknown,
     McpCallTimedOut,
     McpServerGone,
 )
@@ -23,11 +24,17 @@ from gc_core.tools.connect_mcp.durable_scope import (
     McpSessionLostError,
     durable_mcp_calls,
 )
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioSession
+from gc_core.tools.connect_mcp.persistent_stdio import (
+    PersistentStdioRegistry,
+    PersistentStdioSession,
+)
 from gc_core.tools.connect_mcp.transport import forget_stdio_reader
+from gc_core.utils import aretry
 from gc_testkit.mcp import (
+    FakeClock,
     call_tool,
     events,
+    launches,
     set_behavior,
     stdio_cfg,
     wait_for,
@@ -101,14 +108,57 @@ async def test_timeout_is_error_with_cancel(tmp_path, mcp_reaper, mcp_owner):
     assert after["pid"] == first["pid"]
 
 
-async def test_durable_gets_outcome_unknown(tmp_path, mcp_reaper, mcp_owner):
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [("nap", {"seconds": 30}), ("crash", {})],
+    ids=["срок", "смерть"],
+)
+async def test_durable_gets_outcome_unknown(
+    tmp_path, mcp_reaper, mcp_owner, tool, arguments
+):
     control = tmp_path / "s.json"
     set_behavior(control)
 
     with durable_mcp_calls(), pytest.raises(McpSessionLostError):
         await call_tool(
-            "srv", _persistent(control), "nap", {"seconds": 30}, timeout=1
+            "srv", _persistent(control), tool, arguments, timeout=1
         )
+
+
+async def test_death_with_child_holding_stdout_is_gone(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    """Конца вывода нет (его держит потомок), но лидер мёртв — смерть."""
+    control = tmp_path / "s.json"
+    set_behavior(control, child_keeps_stdout=True)
+
+    with pytest.raises(McpServerGone):
+        await call_tool("srv", _persistent(control), "crash", {}, timeout=1)
+
+
+async def test_close_mid_call_is_gone(tmp_path, mcp_reaper, mcp_owner):
+    """Сессию закрыли посреди вызова — смерть, даже пока процесс жив.
+
+    Сервер глух к SIGTERM: закрытие добьёт его только через несколько
+    секунд, и срок вызова истекает раньше, при живом процессе и открытом
+    выводе. Решает то, что процесс снят с сессии.
+    """
+    control = tmp_path / "s.json"
+    set_behavior(control, ignore_term=True)
+    cfg = _persistent(control)
+    registry = PersistentStdioRegistry.instance()
+    call = asyncio.create_task(
+        call_tool("srv", cfg, "nap", {"seconds": 30}, timeout=2)
+    )
+    await wait_for(lambda: _requests(control, "tools/call"))
+    session = registry.get_or_create("srv", cfg)
+
+    closing = asyncio.create_task(registry.aclose_one("srv"))
+    await wait_for(lambda: session._proc is None, 1.0)
+
+    with pytest.raises(McpServerGone):
+        await call
+    assert await asyncio.wait_for(closing, _CEILING_SEC)
 
 
 async def test_one_shot_stdio_death_is_error(tmp_path, mcp_reaper, mcp_owner):
@@ -120,6 +170,23 @@ async def test_one_shot_stdio_death_is_error(tmp_path, mcp_reaper, mcp_owner):
         await _acall_with_retry(cfg, "crash")
 
     assert len(_requests(control, "tools/call")) == 1
+
+
+async def test_one_shot_death_on_initialize_is_retried(
+    tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    """Рукопожатие — не вызов: сбой на ``initialize`` повторяется."""
+    monkeypatch.setattr(aretry, "_wait_before_retry", FakeClock().sleep)
+    control = tmp_path / "s.json"
+    set_behavior(control, exit_on="initialize")
+    cfg = {**stdio_cfg(control), "persistent_session": False}
+
+    with pytest.raises(ConnectionError, match="initialize") as caught:
+        await _acall_with_retry(cfg, "echo")
+
+    assert not isinstance(caught.value, McpCallOutcomeUnknown)
+    assert len(launches(control)) > 1
+    assert _requests(control, "tools/call") == []
 
 
 @pytest.mark.parametrize(

@@ -321,6 +321,37 @@ async def test_child_ignores_term(tmp_path, mcp_reaper):
         assert exits(control) == launches(control)
 
 
+async def test_child_keeps_stdout_hides_the_end_of_output(
+    tmp_path, mcp_reaper
+):
+    """Лидер умер, а потомок держит его stdout: конца вывода нет.
+
+    Смерть лидера ждётся опросом pid: ``proc.wait()`` asyncio ждёт ещё и
+    закрытия труб, а их держит потомок.
+    """
+    control = tmp_path / "s.json"
+    set_behavior(control, child_keeps_stdout=True)
+    async with _raw(stdio_cfg(control)) as proc:
+        await _initialize(proc)
+        [child] = children(control)
+        crash = {"name": "crash", "arguments": {}}
+        await _send(
+            proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": crash,
+            },
+        )
+        await wait_for(lambda: not alive(proc.pid), _TIMEOUT)
+
+        assert alive(child)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(proc.stdout.readline(), 0.3)
+        assert not proc.stdout.at_eof()
+
+
 async def test_nap_does_not_block_other_requests(tmp_path, mcp_reaper):
     control = tmp_path / "s.json"
     async with _raw(stdio_cfg(control)) as proc:

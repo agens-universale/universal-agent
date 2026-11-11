@@ -16,7 +16,9 @@
 * ``ignore_term`` — не выходить по SIGTERM;
 * ``spawn_child`` — потомок ``sleep 300`` в той же группе;
 * ``child_ignores_term`` — такой же потомок, глухой к SIGTERM (сам сервер по
-  SIGTERM выходит) — форма ``node`` + Chromium.
+  SIGTERM выходит) — форма ``node`` + Chromium;
+* ``child_keeps_stdout`` — такой же потомок, унаследовавший stdout сервера:
+  пока он жив, клиент не видит конца вывода и после смерти лидера.
 
 Тулы: ``echo(text)`` → ``{"text", "pid", "trace"}`` (``trace`` — из
 ``TRACE_ID``), ``nap(seconds)`` → ``{"pid"}``, прерывается
@@ -108,18 +110,18 @@ def on_term(_signum, _frame) -> None:
     exit_logged()
 
 
-def spawn_child(ignores_term: bool) -> None:
+def spawn_child(ignores_term: bool, keeps_stdout: bool) -> None:
     # Игнорирование сигнала переживает exec, обработчик — нет: на время
     # запуска ставим то, что должен унаследовать потомок.
     disposition = signal.SIG_IGN if ignores_term else signal.SIG_DFL
     previous = signal.signal(signal.SIGTERM, disposition)
     try:
-        # Вывод потомка — не наш stdout: иначе клиент не увидит конца
-        # вывода, когда лидер умрёт.
+        # Вывод потомка — не наш stdout (кроме ``keeps_stdout``): иначе
+        # клиент не увидит конца вывода, когда лидер умрёт.
         child = subprocess.Popen(
             ["sleep", "300"],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=None if keeps_stdout else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     finally:
@@ -275,8 +277,9 @@ def main() -> None:
     log(f"start {PID}")
     if cfg.get("fail_start"):
         os._exit(1)
-    if cfg.get("spawn_child") or cfg.get("child_ignores_term"):
-        spawn_child(bool(cfg.get("child_ignores_term")))
+    keeps_stdout = bool(cfg.get("child_keeps_stdout"))
+    if cfg.get("spawn_child") or cfg.get("child_ignores_term") or keeps_stdout:
+        spawn_child(bool(cfg.get("child_ignores_term")), keeps_stdout)
     threading.Thread(target=read_stdin, daemon=True).start()
     while True:
         time.sleep(60)

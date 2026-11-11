@@ -385,8 +385,9 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_started(timeout)
-            # Свой процесс вызова: закрытие посреди чтения снимает
-            # ``self._proc``, а решать об исходе надо по этому процессу.
+            # Свой процесс вызова: закрытие посреди обмена снимает
+            # ``self._proc``, а писать, читать и решать об исходе надо по
+            # этому процессу.
             proc = self._proc
             if _user_stop_requested():
                 raise UserStopInterrupt(kind="mcp", started=True)
@@ -398,10 +399,10 @@ class PersistentStdioSession:
                 "method": method,
                 "params": params or {},
             }
-            self._write_line(payload)
+            self._write_line_on(proc, payload)
             self._set_inflight(req_id)
             try:
-                response = self._read_matching(req_id, timeout)
+                response = self._read_matching_on(proc, req_id, timeout)
                 if not response:  # ответ JSON-RPC пустым не бывает
                     raise self._unanswered(proc, timeout)
                 return response
@@ -418,12 +419,19 @@ class PersistentStdioSession:
     ) -> Exception:
         """Ошибка запроса, ответ на который не пришёл.
 
-        Сессию закрыли или читатель увидел конец вывода — сервер умер.
-        Иначе истёк срок: запрос снимается, поздний ответ его id не
-        примется, сессия остаётся. Durable-хост вместо обеих получает
-        «исход неизвестен» и решает о восстановлении сам.
+        Сессию закрыли, читатель увидел конец вывода или процесс вышел —
+        сервер умер. Конец вывода ловит смерть сразу, когда ``poll()`` ещё
+        видит процесс живым; ``poll()`` ловит смерть, когда вывод держит
+        унаследовавший его потомок. После полного срока он надёжен в
+        сторону «мёртв». Иначе истёк срок: запрос снимается, поздний ответ
+        его id не примется, сессия остаётся. Durable-хост вместо обеих
+        получает «исход неизвестен» и решает о восстановлении сам.
         """
-        if self._proc is not proc or stdio_stream_ended(proc.stdout):
+        if (
+            self._proc is not proc
+            or stdio_stream_ended(proc.stdout)
+            or proc.poll() is not None
+        ):
             error: Exception = McpServerGone()
         else:
             self.cancel_inflight()

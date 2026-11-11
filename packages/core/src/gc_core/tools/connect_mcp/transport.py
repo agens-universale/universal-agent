@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import httpx
 
 from gc_core.tools.connect_mcp.call_errors import (
+    McpCallOutcomeUnknown,
     McpCallTimedOut,
     McpServerGone,
 )
@@ -585,6 +586,22 @@ def _parse_rpc_response_line(
     return message
 
 
+async def _aread_step(
+    proc, timeout: float, payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Ответ на шаг обмена; сбой рукопожатия — ошибка соединения.
+
+    «Исход неизвестен» значит «запрос мог исполниться», а на ``initialize``
+    сам запрос ещё не уходил: такой сбой повторяется, как любой обрыв.
+    """
+    try:
+        return await _aread_response(proc, timeout, payload.get("id"))
+    except McpCallOutcomeUnknown as exc:
+        if payload.get("method") != "initialize":
+            raise
+        raise ConnectionError(f"initialize: {exc}") from exc
+
+
 async def _astdio_exchange(
     server_cfg: Dict[str, Any],
     timeout: float,
@@ -607,9 +624,7 @@ async def _astdio_exchange(
             if not expect_response:
                 results.append({})
                 continue
-            results.append(
-                await _aread_response(proc, timeout, payload.get("id"))
-            )
+            results.append(await _aread_step(proc, timeout, payload))
     finally:
         # Закрываем stdin ДО терминации: многие серверы по EOF корректно
         # завершают свой event loop сами, и тогда SIGTERM/SIGKILL не нужны
