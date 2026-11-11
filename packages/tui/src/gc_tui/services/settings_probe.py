@@ -116,6 +116,7 @@ class AgentRoute:
     # Своё подключение основной записи — или None: пара «адрес + токен»
     # наследуется из общего backend, который и правит форма «Подключения».
     own: Optional[ProbeTarget] = None
+    shared_endpoint: str = ""
 
 
 def agent_route(settings, resolved) -> AgentRoute:
@@ -123,7 +124,7 @@ def agent_route(settings, resolved) -> AgentRoute:
     резолв не удался: проба тогда идёт с `agent.model`, как до резолва, и с
     одними общими заголовками; заглушку гейтвей с ACL по модели отклонил бы
     при рабочем агенте)."""
-    from gc_core.onboarding import MODEL_SENTINEL
+    from gc_core.onboarding import MODEL_SENTINEL, configured_endpoint
     from gc_core.settings import settings_of
     from gc_core.utils.connect_backend import connection_probe_headers
 
@@ -138,6 +139,9 @@ def agent_route(settings, resolved) -> AgentRoute:
         model=model or "",
         headers=headers,
         shared_headers=connection_probe_headers(settings),
+        shared_endpoint=configured_endpoint(
+            settings_of(settings).backend.completions_url
+        ),
         own=_own_connection(settings, resolved, model or "", headers),
     )
 
@@ -211,15 +215,26 @@ def connection_probe_target(
     которым агент не ходит, давал бы «токен отклонён» при рабочем агенте.
     Тронутая форма проверяет введённое; модель и заголовки записи прикладываем,
     только если адрес тот же, — на чужой адрес модель записи не ходит, и
-    вердикт там только о токене (заглушка)."""
+    вердикт там только о токене (заглушка). Сохранённые заголовки передаются
+    только на тот адрес, для которого они настроены, включая контроль без токена."""
     own = agent.own
+    shared_headers = (
+        agent.shared_headers
+        if _same_endpoint(form.endpoint, agent.shared_endpoint)
+        else {}
+    )
     if own is None:
-        return replace(form, model=agent.model, headers=agent.headers)
+        headers = (
+            agent.headers
+            if _same_endpoint(form.endpoint, agent.shared_endpoint)
+            else {}
+        )
+        return replace(form, model=agent.model, headers=headers)
     if not form_edited:
         return own
     if _same_endpoint(form.endpoint, own.endpoint):
         return replace(form, model=agent.model, headers=agent.headers)
-    return replace(form, model="", headers=agent.shared_headers)
+    return replace(form, model="", headers=shared_headers)
 
 
 def _same_endpoint(left: str, right: str) -> bool:

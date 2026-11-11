@@ -45,13 +45,29 @@ class ResponsesRecovery:
             await asyncio.sleep(self.config.interval_seconds)
 
     async def recover_once(self):
+        for run in list(self.facade._live.values()):
+            if run.persistence_failed:
+                await run.retry_finalization()
+        await self._recover_records()
+
+    async def _recover_records(self):
         index = self.facade._index
-        ids = set(index.legacy_dialogs())
+        # Старый файловый архив читается один раз и вне HTTP event loop.
+        legacy = await asyncio.to_thread(index.legacy_dialogs)
+        ids = {
+            tid
+            for tid, records in legacy.items()
+            if any(record.status == _RUNNING for record in records)
+        }
         async for thread in index.threads.iter_threads(system=SYSTEM):
-            ids.add(thread.key.thread)
+            summary = index.summary(thread)
+            if summary and summary.get("status") == _RUNNING:
+                ids.add(thread.key.thread)
         for thread_id in ids:
             try:
-                for record in await index.thread_records(thread_id):
+                for record in await index.thread_records(
+                    thread_id, legacy_records=legacy.get(thread_id, [])
+                ):
                     await self.recover(record)
             except Exception:
                 logger.exception("responses recovery thread %s", thread_id)
@@ -136,7 +152,12 @@ class ResponsesRecovery:
         except Exception as exc:
             logger.exception("responses recovery launch")
             error = model_api_error(exc)
-            await self._finish(record, error.code, error.message)
+            permanent = isinstance(exc, ApiError) and 400 <= exc.status < 500
+            if (
+                permanent
+                or record.recovery_attempts >= self.config.max_attempts
+            ):
+                await self._finish(record, error.code, error.message)
             return False
 
     async def _finish(

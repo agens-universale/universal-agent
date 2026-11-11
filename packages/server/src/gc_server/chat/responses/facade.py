@@ -7,6 +7,7 @@ import logging
 import time
 import uuid
 from collections import OrderedDict
+from dataclasses import replace
 from typing import Any
 
 from gc_core.settings import LoadedSettings
@@ -103,9 +104,7 @@ class ResponsesFacade:
         record = await self._index.load(response_id)
         if record is None:
             raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
-        await self.recovery.recover(record)
-        latest = await self._index.load(response_id)
-        return latest.response if latest is not None else record.response
+        return record.response
 
     async def cancel(self, response_id: str) -> dict:
         record = await self._index.load(response_id)
@@ -119,8 +118,6 @@ class ResponsesFacade:
                 await self._index.threads.request_cancel(
                     thread_key(record.thread_id), target=response_id
                 )
-                await self.recovery.recover(record)
-                record = await self._index.load(response_id)
             return record.response if record is not None else {}
         try:
             await live.request_stop()
@@ -158,7 +155,10 @@ class ResponsesFacade:
             record = await self._index.load(incoming.previous_response_id)
             if record is None:
                 raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
-            await self.recovery.recover(record)
+            if record.status == _IN_PROGRESS:
+                raise ApiError(
+                    409, _CONFLICT, "previous response is still running"
+                )
             thread_id = record.thread_id
             cwd = self.new_dialog_cwd(
                 cwd_for_continue(incoming.cwd_sent, record.cwd)
@@ -260,14 +260,26 @@ class ResponsesFacade:
             _IN_PROGRESS,
             mapper.snapshot(),
             reservation=self._admissions[thread_id].token,
-            request_text=incoming.text,
+            # Пока подготовка не закончена, recovery не должен исполнять
+            # запрос, на открытие которого клиент получил ошибку.
+            request_text=None,
         )
         try:
             await self._admissions[thread_id].validate()
             await self._index.save(record)
             return await self._launch(record, agent, incoming.text)
-        except BaseException:
-            await self._release(thread_id, "")
+        except BaseException as exc:
+            try:
+                from gc_server.chat.model_errors import model_api_error
+
+                error = model_api_error(exc)
+                await self.recovery._finish(record, error.code, error.message)
+            except Exception:
+                logger.exception(
+                    "responses failed opening status was not saved"
+                )
+            finally:
+                await self._release(thread_id, "")
             raise
 
     async def _launch(
@@ -283,6 +295,9 @@ class ResponsesFacade:
         flow = await ToolFlow.start(
             self._index.threads, thread_key(record.thread_id), root=record.cwd
         )
+        await self._admissions[record.thread_id].validate()
+        record = replace(record, request_text=record.request_text or prompt)
+        await self._index.save(record)
         run = TurnRun(
             agent=agent,
             mapper=mapper,

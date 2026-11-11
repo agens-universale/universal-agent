@@ -31,10 +31,9 @@ def prepare_agent_settings(
 
 
 def agent_io(settings, cwd, backend, cache):
-    """Локальный I/O и его кэш принадлежат агенту, а не всем диалогам."""
+    """Локальный I/O — на диалог; каталог MCP-тулов — общий на поверхность."""
     from gc_core.backends.factory import parse_os_backend_kind
     from gc_core.backends.local import LocalFsBackend
-    from gc_core.tools.connect_mcp.registry import ToolsCache
 
     if type(backend) is LocalFsBackend or (
         backend is None and parse_os_backend_kind(settings) == "local"
@@ -45,5 +44,7 @@ def agent_io(settings, cwd, backend, cache):
             else settings_of(settings).agent.exec_output_capture_max_chars
         )
         scoped = LocalFsBackend(cwd=cwd, exec_output_capture_max_chars=cap)
-        return scoped, ToolsCache(os_backend=scoped)
+        # Для local MCP запускается в процессе агента, а не через scoped:
+        # смена cwd файловых инструментов не требует нового discovery.
+        return scoped, cache
     return backend, cache

@@ -8,19 +8,19 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from gc_core.execution.progress import QueueSubagentProgressSink
 from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.states import SharedStateData, State
-from gc_testkit.develop_files import read_subagent_trace
 from gc_core.tools.subagents.active_scope import (
     activate_child_input,
     active_parent_call_id,
     is_child_input_active,
     try_enqueue_user_message,
 )
-from gc_core.execution.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.develop_files import read_subagent_trace
 from gc_testkit.settings import fake_ctx
 
 # Уборщика глобали больше нет: скоуп живёт в контексте прогона и не может
@@ -101,14 +101,6 @@ class TestActiveScopeRegistry:
             assert scope.drain() == [{"role": "user", "content": "steer"}]
             assert scope.drain() == []
         assert is_child_input_active(ctx) is False
-
-    def test_on_enqueue_callback(self):
-        seen: list = []
-        ctx = SimpleNamespace()
-        with activate_child_input(ctx, parent_call_id="p1") as scope:
-            scope.set_on_enqueue(lambda m: seen.append(m["content"]))
-            scope.enqueue({"role": "user", "content": "x"})
-        assert seen == ["x"]
 
 
 class TestAgentExecutorRoutesToChild:
@@ -220,10 +212,9 @@ class TestRunnerWiresPending:
         иначе после выхода из TUI карман снесён и в треде остаётся мёртвый путь."""
         import io
 
-        from PIL import Image
-
         from gc_core.attachments.model import ORIGIN_USER, user_label
         from gc_core.attachments.store import ImageStore, amake_attachment
+        from PIL import Image
 
         store = ImageStore.for_threads_dir(str(tmp_path))
         buf = io.BytesIO()
@@ -344,14 +335,15 @@ class TestRunnerWiresPending:
                 "content": wrap_technical_user_content("attachment meta"),
             },
         )
+        assert not [e for e in sink.drain() if e.kind == "user_message"]
+        release.set()
+        t.join(timeout=5)
+        assert not t.is_alive()
         events = sink.drain()
         user_evs = [e for e in events if e.kind == "user_message"]
         assert len(user_evs) == 1
         assert user_evs[0].prose == "check auth next"
         assert user_evs[0].parent_call_id == "call_sub_steer"
-
-        release.set()
-        t.join(timeout=5)
 
         # Строка в трассе ребёнка появляется при заборе реплики из очереди,
         # а не при постановке: не забранная им реплика уходит родителю.
@@ -371,10 +363,9 @@ class TestParentPendingUnchangedWithoutChild:
         потоке, поставившем реплику в очередь (UI TUI) (смоук и ревью 2026-10-01)."""
         import io
 
-        from PIL import Image
-
         from gc_core.attachments.model import ORIGIN_USER, user_label
         from gc_core.attachments.store import ImageStore, amake_attachment
+        from PIL import Image
 
         store = ImageStore.for_threads_dir(str(tmp_path))
         buf = io.BytesIO()
@@ -438,8 +429,7 @@ class TestParentPendingUnchangedWithoutChild:
                 "attachments": [staged.to_dict()],
             },
         )
-        [event] = [e for e in sink.drain() if e.kind == "user_message"]
-        assert event.attachments == [staged.to_dict()]
+        assert not [e for e in sink.drain() if e.kind == "user_message"]
         # поток постановки в очередь файлов не пишет
         assert not [
             f for f in os.listdir(store.root) if f.startswith("cli_task-img_")
@@ -447,12 +437,15 @@ class TestParentPendingUnchangedWithoutChild:
 
         release.set()
         t.join(timeout=5)
+        assert not t.is_alive()
+        [event] = [e for e in sink.drain() if e.kind == "user_message"]
         [row] = [
             r
             for r in read_subagent_trace(str(tmp_path), "cli", "task-img")
             if r.get("kind") == "user"
         ]
         [kept] = row["payload"]["attachments"]
+        assert event.attachments == [kept]
         assert kept["id"] == staged.id
         assert not kept["path"].startswith(store.staging_dir)
         assert os.path.isfile(kept["path"])

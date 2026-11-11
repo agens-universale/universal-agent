@@ -90,9 +90,9 @@ class _Gateway:
 async def _connection_section(tmp_path, yaml_text):
     """Секция «Подключение» на настоящем config.yml с настоящей пробой (без
     подмен `probe_fn`): проверяется ровно то, что уходит по сети."""
+    from gc_testkit.tui_support import tui_settings
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    from gc_testkit.tui_support import tui_settings
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
@@ -307,6 +307,7 @@ def _route(own_endpoint=None):
         model="corp/main-model",
         headers={"x_cl_id": "c", "X-Own": "1"},
         shared_headers={"x_cl_id": "c"},
+        shared_endpoint="http://shared/v1/chat/completions",
         own=own,
     )
 
@@ -459,3 +460,57 @@ def test_route_without_resolve_falls_back_to_the_agent_model(
     route = agent_route(settings, None)
     assert route.model == expected
     assert route.own is None
+
+
+@pytest.mark.parametrize("own", [None, "http://own/v1/chat/completions"])
+def test_new_address_does_not_receive_saved_headers(own):
+    from gc_tui.services.settings_probe import connection_probe_target
+
+    target = connection_probe_target(
+        _route(own), _form("http://new/v1/chat/completions"), form_edited=True
+    )
+    assert target.headers == {}
+    assert target.auth == "Bearer typed"
+
+
+async def test_unsaved_address_does_not_leak_gateway_key(tmp_path):
+    from textual.widgets import Input
+
+    with (
+        _Gateway(header=("X-Gateway-Key", "saved-secret")) as saved,
+        _Gateway() as draft,
+    ):
+        yaml_text = (
+            "backend:\n"
+            "  api_mode: chat_completions\n"
+            f"  completions_url: {saved.url}\n"
+            "  chat_completion_headers:\n"
+            f"    Authorization: {_GOOD}\n"
+            "    X-Gateway-Key: saved-secret\n"
+            "agent:\n"
+            "  model: corp-model\n"
+        )
+        async with _connection_section(tmp_path, yaml_text) as (pilot, scr):
+            assert (
+                saved.posts[-1]["headers"]["X-Gateway-Key"] == "saved-secret"
+            )
+            editor = scr._connection_editor()
+            editor.query_one("#conn-url", Input).value = draft.url
+            editor.query_one("#conn-token", Input).value = _GOOD
+            await pilot.pause()
+            scr._draft_checked = None
+            scr._start_draft_probe(scr._view, manual=True)
+            await wait_until(
+                pilot,
+                lambda: scr._draft_checked is not None,
+                "проба нового адреса",
+                steps=400,
+            )
+            assert draft.posts
+            assert any(
+                "Authorization" not in p["headers"] for p in draft.posts
+            )
+            assert all(
+                "X-Gateway-Key" not in p["headers"] for p in draft.posts
+            )
+            assert (tmp_path / "config.yml").read_text() == yaml_text

@@ -131,7 +131,9 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
     return ""
 
 
-async def _adrain_with_attachments(scope: Any, child_ctx: Any) -> list:
+async def _adrain_with_attachments(
+    scope: Any, child_ctx: Any, on_consumed: Callable | None = None
+) -> list:
     """Реплики очереди субагента — как у родителя: картинки из кармана
     процесса переезжают в тред.
 
@@ -143,8 +145,13 @@ async def _adrain_with_attachments(scope: Any, child_ctx: Any) -> list:
     out = []
     for message in scope.drain():
         message = await awith_committed_attachments(message, child_ctx)
-        await _apersist_child_user(message, child_ctx)
         out.append(message)
+        try:
+            await _apersist_child_user(message, child_ctx)
+        except Exception:
+            _log.exception("subagent_trace_write_failed")
+        if on_consumed is not None:
+            on_consumed(message)
     return out
 
 
@@ -821,16 +828,13 @@ class SubagentRunner:
         with self._input_scope_factory(
             self._ctx, parent_call_id=self._parent_call_id
         ) as scope:
-            # Колбэк enqueue приходит из ЧУЖОГО потока (`add_message` зовёт
-            # TUI), поэтому здесь только строка ленты. Запись в трассу и копия
-            # картинок в тред — при заборе реплики ребёнком
-            # (`_adrain_with_attachments`): не забранная им реплика уходит
-            # родителю и в трассе субагента остаться не должна.
-            def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
+            # Лента и трасса показывают только забранные ребёнком реплики.
+            # Остаток очереди при закрытии достаётся родителю.
+            def _on_child_user_consumed(message: Dict[str, Any]) -> None:
                 prose = extract_real_user_message_text(message)
                 if not prose:
                     return
-                # Строке в ленте — картинки как есть: карман живёт до выхода.
+                # Картинки уже перенесены из кармана в тред.
                 emit_progress(
                     child_ctx,
                     child_state,
@@ -839,31 +843,28 @@ class SubagentRunner:
                     attachments=message.get("attachments"),
                 )
 
-            scope.set_on_enqueue(_on_child_user_enqueue)
             # run_agent_func обязана быть корутинной — это arun_agent. Раньше здесь
             # стоял _maybe_await «на случай синхронной заглушки»; он же и прятал
             # поломку: TypeError от await над обычной функцией ловил except ниже и
             # превращал в конверт subagent_run_failed, а тесты, не проверяющие
             # результат, оставались зелёными.
-            try:
-                return await run_agent_func(
-                    messages,
-                    child_state,
+            return await run_agent_func(
+                messages,
+                child_state,
+                child_ctx,
+                check_stop=self._check_stop_requested,
+                persist_messages_callback=persist_messages_callback,
+                pre_backend_compaction_hook=pre_backend_compaction_hook,
+                session_meta=child_meta,
+                # Приём реплик из очереди — как у родителя: картинки
+                # из кармана процесса переезжают в тред.
+                get_pending_messages=partial(
+                    _adrain_with_attachments,
+                    scope,
                     child_ctx,
-                    check_stop=self._check_stop_requested,
-                    persist_messages_callback=persist_messages_callback,
-                    pre_backend_compaction_hook=pre_backend_compaction_hook,
-                    session_meta=child_meta,
-                    # Приём реплик из очереди — как у родителя: картинки
-                    # из кармана процесса переезжают в тред.
-                    get_pending_messages=partial(
-                        _adrain_with_attachments, scope, child_ctx
-                    ),
-                )
-            finally:
-                # Реплика после конца работы ребёнка — уже не ему: строки в
-                # его ленте для неё не нужно.
-                scope.set_on_enqueue(None)
+                    _on_child_user_consumed,
+                ),
+            )
 
     def _maybe_pin_fallback(
         self,

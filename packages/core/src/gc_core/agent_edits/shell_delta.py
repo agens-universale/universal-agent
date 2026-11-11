@@ -100,6 +100,7 @@ from gc_core.agent_edits.paths import (
     goes_through_link,
     is_external_key,
     is_own_data,
+    prepare_own_data,
 )
 from gc_core.agent_edits.recorder import is_recording
 from gc_core.agent_edits.snapshots import (
@@ -549,7 +550,9 @@ class ShellDelta:
             # Собственные данные gc (`own_data_from_ctx`) приходят только из
             # журнала, записанного до их исключения: `_at_risk_keys` их уже не
             # отдаёт. Читать их байты — снова записать журнал «правкой».
-            own_data = own_data_from_ctx(self._ctx)
+            own_data = prepare_own_data(
+                self._launch_root, own_data_from_ctx(self._ctx)
+            )
             known = [
                 k
                 for k in known
@@ -654,7 +657,9 @@ class ShellDelta:
         слиянии — задача 3).
         """
         protected = protected_extra_from_ctx(self._ctx)
-        own_data = own_data_from_ctx(self._ctx)
+        own_data = prepare_own_data(
+            self._launch_root, own_data_from_ctx(self._ctx)
+        )
 
         def keys_of(rels: list[str]) -> list[str]:
             keys = []
@@ -1204,7 +1209,9 @@ class ShellDelta:
         чей регистр разошёлся (обычное дело при core.ignorecase).
         """
         extra = protected_extra_from_ctx(self._ctx)
-        own_data = own_data_from_ctx(self._ctx)
+        own_data = prepare_own_data(
+            self._launch_root, own_data_from_ctx(self._ctx)
+        )
         planned: list[tuple[str, str, _FileFacts]] = []
         for rel in part:
             abs_path = self._abs(rel)

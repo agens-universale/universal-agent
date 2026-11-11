@@ -498,12 +498,9 @@ def _stdio_command(
 # Раньше stderr уходил в ``DEVNULL``, и сервер, упавший при старте
 # (``ModuleNotFoundError`` в его venv), выглядел на экране ``/mcp`` как
 # «нет соединения с ddgs-mcp» — без единого слова о причине. Теперь stderr
-# пишется в лог сервера в каталоге состояния gc, перезаписываемый на каждом
-# старте. Пока процесс жив, лог только растёт: ни потолка, ни ротации нет —
-# у долгоживущего болтливого сервера он большой. Именно файл, а не
-# ``PIPE``: непрочитанный pipe переполняется, и долгоживущий сервер встаёт
-# на записи в stderr. Буфер с фоновым читателем
-# тоже годился бы, но пути к логу у него нет, а лог целиком бывает нужен.
+# пишется в отдельный приватный лог запуска. Фоновый читатель непрерывно
+# вычитывает stderr; файл ограничен 1 МиБ, при переполнении остаётся хвост.
+# Параллельные запуски не обнуляют логи друг друга; закрытых логов не более 32.
 
 #: Сколько хвоста лога читать в поисках последней строки: причина падения —
 #: в конце, а лог долгоживущего сервера может быть большим.
@@ -538,7 +535,7 @@ _LOG_NAME_MAX = 100
 def _stderr_log_path(
     server_cfg: Dict[str, Any], server_name: Optional[str] = None
 ) -> Path:
-    """Лог stderr: ``<state>/mcp/<имя сервера>.stderr.log``.
+    """Лог stderr: ``<state>/mcp/<имя>.<pid>.<запуск>.stderr.log``.
 
     Имя сервера (ключ в ``mcp-servers``) передают вниз дискавери и вызов
     тула: по команде два сервера с одной командой и разным env/cwd делили
@@ -552,7 +549,13 @@ def _stderr_log_path(
     name = _sanitize_log_name(server_name) if server_name else ""
     if not name:
         name = _sanitize_log_name(_command_log_name(server_cfg))
-    return gc_paths()["state"] / "mcp" / f"{name}.stderr.log"
+    from uuid import uuid4
+
+    return (
+        gc_paths()["state"]
+        / "mcp"
+        / f"{name}.{os.getpid()}.{uuid4().hex[:12]}.stderr.log"
+    )
 
 
 def _command_log_name(server_cfg: Dict[str, Any]) -> str:
@@ -580,30 +583,27 @@ def _stderr_log(
 ) -> Iterator[Tuple[Any, Optional[Path]]]:
     """``(куда писать stderr, путь лога)`` на время запуска процесса.
 
-    Наш дескриптор закрывается сразу после спавна: у процесса своя копия.
-    Ограничение: потолка размера и ротации нет — пока процесс жив, лог
-    растёт; обрезается он только на следующем старте того же сервера.
+    Файл отдельный для каждого запуска, ограничен 1 МиБ; pipe постоянно
+    вычитывается фоновым потоком. Старые закрытые логи ограничены по числу.
     Лог не открылся (каталог только на чтение) — ``DEVNULL`` и пути нет:
     диагностика не повод не запустить сервер.
     """
     path = _stderr_log_path(server_cfg, server_name)
-    try:
-        handle = _open_private_log(path)
-    except OSError:
-        yield subprocess.DEVNULL, None
-        return
-    try:
-        yield handle, path
-    finally:
-        handle.close()
+    from gc_core.tools.connect_mcp.stderr_capture import capture
+
+    with contextlib.ExitStack() as stack:
+        try:
+            result = stack.enter_context(capture(path, _open_private_log))
+        except OSError:
+            result = subprocess.DEVNULL, None
+        yield result
 
 
 def _open_private_log(path: Path) -> Any:
     """Открыть лог на запись с нуля — только для владельца.
 
-    ``O_APPEND`` — на случай двух живых процессов с одним логом: второй
-    спавн обрезает файл, а первый без него писал бы со старого смещения, и
-    в логе появлялась бы дыра из NUL. Обрезка при открытии остаётся.
+    Каждый запуск получает уникальный путь. ``O_APPEND`` позволяет после
+    обрезки большого лога продолжать запись с его текущего конца.
 
     В stderr серверы печатают ошибки авторизации вместе с токенами, поэтому
     файл 0600, а каталог создаётся 0700 (чужой существующий не трогаем).
@@ -632,6 +632,9 @@ def _open_private_log(path: Path) -> Any:
 
 def _last_stderr_line(path: Path) -> str:
     """Последняя непустая строка лога, секреты замаскированы; пусто — нет."""
+    from gc_core.tools.connect_mcp.stderr_capture import finish
+
+    finish(path)
     try:
         with open(path, "rb") as fh:
             fh.seek(0, 2)

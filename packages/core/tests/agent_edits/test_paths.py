@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 
 import pytest
-
 from gc_core.agent_edits.paths import canonical_path_key
 
 
@@ -163,3 +162,41 @@ def test_own_data_dir_holding_the_project_does_not_swallow_it(
         own_data=[str(launch_root.parent), str(launch_root)],
     )
     assert key == "src/foo.py"
+
+
+def test_own_data_is_normalized_once_per_scan(launch_root, monkeypatch):
+    from gc_core.agent_edits import paths
+
+    normalize = paths.normalize_path_for_policy
+    calls = []
+
+    def counted(path, root):
+        calls.append(str(path))
+        return normalize(path, root)
+
+    monkeypatch.setattr(paths, "normalize_path_for_policy", counted)
+    own = [str(launch_root / "threads"), str(launch_root / "hist.jsonl")]
+    prepared = paths.prepare_own_data(launch_root, own)
+    assert len(calls) == 3
+    calls.clear()
+    for i in range(100):
+        assert not paths.is_own_data(f"src/{i}.py", launch_root, prepared)
+        assert paths.is_own_data(f"threads/{i}.json", launch_root, prepared)
+    assert len(calls) == 200
+    assert not set(own).intersection(calls)
+
+
+def test_new_scan_refreshes_own_data_symlink(launch_root):
+    from gc_core.agent_edits.paths import is_own_data, prepare_own_data
+
+    (launch_root / "first").mkdir()
+    (launch_root / "second").mkdir()
+    link = launch_root / "data-link"
+    link.symlink_to(launch_root / "first")
+    before = prepare_own_data(launch_root, [str(link)])
+    link.unlink()
+    link.symlink_to(launch_root / "second")
+    after = prepare_own_data(launch_root, [str(link)])
+    assert is_own_data("first/a", launch_root, before)
+    assert not is_own_data("first/a", launch_root, after)
+    assert is_own_data("second/a", launch_root, after)

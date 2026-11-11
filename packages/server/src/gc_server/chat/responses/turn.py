@@ -15,7 +15,11 @@ from gc_core.tools.turn.turn_close import (
 
 from gc_server.chat.http_common import disconnected
 from gc_server.chat.model_errors import model_api_error
-from gc_server.chat.responses.index_store import ResponseIndex, ResponseRecord
+from gc_server.chat.responses.index_store import (
+    ResponseIndex,
+    ResponseRecord,
+    thread_key,
+)
 from gc_server.chat.responses.sse import encode_sse, is_terminal
 from gc_server.chat.responses.status import incomplete_details, turn_status
 from gc_server.chat.responses.stream_map import StreamMap
@@ -63,6 +67,8 @@ class TurnRun(TurnLifecycle):
         self._seal_lock = asyncio.Lock()
         self.done = asyncio.Event()
         self.sealed = False
+        self.persistence_failed = False
+        self._failed_response: dict | None = None
         self.cancel_requested = False
         self.response_id = record.response_id
         self._task: asyncio.Task | None = None
@@ -78,6 +84,8 @@ class TurnRun(TurnLifecycle):
         return await self.result()
 
     async def result(self) -> dict:
+        if self.persistence_failed:
+            return self._failed_response
         loaded = await self._index.load(self.response_id)
         if loaded is None:
             return self._record.response
@@ -164,17 +172,80 @@ class TurnRun(TurnLifecycle):
             events = self._mapper.seal_events(
                 status, error=error, incomplete_details=details
             )
-            _put(self._queue, events)
             body = events[-1]["response"]
             self._record = replace(self._record, status=status, response=body)
             try:
-                await self._index.save(self._record)
+                if await self._save_final():
+                    # Терминальное событие подтверждает уже сохранённый итог.
+                    _put(self._queue, events)
+                else:
+                    self.persistence_failed = True
+                    self._failed_response = {
+                        **body,
+                        "status": "failed",
+                        "error": {
+                            "code": "response_persistence_failed",
+                            "message": "Response could not be saved. Do not repeat the request; check its status later.",
+                        },
+                        "incomplete_details": None,
+                    }
+                    _put(
+                        self._queue,
+                        [
+                            {
+                                "type": "response.failed",
+                                "response": self._failed_response,
+                            }
+                        ],
+                    )
             finally:
                 self.sealed = True
                 try:
-                    await self._release_busy(self.thread_id, self.response_id)
+                    if not self.persistence_failed:
+                        await self._release_busy(
+                            self.thread_id, self.response_id
+                        )
                 finally:
                     self.done.set()
+
+    async def _save_final(self) -> bool:
+        for attempt in range(3):
+            try:
+                await self._index.save(self._record)
+                return True
+            except Exception:
+                if attempt == 2:
+                    logger.exception(
+                        "responses final status could not be saved"
+                    )
+                    return False
+                await asyncio.sleep(0.05)
+        return False
+
+    async def retry_finalization(self) -> None:
+        """Повторяется только запись итога, пока бронь удерживает этот процесс.
+
+        Агент повторно не запускается; клиент не получает 200 in_progress
+        после ошибки записи. Полная недоступность хранилища вместе с гибелью
+        процесса не позволяет гарантировать сохранность ещё не записанного итога.
+        """
+        async with self._seal_lock:
+            if not self.persistence_failed:
+                return
+            thread = await self._index.threads.get(thread_key(self.thread_id))
+            frontend = thread.frontend if thread else {}
+            admission = frontend.get("chat", {}).get("admission") or {}
+            if admission.get("token") != self._record.reservation:
+                # Другой владелец уже отвечает за итог; старый не может
+                # перезаписать его или навсегда удерживать локальный busy.
+                logger.warning(
+                    "responses finalization lost its admission: %s",
+                    self.response_id,
+                )
+                await self._release_busy(self.thread_id, self.response_id)
+            elif await self._save_final():
+                self.persistence_failed = False
+                await self._release_busy(self.thread_id, self.response_id)
 
     async def _tool_events(self) -> list[dict]:
         events: list[dict] = []

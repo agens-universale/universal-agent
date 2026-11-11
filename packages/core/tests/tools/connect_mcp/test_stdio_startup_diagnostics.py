@@ -9,9 +9,11 @@
 Каталог состояния — изолированный ``GC_HOME`` набора (плагин gc_testkit).
 """
 
+import re
 import stat
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from gc_core.tools.connect_mcp import persistent_stdio, transport
@@ -77,7 +79,7 @@ async def test_crash_before_initialize_names_the_real_cause():
     reason = status["reason"]
     assert "сервер завершился при старте" in reason, reason
     assert _CRASH_LINE in reason, reason
-    log_path = transport._stderr_log_path(_cfg(_CRASH_SCRIPT), "ddg")
+    log_path = Path(re.search(r"\(лог: (.+)\)$", reason)[1])
     assert str(log_path) in reason, reason
     assert _CRASH_LINE in log_path.read_text(encoding="utf-8")
 
@@ -92,9 +94,9 @@ async def test_persistent_crash_before_initialize_names_the_real_cause(
     assert status["status"] == "failed"
     assert "сервер завершился при старте" in status["reason"], status
     assert _CRASH_LINE in status["reason"], status
-    assert (
-        str(transport._stderr_log_path(cfg, "ddg_persist")) in status["reason"]
-    ), status
+    log_path = Path(re.search(r"\(лог: (.+)\)$", status["reason"])[1])
+    assert log_path.name.startswith("ddg_persist.")
+    assert _CRASH_LINE in log_path.read_text(encoding="utf-8")
 
 
 async def test_silent_crash_keeps_the_old_reason():
@@ -123,10 +125,9 @@ async def test_chatty_stderr_does_not_block_a_persistent_server(
 
     assert status["status"] == "connected", status
     assert [t["name"] for t in tools] == ["ping"]
-    log_text = transport._stderr_log_path(cfg, "chatty").read_text(
-        encoding="utf-8"
-    )
-    assert len(log_text) > 1024 * 1024
+    directory = transport._stderr_log_path(cfg, "chatty").parent
+    [path] = list(directory.glob("chatty.*.stderr.log"))
+    assert 0 < path.stat().st_size <= 1024 * 1024
 
 
 _SECRET = "sk-abc123def456ghi789jkl012"

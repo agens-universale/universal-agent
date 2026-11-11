@@ -175,3 +175,47 @@ def test_message_handed_to_parent_is_not_in_child_trace(tmp_path):
     ] == ["ребёнку"], "реплика, ушедшая родителю, записана за субагентом"
     next_step = asyncio.run(ex._atake_pending_messages())
     assert [m["content"] for m in next_step] == ["в окно"]
+
+
+def test_trace_failure_does_not_drop_drained_messages(caplog):
+    ctx = _ctx()
+    executor = AgentExecutor(ctx)
+    drained = []
+
+    async def persist(*args):
+        raise OSError("disk unavailable")
+
+    async def fake_run(messages, state, child, **kwargs):
+        executor.add_message(_msg("first"))
+        executor.add_message(_msg("second"))
+        drained.extend(await kwargs["get_pending_messages"]())
+        return "done"
+
+    with patch("gc_core.tools.subagents.runner._apersist_child_user", persist):
+        asyncio.run(_arun_child(ctx, fake_run))
+    assert [message["content"] for message in drained] == ["first", "second"]
+    assert caplog.text.count("subagent_trace_write_failed") == 2
+
+
+def test_unconsumed_messages_are_not_shown_in_child_feed(monkeypatch):
+    ctx = _ctx()
+    executor = AgentExecutor(ctx)
+    shown = []
+
+    def emit(ctx, state, kind, **details):
+        if kind == "user_message":
+            shown.append(details["prose"])
+
+    monkeypatch.setattr("gc_core.tools.subagents.runner.emit_progress", emit)
+
+    async def fake_run(messages, state, child, **kwargs):
+        executor.add_message(_msg("consumed"))
+        await kwargs["get_pending_messages"]()
+        executor.add_message(_msg("parent"))
+        return "done"
+
+    asyncio.run(_arun_child(ctx, fake_run))
+    assert shown == ["consumed"]
+    assert [
+        m["content"] for m in asyncio.run(executor._atake_pending_messages())
+    ] == ["parent"]

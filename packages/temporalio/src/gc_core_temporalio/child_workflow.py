@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import asdict
 
 # Сторонние транспорты — из процесса воркера, до первого импорта ядра.
@@ -11,7 +11,7 @@ from gc_core_temporalio import sandbox_passthrough  # noqa: F401
 # isort: split
 from gc_core.execution.environment import execution_environment
 from gc_core.execution.human import HumanRequestInterrupted
-from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.model_router import ModelRouter
 from gc_core.processing_responses import arun_agent
 from gc_core.security.permission_store import PermissionStore
 from gc_core.states import State
@@ -148,16 +148,11 @@ class UniversalSubagentWorkflow:
         with activate_child_input(
             ctx, parent_call_id=parent_call_id, thread_safe=False
         ) as scope:
-            original = scope.set_on_enqueue
-
-            def set_callback(callback):
-                original(callback)
-                if callback is not None:
-                    pending, self.pending_messages = self.pending_messages, []
-                    for message in pending:
-                        scope.enqueue(message)
-
-            scope.set_on_enqueue = set_callback
+            # Ранние сигналы передаём при открытии очереди. Доставка не
+            # зависит от callback ленты: она показывает сообщение при заборе.
+            pending, self.pending_messages = self.pending_messages, []
+            for message in pending:
+                scope.enqueue(message)
             try:
                 yield scope
             finally:
@@ -223,7 +218,7 @@ class UniversalSubagentWorkflow:
                 root_words = request.child_context.get("root_user_words")
                 if root_words is not None:
                     parent_ctx.root_user_messages = lambda: list(root_words)
-                parent_ctx.model_router = ModelRouter(
+                parent_ctx.model_router = ModelRouter.sequential(
                     parent_ctx,
                     choice_provider=lambda: request.child_context[
                         "frozen_level"
@@ -233,10 +228,7 @@ class UniversalSubagentWorkflow:
                         request.child_context["frozen_level"],
                     ),
                     force_legacy=request.child_context["force_legacy"],
-                    breaker=CircuitBreaker.restore(
-                        request.parent_transfer.circuit_breaker,
-                        lock_factory=nullcontext,
-                    ),
+                    breaker_snapshot=request.parent_transfer.circuit_breaker,
                 )
                 parent_state = State.from_execution_snapshot(
                     request.parent_state

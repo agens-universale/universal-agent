@@ -91,17 +91,21 @@ def _hook_types(config: Path) -> list[str]:
     return list(types) if isinstance(types, list) and types else ["pre-commit"]
 
 
-def _wanted(root: Path) -> bool:
-    """Нужна ли установка: все отказы из шапки модуля."""
+def _wanted(root: Path) -> list[str]:
+    """Только недостающие типы; существующие хуки не переустанавливаем."""
     if os.environ.get("CI") or os.environ.get(SKIP_ENV) == "1":
-        return False
+        return []
     config = root / _CONFIG
     if not config.is_file() or importlib.util.find_spec("pre_commit") is None:
-        return False
+        return []
     hooks = _hooks_dir(root)
     if hooks is None:
-        return False
-    return not all((hooks / t).is_file() for t in _hook_types(config))
+        return []
+    return [
+        t
+        for t in _hook_types(config)
+        if not (hooks / t).exists() and not (hooks / t).is_symlink()
+    ]
 
 
 def ensure_hooks_installed(root: Path) -> None:
@@ -112,14 +116,20 @@ def ensure_hooks_installed(root: Path) -> None:
     try:
         wanted = _wanted(root)
     except ImportError:
-        wanted = False
+        wanted = []
     # Вложенные прогоны pytest (временные репозитории тестов) — не наше дело.
     os.environ[SKIP_ENV] = "1"
     if not wanted:
         return
     try:
         res = subprocess.run(
-            [sys.executable, "-m", "pre_commit", "install"],
+            [
+                sys.executable,
+                "-m",
+                "pre_commit",
+                "install",
+                *[arg for hook in wanted for arg in ("--hook-type", hook)],
+            ],
             cwd=root,
             capture_output=True,
             text=True,

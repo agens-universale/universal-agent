@@ -145,12 +145,21 @@ class ResponseIndex:
                     return _record(entry.data, response_id)
         return self._legacy(response_id)
 
-    async def thread_records(self, thread_id: str) -> list[ResponseRecord]:
+    async def thread_records(
+        self,
+        thread_id: str,
+        *,
+        legacy_records: list[ResponseRecord] | None = None,
+    ) -> list[ResponseRecord]:
         """Все ответы диалога: develop и v2 (у одного id побеждает v2)."""
         key = thread_key(thread_id)
         found = {
             record.response_id: record
-            for record in self._legacy_all()
+            for record in (
+                self._legacy_all()
+                if legacy_records is None
+                else legacy_records
+            )
             if record.thread_id == key.thread
         }
         for entry in await self.threads.read_frontend(key, _STREAM):

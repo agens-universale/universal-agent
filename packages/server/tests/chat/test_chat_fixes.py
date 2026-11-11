@@ -28,6 +28,15 @@ from pydantic import ValidationError
 
 @pytest.mark.parametrize("cls", [ResponsesFacade, CompletionsFacade])
 async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
+    discoveries = []
+
+    async def discover(name, config, **kwargs):
+        discoveries.append(name)
+        return [], {"status": "connected"}
+
+    monkeypatch.setattr(
+        "gc_core.tools.connect_mcp.registry._adiscover_one", discover
+    )
     process = tmp_path / "process"
     root = tmp_path / "root"
     process.mkdir()
@@ -39,6 +48,7 @@ async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
             "logging.save_logs": False,
             "logging.console_trace": False,
             "paths.threads_data_path": str(tmp_path / "threads"),
+            "mcp.servers.review": {"transport": "stdio", "command": "unused"},
         }
     )
     shared = LocalFsBackend()
@@ -84,6 +94,7 @@ async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
     assert a is not b
     assert os.getcwd() == str(process)
     assert not (process / "written.txt").exists()
+    assert discoveries == ["review"]
 
 
 def test_cwd_root_is_fixed_at_server_creation_and_symlink_cannot_escape(
@@ -207,7 +218,7 @@ def upstream_error(status):
     ],
 )
 def test_provider_failures_have_safe_public_contract(
-    tmp_path, api, factory_error, status, http_status, code
+    tmp_path, api, factory_error, status, http_status, code, caplog
 ):
     body = {
         "model": "GC-UA",
@@ -223,6 +234,11 @@ def test_provider_failures_have_safe_public_contract(
         assert response.json()["error"]["code"] == code
         assert "secret-key" not in response.text
         assert "private.invalid" not in response.text
+        if factory_error:
+            assert any(
+                "open turn failed" in record.message and record.exc_info
+                for record in caplog.records
+            )
         if api == "responses" and not factory_error:
             saved = client.get("/v1/responses/" + response.json()["id"])
             assert saved.json()["error"] == response.json()["error"]
@@ -280,3 +296,105 @@ def test_classified_and_transport_errors(tmp_path, error, expected):
             response.json()["error"]["code"],
         ) == expected
         assert "secret" not in response.text
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("context_length_exceeded", "upstream_error"),
+        ("401", "upstream_authentication_error"),
+        ("503", "upstream_unavailable"),
+        (None, "upstream_error"),
+        ({"code": 500}, "upstream_error"),
+        (["500"], "upstream_error"),
+    ],
+)
+def test_stream_error_code_is_not_assumed_to_be_http_status(status, expected):
+    from gc_core.utils.chat_completions_stream import BackendStreamError
+    from gc_server.chat.model_errors import model_api_error
+
+    error = model_api_error(BackendStreamError("private", status_code=status))
+    assert error.code == expected
+    assert "private" not in error.message
+
+
+@pytest.mark.parametrize("api", ["responses", "chat/completions"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_named_stream_error_finishes_request(tmp_path, api, stream):
+    from gc_core.utils.chat_completions_stream import BackendStreamError
+
+    app = app_for(
+        tmp_path,
+        BackendStreamError("private", status_code="context_length_exceeded"),
+    )
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        body = {
+            "model": "GC-UA",
+            "input": "hi",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": stream,
+        }
+        response = client.post("/v1/" + api, json=body)
+        assert "upstream_error" in response.text
+        if api == "responses":
+            for run in list(app.state.responses_facade._live.values()):
+                client.portal.call(asyncio.wait_for, run.done.wait(), 2)
+            assert not app.state.responses_facade._busy
+            assert not app.state.responses_facade._admissions
+
+
+@pytest.mark.parametrize(
+    ("name", "status", "code"),
+    [
+        ("ContextWindowExceeded", 400, "context_length_exceeded"),
+        ("PayloadTooLarge", 413, "request_too_large"),
+    ],
+)
+def test_known_execution_error_has_safe_actionable_message(name, status, code):
+    from gc_core.execution import contracts
+    from gc_server.chat.model_errors import model_api_error
+
+    error = model_api_error(
+        getattr(contracts, name)("private backend url and credentials")
+    )
+    assert (error.status, error.code) == (status, code)
+    assert "private" not in error.message
+    assert error.message != "Internal server error."
+
+
+def test_public_api_error_keeps_its_code():
+    from gc_server.chat.model_errors import model_api_error
+
+    error = ApiError(400, "invalid_request", "cwd is outside launch_root")
+    assert model_api_error(error) is error
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_response_storage_failures_are_logged_and_return_json(
+    tmp_path, monkeypatch, caplog, method
+):
+    from gc_server.chat.responses.http_api import create_app as responses_app
+
+    facade = ResponsesFacade(
+        settings=make_settings(),
+        agent_factory=None,
+        index=ResponseIndex.for_threads_dir(str(tmp_path / "threads")),
+    )
+
+    async def broken(*args):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(facade._index, "load", broken)
+    with TestClient(
+        responses_app(facade), base_url="http://127.0.0.1"
+    ) as client:
+        path = "/v1/responses/resp_test" + (
+            "/cancel" if method == "post" else ""
+        )
+        response = getattr(client, method)(
+            path, headers={"Content-Type": "application/json"}
+        )
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "server_error"
+    assert "private storage detail" not in response.text
+    assert any(record.exc_info for record in caplog.records)

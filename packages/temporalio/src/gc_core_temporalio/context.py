@@ -18,7 +18,7 @@ from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_guard import (
     final_report_consistency as _final_report_consistency,  # noqa: F401
 )
-from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.model_router import ModelRouter
 from gc_core.run_context import assemble_run_context
 
 # Load these deterministic core modules during sandbox initialization, rather
@@ -136,9 +136,8 @@ def assemble_context(
             **deepcopy(metadata),
             "tool_fabric": candidates[name]["tool_fabric"],
         }
-    router = ModelRouter(
+    router = ModelRouter.sequential(
         loaded,
-        breaker=CircuitBreaker(lock_factory=nullcontext),
         choice_provider=lambda: effective_choice(
             configured_choice(loaded.settings), loaded.settings
         ),

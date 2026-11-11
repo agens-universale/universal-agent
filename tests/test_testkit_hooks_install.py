@@ -295,3 +295,20 @@ def test_copy_nested_in_another_repo_is_not_a_clone(tmp_path):
     assert res.returncode == 0, _output(res)
     assert _installed(outer) == []
     assert "pre-commit" not in res.stderr
+
+
+@pytest.mark.parametrize("existing", ["pre-commit", "pre-push"])
+def test_install_only_missing_hook_preserves_existing_bytes(
+    tmp_path, existing
+):
+    root = _working_copy(tmp_path)
+    hook = _hooks_dir(root) / existing
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    original = b"#!/bin/sh\n# hand-customized existing hook\nexit 0\n"
+    hook.write_bytes(original)
+    hook.chmod(0o755)
+    result = _run(root)
+    assert result.returncode == 0, _output(result)
+    assert _installed(root) == list(_HOOK_TYPES)
+    assert hook.read_bytes() == original
+    assert not hook.with_name(existing + ".legacy").exists()

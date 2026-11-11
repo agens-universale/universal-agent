@@ -11,7 +11,9 @@
 Каталог состояния — изолированный ``GC_HOME`` набора (плагин gc_testkit).
 """
 
+import re
 import sys
+from pathlib import Path
 
 import pytest
 from gc_core.tools.connect_mcp import persistent_stdio, transport
@@ -68,10 +70,8 @@ async def test_same_command_different_servers_get_their_own_logs(
         reasons[who] = status["reason"]
 
     for who, other in (("alpha", "beta"), ("beta", "alpha")):
-        log_path = transport._stderr_log_path(
-            _cfg(transport_name, who), f"{who}_{transport_name}"
-        )
-        assert log_path.name == f"{who}_{transport_name}.stderr.log"
+        log_path = Path(re.search(r"\(лог: (.+)\)$", reasons[who])[1])
+        assert log_path.name.startswith(f"{who}_{transport_name}.")
         text = log_path.read_text(encoding="utf-8")
         assert f"who={who}" in text
         assert f"who={other}" not in text
@@ -87,7 +87,7 @@ async def test_stream_stdio_crash_before_initialize_names_the_real_cause():
     reason = status["reason"]
     assert "сервер завершился при старте" in reason, reason
     assert _CRASH_LINE in reason, reason
-    assert "pw.stderr.log" in reason, reason
+    assert "/pw." in reason and ".stderr.log" in reason, reason
 
 
 async def test_stream_stdio_silent_crash_keeps_the_old_reason():
@@ -112,7 +112,9 @@ def test_server_name_is_sanitized_for_the_filesystem():
 
 def test_without_a_name_the_log_is_named_by_the_command():
     path = transport._stderr_log_path({"command": "/usr/bin/ddgs-mcp"})
-    assert path.name == "ddgs-mcp.stderr.log"
+    assert path.name.startswith("ddgs-mcp.") and path.name.endswith(
+        ".stderr.log"
+    )
 
 
 async def test_stream_stdio_persistent_crash_names_the_real_cause():
@@ -136,4 +138,54 @@ async def test_stream_stdio_persistent_crash_names_the_real_cause():
         )
 
     assert _CRASH_LINE in str(info.value)
-    assert info.value.log_path.name == "persist_pw.stderr.log"
+    assert info.value.log_path.name.startswith("persist_pw.")
+
+
+def test_parallel_same_name_logs_are_independent_and_bounded():
+    import subprocess
+
+    from gc_core.tools.connect_mcp.stderr_capture import MAX_BYTES, finish
+
+    config = {"command": sys.executable}
+    with transport._stderr_log(config, "same") as (first, first_path):
+        with transport._stderr_log(config, "same") as (second, second_path):
+            assert first_path != second_path
+            script = "import sys; sys.stderr.buffer.write(b'x' * 2200000 + sys.argv[1].encode())"
+            processes = [
+                subprocess.Popen(
+                    [sys.executable, "-c", script, marker], stderr=handle
+                )
+                for handle, marker in [
+                    (first, "FIRST-END"),
+                    (second, "SECOND-END"),
+                ]
+            ]
+            for process in processes:
+                assert process.wait(timeout=10) == 0
+    for path, marker in [
+        (first_path, b"FIRST-END"),
+        (second_path, b"SECOND-END"),
+    ]:
+        finish(path)
+        assert 0 < path.stat().st_size <= MAX_BYTES
+        assert path.read_bytes().endswith(marker)
+
+
+def test_closed_log_retention_does_not_remove_a_live_writer(monkeypatch):
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    monkeypatch.setattr(stderr_capture, "KEEP_CLOSED", 2)
+    config = {"command": sys.executable}
+    paths = []
+    with transport._stderr_log(config, "alive") as (live, live_path):
+        for i in range(4):
+            with transport._stderr_log(config, "closed") as (handle, path):
+                handle.write(str(i).encode())
+                paths.append(path)
+            stderr_capture.finish(path)
+        assert live_path.exists()
+        assert paths[-1].exists() and paths[-2].exists()
+        assert not paths[0].exists()
+        live.write(b"still alive")
+    stderr_capture.finish(live_path)
+    assert live_path.read_bytes() == b"still alive"

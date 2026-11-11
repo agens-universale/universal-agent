@@ -41,18 +41,11 @@ class ChildInputScope:
         self, *, parent_call_id: str, thread_safe: bool = True
     ) -> None:
         self.parent_call_id = parent_call_id or ""
-        self.thread_safe = thread_safe
         self._q_lock = threading.Lock() if thread_safe else nullcontext()
         self._pending: List[Dict[str, Any]] = []
-        self._on_enqueue: Optional[Callable[[Dict[str, Any]], None]] = None
         # Очередь родителя после закрытия скоупа (см. `close`): None — скоуп
         # ещё принимает реплики сам.
         self._closed_sink: Optional[Callable[[Dict[str, Any]], None]] = None
-
-    def set_on_enqueue(
-        self, callback: Optional[Callable[[Dict[str, Any]], None]]
-    ) -> None:
-        self._on_enqueue = callback
 
     def enqueue(self, message: Dict[str, Any]) -> None:
         # Лок нужен здесь и только здесь: очередь наполняет ЧУЖОЙ поток (TUI,
@@ -66,13 +59,6 @@ class ChildInputScope:
                 sink(message)
                 return
             self._pending.append(message)
-        cb = self._on_enqueue
-        if cb is not None:
-            try:
-                cb(message)
-            except Exception:
-                if not self.thread_safe:
-                    raise
 
     def drain(self) -> List[Dict[str, Any]]:
         with self._q_lock:

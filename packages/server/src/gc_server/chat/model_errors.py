@@ -2,8 +2,10 @@
 
 import httpx
 from gc_core.execution.contracts import (
+    ContextWindowExceeded,
     MainModelUnavailable,
     ModelProviderError,
+    PayloadTooLarge,
 )
 from gc_core.utils.backend_errors import (
     BackendBadResponseError,
@@ -34,6 +36,18 @@ _ERRORS = {
     ),
     "upstream_error": (502, "Model service could not complete the request."),
     "server_error": (500, "Internal server error."),
+    "response_persistence_failed": (
+        503,
+        "Response could not be saved. Do not repeat the request; check its status later.",
+    ),
+    "context_length_exceeded": (
+        400,
+        "Conversation exceeds the model context window. Start a shorter conversation.",
+    ),
+    "request_too_large": (
+        413,
+        "Request is too large for the execution backend. Reduce its size.",
+    ),
 }
 _STATUSES = {
     401: "upstream_authentication_error",
@@ -42,10 +56,15 @@ _STATUSES = {
 }
 
 
-def _status_code(status: int | None) -> str:
+def _status_code(status: object) -> str:
+    # SSE error.code бывает именем ошибки, а не HTTP-статусом.
+    try:
+        status = int(status)
+    except (TypeError, ValueError, OverflowError):
+        return "upstream_error"
     if status in _STATUSES:
         return _STATUSES[status]
-    if status is not None and status >= 500:
+    if status >= 500:
         return "upstream_unavailable"
     return "upstream_error"
 
@@ -65,6 +84,10 @@ def _provider_code(exc: ModelProviderError) -> str:
 
 
 def _code(exc: BaseException) -> str:
+    if isinstance(exc, ContextWindowExceeded):
+        return "context_length_exceeded"
+    if isinstance(exc, PayloadTooLarge):
+        return "request_too_large"
     if isinstance(exc, ModelProviderError):
         return _provider_code(exc)
     if isinstance(exc, httpx.TimeoutException):
@@ -84,6 +107,8 @@ def _code(exc: BaseException) -> str:
 
 
 def model_api_error(exc: BaseException) -> ApiError:
+    if isinstance(exc, ApiError):
+        return exc
     code = _code(exc)
     status, message = _ERRORS[code]
     return ApiError(status, code, message)

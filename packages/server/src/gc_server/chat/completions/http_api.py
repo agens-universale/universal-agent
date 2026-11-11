@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -28,6 +29,7 @@ from gc_server.chat.model_errors import error_http_status, model_api_error
 from gc_server.chat.model_route import completions_route, models_body
 
 _POLL_S = 0.05
+logger = logging.getLogger(__name__)
 
 
 def create_app(facade: CompletionsFacade) -> FastAPI:
@@ -94,6 +96,7 @@ async def _open_turn(
     except ApiError as exc:
         return json_response(error_payload(exc), exc.status)
     except Exception as exc:
+        logger.exception("completions open turn failed")
         err = model_api_error(exc)
         return json_response(error_payload(err), err.status)
 
