@@ -57,6 +57,15 @@ from collections.abc import Iterator
 from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallTimedOut,
+    McpServerGone,
+)
+from gc_core.tools.connect_mcp.durable_scope import (
+    McpSessionLostError,
+    durable_calls_enabled,
+    require_no_reconnect,
+)
 from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
@@ -65,6 +74,7 @@ from gc_core.tools.connect_mcp.transport import (
     _readline_with_timeout,
     _resolve_command,
     forget_stdio_reader,
+    stdio_stream_ended,
 )
 from gc_core.user_stop import UserStopInterrupt, current_user_stop
 from gc_core.utils.aio_compat import run_coro_blocking
@@ -334,10 +344,6 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
-            from gc_core.tools.connect_mcp.durable_scope import (
-                require_no_reconnect,
-            )
-
             require_no_reconnect()
             dead = self._proc
             self._proc = None
@@ -379,6 +385,9 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_started(timeout)
+            # Свой процесс вызова: закрытие посреди чтения снимает
+            # ``self._proc``, а решать об исходе надо по этому процессу.
+            proc = self._proc
             if _user_stop_requested():
                 raise UserStopInterrupt(kind="mcp", started=True)
             req_id = self._next_id
@@ -392,7 +401,10 @@ class PersistentStdioSession:
             self._write_line(payload)
             self._set_inflight(req_id)
             try:
-                return self._read_matching(req_id, timeout)
+                response = self._read_matching(req_id, timeout)
+                if not response:  # ответ JSON-RPC пустым не бывает
+                    raise self._unanswered(proc, timeout)
+                return response
             except UserStopInterrupt:
                 # Запрос уже ушёл. Снимаем его по спеке и не отдаём поздний
                 # результат ни этому чтению, ни следующему ходу.
@@ -400,6 +412,25 @@ class PersistentStdioSession:
                 raise
             finally:
                 self._clear_inflight(req_id)
+
+    def _unanswered(
+        self, proc: "subprocess.Popen", timeout: float
+    ) -> Exception:
+        """Ошибка запроса, ответ на который не пришёл.
+
+        Сессию закрыли или читатель увидел конец вывода — сервер умер.
+        Иначе истёк срок: запрос снимается, поздний ответ его id не
+        примется, сессия остаётся. Durable-хост вместо обеих получает
+        «исход неизвестен» и решает о восстановлении сам.
+        """
+        if self._proc is not proc or stdio_stream_ended(proc.stdout):
+            error: Exception = McpServerGone()
+        else:
+            self.cancel_inflight()
+            error = McpCallTimedOut(timeout)
+        if durable_calls_enabled():
+            return McpSessionLostError(str(error))
+        return error
 
     def _detach_nowait(self) -> "tuple[Optional[subprocess.Popen], bool]":
         """Снять процесс, НЕ вставая в очередь за локом.

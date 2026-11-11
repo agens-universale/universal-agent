@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import mcp_media_dir
+from gc_core.tools.connect_mcp.call_errors import McpCallOutcomeUnknown
+from gc_core.tools.connect_mcp.durable_scope import (
+    McpSessionLostError,
+    durable_calls_enabled,
+)
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.transport_policy import (
@@ -391,6 +396,11 @@ def _prepare_mcp_call(
     )
 
 
+#: Не повторяются: вызов мог исполниться на сервере, повтор дублировал бы
+#: эффект. Ошибка тула — ответ сервера; остальные — ответа не было.
+_NOT_REPEATED = (McpToolCallError, McpCallOutcomeUnknown, McpSessionLostError)
+
+
 async def acall_mcp_tool(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
@@ -447,7 +457,7 @@ async def acall_mcp_tool(
 
     @retry_with_backoff_async(
         interrupt_on_user_stop=True,
-        should_retry=lambda exc: not isinstance(exc, McpToolCallError),
+        should_retry=lambda exc: not isinstance(exc, _NOT_REPEATED),
         operation_name=(
             f"MCP tool call ({target.server_key}:{target.base_tool_name})"
         ),
@@ -467,8 +477,6 @@ async def acall_mcp_tool(
         return await target.client.acall_tool(
             target.base_tool_name, target.arguments_obj, timeout=timeout
         )
-
-    from gc_core.tools.connect_mcp.durable_scope import durable_calls_enabled
 
     data = await _ado_mcp_call(
         use_retry=target.use_retry and not durable_calls_enabled(),

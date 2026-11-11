@@ -21,6 +21,7 @@ import pytest
 from gc_core.config_modules import env_vars
 from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp.call_errors import McpCallTimedOut
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
 from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
 from gc_testkit.mcp import (
@@ -539,16 +540,15 @@ async def test_call_tool_leaves_the_tool_timeout_to_the_product(
 ):
     """Срок тула меньше потолка: по сроку отвечает продукт, не потолок.
 
-    Сегодня продукт по сроку отдаёт пустой ответ, и помощник бросает
-    ``RuntimeError``. Внешний ``wait_for`` (5 с) короче умолчательного
-    потолка (1 + 10 с): сработай потолок вместо срока тула, тест упал бы
-    на ``TimeoutError``.
+    Продукт по сроку бросает ``McpCallTimedOut`` со сроком тула в тексте.
+    Внешний ``wait_for`` (5 с) короче умолчательного потолка (1 + 10 с):
+    сработай потолок вместо срока тула, тест упал бы на ``TimeoutError``.
     """
     control = tmp_path / "s.json"
     set_behavior(control)
     cfg = {**stdio_cfg(control), "persistent_session": True}
 
-    with pytest.raises(RuntimeError, match="вызов тула не удался"):
+    with pytest.raises(McpCallTimedOut, match="не ответил за 1 с"):
         await asyncio.wait_for(
             call_tool("srv", cfg, "nap", {"seconds": 30}, timeout=1),
             _TIMEOUT,

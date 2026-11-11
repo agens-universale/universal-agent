@@ -12,6 +12,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import httpx
 
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallTimedOut,
+    McpServerGone,
+)
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 
 _SSE_DATA_PREFIX = "data:"
@@ -320,10 +324,11 @@ class _LineReader:
     кроссплатформенно — ``selectors`` не работает с pipe на Windows.
     """
 
-    __slots__ = ("_queue", "_stream", "_thread")
+    __slots__ = ("_ended", "_queue", "_stream", "_thread")
 
     def __init__(self, stream: "Any") -> None:
         self._stream = stream
+        self._ended = False
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._thread = threading.Thread(
             target=self._pump, daemon=True, name="mcp-stdio-reader"
@@ -346,7 +351,13 @@ class _LineReader:
         finally:
             # None — маркер «поток кончился»: без него читатель ждал бы таймаут
             # на каждой строке после смерти процесса.
+            self._ended = True
             self._queue.put(None)
+
+    @property
+    def ended(self) -> bool:
+        """Поток вывода кончился: процесс закрыл stdout или умер."""
+        return self._ended
 
     def readline(self, timeout: float) -> "str | None":
         import time as _time
@@ -427,6 +438,17 @@ async def _areadline_with_timeout(
     """То же, не занимая поток на ожидании."""
     reader = _reader_for(stream)
     return None if reader is None else await reader.areadline(timeout)
+
+
+def stdio_stream_ended(stream: "Any") -> bool:
+    """Читатель этого потока видел его конец.
+
+    Пустое чтение отсюда отличает смерть сервера от истёкшего срока: конец
+    потока приходит раньше, чем процесс становится зомби, и мгновенный
+    ``poll()`` в этот момент ещё видит процесс живым.
+    """
+    reader = _READERS.get(id(stream))
+    return reader is not None and reader.ended
 
 
 def forget_stdio_reader(stream: "Any") -> None:
@@ -525,18 +547,21 @@ async def _aread_response(
     Пропускаем: уведомления (нет ``id``), встречные запросы сервера (есть
     ``method``) и ответы с чужим ``id``. Таймаут — общий на ожидание, а не на
     строку: болтливый сервер иначе растягивал бы его без предела.
+
+    Ответа нет — ошибка, а не ``{}``: пустой ответ модель приняла бы за
+    успех. Конец вывода — ``McpServerGone``, срок — ``McpCallTimedOut``.
     """
     deadline = time.monotonic() + timeout
     while True:
         left = deadline - time.monotonic()
         if left <= 0:
-            return {}
+            raise McpCallTimedOut(timeout)
         try:
             raw = await asyncio.wait_for(proc.stdout.readline(), left)
         except TimeoutError:
-            return {}
+            raise McpCallTimedOut(timeout) from None
         if not raw:
-            return {}  # EOF: процесс закрыл вывод
+            raise McpServerGone()  # EOF: процесс закрыл вывод
         line_in = raw.decode("utf-8", "replace").strip()
         message = (
             _parse_rpc_response_line(line_in, want_id) if line_in else None
