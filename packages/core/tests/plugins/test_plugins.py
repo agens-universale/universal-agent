@@ -469,6 +469,33 @@ def test_update_keeps_plugin_with_unsafe_name(tmp_path):
     assert installed.update("my_plugin").name == "my_plugin"
 
 
+def test_summary_shows_matcher_only_where_it_applies(tmp_path):
+    """У ``UserPromptSubmit`` условие не применяется — сводка его не
+    показывает, чтобы оно не читалось как фильтр; у ``SessionStart``
+    показывает."""
+    from gc_core.plugins import installed
+
+    def group(matcher):
+        return [
+            {
+                "matcher": matcher,
+                "hooks": [{"type": "command", "command": "c"}],
+            }
+        ]
+
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "UserPromptSubmit": group("review"),
+            "SessionStart": group("startup"),
+        },
+    )
+    with installed.prepare(str(root)) as prepared:
+        lines = prepared.summary()
+    assert "UserPromptSubmit: c" in lines
+    assert "SessionStart [startup]: c" in lines
+
+
 def test_install_rejects_non_plugin_dir(tmp_path):
     from gc_core.plugins import installed
 

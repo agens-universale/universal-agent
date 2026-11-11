@@ -22,7 +22,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from gc_core.plugins.manifest import Plugin, ap_manifest_errors, load_plugin
+from gc_core.plugins.manifest import (
+    Plugin,
+    ap_manifest_errors,
+    load_plugin,
+    shown_matcher,
+)
 from gc_core.plugins.sources import _clone, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -172,7 +177,7 @@ class PreparedInstall:
         """
         plugin = self.plugin
         lines = [
-            f"{event} [{m.matcher or '*'}]: {h.command}"
+            f"{_hook_head(event, m.matcher)}: {h.command}"
             for event, matchers in plugin.hooks.items()
             for m in matchers
             for h in m.hooks
@@ -281,6 +286,11 @@ def _role_lines(plugin: Plugin, settings: Any) -> list[str]:
         ]
         lines.extend(granted or [f"субагент {agent.name}: только чтение"])
     return lines
+
+
+def _hook_head(event: str, matcher: str) -> str:
+    shown = shown_matcher(event, matcher)
+    return event if shown is None else f"{event} [{shown}]"
 
 
 def _replace_dir(src: Path, dest: Path) -> None:

@@ -433,3 +433,28 @@ async def test_plugins_screen_off_notice_hides_empty_install_hint(
         shown = " ".join(str(w.render()) for w in scr.query(Static))
         assert f"⚠ {note}" in shown
         assert "Плагинов нет" not in shown
+
+
+def test_plugin_card_hides_matcher_where_it_does_not_apply(monkeypatch):
+    """Карточка показывает условие хука только у событий, где оно работает:
+    ``UserPromptSubmit [review]`` читался бы как фильтр."""
+    from gc_core.plugins.manifest import Plugin
+    from gc_tui.services import plugin_cards as mod
+
+    _no_entries(monkeypatch, mod)
+    monkeypatch.setattr(mod, "list_installed", list)
+    cmd = (HookCommand("echo"),)
+    plugin = Plugin(
+        "p",
+        "1",
+        Path("/nowhere/p"),
+        (),
+        hooks={
+            "UserPromptSubmit": (HookMatcher("review", cmd),),
+            "SessionStart": (HookMatcher("startup", cmd),),
+        },
+    )
+
+    (card,) = mod.plugin_cards(_snapshot_settings((plugin,)))
+
+    assert card["hooks"] == ["UserPromptSubmit", "SessionStart startup"]

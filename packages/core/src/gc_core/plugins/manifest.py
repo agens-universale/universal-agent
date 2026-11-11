@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 EVENT_SESSION_START = "SessionStart"
 EVENT_USER_PROMPT_SUBMIT = "UserPromptSubmit"
 SUPPORTED_EVENTS = frozenset({EVENT_SESSION_START, EVENT_USER_PROMPT_SUBMIT})
+#: События без значения для сверки: ``matcher`` у них не применяется
+#: (`HookMatcher.matches`), как и в Claude Code.
+EVENTS_WITHOUT_MATCHER = frozenset({EVENT_USER_PROMPT_SUBMIT})
 # Хуки на инструменты и Stop переедут на middleware (спека §7.3); до тех пор
 # они пропускаются с диагностикой в ``Plugin.hook_problems``.
 DEFERRED_EVENTS = frozenset(
@@ -72,6 +75,12 @@ _HOOKS_FILE = "hooks/hooks.json"
 class HookCommand:
     command: str
     timeout_sec: int | None = None
+
+
+def shown_matcher(event: str, matcher: str) -> str | None:
+    """Условие группы хуков для сводки и карточки; ``None`` — у события
+    оно не применяется и читалось бы как фильтр."""
+    return None if event in EVENTS_WITHOUT_MATCHER else (matcher or "*")
 
 
 @dataclass(frozen=True)
