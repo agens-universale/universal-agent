@@ -24,7 +24,8 @@ import asyncio
 import contextvars
 import logging
 import threading
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from gc_core.mcp_session_owner import copy_context_for_thread
 
@@ -33,6 +34,11 @@ from gc_core.mcp_session_owner import copy_context_for_thread
 _MAX_WORKERS = 8
 
 _slots = threading.BoundedSemaphore(_MAX_WORKERS)
+
+#: Свой набор слотов на время вызова; ``None`` — общий пул процесса.
+_call_slots: contextvars.ContextVar[threading.BoundedSemaphore | None] = (
+    contextvars.ContextVar("gc_call_slots", default=None)
+)
 
 
 logger = logging.getLogger(__name__)
@@ -145,16 +151,38 @@ async def run_abandonable_in(
     return await future
 
 
+@contextmanager
+def use_call_slots(slots: threading.BoundedSemaphore) -> Iterator[None]:
+    """На время блока :func:`run_abandonable` берёт слоты из ``slots``.
+
+    Так зависшие вызовы одного потребителя не занимают слоты другого.
+    """
+    token = _call_slots.set(slots)
+    try:
+        yield
+    finally:
+        _call_slots.reset(token)
+
+
 async def run_abandonable(
     fn: Callable[..., Any], /, *args: Any, **kwargs: Any
 ) -> Any:
-    """Выполнить ``fn`` в потоке-демоне на пуле MCP и дождаться результата.
+    """Выполнить ``fn`` в потоке-демоне и дождаться результата.
+
+    Слоты — из :func:`use_call_slots`, если заданы, иначе общий пул MCP.
 
     Если вызывающего отменили (истёк ``asyncio.timeout``), поток продолжит
     работу в фоне: результат к тому моменту уже никому не нужен, а прервать
     блокирующий сокет всё равно нечем.
     """
-    return await run_abandonable_in(_slots, fn, *args, **kwargs)
+    # Набор читается здесь, в контексте вызывающего, до ухода в поток.
+    slots = _call_slots.get() or _slots
+    return await run_abandonable_in(slots, fn, *args, **kwargs)
 
 
-__all__ = ["current_call_abandoned", "run_abandonable", "run_abandonable_in"]
+__all__ = [
+    "current_call_abandoned",
+    "run_abandonable",
+    "run_abandonable_in",
+    "use_call_slots",
+]
