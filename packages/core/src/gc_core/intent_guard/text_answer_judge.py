@@ -72,7 +72,7 @@ async def ashould_return_text_answer(
     ``deny`` / нет ключа → reject generic."""
     if not (assistant_text or "").strip():
         return TextAnswerDecision(False)
-    # Режим — сигнал поверхности (только TUI), а не настройка: рантайм.
+    # The launch surface passes the configured mode through runtime settings.
     mode = runtime_of(ctx).text_answer_mode
     if mode == "allow":
         return TextAnswerDecision(True)

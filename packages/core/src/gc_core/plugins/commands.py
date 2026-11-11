@@ -15,18 +15,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gc_core.message_policy.tool_usage_notice.policy import (
-    wrap_thread_memory_technical_user_message,
-)
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    wrap_request_context_message,
 )
 from gc_core.plugins.manifest import PluginCommand
 from gc_core.plugins.snapshot import PluginSnapshot
 from gc_core.settings import runtime_of
 
 _SLASH_RE = re.compile(r"^/([\w.-]+(?::[\w.-]+)?)(?:\s+(.*))?$", re.DOTALL)
-_POSITIONAL_RE = re.compile(r"\$([1-9])")
+_PLACEHOLDER_RE = re.compile(r"\$(ARGUMENTS|[1-9])")
 
 
 @dataclass(frozen=True)
@@ -67,18 +65,23 @@ def resolve_slash_name(
 
 
 def expand_command(command: PluginCommand, arguments: str) -> str:
-    """Текст команды с ``$ARGUMENTS`` и ``$1``..``$9`` вместо аргументов."""
+    """Текст команды с ``$ARGUMENTS`` и ``$1``..``$9`` вместо аргументов.
+
+    Подстановка — один проход по шаблону: ``$5`` в словах пользователя
+    остаётся текстом."""
     try:
         words = shlex.split(arguments)
     except ValueError:
         words = arguments.split()
 
-    def positional(match: re.Match[str]) -> str:
-        index = int(match.group(1)) - 1
+    def placeholder(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name == "ARGUMENTS":
+            return arguments
+        index = int(name) - 1
         return words[index] if index < len(words) else ""
 
-    body = command.body.replace("$ARGUMENTS", arguments)
-    return _POSITIONAL_RE.sub(positional, body)
+    return _PLACEHOLDER_RE.sub(placeholder, command.body)
 
 
 def _resolve_prompt(
@@ -152,11 +155,7 @@ def command_messages(
     text = None if found is None else _command_text(snapshot, *found)
     if text is None:
         return []
-    return [
-        wrap_thread_memory_technical_user_message(
-            text, message_id_suffix="plugin_command"
-        )
-    ]
+    return [wrap_request_context_message(text, kind="plugin_command")]
 
 
 def listed_skill_ids(skills: Sequence[Mapping[str, Any]]) -> list[str]:

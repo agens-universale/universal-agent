@@ -376,6 +376,32 @@ def test_plugin_cards_survive_removed_skills_dir(tmp_path, monkeypatch):
     assert card["skills"] == []
 
 
+def test_plugin_card_skill_ids_follow_the_skills_registry(
+    tmp_path, monkeypatch
+):
+    """Id скилла в карточке — как в реестре ядра: из шапки SKILL.md; скилл
+    Agent Plugins по ссылке за пределы плагина не показывается."""
+    from gc_core.plugins.manifest import PLUGIN_FORMAT_AP, Plugin
+    from gc_tui.services import plugin_cards as mod
+
+    _no_entries(monkeypatch, mod)
+    monkeypatch.setattr(mod, "list_installed", list)
+    skills = tmp_path / "p" / "skills"
+    (skills / "dir-name").mkdir(parents=True)
+    (skills / "dir-name" / "SKILL.md").write_text("---\nid: real-id\n---\nx\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("x")
+    (skills / "linked").symlink_to(outside)
+    plugin = Plugin(
+        "p", "1", tmp_path / "p", (skills,), format=PLUGIN_FORMAT_AP
+    )
+
+    (card,) = mod.plugin_cards(_snapshot_settings((plugin,)))
+
+    assert card["skills"] == ["p:real-id"]
+
+
 @pytest.mark.asyncio
 async def test_plugins_screen_load_failure_shows_error_line(
     tmp_path, monkeypatch
@@ -407,3 +433,28 @@ async def test_plugins_screen_off_notice_hides_empty_install_hint(
         shown = " ".join(str(w.render()) for w in scr.query(Static))
         assert f"⚠ {note}" in shown
         assert "Плагинов нет" not in shown
+
+
+def test_plugin_card_hides_matcher_where_it_does_not_apply(monkeypatch):
+    """Карточка показывает условие хука только у событий, где оно работает:
+    ``UserPromptSubmit [review]`` читался бы как фильтр."""
+    from gc_core.plugins.manifest import Plugin
+    from gc_tui.services import plugin_cards as mod
+
+    _no_entries(monkeypatch, mod)
+    monkeypatch.setattr(mod, "list_installed", list)
+    cmd = (HookCommand("echo"),)
+    plugin = Plugin(
+        "p",
+        "1",
+        Path("/nowhere/p"),
+        (),
+        hooks={
+            "UserPromptSubmit": (HookMatcher("review", cmd),),
+            "SessionStart": (HookMatcher("startup", cmd),),
+        },
+    )
+
+    (card,) = mod.plugin_cards(_snapshot_settings((plugin,)))
+
+    assert card["hooks"] == ["UserPromptSubmit", "SessionStart startup"]

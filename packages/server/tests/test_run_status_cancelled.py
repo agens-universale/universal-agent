@@ -38,6 +38,13 @@ def test_completed_and_failed_fields():
     assert failed["status"] == "failed" and "boom" in failed["error"]
 
 
+def test_webhook_reports_no_tool_response_as_failed():
+    executor = SimpleNamespace(last_terminal_outcome="no_tool_response")
+    fields = _final_fields(_run("completed", executor=executor))
+    assert fields["status"] == "failed"
+    assert "no usable answer or tool call" in fields["error"]
+
+
 def test_status_body_keeps_the_old_shape():
     base = {"system": "generic", "task_id": "t"}
     done = status_body(

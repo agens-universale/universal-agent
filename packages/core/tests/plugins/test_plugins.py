@@ -123,6 +123,23 @@ def test_matcher_wildcard_and_alternatives(tmp_path):
     assert plugin.hooks_for("UserPromptSubmit", None)
 
 
+def test_matcher_is_ignored_without_value(tmp_path):
+    """У ``UserPromptSubmit`` нет значения для сверки: условие не
+    применяется, хук срабатывает на каждый запрос (как в Claude Code)."""
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "UserPromptSubmit": [
+                {
+                    "matcher": "review",
+                    "hooks": [{"type": "command", "command": "true"}],
+                }
+            ],
+        },
+    )
+    assert load_plugin(root).hooks_for("UserPromptSubmit", None)
+
+
 def test_reset_plugin_cache_clears_source_warnings():
     from gc_core.plugins import sources
 
@@ -418,6 +435,67 @@ def test_install_list_disable_enable_update_uninstall(tmp_path):
     assert installed.list_installed() == []
 
 
+def test_update_refuses_renamed_plugin(tmp_path):
+    """Имя плагина в источнике сменилось: обновление отказывает с причиной,
+    не ставит копию под новым именем и не затирает плагин с этим именем."""
+    from gc_core.plugins import catalog, installed
+
+    catalog.reset_plugin_cache()
+    src = _make_plugin(tmp_path, with_skill=True, name="old-name")
+    installed.install(str(src))
+    other = _make_plugin(tmp_path / "other", with_skill=True, name="new-name")
+    installed.install(str(other))
+    (src / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "new-name", "version": "2"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="old-name → new-name"):
+        installed.update("old-name")
+
+    sources = {p.name: p.source for p in installed.list_installed()}
+    assert sorted(sources) == ["new-name", "old-name"]
+    assert sources["new-name"].endswith("other/new-name")
+
+
+def test_update_keeps_plugin_with_unsafe_name(tmp_path):
+    """Имя с пробелом хранится под безопасным ``my_plugin``: это не смена
+    имени, update обновляет плагин."""
+    from gc_core.plugins import catalog, installed
+
+    catalog.reset_plugin_cache()
+    src = _make_plugin(tmp_path, with_skill=True, name="my plugin")
+    assert installed.install(str(src)).name == "my_plugin"
+
+    assert installed.update("my_plugin").name == "my_plugin"
+
+
+def test_summary_shows_matcher_only_where_it_applies(tmp_path):
+    """У ``UserPromptSubmit`` условие не применяется — сводка его не
+    показывает, чтобы оно не читалось как фильтр; у ``SessionStart``
+    показывает."""
+    from gc_core.plugins import installed
+
+    def group(matcher):
+        return [
+            {
+                "matcher": matcher,
+                "hooks": [{"type": "command", "command": "c"}],
+            }
+        ]
+
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "UserPromptSubmit": group("review"),
+            "SessionStart": group("startup"),
+        },
+    )
+    with installed.prepare(str(root)) as prepared:
+        lines = prepared.summary()
+    assert "UserPromptSubmit: c" in lines
+    assert "SessionStart [startup]: c" in lines
+
+
 def test_install_rejects_non_plugin_dir(tmp_path):
     from gc_core.plugins import installed
 
@@ -688,6 +766,61 @@ async def test_ap_skill_symlink_outside_root_skipped(tmp_path):
     }
     assert "x:a" in ids
     assert "x:evil" not in ids
+
+
+def test_install_keeps_skill_symlinks_as_links(tmp_path):
+    """Установка копирует ссылки ссылками: скилл по ссылке внутри плагина
+    работает и в хранилище, а ссылка за корень остаётся ссылкой наружу и
+    отсекается границей Agent Plugins (а не становится своим каталогом)."""
+    from gc_core.plugins import catalog, installed
+
+    catalog.reset_plugin_cache()
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "x"})
+    (root / "shared" / "inner").mkdir(parents=True)
+    (root / "shared" / "inner" / "SKILL.md").write_text(
+        "---\nname: inner\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "inner").symlink_to(
+        "../shared/inner", target_is_directory=True
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(
+        "---\nname: evil\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "evil").symlink_to(outside, target_is_directory=True)
+
+    stored = installed.installed_dir() / installed.install(str(root)).name
+
+    assert (stored / "skills" / "evil").is_symlink()
+    assert catalog.plugin_skill_ids(load_plugin(stored)) == ["x:a", "x:inner"]
+
+
+async def test_ap_skill_symlink_inside_root_is_loaded(tmp_path):
+    """Скилл по ссылке внутри плагина работает: отсекается только ссылка
+    за корень. Реестр и подсчёт ядра для витрин видят одно и то же."""
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "x"})
+    shared = root / "shared" / "linked"
+    shared.mkdir(parents=True)
+    (shared / "SKILL.md").write_text(
+        "---\nname: linked\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "linked").symlink_to(shared, target_is_directory=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    reg = SkillsRegistry(
+        system_root=str(empty),
+        user_root=str(empty),
+        project_root=str(empty),
+        plugin_roots=[SkillRoot("x", str(root / "skills"), str(root))],
+    )
+    ids = {
+        s["id"] if isinstance(s, dict) else s.id
+        for s in await reg.list_skills()
+    }
+    assert {"x:a", "x:linked"} <= ids
+    plugin = load_plugin(root)
+    assert catalog.plugin_skill_ids(plugin) == ["x:a", "x:linked"]
 
 
 def test_cc_plugin_unaffected_by_ap_rules(tmp_path):

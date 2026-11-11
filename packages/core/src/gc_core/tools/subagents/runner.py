@@ -28,6 +28,10 @@ from gc_core.config_modules.stored_outputs import (
 )
 from gc_core.constants.tool_display import subagent_role
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from gc_core.execution.constants import (
+    NO_TOOL_RESPONSE,
+    NO_TOOL_RESPONSE_MESSAGE,
+)
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.progress import emit_progress
 from gc_core.execution.turn_clock import (
@@ -524,7 +528,7 @@ class SubagentRunner:
             # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
             # our own JSON or call LLM here — spec §6.2.
             return result
-        if outcome == "judge_unavailable":
+        if outcome in ("judge_unavailable", NO_TOOL_RESPONSE):
             # Проверка действий судьёй недоступна: субагент остановлен,
             # родитель и соседи продолжают — о недоступности родитель
             # узнает на своём первом спорном действии.
@@ -534,7 +538,9 @@ class SubagentRunner:
             return self._error_response(
                 tool_name=tool_name,
                 code=outcome,
-                message=str(result or ""),
+                message=NO_TOOL_RESPONSE_MESSAGE
+                if outcome == NO_TOOL_RESPONSE
+                else str(result or ""),
                 retryable=False,
                 steps=child_state.steps,
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
@@ -771,16 +777,15 @@ class SubagentRunner:
             if error_response is not None:
                 return error_response
 
-            if result is None:
-                return await self._acancelled_by_user(
-                    tool_name, child_state, child_ctx
-                )
-
             stopped = await self._astopped_response(
                 tool_name, child_state, child_ctx, result
             )
             if stopped is not None:
                 return stopped
+            if result is None:
+                return await self._acancelled_by_user(
+                    tool_name, child_state, child_ctx
+                )
 
             result_payload: Any = (
                 result or "Subagent finished without explicit result."

@@ -22,7 +22,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from gc_core.plugins.manifest import Plugin, ap_manifest_errors, load_plugin
+from gc_core.plugins.manifest import (
+    Plugin,
+    ap_manifest_errors,
+    load_plugin,
+    shown_matcher,
+)
 from gc_core.plugins.sources import _clone, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -125,8 +130,13 @@ def _fetch(
     local = Path(source).expanduser()
     if local.exists():
         target = tmp / "src"
+        # Ссылки — ссылками: скилл по ссылке за корень остаётся ссылкой
+        # наружу и отсекается границей, а не становится своим каталогом.
         shutil.copytree(
-            local.resolve(), target, ignore=shutil.ignore_patterns(".git")
+            local.resolve(),
+            target,
+            symlinks=True,
+            ignore=shutil.ignore_patterns(".git"),
         )
         return target, _commit_of(local.resolve()), str(local.resolve())
     url = normalize_url(source)
@@ -172,7 +182,7 @@ class PreparedInstall:
         """
         plugin = self.plugin
         lines = [
-            f"{event} [{m.matcher or '*'}]: {h.command}"
+            f"{_hook_head(event, m.matcher)}: {h.command}"
             for event, matchers in plugin.hooks.items()
             for m in matchers
             for h in m.hooks
@@ -283,6 +293,11 @@ def _role_lines(plugin: Plugin, settings: Any) -> list[str]:
     return lines
 
 
+def _hook_head(event: str, matcher: str) -> str:
+    shown = shown_matcher(event, matcher)
+    return event if shown is None else f"{event} [{shown}]"
+
+
 def _replace_dir(src: Path, dest: Path) -> None:
     """Заменить ``dest`` копией ``src``: копия в ``.staging``, затем
     переименование.
@@ -294,7 +309,9 @@ def _replace_dir(src: Path, dest: Path) -> None:
     ) as tmp_name:
         tmp = Path(tmp_name)
         staged = tmp / "new"
-        shutil.copytree(src, staged, ignore=shutil.ignore_patterns(".git"))
+        shutil.copytree(
+            src, staged, symlinks=True, ignore=shutil.ignore_patterns(".git")
+        )
         old = tmp / "old"
         had_old = dest.exists()
         if had_old:
@@ -484,7 +501,9 @@ def update(
     """Переустановить из исходного источника с тем же ref (ветка уйдёт вперёд).
 
     ``confirm`` вызывается, только если хуки или MCP отличаются от установленной
-    копии; отказ даёт ``ValueError``.
+    копии; отказ даёт ``ValueError``. Сменившееся в источнике имя — тоже
+    ``ValueError``: копия встала бы рядом под новым именем, затерев
+    одноимённый плагин, а данные плагина остались бы под старым.
     """
     root, meta = _load_meta(root)
     rec = meta.get(name)
@@ -494,6 +513,11 @@ def update(
     with prepare(
         rec["source"], ref=rec.get("ref"), subdir=rec.get("subdir"), root=root
     ) as prepared:
+        if _safe_name(prepared.plugin.name) != name:
+            raise ValueError(
+                f"имя плагина в источнике сменилось: {name} → "
+                f"{prepared.plugin.name}; удалите {name} и установите заново"
+            )
         if confirm and prepared.differs_from(name) and not confirm(prepared):
             raise ValueError("обновление отменено")
         info = prepared.commit(force=True)

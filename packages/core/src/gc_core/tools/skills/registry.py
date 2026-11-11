@@ -417,7 +417,10 @@ class SkillsRegistry:
         if not root or not await self._backend.is_dir(root):
             return
         for entry, is_dir in await self._backend.listdir(root):
-            if not is_dir:
+            # listdir не считает ссылку каталогом; скилл по ссылке берётся,
+            # а выход за корень Agent Plugins отсекает проверка ниже.
+            path = self._backend.join(root, entry)
+            if not is_dir and not await self._backend.is_dir(path):
                 continue
             if contain and not _inside(Path(root) / entry, Path(contain)):
                 logger.warning(
@@ -427,7 +430,7 @@ class SkillsRegistry:
                 )
                 continue
             skill = await self._load_skill_dir(
-                self._backend.join(root, entry),
+                path,
                 dir_name=entry,
                 source="system",
                 pack_id=plugin_name,

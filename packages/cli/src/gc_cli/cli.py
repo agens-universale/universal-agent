@@ -30,6 +30,10 @@ from gc_core.config_modules.env_interpolation import (
 from gc_core.config_modules.images import read_images_config
 from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import schema_error_details
+from gc_core.execution.constants import (
+    NO_TOOL_RESPONSE,
+    NO_TOOL_RESPONSE_MESSAGE,
+)
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
@@ -873,6 +877,10 @@ def _load_cli_settings(config_arg, profile_arg):
         # трейсбека (значения в сообщении нет).
         print(f"[gc] некорректный параметр: {exc}", file=sys.stderr)
         return None, 2
+    if loaded.settings.agent.text_answer_mode is not None:
+        loaded = loaded.with_runtime(
+            text_answer_mode=loaded.settings.agent.text_answer_mode
+        )
     if getattr(arg_parser.run_args, "external_request", False):
         # Канал объявляет о себе, как webhook сервера: человека нет, слова
         # запроса — запрос внешней системы.
@@ -1208,6 +1216,9 @@ async def _arun_loaded(
                 shutdown_mcp_daemons()
     if structured_exit is not None:
         return structured_exit
+    if getattr(executor, "last_terminal_outcome", None) == NO_TOOL_RESPONSE:
+        print(NO_TOOL_RESPONSE_MESSAGE, file=sys.stderr)
+        return 1
     _print_agent_response(response, loaded, ctx)
     return 0
 

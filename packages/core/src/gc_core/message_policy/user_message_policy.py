@@ -6,6 +6,7 @@ from gc_core.constants.tool_names import (
     FS_APPEND_FILE_NAME,
     FS_WRITE_FILE_NAME,
 )
+from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
 TECHNICAL_TYPE_TECHNICAL = "technical"
 TECHNICAL_TYPE_ERROR_MESSAGE = "error_message"
@@ -65,6 +66,31 @@ def wrap_technical_user_content(
     if match:
         return raw
     return f'<technical type="{technical_type}">{raw}</technical>'
+
+
+#: Префикс id технического сообщения, сопровождающего запрос человека.
+_REQUEST_CONTEXT_ID_PREFIX = "m_request_context"
+
+
+def wrap_request_context_message(text: str, *, kind: str) -> dict[str, Any]:
+    """Техническое сообщение к запросу человека (вывод хука на запрос,
+    раскрытая команда плагина); ``kind`` — источник, часть id. Сжатие
+    посреди шага сохраняет его вместе с запросом
+    (`is_request_context_message`): повтор запроса источник не запускает."""
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            text, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+        ),
+        "id": generate_msg_id_sha256(f"{_REQUEST_CONTEXT_ID_PREFIX}_{kind}"),
+    }
+
+
+def is_request_context_message(message: Any) -> bool:
+    """Сообщение из `wrap_request_context_message`."""
+    return isinstance(message, dict) and str(message.get("id", "")).startswith(
+        f"{_REQUEST_CONTEXT_ID_PREFIX}_"
+    )
 
 
 def build_model_fallback_resume_message(state_id: str) -> dict[str, str]:

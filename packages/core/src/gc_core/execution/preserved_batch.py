@@ -2,6 +2,7 @@
 
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    is_request_context_message,
 )
 
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
@@ -32,6 +33,9 @@ def remove_exact_suffix_if_matches(
 
 
 def _preserved_user_ask_batch(current_messages: list[dict]) -> list[dict]:
+    """Реплики человека, вложения и сообщения к запросу (вывод хука на
+    запрос, раскрытая команда) — их источник повтор не перезапускает — и
+    последнее сообщение."""
     last = current_messages[-1]
     out: list[dict] = []
     for msg in current_messages[:-1]:
@@ -39,7 +43,11 @@ def _preserved_user_ask_batch(current_messages: list[dict]) -> list[dict]:
             continue
         if str(msg.get("role", "")).strip().lower() != "user":
             continue
-        if not (extract_real_user_message_text(msg) or msg.get("attachments")):
+        if not (
+            extract_real_user_message_text(msg)
+            or msg.get("attachments")
+            or is_request_context_message(msg)
+        ):
             continue
         out.append(msg)
     out.append(last)
@@ -90,7 +98,9 @@ def build_preserved_batch(
 
     Для режима ``user_ask``: из батча остаются реплики человека,
     user-сообщения с вложениями (картинка тула или ответа на вопрос агента —
-    сводка её не несёт) и последнее сообщение.
+    сводка её не несёт), сообщения к запросу (вывод хука на запрос,
+    раскрытая команда плагина — повтор их не пересоздаёт) и последнее
+    сообщение.
 
     Для режима ``function_call_output``: пара «вызов → ответ» уходит в сводку.
     После неё остаются реплики человека и сообщения с вложениями (картинка

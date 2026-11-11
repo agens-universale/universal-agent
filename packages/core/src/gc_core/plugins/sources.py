@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 _SHORT = re.compile(r"^[\w.-]+/[\w.-]+$")
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
+_SHORT_SHA = re.compile(r"^[0-9a-f]{7,39}$")
+#: Подсказка к неудачному клону: сервер git отдаёт коммит только по полному
+#: хешу, а ``ref`` из 7–39 шестнадцатеричных знаков может быть и тегом.
+SHORT_COMMIT_HINT = "если ref — хеш коммита, нужен полный (40 знаков)"
 _GIT_TIMEOUT_SEC = 120
 
 _resolved: dict[tuple[str, str, str], Path | None] = {}
@@ -65,7 +69,25 @@ def _git(args: list[str], cwd: Path | None = None) -> None:
     )
 
 
+def is_short_commit(ref: str | None) -> bool:
+    """``ref`` похож на короткий хеш коммита (или тег из тех же знаков)."""
+    return bool(ref) and _SHORT_SHA.match(ref) is not None
+
+
 def _clone(url: str, ref: str | None, target: Path) -> None:
+    """Клон в ``target``. Не получилось, а ``ref`` похож на короткий хеш —
+    ``ValueError`` с подсказкой вместо ошибки git."""
+    try:
+        _clone_into(url, ref, target)
+    except subprocess.SubprocessError as exc:
+        if is_short_commit(ref):
+            raise ValueError(
+                f"коммит {ref} не получен: {SHORT_COMMIT_HINT}"
+            ) from exc
+        raise
+
+
+def _clone_into(url: str, ref: str | None, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -118,7 +140,7 @@ def resolve_source(
     try:
         if update or not (target / ".git").is_dir():
             _clone(url, source.ref, target)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
         detail = getattr(exc, "stderr", "") or exc
         # Без клона пользователь получит уведомление набора; здесь — причина.
         if not (target / ".git").is_dir():

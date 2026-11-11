@@ -658,7 +658,8 @@ async def test_overflow_with_compaction_keeps_request_and_command(
     tmp_path, monkeypatch, times
 ):
     """Сводка при переполнении окна заменила историю: в повторе запрос
-    человека и раскрытая команда — по одному разу, хук не перезапущен."""
+    человека, вывод хука на запрос и раскрытая команда — по одному разу,
+    хук не перезапущен."""
     from helpers.context_overflow import overflow_then_summarize
 
     log = tmp_path / "hooks.log"
@@ -681,6 +682,8 @@ async def test_overflow_with_compaction_keeps_request_and_command(
     assert [m["role"] for m in asks] == ["user"]
     expanded = [m for m in live if "SAY-HI there" in str(m["content"])]
     assert len(expanded) == 1
+    hook_context = [m for m in live if "CTX" in str(m["content"])]
+    assert len(hook_context) == 1
     assert _lines(log) == ["UserPromptSubmit:"]
 
 

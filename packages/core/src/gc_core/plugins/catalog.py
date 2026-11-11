@@ -59,6 +59,8 @@ def _source_notice(source) -> str:
     head = f"Плагин из источника {source.git} не подключён: "
     if sources.is_cloned(source) and source.subdir:
         return head + f"в репозитории нет подкаталога {source.subdir}."
+    if sources.is_short_commit(source.ref):
+        return head + f"репозиторий не получен; {sources.SHORT_COMMIT_HINT}."
     return head + "репозиторий не получен."
 
 
@@ -141,6 +143,11 @@ def _skill_ids(roots: tuple[SkillRoot, ...]) -> frozenset[str]:
                 continue
             ids.add(f"{root.plugin}:{skill_id_segment(entry)}")
     return frozenset(ids)
+
+
+def plugin_skill_ids(plugin: Plugin) -> list[str]:
+    """Id skills одного плагина по правилу реестра — для витрин."""
+    return sorted(_skill_ids(skill_roots((plugin,))))
 
 
 def _plugin_commands(

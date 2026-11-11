@@ -69,6 +69,14 @@
   - `gc-cli -q "..." -t my-thread -n` (или `--new`) — начать тред заново с тем же id и удалить старые файлы этого треда (`data_*`/`meta_*`);
   - `-n/--new` можно использовать только вместе с `-t/--thread-id`.
   - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
+- `agent.text_answer_mode` selects prose handling for CLI and webhook runs. With
+  `allow`, usable prose can end the turn. Leaving it unset preserves the
+  surface default. Harbor accepts the same mode through
+  `agent_kwargs.gc_cli_config.text_answer_mode`.
+- `agent.stop_on_no_tool_response` defaults to `false`. Enable it for RL runs to
+  stop with `no_tool_response` when the model returns neither an identifiable
+  tool call nor an accepted final answer. The loop omits the follow-up user
+  message. Prose acceptance and auto routing keep their existing rules.
 - По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
 - **TUI**: секция `tui` управляет поведением интерфейса:
   - `tui.stream` (по умолчанию `true`) — мастер-переключатель live-стриминга ответа в TUI.
