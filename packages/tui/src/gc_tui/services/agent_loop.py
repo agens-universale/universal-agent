@@ -55,7 +55,8 @@ class AgentLoop:
         #: Реентерабельный: `submit` и `call_soon` зовут `start` под ним.
         self._lock = threading.RLock()
         self._closed = False
-        self._drain_sec = 0.0
+        #: Срок уборки выхода (``time.monotonic``); ставит `_close`.
+        self._deadline = 0.0
         self._clock: Callable[[], float] = time.monotonic
 
     def start(self) -> None:
@@ -122,11 +123,13 @@ class AgentLoop:
         )
 
     def shutdown(self, timeout: float = 5.0) -> None:
-        """Выход: ``aclose_clients`` на цикле → stop → join.
+        """Выход: stop → в потоке цикла отмена задач и ``aclose_clients`` →
+        join.
 
         Ограничено ``timeout`` целиком. Задачи, пережившие остановку (ход,
-        глухой к стопу), отменяются в потоке цикла. Не дождались — поток
-        daemon и процесс не держит. Только с потока без своего цикла, как
+        глухой к стопу), отменяются в потоке цикла раньше закрытия клиентов:
+        пул, закрытый под живой задачей, её уборка открыла бы заново. Не
+        дождались — поток daemon и процесс не держит. Только с потока без своего цикла, как
         и `run`: с UI — через ``asyncio.to_thread``.
 
         Идемпотентно и под гонку: закрывает только первый вызов (тот, что
@@ -151,20 +154,8 @@ class AgentLoop:
         thread.join(max(0.0, deadline - time.monotonic()))
 
     def _close(self, loop: asyncio.AbstractEventLoop, deadline: float) -> None:
-        """Первый `shutdown`: закрыть клиенты на цикле и остановить его."""
-        from gc_core.utils import async_http
-
-        future: concurrent.futures.Future | None = None
-        try:
-            future = asyncio.run_coroutine_threadsafe(
-                async_http.aclose_clients(), loop
-            )
-            future.result(max(0.0, deadline - time.monotonic()))
-        except Exception:
-            _log.warning("agent_loop_aclose_clients_failed", exc_info=True)
-            if future is not None:
-                future.cancel()
-        self._drain_sec = max(0.0, deadline - time.monotonic())
+        """Первый `shutdown`: остановить цикл; уборку делает его поток."""
+        self._deadline = deadline
         try:
             loop.call_soon_threadsafe(loop.stop)
         except RuntimeError:  # цикл уже закрыт (поток вышел сам)
@@ -178,7 +169,12 @@ class AgentLoop:
                 loop.run_forever()
             finally:
                 self._cancel_leftovers(loop)
+                self._aclose_clients(loop)
+                loop.run_until_complete(loop.shutdown_asyncgens())
                 loop.close()
+
+    def _budget(self) -> float:
+        return max(self._deadline - time.monotonic(), 0.1)
 
     def _cancel_leftovers(self, loop: asyncio.AbstractEventLoop) -> None:
         tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
@@ -186,9 +182,18 @@ class AgentLoop:
             task.cancel()
         if tasks:
             loop.run_until_complete(
-                asyncio.wait(tasks, timeout=max(self._drain_sec, 0.1))
+                asyncio.wait(tasks, timeout=self._budget())
             )
-        loop.run_until_complete(loop.shutdown_asyncgens())
+
+    def _aclose_clients(self, loop: asyncio.AbstractEventLoop) -> None:
+        from gc_core.utils import async_http
+
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(async_http.aclose_clients(), self._budget())
+            )
+        except Exception:
+            _log.warning("agent_loop_aclose_clients_failed", exc_info=True)
 
     def _watch(self, expected: float) -> None:
         self._check_lag(expected)

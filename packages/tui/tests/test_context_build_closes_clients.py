@@ -47,7 +47,8 @@ def test_context_build_and_compaction_do_not_close_the_pool():
 
 def test_the_pool_closes_in_agent_loop_shutdown():
     calls = _calls_of(_SERVICES / "agent_loop.py", "aclose_clients")
-    assert calls == {"_close": 1}, (
+    assert calls == {"_aclose_clients": 1}, (
         "пул httpx цикла агента должен закрываться ровно один раз, в "
-        f"закрытии AgentLoop.shutdown (`_close`), а не {calls}"
+        "уборке потока цикла после AgentLoop.shutdown "
+        f"(`_aclose_clients`), а не {calls}"
     )

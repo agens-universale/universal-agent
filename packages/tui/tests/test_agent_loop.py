@@ -273,6 +273,28 @@ def test_concurrent_shutdown_closes_once(agent_loop, monkeypatch):
     assert not agent_loop.thread.is_alive()
 
 
+def test_shutdown_closes_clients_opened_by_cancelled_tasks(agent_loop):
+    """Выход сначала отменяет задачи, потом закрывает пул: клиент, взятый
+    уборкой отменённой задачи, тоже закрыт."""
+    from gc_core.utils.async_http import get_async_client
+
+    started = threading.Event()
+    opened: list = []
+
+    async def _deaf_turn() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            opened.append(get_async_client())
+
+    agent_loop.submit(_deaf_turn())
+    assert started.wait(5)
+    agent_loop.shutdown()
+    assert len(opened) == 1
+    assert opened[0].is_closed
+
+
 def test_start_is_idempotent_and_names_the_thread(agent_loop):
     agent_loop.start()
     thread = agent_loop.thread
