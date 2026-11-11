@@ -43,6 +43,7 @@ from gc_core.utils.logging_module import release_run_logger
 _SYS = "test"
 _TID = "t1"
 _KEY = ThreadKey(system=_SYS, thread=_TID)
+_REQUEST_CANONICAL = pr._arequest_backend_canonical
 _LIMITS = (
     "step_limit",
     "tool_call_limit",
@@ -231,7 +232,9 @@ async def test_finish_writes_done_after_last_message(run):
 
 
 async def test_accepted_text_writes_done(tmp_path, monkeypatch):
-    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode="allow")
+    run = await _Run(tmp_path, monkeypatch).build(
+        text_answer_mode="allow", stop_on_no_tool_response=True
+    )
     run.script = [
         [
             {
@@ -245,6 +248,194 @@ async def test_accepted_text_writes_done(tmp_path, monkeypatch):
 
     outcomes = _only_outcomes(run)
     assert [(o.status, o.reason) for o in outcomes] == [("done", None)]
+
+
+def _stub_chat(monkeypatch, *choices):
+    monkeypatch.setattr(pr, "_arequest_backend_canonical", _REQUEST_CANONICAL)
+    requests = []
+
+    async def send(payload, *_args, **_kwargs):
+        requests.append(payload["messages"])
+        return {
+            "id": f"resp_{len(requests)}",
+            "choices": [choices[len(requests) - 1]],
+        }
+
+    monkeypatch.setattr(
+        "gc_core.request_backend_policy.arequest_backend_chat_completions",
+        send,
+    )
+    return requests
+
+
+@pytest.mark.parametrize(
+    ("message", "finish_reason"),
+    [
+        ({}, "stop"),
+        ({"reasoning_content": "Thinking"}, "stop"),
+        ({"content": "Incomplete"}, "length"),
+        ({}, "content_filter"),
+        ({"content": "(tool results received)"}, "stop"),
+        ({"tool_calls": 7}, "tool_calls"),
+        (
+            {
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_file",
+                            "arguments": "{}",
+                        },
+                    }
+                ]
+            },
+            "tool_calls",
+        ),
+    ],
+)
+@pytest.mark.parametrize("mode", ["allow", "deny", "judge"])
+async def test_opt_in_ends_unusable_model_response(
+    tmp_path, monkeypatch, message, finish_reason, mode
+):
+    run = await _Run(tmp_path, monkeypatch).build(
+        text_answer_mode=mode, stop_on_no_tool_response=True
+    )
+    requests = _stub_chat(
+        monkeypatch,
+        {
+            "finish_reason": finish_reason,
+            "message": {"role": "assistant", **message},
+        },
+    )
+
+    assert await run.arun() is None
+    assert len(requests) == 1
+    assert [(o.status, o.reason) for o in _only_outcomes(run)] == [
+        ("stopped", "no_tool_response")
+    ]
+    history = [m["payload"] for m in run.messages()]
+    assert [m["id"] for m in history if m.get("role") == "user"] == ["m_user"]
+    assert not any(m.get("type") == "function_call_output" for m in history)
+
+
+async def test_bad_tools_return_one_paired_result_each(tmp_path, monkeypatch):
+    run = await _Run(tmp_path, monkeypatch).build(
+        text_answer_mode="allow", stop_on_no_tool_response=True
+    )
+    calls = {
+        "ok": ("fs_read_file", '{"path": "present.txt"}'),
+        "unknown": ("no_such_tool", "{}"),
+        "json": ("fs_read_file", '{"path":'),
+        "schema": ("fs_read_file", '{"path": 42}'),
+        "execution": ("fs_read_file", '{"path": "missing.txt"}'),
+        "finish": ("turn_finish", '{"solution_type": "bogus"}'),
+    }
+    (tmp_path / "present.txt").write_text("present")
+    requests = _stub_chat(
+        monkeypatch,
+        {
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_file",
+                            "arguments": "{}",
+                        },
+                    },
+                ]
+                + [
+                    {
+                        "id": key,
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": arguments,
+                        },
+                    }
+                    for key, (name, arguments) in calls.items()
+                ],
+            },
+        },
+        {
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "Done"},
+        },
+    )
+    executions = []
+    apply = pr.aapply_tool
+
+    async def counted_apply(**kwargs):
+        executions.append(kwargs["call_id"])
+        return await apply(**kwargs)
+
+    monkeypatch.setattr(pr, "aapply_tool", counted_apply)
+
+    assert await run.arun() == "Done"
+    assert executions == list(calls)
+    assert len(requests) == 2
+    request = requests[1]
+    assert sum(m["role"] == "user" for m in request) == 1
+    sent_calls = [c for m in request for c in m.get("tool_calls", [])]
+    assert [c["id"] for c in sent_calls] == list(calls)
+    assert (
+        next(c for c in sent_calls if c["id"] == "json")["function"][
+            "arguments"
+        ]
+        == calls["json"][1]
+    )
+    results = [m for m in request if m["role"] == "tool"]
+    assert [m["tool_call_id"] for m in results] == list(calls)
+    for result in results[1:]:
+        payload = json.loads(result["content"])
+        assert payload["error"]
+    history = [m["payload"] for m in run.messages()]
+    assert [
+        m["call_id"]
+        for m in history
+        if m.get("type") == "function_call_output"
+    ] == list(calls)
+    assert (
+        next(m for m in history if m.get("call_id") == "json")["arguments"]
+        == calls["json"][1]
+    )
+
+
+@pytest.mark.parametrize("mode", ["deny", "judge"])
+async def test_default_keeps_unknown_tool_recovery_for_empty_name(
+    tmp_path, monkeypatch, mode
+):
+    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode=mode)
+    finish = _finish()
+
+    def tool_choice(name, call_id, arguments):
+        return {
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": arguments},
+                    }
+                ],
+            },
+        }
+
+    requests = _stub_chat(
+        monkeypatch,
+        tool_choice("", "unnamed", "{}"),
+        tool_choice(finish["name"], finish["call_id"], finish["arguments"]),
+    )
+    await run.arun()
+    assert len(requests) == 2
+    result = next(m for m in requests[1] if m["role"] == "tool")
+    assert result["tool_call_id"] == "unnamed"
+    assert json.loads(result["content"])["error"]["type"] == "unknown_tool"
+    assert _only_outcomes(run)[0].status == "done"
 
 
 async def test_responses_mode_finish_writes_done(tmp_path, monkeypatch):
@@ -583,7 +774,13 @@ async def test_limit_outcome_is_stopped_with_reason(run, limit):
     assert [(o.status, o.reason) for o in outcomes] == [("stopped", limit)]
 
 
-async def test_backend_error_writes_masked_error(run):
+@pytest.mark.parametrize("stop_on_no_tool_response", [False, True])
+async def test_backend_error_writes_masked_error(
+    tmp_path, monkeypatch, stop_on_no_tool_response
+):
+    run = await _Run(tmp_path, monkeypatch).build(
+        stop_on_no_tool_response=stop_on_no_tool_response
+    )
     key = "sk-" + "a1B2c3D4e5F6g7H8i9J0"
 
     async def _fail():

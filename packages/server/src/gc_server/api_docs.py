@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from fastapi import FastAPI
@@ -24,6 +23,7 @@ from gc_server.api_catalog import (
     SurfaceDoc,
     split_route_entry,
 )
+from gc_server.surface import server_version
 
 #: Пути документации FastAPI: без ``docs`` их нет, с ним — без токена.
 DOC_PATHS = ("/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json")
@@ -75,7 +75,7 @@ def _disabled(route: APIRoute, doc: SurfaceDoc, entries: list[str]) -> bool:
 
 def _install_openapi(app: FastAPI, doc: SurfaceDoc, *, secured: bool) -> None:
     app.title = doc.title
-    app.version = _version()
+    app.version = server_version()
     app.description = doc.description
 
     def openapi() -> dict[str, Any]:
@@ -141,7 +141,7 @@ def combined_docs(apps: list[FastAPI]) -> FastAPI | None:
     names = [_short(app) for app in documented]
     docs = FastAPI(
         title="GigaCode · gc-serve: " + ", ".join(names),
-        version=_version(),
+        version=server_version(),
         description=_combined_description(documented),
     )
 
@@ -228,13 +228,6 @@ def _merge_one(schema: dict, components: dict, app: FastAPI) -> None:
             target[method] = merged
     for name, value in one.get("components", {}).get("schemas", {}).items():
         components.setdefault("schemas", {}).setdefault(name, value)
-
-
-def _version() -> str:
-    try:
-        return version("gc-server")
-    except PackageNotFoundError:
-        return "0"
 
 
 __all__ = ["DOC_PATHS", "apply_api_docs", "combined_docs", "docs_paths"]

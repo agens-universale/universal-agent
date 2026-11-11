@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-_INCOMPLETE = frozenset({"token_limit", "step_limit", "tool_call_limit"})
+from gc_core.execution.constants import NO_TOOL_RESPONSE
+
+_INCOMPLETE = frozenset(
+    {"token_limit", "step_limit", "tool_call_limit", NO_TOOL_RESPONSE}
+)
 
 
 def status_from_outcome(outcome: str | None) -> str:

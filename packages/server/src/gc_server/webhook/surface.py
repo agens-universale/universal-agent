@@ -24,6 +24,10 @@ from gc_core.agent_edits.ctx import RUN_MODE_SERVER
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules.auth import build_auth_connector
+from gc_core.execution.constants import (
+    NO_TOOL_RESPONSE,
+    NO_TOOL_RESPONSE_MESSAGE,
+)
 from gc_core.execution.environment import utc_now
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import validate_thread_id
@@ -72,10 +76,12 @@ KEEP_CALLBACK = object()
 def webhook_settings(runtime: ServerRuntime, name: str = "webhook"):
     """Настройки агента вебхука: за ним нет человека, слова — запрос
     внешней системы, режим запуска — сервер."""
-    return runtime.surface_settings(name).with_runtime(
+    loaded = runtime.surface_settings(name)
+    return loaded.with_runtime(
         run_mode=RUN_MODE_SERVER,
         human_channel=False,
         external_user_words=True,
+        text_answer_mode=loaded.settings.agent.text_answer_mode,
     )
 
 
@@ -677,6 +683,15 @@ def _final_fields(run: ActiveRun) -> Dict[str, Any]:
         return {"status": "cancelled", **fields}
     if run.ending == "failed":
         return {"status": "failed", **fields, "error": repr(run.error)}
+    if (
+        getattr(getattr(run, "executor", None), "last_terminal_outcome", None)
+        == NO_TOOL_RESPONSE
+    ):
+        return {
+            "status": "failed",
+            **fields,
+            "error": NO_TOOL_RESPONSE_MESSAGE,
+        }
     return {"status": "completed", **fields, "result": run.result}
 
 

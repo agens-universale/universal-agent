@@ -79,6 +79,7 @@ from gc_core.execution.constants import (
     _MAX_CONTEXT_OVERFLOW_RETRIES,
     _SESSION_COMPACT_RESUME_USER_TEXT,
     _TRUNCATED_ARGUMENTS_HINT,
+    NO_TOOL_RESPONSE,
 )
 from gc_core.execution.contracts import (
     ExecutionFailure,
@@ -234,6 +235,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_responses as create_call_data,
 )
 from gc_core.utils.convertations import (
+    UnparseableModelResponse,
     output_chat_completion_to_response,
     sanitize_messages_for_chat_completions,
 )
@@ -1279,6 +1281,12 @@ async def _arequest_responses_once(
             timeout=request_timeout_sec,
             config_proxy=config_proxy,
         )
+    if settings.agent.stop_on_no_tool_response and (
+        not isinstance(res, dict)
+        or not isinstance(res.get("output"), list)
+        or any(not isinstance(item, dict) for item in res["output"])
+    ):
+        raise UnparseableModelResponse("Invalid Responses API output")
     return res["output"], str(res["id"]), res_headers
 
 
@@ -1740,6 +1748,10 @@ async def _arequest_backend_canonical_once(
         route_key=route_key,
     )
     if not isinstance(res, dict):
+        if settings.agent.stop_on_no_tool_response:
+            raise UnparseableModelResponse(
+                "Chat completion payload is not an object"
+            )
         raise ValueError("chat/completions backend response must be an object")
     _finish = _first_choice_finish_reason(res)
     # Сохраняем finish_reason на state — catch-блок WrongFunctionArgumentsException
@@ -1765,6 +1777,7 @@ async def _arequest_backend_canonical_once(
             "request_summary": _summarize_call_data_for_log(call_data),
         },
         persist_reasoning_content=persist_reasoning,
+        recover_invalid_tool_calls=settings.agent.stop_on_no_tool_response,
     )
     resp_messages = canonical["output"]
     response_id = str(canonical.get("id") or res.get("id") or "")
@@ -1859,6 +1872,25 @@ def _batch_has_pending_function_calls(messages: List[Dict]) -> bool:
     return any(
         message.get("type") == "function_call" for message in messages or []
     )
+
+
+def _drop_unidentifiable_tool_calls(messages: List[Dict]) -> List[Dict]:
+    filtered = [
+        message
+        for message in messages
+        if message.get("type") != "function_call"
+        or all(
+            isinstance(value, str) and value.strip()
+            for value in (message.get("call_id"), message.get("name"))
+        )
+    ]
+    if len(filtered) != len(
+        messages
+    ) and not _batch_has_pending_function_calls(filtered):
+        raise UnparseableModelResponse(
+            "Model tool calls have no usable identity"
+        )
+    return filtered
 
 
 def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
@@ -3191,6 +3223,7 @@ class _AgentLoop:
         self.context_overflow_retries = 0
         self.run_logger = getattr(ctx, "logger", None) or _fallback_logger
         agent_cfg = settings_of(ctx).agent
+        self.stop_on_no_tool_response = agent_cfg.stop_on_no_tool_response
         self.proj_tags = projection_tags_from_config(ctx)
         self.console_human = human_console_enabled(ctx)
         self.max_tool_errors = agent_cfg.no_tool_call_max_count
@@ -3252,6 +3285,8 @@ class _AgentLoop:
             # с ValueError('Empty messages list'). Вместо этого генерируем понятное
             # сообщение‑обратную связь для агента.
             if not messages:
+                if self.stop_on_no_tool_response:
+                    return self._stop_without_tool().result
                 messages = self._bounce_empty_messages()
                 continue
             step = await self._astep(messages, _get_backend_api_mode(self.ctx))
@@ -3306,6 +3341,8 @@ class _AgentLoop:
             messages, mode, early = await self._aprepare_batch(
                 messages, backend_mode
             )
+        except UnparseableModelResponse:
+            return self._stop_without_tool()
         except ExecutionFailure:
             raise
         except Exception as e:
@@ -3330,6 +3367,10 @@ class _AgentLoop:
             outcome = _Outcome(
                 self._bounce_wrong_arguments(e), completed_step=True
             )
+        except UnparseableModelResponse:
+            if not self.stop_on_no_tool_response:
+                raise
+            return self._stop_without_tool()
         except ExecutionFailure:
             raise
         except ModelRequestStopped:
@@ -3498,6 +3539,15 @@ class _AgentLoop:
         self.tool_error_cnt += 1
         self.state.steps += 1
         return self._finish_reason_bounce()
+
+    def _stop_without_tool(self) -> _Outcome:
+        self.state.terminal_outcome = NO_TOOL_RESPONSE
+        self.state.steps += 1
+        self.run_logger.warning(
+            "No usable final answer or tool call (finish_reason=%s)",
+            getattr(self.state, "last_finish_reason", None),
+        )
+        return _Outcome(result=None)
 
     def _bounce_on_error(self, e: Exception) -> List[Dict]:
         self.run_logger.error(e, exc_info=True)
@@ -3694,6 +3744,8 @@ class _AgentLoop:
         """
         state = self.state
         self._log_incoming(messages)
+        if self.stop_on_no_tool_response:
+            messages = _drop_unidentifiable_tool_calls(messages)
         messages = self._sanitize_batch(messages)
         # Весь батч сразу в истории. Последний ответ и соседи за ним
         # (реплика, картинка) на диск — после сводки: без неё уже с подсказками.
@@ -3728,7 +3780,14 @@ class _AgentLoop:
             )
             return messages, None, "Agent tools call errors."
 
-        mode = check_mode(messages, self.run_logger)
+        try:
+            mode = check_mode(messages, self.run_logger)
+        except ValueError:
+            if not self.stop_on_no_tool_response:
+                raise
+            raise UnparseableModelResponse(
+                "Model response has no usable message"
+            ) from None
         return messages, mode, _NO_RETURN
 
     def _history_replaced(self, previous: Any) -> bool:
@@ -4243,7 +4302,7 @@ class _AgentLoop:
         # blocked / length — не финал даже в allow: отказ провайдера
         # или усечение (обрезок тулы/ответа). Иначе allow принимает
         # мусор и крутит до no_tool_call_max_count / сдаёт ход.
-        # Payload уже в state/jsonl; reject → bounce, не discard.
+        # The loop decides how to handle a rejected answer after this check.
         if finish_prevents_text_final(last_finish):
             return False, None
         # Модель повторила наш мост «(tool results received)» — шаблон из истории,
@@ -4328,6 +4387,8 @@ class _AgentLoop:
                     await await_callback(self.mark_finalizing(False))
             return await self._aclose_turn(assistant_text)
         # === reject ===
+        if self.stop_on_no_tool_response:
+            return self._stop_without_tool()
         state.tick_signals.add(NO_TOOL_BOUNCE)
         self.tool_error_cnt += 1
         bounce_msg = self._text_reject_bounce_msg(
