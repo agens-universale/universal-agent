@@ -23,6 +23,7 @@ import threading
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from gc_core.config_modules.field_meta import plain_dump
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp import stream_client
@@ -39,6 +40,8 @@ from gc_core.tools.connect_mcp.consumer_status import (
     server_status,
     shared_failure,
 )
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+from gc_core.tools.connect_mcp.execute_on import runs_in_agent_runtime
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
 )
@@ -90,6 +93,28 @@ def _succeeded(task: asyncio.Task) -> bool:
     return not task.cancelled() and task.exception() is None and task.result()
 
 
+def _agent_side_definitions(settings: Any, os_backend: Any) -> dict[str, dict]:
+    """Определения серверов сборки без trace (``plain_dump`` по алиасам)
+    — кроме серверов, исполняемых внутри бэкенда (§5.10)."""
+    defs = {
+        key: plain_dump(model, by_alias=True)
+        for key, model in effective_mcp_servers(settings).items()
+    }
+    return {
+        key: cfg
+        for key, cfg in defs.items()
+        if runs_in_agent_runtime(cfg, os_backend=os_backend)
+    }
+
+
+def _pin_view(pinned: dict[str, tuple[str, ServerStatus]]) -> dict:
+    """То в срезе, что меняет набор тулов: без времени и номера повтора."""
+    return {
+        key: (fp, st.state, st.reason_code, st.from_catalog, st.tools)
+        for key, (fp, st) in pinned.items()
+    }
+
+
 class McpConsumer:
     """Сессии одного потребителя сервиса и его статусы серверов.
 
@@ -98,7 +123,12 @@ class McpConsumer:
     сервера без постоянной сессии; ``_connects`` — идущая попытка;
     ``_series`` — серия повторов; ``_failures`` — своя последняя неудачная
     или прерванная попытка; ``_retry`` — номер повтора серии; ``_closing`` —
-    закрытие остатков сессий после отказа или отмены попытки.
+    закрытие остатков сессий после отказа или отмены попытки и сессий
+    серверов, ушедших из набора; ``_closing_keys`` — закрытие ушедшего
+    сервера по ключу: новое подключение того же ключа его дожидается.
+    ``_servers`` — набор (записи серверов последней начатой сборки),
+    ``_build`` — последний выданный номер сборки, ``_pinned`` —
+    закреплённый срез ``{ключ: (отпечаток, статус)}``.
     ``_settings`` — настройки сборки, по которым строятся определения.
     """
 
@@ -117,6 +147,10 @@ class McpConsumer:
         self._failures: dict[str, Failure] = {}
         self._retry: dict[str, int] = {}
         self._closing: set[asyncio.Task] = set()
+        self._closing_keys: dict[str, asyncio.Task] = {}
+        self._build = 0
+        self._servers: dict[str, ServerEntry] = {}
+        self._pinned: dict[str, tuple[str, ServerStatus]] = {}
         # Хвост закрытия (сессии владельца) идёт по одному вызову за раз.
         self._closing_sessions = asyncio.Lock()
 
@@ -198,18 +232,29 @@ class McpConsumer:
             if running is not None and not running.done():
                 return running
             started = self._service._clock()
+            # Закрытие прежней сессии того же ключа (сервер убрали из
+            # набора и вернули) должно кончиться до новой сессии: иначе
+            # оно закрыло бы её, а сервер с одним экземпляром отказал бы.
+            closing = self._closing_keys.get(key)
             task = asyncio.get_running_loop().create_task(
-                self._aconnect(entry, started),
+                self._aconnect(entry, started, closing),
                 context=contextvars.Context(),
             )
             self._connects[key] = task
         task.add_done_callback(partial(self._on_connect_done, entry, started))
         return task
 
-    async def _aconnect(self, entry: ServerEntry, started: float) -> bool:
+    async def _aconnect(
+        self,
+        entry: ServerEntry,
+        started: float,
+        closing: asyncio.Task | None,
+    ) -> bool:
         key = _session_key_of(entry)
         with use_owner(self.owner), use_call_slots(self._slots):
             try:
+                if closing is not None:
+                    await asyncio.wait({closing})
                 await self._alist_and_record(entry)
                 return True
             except asyncio.CancelledError:
@@ -265,14 +310,25 @@ class McpConsumer:
         task = asyncio.get_running_loop().create_task(
             self._aclose_session(entry), context=contextvars.Context()
         )
-        with self._lock:
-            self._closing.add(task)
-        task.add_done_callback(self._forget_closing)
+        self._track_closing(task)
         await asyncio.shield(task)
 
-    def _forget_closing(self, task: asyncio.Task) -> None:
+    def _track_closing(
+        self, task: asyncio.Task, key: str | None = None
+    ) -> None:
+        """Закрытие числится за потребителем (его ждёт ``aclose``); с
+        ``key`` — ещё и за ключом сессии ушедшего сервера."""
+        with self._lock:
+            self._closing.add(task)
+            if key is not None:
+                self._closing_keys[key] = task
+        task.add_done_callback(partial(self._forget_closing, key))
+
+    def _forget_closing(self, key: str | None, task: asyncio.Task) -> None:
         with self._lock:
             self._closing.discard(task)
+            if key is not None and self._closing_keys.get(key) is task:
+                del self._closing_keys[key]
 
     async def _aclose_session(self, entry: ServerEntry) -> None:
         """Сессия сервера у потребителя — во всех трёх реестрах."""
@@ -297,12 +353,16 @@ class McpConsumer:
     ) -> None:
         key = _session_key_of(entry)
         with self._lock:
-            if self._connects.get(key) is task:
+            # Попытку сервера, ушедшего из набора, сверка уже сняла с
+            # учёта: её отмена исходом не считается.
+            own = self._connects.get(key) is task
+            if own:
                 del self._connects[key]
             if task.cancelled():
-                self._failures[key] = Failure(
-                    started, "other", INTERRUPTED_REASON
-                )
+                if own:
+                    self._failures[key] = Failure(
+                        started, "other", INTERRUPTED_REASON
+                    )
                 return
         if self._unexpected_failure(entry, task):
             return
@@ -356,7 +416,11 @@ class McpConsumer:
             with self._lock:
                 # За паузу сервер мог подключиться (вызов, вход в ход):
                 # попытка поверх живой сессии её бы и закрыла при отказе.
+                # Сервер мог и уйти из набора: серию заводит колбэк
+                # попытки, и сверка могла пройти раньше него.
                 if self.closed or self._connected(key):
+                    return
+                if self._servers.get(entry.key) is not entry:
                     return
             # Ждём без отмены попытки: снятие серии её не прерывает.
             task = self._start_attempt(entry)
@@ -367,11 +431,162 @@ class McpConsumer:
     def _on_series_done(self, entry: ServerEntry, task: asyncio.Task) -> None:
         key = _session_key_of(entry)
         with self._lock:
-            self._retry.pop(key, None)
             if self._series.get(key) is task:
                 del self._series[key]
+                self._retry.pop(key, None)
         if not task.cancelled():
             self._unexpected_failure(entry, task)
+
+    def next_build(self) -> int:
+        """Номер новой сборки; набор меняет только сверка самой поздней."""
+        with self._lock:
+            self._build += 1
+            return self._build
+
+    def servers(self) -> dict[str, ServerEntry]:
+        """Набор: записи серверов последней начатой сборки."""
+        with self._lock:
+            return dict(self._servers)
+
+    def pin(self) -> bool:
+        """Закрепить срез ``{ключ: (отпечаток, статус)}`` набора.
+
+        Возвращает, отличается ли он от прошлого закреплённого по
+        отпечатку, состоянию, коду причины, признаку каталога и тулам;
+        время проверки и номер повтора на пересборку не влияют.
+        """
+        pinned = {
+            key: (entry.fingerprint, self.status_of(entry))
+            for key, entry in self.servers().items()
+        }
+        previous, self._pinned = self._pinned, pinned
+        return _pin_view(previous) != _pin_view(pinned)
+
+    async def aensure(
+        self, build: int, settings: Any, *, os_backend: Any = None
+    ) -> None:
+        """Сверить набор с серверами сборки ``build`` (спека §5.3–§5.4).
+
+        Устаревшая сборка (выдана раньше самой поздней) ничего не меняет.
+        Набор меняется атомарно, до любых ожиданий: новые серверы
+        подключаются по политике хоста, убранные и изменённые закрываются
+        в фоне, неизменные не трогаются. Затем сборка ждёт свои
+        подключения серверов без тулов и без отказа в этом процессе (при
+        ``wait_all`` — все свои подключения), не дольше
+        ``discovery_timeout_sec``; отмена ожидания набор не откатывает.
+        После остановки сервиса или закрытия — ``McpServiceClosed``.
+        """
+        self._service._bind_loop()
+        with self._lock:
+            if self.closed or self._service.closed:
+                raise McpServiceClosed(SERVICE_CLOSED_TEXT)
+            if build < self._build:
+                return
+        timeout = settings_of(settings).mcp.meta.discovery_timeout_sec
+        entries = {
+            key: self._service.entry(key, cfg, discovery_timeout=timeout)
+            for key, cfg in _agent_side_definitions(
+                settings, os_backend
+            ).items()
+        }
+        for entry in self._replace_set(settings, entries):
+            self._leave(entry)
+        self.pin()
+        waits = {self._connect_for_build(entry) for entry in entries.values()}
+        waits.discard(None)
+        await self._await_build(waits, timeout)
+        self.pin()
+
+    def _replace_set(
+        self, settings: Any, entries: dict[str, ServerEntry]
+    ) -> list[ServerEntry]:
+        """Заменить набор; вернуть убранные и изменённые записи."""
+        with self._lock:
+            gone = [
+                entry
+                for key, entry in self._servers.items()
+                if entries.get(key) is not entry
+            ]
+            self._servers = entries
+            self._settings = settings
+        return gone
+
+    def _leave(self, entry: ServerEntry) -> None:
+        """Сервер ушёл из набора: снять его попытку и серию, сессию закрыть
+        в фоне под владельцем потребителя.
+
+        Начатый по этой сессии вызов получает ошибку закрытой сессии, а
+        не зависает. Закрытие дожидается снятых задач и прежнего закрытия
+        того же ключа: так закрытия одного ключа идут по порядку.
+        """
+        key = _session_key_of(entry)
+        with self._lock:
+            work = {self._connects.pop(key, None), self._series.pop(key, None)}
+            work.discard(None)
+            earlier = self._closing_keys.get(key)
+            self._retry.pop(key, None)
+            self._sessions.discard(key)
+            self._ok.discard(key)
+        for task in work:
+            task.cancel()
+        if earlier is not None:
+            work.add(earlier)
+        closing = asyncio.get_running_loop().create_task(
+            self._aclose_left(entry, work), context=contextvars.Context()
+        )
+        self._track_closing(closing, key)
+
+    async def _aclose_left(
+        self, entry: ServerEntry, work: set[asyncio.Task]
+    ) -> None:
+        if work:
+            await asyncio.wait(work)
+        await self._aclose_session(entry)
+
+    def _connect_for_build(self, entry: ServerEntry) -> asyncio.Task | None:
+        """Начать подключение по политике хоста; отдать задачу, если
+        сборке её ждать."""
+        key = _session_key_of(entry)
+        with self._lock:
+            if self._connected(key):
+                return None
+            task = self._connects.get(key) if self._attempting(key) else None
+        wanted = self._service.connect_on_start or not entry.tools_known
+        if task is None and wanted and self.may_connect(entry):
+            task = self._start_attempt(entry)
+        if task is None or not self._build_waits(entry):
+            return None
+        return task
+
+    def _build_waits(self, entry: ServerEntry) -> bool:
+        """Сборка ждёт: тулов нет и отказа в этом процессе ещё не было;
+        при ``wait_all`` — всегда."""
+        if self._service.wait_all:
+            return True
+        return not entry.tools_known and entry.last_failure is None
+
+    async def _await_build(
+        self, tasks: set[asyncio.Task], timeout: float
+    ) -> None:
+        """Ждать попытки, остановку сервиса или срок — что раньше.
+
+        Попытки ждём через ``asyncio.wait``: отмена ожидающего (срок,
+        отмена сборки) их не прерывает.
+        """
+        if not tasks:
+            return
+        loop = asyncio.get_running_loop()
+        stopped = loop.create_task(self._service._stopped_event.wait())
+        settled = loop.create_task(asyncio.wait(tasks))
+        try:
+            await asyncio.wait(
+                {stopped, settled},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            stopped.cancel()
+            settled.cancel()
 
     def status_of(self, entry: ServerEntry) -> ServerStatus:
         """Статус сервера у этого потребителя (спека §5.5)."""

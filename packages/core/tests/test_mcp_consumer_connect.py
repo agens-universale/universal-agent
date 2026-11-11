@@ -88,6 +88,13 @@ def _entry(service: McpService, settings, key: str = "srv"):
     return service.entry(key, cfg, discovery_timeout=timeout)
 
 
+def _in_set(consumer, entry):
+    """Сервер в наборе потребителя, как после сверки: серия повторов
+    кончается, если сервера в наборе нет."""
+    consumer._servers[entry.key] = entry
+    return entry
+
+
 async def _connect(consumer, entry) -> None:
     """Подключить и дождаться; срок ожидания попытку не прерывает."""
     await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
@@ -377,7 +384,7 @@ async def test_network_server_retries_five_times(
     settings = _settings({"srv": _closed_port_cfg()})
     service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     consumer = _consumer(mcp_reaper, service, settings)
-    entry = _entry(service, settings)
+    entry = _in_set(consumer, _entry(service, settings))
 
     await _connect(consumer, entry)
     await wait_for(
@@ -423,7 +430,7 @@ async def test_retry_succeeds_when_server_appears(
             connect_on_start=True, clock=clock.now, sleep=sleep
         )
         consumer = _consumer(mcp_reaper, service, settings)
-        entry = _entry(service, settings)
+        entry = _in_set(consumer, _entry(service, settings))
 
         await _connect(consumer, entry)
         await wait_for(
@@ -448,7 +455,7 @@ async def test_retries_stop_on_consumer_close(
     settings = _settings({"srv": _closed_port_cfg()})
     service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     consumer = _consumer(mcp_reaper, service, settings)
-    entry = _entry(service, settings)
+    entry = _in_set(consumer, _entry(service, settings))
     await _connect(consumer, entry)
     await wait_for(lambda: sleep.pauses == [1])
 
@@ -588,7 +595,7 @@ async def test_retry_status_between_attempts(mcp_home, mcp_reaper, mcp_owner):
     settings = _settings({"srv": _closed_port_cfg()})
     service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     consumer = _consumer(mcp_reaper, service, settings)
-    entry = _entry(service, settings)
+    entry = _in_set(consumer, _entry(service, settings))
     await _connect(consumer, entry)
 
     seen = []
@@ -883,7 +890,7 @@ async def test_series_stops_when_connected_during_pause(
     settings = _settings({"srv": {"transport": "stream_http", "url": url}})
     service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     consumer = _consumer(mcp_reaper, service, settings)
-    entry = _entry(service, settings)
+    entry = _in_set(consumer, _entry(service, settings))
     await _connect(consumer, entry)
     await wait_for(lambda: sleep.pauses == [1])
 
@@ -915,7 +922,7 @@ async def test_cancelled_waiter_keeps_attempt_and_series(
     settings = _settings({"srv": _closed_port_cfg()})
     service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     consumer = _consumer(mcp_reaper, service, settings)
-    entry = _entry(service, settings)
+    entry = _in_set(consumer, _entry(service, settings))
     await _connect(consumer, entry)
     await wait_for(lambda: sleep.pauses == [1])
     clock.advance(1)
