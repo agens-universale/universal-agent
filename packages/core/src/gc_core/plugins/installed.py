@@ -484,7 +484,9 @@ def update(
     """Переустановить из исходного источника с тем же ref (ветка уйдёт вперёд).
 
     ``confirm`` вызывается, только если хуки или MCP отличаются от установленной
-    копии; отказ даёт ``ValueError``.
+    копии; отказ даёт ``ValueError``. Сменившееся в источнике имя — тоже
+    ``ValueError``: копия встала бы рядом под новым именем, затерев
+    одноимённый плагин, а данные плагина остались бы под старым.
     """
     root, meta = _load_meta(root)
     rec = meta.get(name)
@@ -494,6 +496,11 @@ def update(
     with prepare(
         rec["source"], ref=rec.get("ref"), subdir=rec.get("subdir"), root=root
     ) as prepared:
+        if prepared.plugin.name != name:
+            raise ValueError(
+                f"имя плагина в источнике сменилось: {name} → "
+                f"{prepared.plugin.name}; удалите {name} и установите заново"
+            )
         if confirm and prepared.differs_from(name) and not confirm(prepared):
             raise ValueError("обновление отменено")
         info = prepared.commit(force=True)

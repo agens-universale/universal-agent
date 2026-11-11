@@ -435,6 +435,28 @@ def test_install_list_disable_enable_update_uninstall(tmp_path):
     assert installed.list_installed() == []
 
 
+def test_update_refuses_renamed_plugin(tmp_path):
+    """Имя плагина в источнике сменилось: обновление отказывает с причиной,
+    не ставит копию под новым именем и не затирает плагин с этим именем."""
+    from gc_core.plugins import catalog, installed
+
+    catalog.reset_plugin_cache()
+    src = _make_plugin(tmp_path, with_skill=True, name="old-name")
+    installed.install(str(src))
+    other = _make_plugin(tmp_path / "other", with_skill=True, name="new-name")
+    installed.install(str(other))
+    (src / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "new-name", "version": "2"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="old-name → new-name"):
+        installed.update("old-name")
+
+    sources = {p.name: p.source for p in installed.list_installed()}
+    assert sorted(sources) == ["new-name", "old-name"]
+    assert sources["new-name"].endswith("other/new-name")
+
+
 def test_install_rejects_non_plugin_dir(tmp_path):
     from gc_core.plugins import installed
 
