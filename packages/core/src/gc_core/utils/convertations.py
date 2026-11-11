@@ -197,9 +197,10 @@ def get_output_list(
 
 
 def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
-    """Аргументы вызова — не JSON: в лог сырой строкой. Сборка не меняется,
-    модель и так получит ошибку разбора; лог нужен, чтобы отличить обрыв у
-    бэкенда (вызов закрыт как готовый) от потери на нашей стороне."""
+    """Аргументы вызова — не JSON: предупреждение с метаданными. Сборка не
+    меняется, модель и так получит ошибку разбора; лог нужен, чтобы отличить
+    обрыв у бэкенда (вызов закрыт как готовый) от потери на нашей стороне.
+    Сам обрывок — только на debug (см. `_log_raw_payload`)."""
     if logger is None:
         return
     fn = tool_call.get("function") or {}
@@ -211,12 +212,24 @@ def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
         return
     logger.warning(
         "chat/completions tool call arguments are not valid JSON "
-        "(finish_reason=%r, tool=%s, call_id=%s): arguments=%s",
+        "(finish_reason=%r, tool=%s, call_id=%s, chars=%d)",
         finish_reason,
         fn.get("name"),
         tool_call.get("id"),
+        len(arguments),
+    )
+    logger.debug(
+        "chat/completions tool call arguments (call_id=%s): %s",
+        tool_call.get("id"),
         clip_middle(arguments, _MAX_BACKEND_LOG_CHARS),
     )
+
+
+def _log_raw_payload(logger, dct) -> None:
+    """Сырой ответ модели — только на debug. В сообщение лога он попадает
+    строкой, а маскировка секретов узнаёт их по имени ключа лишь в словаре:
+    поле ``password`` в аргументах вызова иначе ушло бы в лог как есть."""
+    logger.debug("chat/completions payload=%s", _safe_json_for_log(dct))
 
 
 def _accept_choice_finish_reason(
@@ -246,25 +259,32 @@ def _accept_choice_finish_reason(
         # ValueError: пустой батч, цикл сам bounce. Choice error уже выше.
         if logger_override is not None:
             logger_override.error(
-                "Empty choice discarded (unknown/empty finish_reason=%r): payload=%s",
+                "Empty choice discarded (unknown/empty finish_reason=%r): "
+                "id=%s model=%s",
                 fr,
-                _safe_json_for_log(dct),
+                dct.get("id"),
+                dct.get("model"),
             )
+            _log_raw_payload(logger_override, dct)
         return False
     if logger_override is None:
         return True
     if _decision.unknown:
         logger_override.warning(
-            "Unknown finish_reason=%r accepted permissively (content/tool_calls/reasoning present): payload=%s",
+            "Unknown finish_reason=%r accepted permissively (content/tool_calls/reasoning present): id=%s model=%s",
             fr,
-            _safe_json_for_log(dct),
+            dct.get("id"),
+            dct.get("model"),
         )
     if _decision.kind == FINISH_KIND_LENGTH:
         logger_override.warning(
             "chat/completions choice finished with length (output may be truncated; "
-            "tool JSON may be incomplete). payload=%s",
-            _safe_json_for_log(dct),
+            "tool JSON may be incomplete). id=%s model=%s",
+            dct.get("id"),
+            dct.get("model"),
         )
+    if _decision.unknown or _decision.kind == FINISH_KIND_LENGTH:
+        _log_raw_payload(logger_override, dct)
     return True
 
 
@@ -370,11 +390,14 @@ def output_chat_completion_to_response(
     except Exception:
         if logger_override is not None:
             logger_override.error(
-                "Failed to convert chat/completions payload. context=%s payload=%s",
+                "Failed to convert chat/completions payload. context=%s "
+                "id=%s model=%s",
                 _safe_json_for_log(log_context or {}),
-                _safe_json_for_log(dct),
+                dct.get("id"),
+                dct.get("model"),
                 exc_info=True,
             )
+            _log_raw_payload(logger_override, dct)
         raise
     if "system_fingerprint" in dct_output:
         del dct_output["system_fingerprint"]

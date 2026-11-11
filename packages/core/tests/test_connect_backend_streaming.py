@@ -262,9 +262,19 @@ async def test_stream_stops_at_done_even_if_the_server_holds_the_body_open(
     assert ("answer", "hi") in deltas
 
 
+def _debug(log) -> list:
+    """Строковые debug-записи мок-логгера (запрос и ответ идут словарём)."""
+    return [
+        c.args[0] % c.args[1:]
+        for c in log.debug.call_args_list
+        if c.args and isinstance(c.args[0], str) and "%" in c.args[0]
+    ]
+
+
 def test_stream_logs_dropped_chunk(monkeypatch):
     """Чанк, не разобранный как JSON-объект, в сборку не идёт, но и не
-    пропадает молча: транспорт пишет его в лог предупреждением."""
+    пропадает молча: предупреждение — с числом и размерами, сам текст — на
+    debug (строкой его маскировка секретов по имени ключа не видит)."""
     from unittest.mock import MagicMock
 
     body = (
@@ -292,11 +302,13 @@ def test_stream_logs_dropped_chunk(monkeypatch):
         )
     )
     assert res["choices"][0]["message"]["content"] == "a"
+    chunk = '{"choices": [{"delta": {"content": "b"'
     warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
     assert warnings == [
-        "chat/completions stream chunk dropped (not a JSON object): "
-        '{"choices": [{"delta": {"content": "b"'
+        "chat/completions stream: 1 chunks dropped (not a JSON object), "
+        f"sizes of the first 1: [{len(chunk)}]"
     ]
+    assert f"chat/completions stream chunk dropped: {chunk}" in _debug(log)
 
 
 async def test_dropped_chunk_is_logged_even_if_the_stream_breaks(monkeypatch):
@@ -326,15 +338,17 @@ async def test_dropped_chunk_is_logged_even_if_the_stream_breaks(monkeypatch):
             logger=log,
         )
     warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
+    assert any("1 chunks dropped" in w for w in warnings)
     assert (
-        "chat/completions stream chunk dropped (not a JSON object): "
+        "chat/completions stream chunk dropped: "
         '{"choices": [{"delta": {"content": "b"'
-    ) in warnings
+    ) in _debug(log)
 
 
 def test_dropped_chunks_log_is_capped_with_a_total(monkeypatch):
-    """Поток в нечитаемом формате: в лог первые обрывки и итог, сколько
-    отброшено всего, — не по предупреждению на каждый чанк."""
+    """Поток в нечитаемом формате: одно предупреждение с итогом, сколько
+    отброшено всего, и текст первых обрывков на debug — не по записи на
+    каждый чанк."""
     from unittest.mock import MagicMock
 
     from gc_core.utils.stream_assembler import MAX_DROPPED_PAYLOADS
@@ -366,8 +380,11 @@ def test_dropped_chunks_log_is_capped_with_a_total(monkeypatch):
         )
     )
     warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
-    assert len(warnings) == MAX_DROPPED_PAYLOADS + 1
-    assert warnings[-1] == (
+    assert len(warnings) == 1
+    assert warnings[0].startswith(
         f"chat/completions stream: {MAX_DROPPED_PAYLOADS + extra} chunks "
-        f"dropped in total, {extra} not logged"
+        f"dropped (not a JSON object), sizes of the first "
+        f"{MAX_DROPPED_PAYLOADS}: "
     )
+    dropped = [m for m in _debug(log) if "chunk dropped" in m]
+    assert len(dropped) == MAX_DROPPED_PAYLOADS

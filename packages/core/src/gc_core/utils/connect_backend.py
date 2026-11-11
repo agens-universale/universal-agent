@@ -283,20 +283,22 @@ def _log_backend_request(
 
 
 def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
-    if logger is None:
+    """Чанки, не разобранные как JSON: на warning — сколько и каких размеров,
+    сам текст — только на debug. Это сырой вывод модели строкой, и маскировка
+    секретов по имени ключа его не видит."""
+    if logger is None or not assembler.dropped_count:
         return
+    logger.warning(
+        "chat/completions stream: %d chunks dropped (not a JSON object), "
+        "sizes of the first %d: %s",
+        assembler.dropped_count,
+        len(assembler.dropped_payloads),
+        [len(p) for p in assembler.dropped_payloads],
+    )
     for payload in assembler.dropped_payloads:
-        logger.warning(
-            "chat/completions stream chunk dropped (not a JSON object): %s",
+        logger.debug(
+            "chat/completions stream chunk dropped: %s",
             clip_middle(payload, _MAX_DROPPED_CHUNK_LOG_CHARS),
-        )
-    unlogged = assembler.dropped_count - len(assembler.dropped_payloads)
-    if unlogged:
-        logger.warning(
-            "chat/completions stream: %d chunks dropped in total, "
-            "%d not logged",
-            assembler.dropped_count,
-            unlogged,
         )
 
 
