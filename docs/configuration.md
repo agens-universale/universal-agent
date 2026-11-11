@@ -931,9 +931,9 @@ models:                                  # реестр: алиас → пров
       chat_template_kwargs:
         enable_thinking: false
 
-# В models.<alias>.backend нет api_mode, stream, send_tool_strict и
-# openai_strict_tools_schema: они действуют на весь бэкенд и задаются в общей
-# секции backend (на модели ключ проигнорируется с уведомлением).
+# В models.<alias>.backend нет api_mode и stream: они действуют на весь
+# бэкенд и задаются в общей секции backend (на модели ключ проигнорируется
+# с уведомлением).
 
 slots:                                   # уровни — указатели на алиасы, не копии
   light: flash
