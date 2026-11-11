@@ -1,4 +1,6 @@
 import unittest
+
+import pytest
 from unittest.mock import MagicMock
 
 from gc_core.utils.convertations import (
@@ -561,6 +563,28 @@ def test_long_unparsable_arguments_keep_their_tail_in_the_log():
     assert msg.endswith("xTAIL")
     assert f"total_chars={len(broken)}" in msg
     assert '{"path": "a.txt"' in msg
+
+
+@pytest.mark.parametrize(
+    "tool_call",
+    [
+        None,
+        {"type": "function", "function": None},
+        {"type": "function", "function": "fs_read_file"},
+        {"id": "c1", "type": "function", "function": {"name": "x"}},
+    ],
+)
+def test_warning_does_not_break_recovery_of_invalid_calls(tool_call):
+    """Режим восстановления оставляет мусорный вызов в батче (дальше его
+    отклонит общая проверка). Предупреждение о битых аргументах идёт до
+    нормализации и не должно ронять разбор на таком вызове."""
+    log = MagicMock()
+    out = get_output_list(
+        _dct("tool_calls", content=None, tool_calls=[tool_call]),
+        logger_override=log,
+        recover_invalid_tool_calls=True,
+    )
+    assert [o["type"] for o in out] == ["function_call"]
 
 
 if __name__ == "__main__":

@@ -212,9 +212,13 @@ def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
     меняется, модель и так получит ошибку разбора; лог нужен, чтобы отличить
     обрыв у бэкенда (вызов закрыт как готовый) от потери на нашей стороне.
     Сам обрывок — только на debug (см. `_log_raw_payload`)."""
-    if logger is None:
+    if logger is None or not isinstance(tool_call, dict):
         return
-    fn = tool_call.get("function") or {}
+    # Мусорный вызов (функция не словарь) — не обрыв аргументов: его
+    # нормализует режим восстановления, падать здесь нельзя.
+    fn = tool_call.get("function")
+    if not isinstance(fn, dict):
+        return
     arguments = fn.get("arguments")
     # Пустые аргументы — вызов без параметров, не обрывок.
     if not isinstance(arguments, str) or not arguments.strip():
