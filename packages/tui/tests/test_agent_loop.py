@@ -468,6 +468,18 @@ def test_foreign_input_on_the_loop_reads_the_app_queue(agent_loop):
     assert agent_loop.run(as_coro(input)(), timeout=5.0) == "ответ"
 
 
+def test_next_runner_keeps_the_stop_wakeup(agent_loop):
+    """Стоп будит чужой ``input()`` пустой строкой в общей очереди stdin.
+    Старт следующего раннера её не забирает: ход остановленного раннера
+    может дойти до ``input()`` позже и без неё держал бы весь цикл."""
+    stopped = AgentRunner(executor=_LoopRecorder(), loop=agent_loop)
+    stopped.stop()
+    following = AgentRunner(executor=_LoopRecorder(), loop=agent_loop)
+    assert following.start(query="q", thread_id="t1")
+    following.wait(5.0)
+    assert agent_loop.stdin_queue.get_nowait() == "\n"
+
+
 def test_submit_after_shutdown_raises_instead_of_hanging(agent_loop):
     """Корутина, отданная закрытому циклу, не ждёт вечно: отказ сразу,
     сама корутина закрыта (иначе «never awaited»)."""
