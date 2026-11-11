@@ -137,11 +137,3 @@ def test_mark_gradient_spans_columns():
         branding.gradient_color(1.0).lower()
     )
     assert first.bold
-
-
-def test_measure_is_widest_layout():
-    from rich.measure import Measurement
-
-    console = Console(width=200)
-    r = branding.BrandHeader("v0.5.0", update=True)
-    assert Measurement.get(console, console.options, r).maximum == 88

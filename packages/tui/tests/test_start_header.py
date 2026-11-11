@@ -240,6 +240,35 @@ async def test_settled_toasts_once(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_failed_build_does_not_spend_the_startup_toasts(
+    tmp_path, monkeypatch
+):
+    """Сбой сборки — не итог загрузки: тосты показываются один раз за запуск,
+    и потратить их на неполный список (MCP ещё не опрошены) значило бы
+    потерять предупреждения удачной пересборки."""
+    from gc_core import startup_notices
+
+    toasts = []
+    monkeypatch.setattr(
+        startup_notices,
+        "warning_toasts",
+        lambda notices: toasts.append(1) or ([], None, frozenset()),
+    )
+    app = _app(tmp_path, _TWO_SERVERS)
+    async with app.run_test(size=(120, 40)) as pilot:
+        header = _header(app)
+        await _feed(app, pilot, _progress(outcome=False))
+        await pilot.pause()
+        assert _status(header) == _FAILED
+        assert toasts == []
+
+        await _feed(app, pilot, _progress(_ALL_OK, outcome=True))
+        _spin(header)
+        await pilot.pause()
+        assert len(toasts) == 1
+
+
+@pytest.mark.asyncio
 async def test_settled_without_servers_waits_for_end_of_build(
     tmp_path, monkeypatch
 ):
@@ -303,7 +332,7 @@ def test_build_success_finishes_progress(tmp_path, monkeypatch):
         tmp_path, monkeypatch, as_coro(lambda *a, **k: _Ctx())
     )
     app._build_real_executor()
-    assert app._mcp_progress.outcome() is True
+    assert app._mcp_progress.state()[1] is True
 
 
 def test_build_error_marks_progress_failed(tmp_path, monkeypatch):
@@ -313,7 +342,7 @@ def test_build_error_marks_progress_failed(tmp_path, monkeypatch):
     app = _real_build_app(tmp_path, monkeypatch, as_coro(_boom))
     with pytest.raises(RuntimeError, match="boom"):
         app._build_real_executor()
-    assert app._mcp_progress.outcome() is False
+    assert app._mcp_progress.state()[1] is False
 
 
 def _boom(*_a, **_k):
@@ -339,7 +368,7 @@ def test_build_failure_anywhere_marks_progress_failed(
     monkeypatch.setattr(target, _boom)
     with pytest.raises(RuntimeError, match="boom"):
         app._build_real_executor()
-    assert app._mcp_progress.outcome() is False
+    assert app._mcp_progress.state()[1] is False
 
 
 def test_failed_build_keeps_foreign_published_progress(tmp_path, monkeypatch):
@@ -361,7 +390,7 @@ def test_failed_build_keeps_foreign_published_progress(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         app._build_real_executor()
     assert app._mcp_progress is second
-    assert second.outcome() is None
+    assert second.state()[1] is None
 
 
 @pytest.mark.asyncio

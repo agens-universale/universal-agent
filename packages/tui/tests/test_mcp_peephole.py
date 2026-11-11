@@ -141,3 +141,21 @@ def test_finished_only_for_current_source_with_outcome():
     _run(p, 20)
     assert p.finished(src)
     assert not p.finished(object())  # чужой источник — новое поколение
+
+
+def test_sync_reports_whether_the_view_changed():
+    """Что изменилось на экране, знает модель: виджет не дублирует её поля."""
+    p = McpPeephole(2)
+    src = object()
+    assert p.sync(src, {"a": None, "b": None}, None) is True  # новое поколение
+    assert p.sync(src, {"a": None, "b": None}, None) is False  # тот же снимок
+    assert p.sync(src, {"a": None, "b": None}, False) is True  # сбой
+    assert p.sync(src, {"a": None, "b": None}, False) is False
+
+
+def test_total_changes_only_with_the_generation():
+    p = McpPeephole(2)
+    src = object()
+    p.sync(src, {"a": None, "b": None}, None)
+    p.sync(src, {"a": None}, None)
+    assert p.total == 2

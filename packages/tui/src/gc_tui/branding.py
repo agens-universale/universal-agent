@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from rich.console import Console, ConsoleOptions, RenderResult
-from rich.measure import Measurement
 from rich.text import Text
 
 from gc_tui.palette import (
@@ -164,9 +163,3 @@ class BrandHeader(WidthAware):
             yield from self._status()
         if self.update and not beside:
             yield ColumnRow(Text("  "), self._tail_atoms())
-
-    def __rich_measure__(
-        self, console: Console, options: ConsoleOptions
-    ) -> Measurement:
-        widest = self._tail_beside() if self.update else self._mark_need
-        return Measurement(widest, widest)

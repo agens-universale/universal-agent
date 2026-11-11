@@ -25,10 +25,6 @@ class McpProgress:
         with self._lock:
             self._outcome = ok
 
-    def outcome(self) -> Optional[bool]:
-        with self._lock:
-            return self._outcome
-
     def update(self, server: str, status: dict) -> None:
         with self._lock:
             self._servers[server] = status
