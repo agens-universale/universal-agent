@@ -15,11 +15,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gc_core.message_policy.tool_usage_notice.policy import (
-    wrap_thread_memory_technical_user_message,
-)
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    wrap_request_context_message,
 )
 from gc_core.plugins.manifest import PluginCommand
 from gc_core.plugins.snapshot import PluginSnapshot
@@ -157,11 +155,7 @@ def command_messages(
     text = None if found is None else _command_text(snapshot, *found)
     if text is None:
         return []
-    return [
-        wrap_thread_memory_technical_user_message(
-            text, message_id_suffix="plugin_command"
-        )
-    ]
+    return [wrap_request_context_message(text, kind="plugin_command")]
 
 
 def listed_skill_ids(skills: Sequence[Mapping[str, Any]]) -> list[str]:

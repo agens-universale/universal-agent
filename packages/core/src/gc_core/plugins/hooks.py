@@ -34,7 +34,10 @@ from gc_core.message_format.serialization import (
 from gc_core.message_policy.tool_usage_notice.policy import (
     wrap_thread_memory_technical_user_message,
 )
-from gc_core.message_policy.user_message_policy import last_real_user_text
+from gc_core.message_policy.user_message_policy import (
+    last_real_user_text,
+    wrap_request_context_message,
+)
 from gc_core.plugins.hook_runner import HookResult, run_hook
 from gc_core.plugins.manifest import (
     EVENT_SESSION_START,
@@ -99,7 +102,11 @@ async def _auser_prompt(
             texts.extend(_prompt_texts(ctx, result))
     if not texts:
         return []
-    return [_technical("\n\n".join(texts), "plugin_user_prompt")]
+    return [
+        wrap_request_context_message(
+            "\n\n".join(texts), kind="plugin_user_prompt"
+        )
+    ]
 
 
 def _prompt_texts(ctx: Any, result: HookResult) -> list[str]:
