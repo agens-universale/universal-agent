@@ -63,7 +63,7 @@ from gc_core.tools.connect_mcp.transport import (
     _areadline_with_timeout,
     _cancelled_notification,
     _readline_with_timeout,
-    _resolve_command,
+    _stdio_command,
     forget_stdio_reader,
 )
 from gc_core.user_stop import UserStopInterrupt, current_user_stop
@@ -89,21 +89,7 @@ def _spawn_detached_stdio_process(
     дети) лечится только групповым сигналом, для которого нужен отдельный
     process group — его и создаём здесь.
     """
-    command = server_cfg.get("command")
-    if not command:
-        raise ValueError("stdio MCP server config must have 'command'")
-    command = _resolve_command(str(command))
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-    cmd = [command] + [str(a) for a in args]
-    cwd = server_cfg.get("cwd")
-    env_extra = server_cfg.get("env") or {}
-    from gc_core.mcp_runtime.env import augment_process_env
-
-    env = augment_process_env()
-    for k, v in env_extra.items():
-        env[str(k)] = str(v)
+    cmd, cwd, env = _stdio_command(server_cfg)
 
     popen_kwargs: Dict[str, Any] = dict(
         stdin=subprocess.PIPE,
