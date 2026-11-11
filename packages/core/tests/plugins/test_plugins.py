@@ -457,6 +457,18 @@ def test_update_refuses_renamed_plugin(tmp_path):
     assert sources["new-name"].endswith("other/new-name")
 
 
+def test_update_keeps_plugin_with_unsafe_name(tmp_path):
+    """Имя с пробелом хранится под безопасным ``my_plugin``: это не смена
+    имени, update обновляет плагин."""
+    from gc_core.plugins import catalog, installed
+
+    catalog.reset_plugin_cache()
+    src = _make_plugin(tmp_path, with_skill=True, name="my plugin")
+    assert installed.install(str(src)).name == "my_plugin"
+
+    assert installed.update("my_plugin").name == "my_plugin"
+
+
 def test_install_rejects_non_plugin_dir(tmp_path):
     from gc_core.plugins import installed
 

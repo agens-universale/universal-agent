@@ -496,7 +496,7 @@ def update(
     with prepare(
         rec["source"], ref=rec.get("ref"), subdir=rec.get("subdir"), root=root
     ) as prepared:
-        if prepared.plugin.name != name:
+        if _safe_name(prepared.plugin.name) != name:
             raise ValueError(
                 f"имя плагина в источнике сменилось: {name} → "
                 f"{prepared.plugin.name}; удалите {name} и установите заново"
