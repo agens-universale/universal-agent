@@ -80,17 +80,17 @@ class HookMatcher:
 
     ``*`` или пустая строка подходят всегда. Иначе это регулярное выражение,
     которое должно совпасть со значением целиком: для ``SessionStart`` это
-    источник старта (``startup`` или ``compact``).
+    источник старта (``startup`` или ``compact``). У события без значения
+    (``UserPromptSubmit``, ``value is None``) условие не применяется — как в
+    Claude Code, где оно молча игнорируется.
     """
 
     matcher: str
     hooks: tuple[HookCommand, ...]
 
     def matches(self, value: str | None) -> bool:
-        if self.matcher in ("", "*"):
+        if self.matcher in ("", "*") or value is None:
             return True
-        if value is None:
-            return False
         try:
             return re.fullmatch(self.matcher, value) is not None
         except re.error:

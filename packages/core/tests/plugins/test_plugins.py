@@ -123,6 +123,23 @@ def test_matcher_wildcard_and_alternatives(tmp_path):
     assert plugin.hooks_for("UserPromptSubmit", None)
 
 
+def test_matcher_is_ignored_without_value(tmp_path):
+    """У ``UserPromptSubmit`` нет значения для сверки: условие не
+    применяется, хук срабатывает на каждый запрос (как в Claude Code)."""
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "UserPromptSubmit": [
+                {
+                    "matcher": "review",
+                    "hooks": [{"type": "command", "command": "true"}],
+                }
+            ],
+        },
+    )
+    assert load_plugin(root).hooks_for("UserPromptSubmit", None)
+
+
 def test_reset_plugin_cache_clears_source_warnings():
     from gc_core.plugins import sources
 
