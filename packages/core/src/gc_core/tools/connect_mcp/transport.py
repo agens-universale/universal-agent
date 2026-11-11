@@ -379,7 +379,19 @@ class _LineReader:
                 return self._queue.get(timeout=min(0.02, remaining))
             except queue.Empty:
                 if self._ended:
-                    return None
+                    return self._rest_after_end()
+
+    def _rest_after_end(self) -> "str | None":
+        """Конец потока увиден после пустой очереди.
+
+        Качальщик мог положить последнюю строку уже после того, как
+        очередь оказалась пустой, и только потом поставить флаг конца:
+        забираем её без ожидания, «конец» — только при пустой очереди.
+        """
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
 
     async def areadline(self, timeout: float) -> "str | None":
         """То же, но ожиданием очереди не занимает ни поток, ни loop.
@@ -405,7 +417,7 @@ class _LineReader:
                 return self._queue.get_nowait()
             except queue.Empty:
                 if self._ended:
-                    return None
+                    return self._rest_after_end()
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
                 return None

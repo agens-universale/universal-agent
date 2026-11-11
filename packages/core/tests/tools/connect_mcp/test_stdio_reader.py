@@ -4,11 +4,15 @@
 вызов тула — и при таймауте оставляла его висеть на readline навсегда.
 """
 
+import queue
 import threading
 import time
 
+import pytest
+
 from gc_core.tools.connect_mcp.transport import (
     _areadline_with_timeout,
+    _LineReader,
     _readline_with_timeout,
     forget_stdio_reader,
 )
@@ -133,6 +137,50 @@ async def test_async_read_after_end_returns_none_at_once():
         assert time.monotonic() - started < 1, "второе чтение ждало срок"
     finally:
         forget_stdio_reader(stream)
+
+
+class _HeldStream:
+    """Поток, который молчит, пока тест его не отпустит."""
+
+    def __init__(self):
+        self.release = threading.Event()
+
+    def readline(self):
+        self.release.wait(10)
+        return ""
+
+
+class _RacingQueue(queue.Queue):
+    """Очередь пуста на первом чтении, но сразу после него качальщик кладёт
+    последнюю строку и ставит флаг конца — окно гонки, развёрнутое в шаг."""
+
+    def __init__(self, reader):
+        super().__init__()
+        self._reader = reader
+        self._raced = False
+
+    def get(self, block=True, timeout=None):
+        if not self._raced:
+            self._raced = True
+            super().put("последняя\n")
+            self._reader._ended = True
+            raise queue.Empty
+        return super().get(block, timeout)
+
+
+@pytest.mark.parametrize("form", ["sync", "async"])
+async def test_last_line_put_before_end_flag_is_returned(form):
+    stream = _HeldStream()
+    reader = _LineReader(stream)
+    reader._queue = _RacingQueue(reader)
+    try:
+        if form == "sync":
+            line = reader.readline(2)
+        else:
+            line = await reader.areadline(2)
+        assert line == "последняя\n"
+    finally:
+        stream.release.set()
 
 
 def test_bytes_lines_are_decoded():
