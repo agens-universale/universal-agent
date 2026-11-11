@@ -21,9 +21,8 @@ def _safe_json_for_log(payload, *, max_chars=_MAX_BACKEND_LOG_CHARS):
         raw = json.dumps(payload, ensure_ascii=False, default=str)
     except Exception:
         raw = str(payload)
-    if len(raw) <= max_chars:
-        return raw
-    return f"{raw[:max_chars]}... [truncated, total_chars={len(raw)}]"
+    # Начало и конец: при упоре в лимит длины важен хвост ответа.
+    return clip_middle(raw, max_chars)
 
 
 def sanitize_messages_for_chat_completions(

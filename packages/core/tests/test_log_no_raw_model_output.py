@@ -1,9 +1,10 @@
-"""Сырой вывод модели не попадает в лог выше debug.
+"""Сырой вывод модели не попадает в предупреждения и ошибки лога.
 
 Маскировка секретов узнаёт их по имени ключа только в словаре; вывод модели
 (аргументы вызова, чанки стрима, весь ответ) в сообщение лога уходит строкой —
 там поле ``password`` уже не ключ, и значение утекало бы в stdout, файл и
-обработчики приложения. На warning и error — только метаданные.
+обработчики приложения. На warning и error — только метаданные, текст — на
+debug. Журнал диалога на info пишет сообщения целиком — это его назначение.
 """
 
 import json
@@ -105,16 +106,16 @@ def _assert_warned_without_secret(channels, marker):
 
 
 def test_truncated_arguments(run_log):
-    logger, channels = run_log
-    logger = logger()
+    make_logger, channels = run_log
+    logger = make_logger()
     broken = '{"path": "a.toml", "password": "' + SECRET + '", "x": '
     get_output_list(_choice("tool_calls", broken), logger_override=logger)
     _assert_warned_without_secret(channels, "not valid JSON")
 
 
 def test_dropped_stream_chunk(run_log):
-    logger, channels = run_log
-    logger = logger()
+    make_logger, channels = run_log
+    logger = make_logger()
     asm = StreamAssembler()
     asm.feed_line('data: {"password": "' + SECRET + '", "choices": [')
     connect_backend._log_dropped_chunks(logger, asm)
@@ -122,24 +123,24 @@ def test_dropped_stream_chunk(run_log):
 
 
 def test_length_finish(run_log):
-    logger, channels = run_log
-    logger = logger()
+    make_logger, channels = run_log
+    logger = make_logger()
     args = json.dumps({"path": "a", "password": SECRET})
     get_output_list(_choice("length", args), logger_override=logger)
     _assert_warned_without_secret(channels, "finished with length")
 
 
 def test_unknown_finish(run_log):
-    logger, channels = run_log
-    logger = logger()
+    make_logger, channels = run_log
+    logger = make_logger()
     args = json.dumps({"path": "a", "password": SECRET})
     get_output_list(_choice("weird", args), logger_override=logger)
     _assert_warned_without_secret(channels, "accepted permissively")
 
 
 def test_empty_choice(run_log):
-    logger, channels = run_log
-    logger = logger()
+    make_logger, channels = run_log
+    logger = make_logger()
     dct = {
         "id": "resp-1",
         "model": "m",
@@ -153,8 +154,8 @@ def test_empty_choice(run_log):
 
 
 def test_failed_conversion(run_log, monkeypatch):
-    logger, channels = run_log
-    logger = logger()
+    make_logger, channels = run_log
+    logger = make_logger()
     from gc_core.utils import convertations
 
     def _boom(*_a, **_k):

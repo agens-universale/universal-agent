@@ -70,6 +70,8 @@ _MODEL_REQUEST_STOPPED = "Ход остановлен"
 NO_BACKEND_OVERRIDE = object()
 # Отброшенный чанк стрима в лог — с потолком: битая строка бывает любой длины.
 _MAX_DROPPED_CHUNK_LOG_CHARS = 2000
+# Последний чанк responses — весь ответ: потолок как у сырого ответа.
+_MAX_LAST_CHUNK_LOG_CHARS = 8000
 
 
 def get_async_client(*args, **kwargs):
@@ -300,6 +302,30 @@ def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
             "chat/completions stream chunk dropped: %s",
             clip_middle(payload, _MAX_DROPPED_CHUNK_LOG_CHARS),
         )
+
+
+def _log_last_chunk(logger, last_chunk: str) -> None:
+    """Последний чанк ответа responses — сырой вывод модели: только на debug,
+    строкой его маскировка секретов по имени ключа не видит. Текст — в самом
+    сообщении: format text полей события не выводит."""
+    logger.debug(
+        "backend_responses_last_chunk: %s",
+        clip_middle(last_chunk, _MAX_LAST_CHUNK_LOG_CHARS),
+        extra={"event": "backend_responses_last_chunk"},
+    )
+
+
+def _stream_finish_reason(result: dict) -> Any:
+    """Причина незавершённого потока от провайдера — код, сообщение, причина
+    остановки; вывода модели в ней нет. Ищется в ответе (response.failed,
+    response.incomplete) и в событии error верхнего уровня потока."""
+    response = result.get("response")
+    if isinstance(response, dict):
+        reason = response.get("error") or response.get("incomplete_details")
+        if reason:
+            return reason
+    top = {k: result[k] for k in ("error", "code", "message") if k in result}
+    return top or None
 
 
 def _log_backend_response(logger, api_mode: str, response: Any) -> None:
@@ -604,19 +630,30 @@ async def _arequest_backend_responses_once(
     try:
         result = json.loads(re.sub("^data: +", "", last_chunk))
     except Exception as e:
-        print(f"Error read json from backend. Last chunk: {last_chunk}")
+        print(
+            f"Error read json from backend: last chunk {len(last_chunk)} chars"
+        )
         if logger is not None:
             logger.error(
                 "backend_responses_json_error",
                 extra={
                     "event": "backend_responses_json_error",
-                    "last_chunk": last_chunk,
+                    "last_chunk_chars": len(last_chunk),
                 },
             )
+            _log_last_chunk(logger, last_chunk)
         raise e
 
     if result.get("type") != "response.completed":
-        raise ValueError(f"wrong stream finish: {last_chunk}")
+        if logger is not None:
+            _log_last_chunk(logger, last_chunk)
+        # Последний чанк — весь ответ с аргументами вызовов: в текст
+        # исключения (его пишет и политика ретраев) — тип события и причина
+        # от провайдера. По ней восстановление узнаёт переполнение контекста.
+        raise ValueError(
+            f"wrong stream finish: {result.get('type')!r} "
+            f"{_stream_finish_reason(result)!r}"
+        )
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
