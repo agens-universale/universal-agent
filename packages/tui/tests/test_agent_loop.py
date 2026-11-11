@@ -223,13 +223,14 @@ def test_shutdown_closes_clients_and_joins(agent_loop, spy_aclose_clients):
     assert spy_aclose_clients.calls == 1 and not agent_loop.thread.is_alive()
 
 
-def test_concurrent_shutdown_closes_once(agent_loop, monkeypatch):
-    """Два `shutdown` наперегонки (воркер раннера и teardown): закрывает
-    первый, второй только ждёт поток — без «Event loop is closed».
+def test_concurrent_shutdown_closes_once(agent_loop, monkeypatch, caplog):
+    """Два `shutdown` наперегонки (воркер раннера и teardown): цикл
+    останавливает первый, второй только ждёт поток — его ``loop.stop``
+    оборвал бы уборку, и закрытие клиентов упало бы в лог.
 
-    Порядок — событиями: первый держится в ``aclose_clients``, пока второй
-    не дошёл до своего шага — до ``join`` потока (правильно) или до
-    второго ``aclose_clients`` (гонка)."""
+    Порядок — событиями: уборка первого держится в ``aclose_clients``, пока
+    второй не дошёл до своего шага — до ``join`` потока."""
+    caplog.set_level(logging.WARNING, logger="gc_tui.services.agent_loop")
     entered, release = threading.Event(), threading.Event()
     second_arrived = threading.Event()
     calls: list[int] = []
@@ -261,7 +262,7 @@ def test_concurrent_shutdown_closes_once(agent_loop, monkeypatch):
 
     first = threading.Thread(target=_shutdown)
     first.start()
-    assert entered.wait(5)  # первый закрывает клиенты на цикле
+    assert entered.wait(5)  # уборка первого закрывает клиенты на цикле
     second = threading.Thread(target=_shutdown, name="second-shutdown")
     second.start()
     assert second_arrived.wait(5)  # второй внутри shutdown, цикл ещё жив
@@ -271,6 +272,7 @@ def test_concurrent_shutdown_closes_once(agent_loop, monkeypatch):
     assert errors == []
     assert calls == [1]
     assert not agent_loop.thread.is_alive()
+    assert "agent_loop_aclose_clients_failed" not in caplog.text
 
 
 def test_shutdown_closes_clients_opened_by_cancelled_tasks(agent_loop):
