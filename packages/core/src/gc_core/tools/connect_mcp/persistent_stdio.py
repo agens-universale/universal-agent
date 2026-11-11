@@ -905,7 +905,9 @@ class PersistentStdioRegistry:
 
         ``False`` — такой сессии нет. Закрытие под ``shield``, как в
         ``aclose_all``: отмена вызывающего не обрывает его на середине,
-        иначе сервер получил бы SIGKILL без штатного закрытия.
+        иначе сервер получил бы SIGKILL без штатного закрытия. Исключения
+        закрытия пробрасываются (``aclose_all`` их глотает) — вызывающий
+        обрабатывает их сам.
         """
         with self._lock:
             session = self._sessions.pop((current_owner(), server_key), None)

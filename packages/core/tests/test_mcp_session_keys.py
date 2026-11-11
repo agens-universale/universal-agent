@@ -11,7 +11,7 @@ import asyncio
 import os
 
 import pytest
-from gc_core.mcp_session_owner import use_owner
+from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.connect_mcp import client, stream_client
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
@@ -30,6 +30,14 @@ from gc_testkit.mcp.fixtures import mcp_owner, mcp_reaper
 pytestmark = pytest.mark.skipif(
     os.name != "posix", reason="процессы и сигналы POSIX"
 )
+
+# Потолок закрытия: штатное закрытие с эскалацией укладывается в 7 с.
+_CLOSE_SEC = 10.0
+
+
+async def _aclose_one(key: str) -> bool:
+    registry = ps.PersistentStdioRegistry.instance()
+    return await asyncio.wait_for(registry.aclose_one(key), _CLOSE_SEC)
 
 
 def _keyed(cfg: dict, key: str) -> dict:
@@ -61,13 +69,26 @@ async def test_aclose_one_closes_only_that_session(
     cfg = stdio_cfg(control)
     first = await _echo_pid(_keyed(cfg, "srv@1"))
     second = await _echo_pid(_keyed(cfg, "srv@2"))
-    registry = ps.PersistentStdioRegistry.instance()
 
-    assert await registry.aclose_one("srv@1") is True
-    assert await registry.aclose_one("srv@1") is False
+    assert await _aclose_one("srv@1") is True
+    assert await _aclose_one("srv@1") is False
     assert first in exits(control)
     assert alive(second)
     assert second not in exits(control)
+
+
+async def test_aclose_one_spares_other_owners_session(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    cfg = _keyed(stdio_cfg(tmp_path / "s.json"), "srv@1")
+    pid = await _echo_pid(cfg)
+
+    with use_owner(new_owner_token("other")):
+        closed = await _aclose_one("srv@1")
+
+    assert closed is False
+    assert alive(pid)
+    assert await _echo_pid(cfg) == pid
 
 
 async def test_aclose_one_finishes_close_when_caller_is_cancelled(
@@ -95,12 +116,12 @@ async def test_aclose_one_finishes_close_when_caller_is_cancelled(
 
         closing.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await closing
+            await asyncio.wait_for(closing, _CLOSE_SEC)
     finally:
         release.set()
 
     await wait_for(lambda: pid in exits(control))
-    assert await registry.aclose_one("srv@1") is False
+    assert await _aclose_one("srv@1") is False
 
 
 async def test_stream_sessions_same_url_different_keys(
@@ -113,8 +134,10 @@ async def test_stream_sessions_same_url_different_keys(
         again = await call_tool("st", k1, "action", {})
         # Закрытие по ключу — существующее снятие сессии менеджером; на
         # живом сервере, а не после его гашения.
-        await stream_client._SESSION_MANAGER.ainvalidate("k1")
-        await stream_client._SESSION_MANAGER.ainvalidate("k2")
+        for key in ("k1", "k2"):
+            await asyncio.wait_for(
+                stream_client._SESSION_MANAGER.ainvalidate(key), _CLOSE_SEC
+            )
 
     assert first["session"] != second["session"]
     assert first["session"] == again["session"]

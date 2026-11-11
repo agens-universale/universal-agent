@@ -237,10 +237,14 @@ def forget_session(server_key: str) -> None:
 
 
 def forget_owner_sessions() -> None:
-    """Забыть session_id всех серверов ТЕКУЩЕГО владельца."""
+    """Забыть session_id всех серверов ТЕКУЩЕГО владельца.
+
+    Обход по снимку ключей: в словарь пишут и циклы других потоков.
+    """
     owner = current_owner()
-    for key in [key for key in _MCP_SESSIONS if key[0] == owner]:
-        _MCP_SESSIONS.pop(key, None)
+    for key in list(_MCP_SESSIONS):
+        if key[0] == owner:
+            _MCP_SESSIONS.pop(key, None)
 
 
 async def _aget_or_init_session_id(
