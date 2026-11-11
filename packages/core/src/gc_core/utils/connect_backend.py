@@ -68,8 +68,6 @@ _MODEL_REQUEST_STOPPED = "Ход остановлен"
 # Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
 # ResolvedModel.backend_overrides (см. backend_override_value).
 NO_BACKEND_OVERRIDE = object()
-# Отброшенный чанк стрима в лог — с потолком: битая строка бывает любой длины.
-_MAX_DROPPED_CHUNK_LOG_CHARS = 2000
 # Последний чанк responses — весь ответ: потолок как у сырого ответа.
 _MAX_LAST_CHUNK_LOG_CHARS = 8000
 
@@ -285,9 +283,10 @@ def _log_backend_request(
 
 
 def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
-    """Чанки, не разобранные как JSON: на warning — сколько и каких размеров,
-    сам текст — только на debug. Это сырой вывод модели строкой, и маскировка
-    секретов по имени ключа его не видит."""
+    """Чанки, не разобранные как JSON: сколько и каких размеров — по ним
+    видно, что потеря у нас, а не обрыв у бэкенда. Текст чанка не пишется
+    ни на каком уровне: это сырой вывод модели строкой (маскировка по имени
+    ключа его не видит), а format text пишет в файл и debug."""
     if logger is None or not assembler.dropped_count:
         return
     logger.warning(
@@ -297,11 +296,6 @@ def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
         len(assembler.dropped_payloads),
         [len(p) for p in assembler.dropped_payloads],
     )
-    for payload in assembler.dropped_payloads:
-        logger.debug(
-            "chat/completions stream chunk dropped: %s",
-            clip_middle(payload, _MAX_DROPPED_CHUNK_LOG_CHARS),
-        )
 
 
 def _log_last_chunk(logger, last_chunk: str) -> None:

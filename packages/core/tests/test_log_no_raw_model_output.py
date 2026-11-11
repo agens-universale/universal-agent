@@ -168,3 +168,42 @@ def test_failed_conversion(run_log, monkeypatch):
             _choice("tool_calls", args), logger_override=logger
         )
     _assert_warned_without_secret(channels, "Failed to convert")
+
+
+@pytest.mark.parametrize("fmt", ["text", "jsonl"])
+def test_dropped_chunk_text_is_not_logged_by_default(tmp_path, capsys, fmt):
+    """`format: text` пишет в файл и debug при любом log_level: текст
+    неразобранного чанка не пишется ни на каком уровне, только число и
+    размеры. На develop такие чанки не попадали в лог вовсе."""
+    capture = _Capture()
+    logger, path, _ = create_run_logger(
+        make_settings(
+            {
+                "paths.logs_dump_dir": str(tmp_path),
+                "logging.save_logs": True,
+                "logging.console_trace": True,
+                "logging.format": fmt,
+                "logging.redact_secrets.enabled": True,
+            }
+        ),
+        run_id=f"dflt-{fmt}",
+        log_handlers=[capture],
+    )
+    try:
+        asm = StreamAssembler()
+        asm.feed_line('data: {"password": "' + SECRET + '", "choices": [')
+        connect_backend._log_dropped_chunks(logger, asm)
+        for handler in logger.handlers:
+            handler.flush()
+        with open(path, encoding="utf-8") as fh:
+            file_text = fh.read()
+        channels = [
+            file_text,
+            capsys.readouterr().out,
+            "\n".join(capture.lines),
+        ]
+        assert "1 chunks dropped" in file_text
+        for text in channels:
+            assert SECRET not in text
+    finally:
+        release_run_logger(logger)

@@ -273,8 +273,9 @@ def _debug(log) -> list:
 
 def test_stream_logs_dropped_chunk(monkeypatch):
     """Чанк, не разобранный как JSON-объект, в сборку не идёт, но и не
-    пропадает молча: предупреждение — с числом и размерами, сам текст — на
-    debug (строкой его маскировка секретов по имени ключа не видит)."""
+    пропадает молча: предупреждение — с числом и размерами. Текст чанка в
+    лог не пишется: строкой его маскировка секретов по имени ключа не
+    видит, а format text пишет в файл и debug."""
     from unittest.mock import MagicMock
 
     body = (
@@ -308,7 +309,7 @@ def test_stream_logs_dropped_chunk(monkeypatch):
         "chat/completions stream: 1 chunks dropped (not a JSON object), "
         f"sizes of the first 1: [{len(chunk)}]"
     ]
-    assert f"chat/completions stream chunk dropped: {chunk}" in _debug(log)
+    assert not any(chunk in m for m in _debug(log))
 
 
 async def test_dropped_chunk_is_logged_even_if_the_stream_breaks(monkeypatch):
@@ -339,16 +340,12 @@ async def test_dropped_chunk_is_logged_even_if_the_stream_breaks(monkeypatch):
         )
     warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
     assert any("1 chunks dropped" in w for w in warnings)
-    assert (
-        "chat/completions stream chunk dropped: "
-        '{"choices": [{"delta": {"content": "b"'
-    ) in _debug(log)
 
 
 def test_dropped_chunks_log_is_capped_with_a_total(monkeypatch):
     """Поток в нечитаемом формате: одно предупреждение с итогом, сколько
-    отброшено всего, и текст первых обрывков на debug — не по записи на
-    каждый чанк."""
+    отброшено всего, и размерами первых обрывков — не по записи на каждый
+    чанк."""
     from unittest.mock import MagicMock
 
     from gc_core.utils.stream_assembler import MAX_DROPPED_PAYLOADS
@@ -386,5 +383,5 @@ def test_dropped_chunks_log_is_capped_with_a_total(monkeypatch):
         f"dropped (not a JSON object), sizes of the first "
         f"{MAX_DROPPED_PAYLOADS}: "
     )
-    dropped = [m for m in _debug(log) if "chunk dropped" in m]
-    assert len(dropped) == MAX_DROPPED_PAYLOADS
+    sizes = warnings[0].rsplit(": ", 1)[1]
+    assert sizes.count(",") == MAX_DROPPED_PAYLOADS - 1
