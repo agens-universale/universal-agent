@@ -25,7 +25,8 @@ class StartHeader(ColumnStatic):
     """Знак, подпись, версия [+ хвост обновления] и строка статуса."""
 
     class Settled(Message):
-        """Сборка поколения закончилась (успех или сбой) — раз на поколение.
+        """Сборка поколения удалась — раз на поколение; сбой итогом не
+        считается, ждём удачной пересборки.
         С серверами сигнал идёт вместе с итогом в строке; без серверов
         «готов к работе» виден раньше, а сигнал ждёт конца сборки:
         уведомления о тулах появляются при их регистрации."""
@@ -102,9 +103,11 @@ class StartHeader(ColumnStatic):
 
     def _post_settled(self) -> None:
         p = self._peephole
+        # Сбой сборки — не итог: статусов MCP ещё нет, а итог тратит
+        # единственный за запуск показ тостов.
         if (
             p.phase != "loading"
-            and p.outcome is not None
+            and p.outcome is True
             and self._settled_generation != p.generation
         ):
             self._settled_generation = p.generation

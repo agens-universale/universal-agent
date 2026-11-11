@@ -240,6 +240,35 @@ async def test_settled_toasts_once(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_failed_build_does_not_spend_the_startup_toasts(
+    tmp_path, monkeypatch
+):
+    """Сбой сборки — не итог загрузки: тосты показываются один раз за запуск,
+    и потратить их на неполный список (MCP ещё не опрошены) значило бы
+    потерять предупреждения удачной пересборки."""
+    from gc_core import startup_notices
+
+    toasts = []
+    monkeypatch.setattr(
+        startup_notices,
+        "warning_toasts",
+        lambda notices: toasts.append(1) or ([], None, frozenset()),
+    )
+    app = _app(tmp_path, _TWO_SERVERS)
+    async with app.run_test(size=(120, 40)) as pilot:
+        header = _header(app)
+        await _feed(app, pilot, _progress(outcome=False))
+        await pilot.pause()
+        assert _status(header) == _FAILED
+        assert toasts == []
+
+        await _feed(app, pilot, _progress(_ALL_OK, outcome=True))
+        _spin(header)
+        await pilot.pause()
+        assert len(toasts) == 1
+
+
+@pytest.mark.asyncio
 async def test_settled_without_servers_waits_for_end_of_build(
     tmp_path, monkeypatch
 ):
