@@ -130,8 +130,13 @@ def _fetch(
     local = Path(source).expanduser()
     if local.exists():
         target = tmp / "src"
+        # Ссылки — ссылками: скилл по ссылке за корень остаётся ссылкой
+        # наружу и отсекается границей, а не становится своим каталогом.
         shutil.copytree(
-            local.resolve(), target, ignore=shutil.ignore_patterns(".git")
+            local.resolve(),
+            target,
+            symlinks=True,
+            ignore=shutil.ignore_patterns(".git"),
         )
         return target, _commit_of(local.resolve()), str(local.resolve())
     url = normalize_url(source)
@@ -304,7 +309,9 @@ def _replace_dir(src: Path, dest: Path) -> None:
     ) as tmp_name:
         tmp = Path(tmp_name)
         staged = tmp / "new"
-        shutil.copytree(src, staged, ignore=shutil.ignore_patterns(".git"))
+        shutil.copytree(
+            src, staged, symlinks=True, ignore=shutil.ignore_patterns(".git")
+        )
         old = tmp / "old"
         had_old = dest.exists()
         if had_old:

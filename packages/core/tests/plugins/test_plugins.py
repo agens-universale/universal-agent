@@ -768,6 +768,34 @@ async def test_ap_skill_symlink_outside_root_skipped(tmp_path):
     assert "x:evil" not in ids
 
 
+def test_install_keeps_skill_symlinks_as_links(tmp_path):
+    """Установка копирует ссылки ссылками: скилл по ссылке внутри плагина
+    работает и в хранилище, а ссылка за корень остаётся ссылкой наружу и
+    отсекается границей Agent Plugins (а не становится своим каталогом)."""
+    from gc_core.plugins import catalog, installed
+
+    catalog.reset_plugin_cache()
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "x"})
+    (root / "shared" / "inner").mkdir(parents=True)
+    (root / "shared" / "inner" / "SKILL.md").write_text(
+        "---\nname: inner\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "inner").symlink_to(
+        "../shared/inner", target_is_directory=True
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(
+        "---\nname: evil\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "evil").symlink_to(outside, target_is_directory=True)
+
+    stored = installed.installed_dir() / installed.install(str(root)).name
+
+    assert (stored / "skills" / "evil").is_symlink()
+    assert catalog.plugin_skill_ids(load_plugin(stored)) == ["x:a", "x:inner"]
+
+
 async def test_ap_skill_symlink_inside_root_is_loaded(tmp_path):
     """Скилл по ссылке внутри плагина работает: отсекается только ссылка
     за корень. Реестр и подсчёт ядра для витрин видят одно и то же."""
