@@ -50,6 +50,55 @@ def test_dir_already_in_path_is_not_moved():
     assert env["PATH"] == os.pathsep.join(["/usr/bin", "/bin"])
 
 
+@posix_only
+def test_dir_reached_through_a_link_counts_as_present(tmp_path, monkeypatch):
+    """`/bin` — ссылка на `/usr/bin` (Arch, Fedora): команда `/bin/bash` не
+    должна ставить системный каталог впереди пользовательских."""
+    real = tmp_path / "usr-bin"
+    real.mkdir()
+    (tmp_path / "bin").symlink_to(real)
+    monkeypatch.setenv("PATH", os.pathsep.join(["/opt/user", str(real)]))
+    env = mcp_process_env(str(tmp_path / "bin" / "bash"))
+    assert env["PATH"] == os.pathsep.join(["/opt/user", str(real)])
+
+
+def test_empty_path_entries_are_kept(tmp_path, monkeypatch):
+    # Пустой элемент PATH на POSIX — текущий каталог: не теряется.
+    bin_dir, tool = _agent_node(tmp_path)
+    monkeypatch.setenv("PATH", os.pathsep.join(["", "/usr/bin", ""]))
+    env = mcp_process_env(str(tool))
+    assert env["PATH"] == os.pathsep.join([str(bin_dir), "", "/usr/bin", ""])
+
+
+def test_relative_path_entries_do_not_count(tmp_path, monkeypatch):
+    # «.» в PATH ребёнок разрешит от своего cwd, а не от cwd агента: такой
+    # элемент не может подтвердить, что каталог команды уже есть.
+    bin_dir, tool = _agent_node(tmp_path)
+    monkeypatch.chdir(bin_dir)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", "/usr/bin"]))
+    env = mcp_process_env(str(tool))
+    assert env["PATH"].split(os.pathsep)[0] == str(bin_dir)
+
+
+@posix_only
+def test_linked_command_brings_the_dir_of_the_link(tmp_path):
+    """`bin/npx` в Node — ссылка на скрипт npm в другом каталоге: в PATH
+    нужен каталог ссылки, где лежит `node`, а не каталог цели."""
+    bin_dir, _tool = _agent_node(tmp_path)
+    target = tmp_path / "lib" / "npx-cli.js"
+    target.parent.mkdir()
+    target.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    target.chmod(0o755)
+    link = bin_dir / "npx-link"
+    link.symlink_to(target)
+    env = mcp_process_env(str(link))
+    assert env["PATH"].split(os.pathsep)[0] == str(bin_dir)
+    out = subprocess.run(
+        [str(link)], env=env, capture_output=True, text=True, check=True
+    ).stdout
+    assert out == "agent-node\n"
+
+
 def test_bare_command_adds_nothing():
     env = mcp_process_env("npx")
     assert env["PATH"] == os.pathsep.join(["/usr/bin", "/bin"])
@@ -98,3 +147,5 @@ def test_every_stdio_launcher_uses_it(tmp_path):
         assert proc.stdout.readline() == "agent-node\n"
     finally:
         proc.wait(timeout=10)
+        proc.stdin.close()
+        proc.stdout.close()

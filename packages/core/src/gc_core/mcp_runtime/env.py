@@ -42,19 +42,35 @@ def mcp_process_env(
     ``command`` — уже разрешённая (`resolve_mcp_command`). Заданная путём,
     она видит свой каталог первым в PATH: скрипт на ``#!/usr/bin/env node``
     (npx из Node агента) найдёт интерпретатор рядом с собой, а не системный
-    другой версии. Каталог, который уже есть в PATH, не переставляется.
+    другой версии. Каталог, который уже есть в PATH (в том числе через
+    ссылку: `/bin` → `/usr/bin`), не переставляется.
     """
     merged = augment_process_env()
     if os.path.isabs(command):
         command_dir = os.path.dirname(command)
         current = merged.get("PATH", "")
-        if command_dir not in current.split(os.pathsep):
+        if not _dir_in_path(command_dir, current):
             merged["PATH"] = command_dir + (
                 os.pathsep + current if current else ""
             )
     if overrides:
         merged.update({str(k): str(v) for k, v in overrides.items()})
     return merged
+
+
+def _dir_in_path(directory: str, path_value: str) -> bool:
+    """Сравнение по настоящему пути: ссылка на каталог из PATH, регистр и
+    хвостовой разделитель (Windows) — тот же каталог. Относительные и пустые
+    элементы не в счёт: ребёнок разрешит их от своего cwd, не от агента."""
+
+    def canon(p: str) -> str:
+        return os.path.normcase(os.path.realpath(p))
+
+    target = canon(directory)
+    return any(
+        os.path.isabs(p) and canon(p) == target
+        for p in path_value.split(os.pathsep)
+    )
 
 
 def resolve_mcp_command(command: str) -> str:
