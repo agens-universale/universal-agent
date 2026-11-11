@@ -34,8 +34,6 @@ THREAD_NAME = "gc-ua-agent-loop"
 
 _log = logging.getLogger(__name__)
 
-_OF_LOCK = threading.Lock()
-
 #: Шаг сторожа занятости цикла.
 _WATCH_TICK_SEC = 1.0
 
@@ -224,13 +222,3 @@ def thread_has_running_loop() -> bool:
     except RuntimeError:
         return False
     return True
-
-
-def agent_loop_of(app: Any) -> AgentLoop:
-    """Цикл агента приложения; создаётся лениво, под замком."""
-    with _OF_LOCK:
-        loop = getattr(app, "_agent_loop", None)
-        if loop is None:
-            loop = AgentLoop()
-            app._agent_loop = loop
-        return loop

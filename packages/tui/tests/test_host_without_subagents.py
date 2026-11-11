@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 import pytest
 from gc_testkit.tui_support import tui_settings, wait_until
-from gc_tui.services.agent_loop import agent_loop_of
 
 _LOOP_THREAD = "gc-ua-agent-loop"
 
@@ -186,7 +185,7 @@ class _Host:
         await self.until(lambda: executor.stopped, "стоп дошёл до хода")
 
     async def loop_tasks(self) -> list:
-        loop = agent_loop_of(self.app)
+        loop = self.app.agent_loop
         return await asyncio.wrap_future(loop.submit(_other_tasks()))
 
 
@@ -242,7 +241,7 @@ async def test_esc_mid_tool(host_tool):
     second = h.factory.built[-1]
     assert second is not first
     assert second.loops[0] is first.loops[0]
-    assert agent_loop_of(h.app).thread.is_alive()
+    assert h.app.agent_loop.thread.is_alive()
 
 
 async def test_esc_on_confirm(host_confirm):
@@ -386,7 +385,7 @@ async def test_exit_with_hanging_turn_finishes(tmp_path, monkeypatch):
         ex = h.executor
         await h.until(ex.asking.is_set, "агент спросил")
         runner = app.active_runner
-        loop = agent_loop_of(app)
+        loop = app.agent_loop
     assert ex.answers == [""]
     assert not loop.thread.is_alive()
     worker = runner._thread

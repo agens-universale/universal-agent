@@ -39,7 +39,7 @@ from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
-from gc_tui.services.agent_loop import agent_loop_of
+from gc_tui.services.agent_loop import AgentLoop
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.profile_lock import profile_switch_refusal
@@ -405,8 +405,9 @@ class TuiApp(App):
             None  # имена тулов до stop_tools — валидатор notices
         )
         self.active_runner = None  # AgentRunner | None
-        #: Цикл агента приложения (`agent_loop_of`), один на все ходы.
-        self._agent_loop = None  # AgentLoop | None
+        #: Цикл агента приложения, один на все ходы; поток поднимается при
+        #: первом обращении (`AgentLoop.start`).
+        self.agent_loop = AgentLoop()
         #: Решения по плану снятого раннера для следующего (`_retire_runner`).
         self._carried_plan: tuple = (None, None)
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
@@ -1761,9 +1762,7 @@ class TuiApp(App):
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()
         atexit.unregister(self._clear_image_pocket)
-        agent_loop = self._agent_loop
-        if agent_loop is not None:
-            await asyncio.to_thread(agent_loop.shutdown)
+        await asyncio.to_thread(self.agent_loop.shutdown)
 
     def watch_app_focus(self, focused: bool) -> None:
         """Окно терминала потеряло фокус — погасить подсветку картинок в репликах
@@ -1867,7 +1866,7 @@ class TuiApp(App):
             executor_factory=factory,
             on_error=_on_runner_error,
             on_complete=_on_runner_complete,
-            loop=agent_loop_of(self),
+            loop=self.agent_loop,
         )
         runner_ref.append(self.active_runner)
         self._runner_stale = False
@@ -2009,7 +2008,7 @@ class TuiApp(App):
         # цикл переживает пересборку (`/profile`, смена конфига сессии), и на
         # нём могут идти запросы живых субагентов — пул закрывает
         # `AgentLoop.shutdown` на выходе.
-        ctx = agent_loop_of(self).run(
+        ctx = self.agent_loop.run(
             acreate_run_context(
                 loaded,
                 auth_connector=auth,

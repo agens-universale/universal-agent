@@ -116,7 +116,7 @@ class AgentRunner:
         on_complete: Optional[Callable[[Optional[str]], None]] = None,
         loop: Optional[AgentLoop] = None,
     ) -> None:
-        #: Цикл агента. Окно отдаёт свой, общий на приложение (`agent_loop_of`);
+        #: Цикл агента. Окно отдаёт свой, общий на приложение (`agent_loop`);
         #: без него (тесты) раннер заводит свой и гасит его в `release`.
         self._own_loop = loop is None
         self._loop = loop if loop is not None else AgentLoop()

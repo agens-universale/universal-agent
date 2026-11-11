@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 from gc_testkit import as_coro
 from gc_testkit.tui_support import tui_settings, wait_until
-from gc_tui.services.agent_loop import AgentLoop, agent_loop_of
+from gc_tui.services.agent_loop import AgentLoop
 from gc_tui.services.agent_runner import AgentRunner
 
 
@@ -138,7 +138,7 @@ class _AppOnLoop:
             system="cli",
             settings=tui_settings({"agent.model": "M"}),
         )
-        self.loop = agent_loop_of(self.app)
+        self.loop = self.app.agent_loop
         monkeypatch.setattr(
             "gc_core.config_modules.auth.build_auth_connector",
             lambda cfg: None,
@@ -324,9 +324,7 @@ async def app_pilot_with_loop(tmp_path):
     )
     app._executor_factory = _LoopRecorder
     async with app.run_test() as pilot:
-        yield SimpleNamespace(
-            app=app, pilot=pilot, agent_loop=agent_loop_of(app)
-        )
+        yield SimpleNamespace(app=app, pilot=pilot, agent_loop=app.agent_loop)
 
 
 async def test_run_from_ui_thread_raises(app_pilot_with_loop):
@@ -355,7 +353,7 @@ async def test_unmount_shuts_the_loop_down(tmp_path):
     )
     app._executor_factory = _LoopRecorder
     async with app.run_test():
-        loop = agent_loop_of(app)
+        loop = app.agent_loop
         loop.start()
     assert not loop.thread.is_alive()
 
