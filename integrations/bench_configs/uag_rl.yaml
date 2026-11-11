@@ -45,6 +45,7 @@ harbor_job:
               tool_choice: auto
           os_backend: harbor
           agent: &uag_settings
+            stop_on_no_tool_response: true
             harbor_exec_init: bashrc
             system_prompt_id: v1
             max_steps: 1000

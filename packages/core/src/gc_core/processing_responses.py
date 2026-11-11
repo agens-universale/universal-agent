@@ -79,6 +79,7 @@ from gc_core.execution.constants import (
     _MAX_CONTEXT_OVERFLOW_RETRIES,
     _SESSION_COMPACT_RESUME_USER_TEXT,
     _TRUNCATED_ARGUMENTS_HINT,
+    NO_TOOL_RESPONSE,
 )
 from gc_core.execution.contracts import (
     ExecutionFailure,
@@ -100,7 +101,6 @@ from gc_core.execution.progress import (
     todo_items_from_arguments,
     tool_args_summary,
 )
-from gc_core.execution.tool_feedback import failed_call_output
 from gc_core.execution.turn_clock import (
     TurnClock,
     begin_call_time,
@@ -180,13 +180,12 @@ from gc_core.runtime_notices import (
     maybe_push_level_reroute_notice,
     maybe_push_llm_failure_notice,
 )
-from gc_core.security.log_redaction import Redactor
 from gc_core.security.permission_mode import (
     offers_plan_tool,
     resolve_mode,
     tools_for_mode,
 )
-from gc_core.settings import AppConfig, runtime_of, settings_of
+from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.summarize.summary_validation import SummaryRejectedError
@@ -236,7 +235,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_responses as create_call_data,
 )
 from gc_core.utils.convertations import (
-    UnparseableToolCall,
+    UnparseableModelResponse,
     output_chat_completion_to_response,
     sanitize_messages_for_chat_completions,
 )
@@ -1282,6 +1281,12 @@ async def _arequest_responses_once(
             timeout=request_timeout_sec,
             config_proxy=config_proxy,
         )
+    if settings.agent.stop_on_no_tool_response and (
+        not isinstance(res, dict)
+        or not isinstance(res.get("output"), list)
+        or any(not isinstance(item, dict) for item in res["output"])
+    ):
+        raise UnparseableModelResponse("Invalid Responses API output")
     return res["output"], str(res["id"]), res_headers
 
 
@@ -1740,6 +1745,10 @@ async def _arequest_backend_canonical_once(
         route_key=route_key,
     )
     if not isinstance(res, dict):
+        if settings.agent.stop_on_no_tool_response:
+            raise UnparseableModelResponse(
+                "Chat completion payload is not an object"
+            )
         raise ValueError("chat/completions backend response must be an object")
     _run_log = getattr(ctx, "logger", None) or _fallback_logger
     _finish = _first_choice_finish_reason(res)
@@ -1766,6 +1775,7 @@ async def _arequest_backend_canonical_once(
             "request_summary": _summarize_call_data_for_log(call_data),
         },
         persist_reasoning_content=persist_reasoning,
+        recover_invalid_tool_calls=settings.agent.stop_on_no_tool_response,
     )
     resp_messages = canonical["output"]
     response_id = str(canonical.get("id") or res.get("id") or "")
@@ -1860,6 +1870,25 @@ def _batch_has_pending_function_calls(messages: List[Dict]) -> bool:
     return any(
         message.get("type") == "function_call" for message in messages or []
     )
+
+
+def _drop_unidentifiable_tool_calls(messages: List[Dict]) -> List[Dict]:
+    filtered = [
+        message
+        for message in messages
+        if message.get("type") != "function_call"
+        or all(
+            isinstance(value, str) and value.strip()
+            for value in (message.get("call_id"), message.get("name"))
+        )
+    ]
+    if len(filtered) != len(
+        messages
+    ) and not _batch_has_pending_function_calls(filtered):
+        raise UnparseableModelResponse(
+            "Model tool calls have no usable identity"
+        )
+    return filtered
 
 
 def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
@@ -1965,12 +1994,6 @@ async def _amaybe_reroute_for_floors(
     Один переигрыш на основной запрос; важное действие сильной начинает
     её серию заново. Расход сохраняется, а мемо такта фиксирует новый уровень."""
     if getattr(state, "current_level", None) is None:
-        return resp_messages, response_id, res_headers
-    if runtime_of(
-        ctx
-    ).text_answer_mode == "allow" and not _batch_has_pending_function_calls(
-        resp_messages
-    ):
         return resp_messages, response_id, res_headers
     params = _routing_params(ctx, state)
     source = ctx
@@ -2343,22 +2366,6 @@ def _emit_tool_start(
     )
 
 
-def _tool_result_with_failure_details(output, tool_name, arguments, ctx):
-    ok, error_brief = parse_tool_result_status(output)
-    if ok is False:
-        redact_cfg = settings_of(ctx).logging.redact_secrets
-        output = failed_call_output(
-            output,
-            tool_name=tool_name,
-            arguments=arguments,
-            redactor=Redactor(
-                extra_keys=redact_cfg.extra_keys,
-                extra_patterns=redact_cfg.extra_patterns,
-            ),
-        )
-    return output, ok, error_brief
-
-
 async def _aexecute_tool_call(
     m: Dict,
     tool_name: str,
@@ -2425,9 +2432,7 @@ async def _aexecute_tool_call(
         # В историю треда это не пишется.
         elapsed = clock() - started_at
         elapsed_ms = int(elapsed * 1000)
-        tool_res_raw, ok, error_brief = _tool_result_with_failure_details(
-            tool_res_raw, tool_name, tool_arguments, ctx
-        )
+        ok, error_brief = parse_tool_result_status(tool_res_raw)
         if is_intermediate:
             await _aemit_intermediate_reply(
                 ctx,
@@ -3216,6 +3221,7 @@ class _AgentLoop:
         self.context_overflow_retries = 0
         self.run_logger = getattr(ctx, "logger", None) or _fallback_logger
         agent_cfg = settings_of(ctx).agent
+        self.stop_on_no_tool_response = agent_cfg.stop_on_no_tool_response
         self.proj_tags = projection_tags_from_config(ctx)
         self.console_human = human_console_enabled(ctx)
         self.max_tool_errors = agent_cfg.no_tool_call_max_count
@@ -3277,7 +3283,7 @@ class _AgentLoop:
             # с ValueError('Empty messages list'). Вместо этого генерируем понятное
             # сообщение‑обратную связь для агента.
             if not messages:
-                if runtime_of(self.ctx).text_answer_mode == "allow":
+                if self.stop_on_no_tool_response:
                     return self._stop_without_tool().result
                 messages = self._bounce_empty_messages()
                 continue
@@ -3333,7 +3339,7 @@ class _AgentLoop:
             messages, mode, early = await self._aprepare_batch(
                 messages, backend_mode
             )
-        except UnparseableToolCall:
+        except UnparseableModelResponse:
             return self._stop_without_tool()
         except ExecutionFailure:
             raise
@@ -3359,8 +3365,8 @@ class _AgentLoop:
             outcome = _Outcome(
                 self._bounce_wrong_arguments(e), completed_step=True
             )
-        except UnparseableToolCall:
-            if runtime_of(self.ctx).text_answer_mode != "allow":
+        except UnparseableModelResponse:
+            if not self.stop_on_no_tool_response:
                 raise
             return self._stop_without_tool()
         except ExecutionFailure:
@@ -3533,7 +3539,7 @@ class _AgentLoop:
         return self._finish_reason_bounce()
 
     def _stop_without_tool(self) -> _Outcome:
-        self.state.terminal_outcome = "no_tool_response"
+        self.state.terminal_outcome = NO_TOOL_RESPONSE
         self.state.steps += 1
         self.run_logger.warning(
             "No usable final answer or tool call (finish_reason=%s)",
@@ -3736,15 +3742,8 @@ class _AgentLoop:
         """
         state = self.state
         self._log_incoming(messages)
-        if runtime_of(self.ctx).text_answer_mode == "allow":
-            for message in messages:
-                if message.get("type") == "function_call" and not all(
-                    isinstance(value, str) and value.strip()
-                    for value in (message.get("call_id"), message.get("name"))
-                ):
-                    raise UnparseableToolCall(
-                        "Model tool call has no usable identity"
-                    )
+        if self.stop_on_no_tool_response:
+            messages = _drop_unidentifiable_tool_calls(messages)
         messages = self._sanitize_batch(messages)
         # Весь батч сразу в истории. Последний ответ и соседи за ним
         # (реплика, картинка) на диск — после сводки: без неё уже с подсказками.
@@ -3782,9 +3781,9 @@ class _AgentLoop:
         try:
             mode = check_mode(messages, self.run_logger)
         except ValueError:
-            if runtime_of(self.ctx).text_answer_mode != "allow":
+            if not self.stop_on_no_tool_response:
                 raise
-            raise UnparseableToolCall(
+            raise UnparseableModelResponse(
                 "Model response has no usable message"
             ) from None
         return messages, mode, _NO_RETURN
@@ -4301,7 +4300,7 @@ class _AgentLoop:
         # blocked / length — не финал даже в allow: отказ провайдера
         # или усечение (обрезок тулы/ответа). Иначе allow принимает
         # мусор и крутит до no_tool_call_max_count / сдаёт ход.
-        # Payload уже в state/jsonl; reject → bounce, не discard.
+        # The loop decides how to handle a rejected answer after this check.
         if finish_prevents_text_final(last_finish):
             return False, None
         # Модель повторила наш мост «(tool results received)» — шаблон из истории,
@@ -4386,7 +4385,7 @@ class _AgentLoop:
                     await await_callback(self.mark_finalizing(False))
             return await self._aclose_turn(assistant_text)
         # === reject ===
-        if runtime_of(ctx).text_answer_mode == "allow":
+        if self.stop_on_no_tool_response:
             return self._stop_without_tool()
         state.tick_signals.add(NO_TOOL_BOUNCE)
         self.tool_error_cnt += 1

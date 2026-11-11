@@ -232,7 +232,9 @@ async def test_finish_writes_done_after_last_message(run):
 
 
 async def test_accepted_text_writes_done(tmp_path, monkeypatch):
-    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode="allow")
+    run = await _Run(tmp_path, monkeypatch).build(
+        text_answer_mode="allow", stop_on_no_tool_response=True
+    )
     run.script = [
         [
             {
@@ -274,6 +276,7 @@ def _stub_chat(monkeypatch, *choices):
         ({"content": "Incomplete"}, "length"),
         ({}, "content_filter"),
         ({"content": "(tool results received)"}, "stop"),
+        ({"tool_calls": 7}, "tool_calls"),
         (
             {
                 "tool_calls": [
@@ -290,10 +293,13 @@ def _stub_chat(monkeypatch, *choices):
         ),
     ],
 )
-async def test_allow_ends_unusable_model_response(
-    tmp_path, monkeypatch, message, finish_reason
+@pytest.mark.parametrize("mode", ["allow", "deny", "judge"])
+async def test_opt_in_ends_unusable_model_response(
+    tmp_path, monkeypatch, message, finish_reason, mode
 ):
-    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode="allow")
+    run = await _Run(tmp_path, monkeypatch).build(
+        text_answer_mode=mode, stop_on_no_tool_response=True
+    )
     requests = _stub_chat(
         monkeypatch,
         {
@@ -313,7 +319,9 @@ async def test_allow_ends_unusable_model_response(
 
 
 async def test_bad_tools_return_one_paired_result_each(tmp_path, monkeypatch):
-    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode="allow")
+    run = await _Run(tmp_path, monkeypatch).build(
+        text_answer_mode="allow", stop_on_no_tool_response=True
+    )
     calls = {
         "ok": ("fs_read_file", '{"path": "present.txt"}'),
         "unknown": ("no_such_tool", "{}"),
@@ -330,6 +338,15 @@ async def test_bad_tools_return_one_paired_result_each(tmp_path, monkeypatch):
             "message": {
                 "role": "assistant",
                 "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_file",
+                            "arguments": "{}",
+                        },
+                    },
+                ]
+                + [
                     {
                         "id": key,
                         "type": "function",
@@ -372,10 +389,7 @@ async def test_bad_tools_return_one_paired_result_each(tmp_path, monkeypatch):
     results = [m for m in request if m["role"] == "tool"]
     assert [m["tool_call_id"] for m in results] == list(calls)
     for result in results[1:]:
-        name, args = calls[result["tool_call_id"]]
         payload = json.loads(result["content"])
-        assert payload["tool"] == name
-        assert payload["arguments"] == args
         assert payload["error"]
     history = [m["payload"] for m in run.messages()]
     assert [
@@ -387,6 +401,41 @@ async def test_bad_tools_return_one_paired_result_each(tmp_path, monkeypatch):
         next(m for m in history if m.get("call_id") == "json")["arguments"]
         == calls["json"][1]
     )
+
+
+@pytest.mark.parametrize("mode", ["deny", "judge"])
+async def test_default_keeps_unknown_tool_recovery_for_empty_name(
+    tmp_path, monkeypatch, mode
+):
+    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode=mode)
+    finish = _finish()
+
+    def tool_choice(name, call_id, arguments):
+        return {
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": arguments},
+                    }
+                ],
+            },
+        }
+
+    requests = _stub_chat(
+        monkeypatch,
+        tool_choice("", "unnamed", "{}"),
+        tool_choice(finish["name"], finish["call_id"], finish["arguments"]),
+    )
+    await run.arun()
+    assert len(requests) == 2
+    result = next(m for m in requests[1] if m["role"] == "tool")
+    assert result["tool_call_id"] == "unnamed"
+    assert json.loads(result["content"])["error"]["type"] == "unknown_tool"
+    assert _only_outcomes(run)[0].status == "done"
 
 
 async def test_responses_mode_finish_writes_done(tmp_path, monkeypatch):
@@ -725,7 +774,13 @@ async def test_limit_outcome_is_stopped_with_reason(run, limit):
     assert [(o.status, o.reason) for o in outcomes] == [("stopped", limit)]
 
 
-async def test_backend_error_writes_masked_error(run):
+@pytest.mark.parametrize("stop_on_no_tool_response", [False, True])
+async def test_backend_error_writes_masked_error(
+    tmp_path, monkeypatch, stop_on_no_tool_response
+):
+    run = await _Run(tmp_path, monkeypatch).build(
+        stop_on_no_tool_response=stop_on_no_tool_response
+    )
     key = "sk-" + "a1B2c3D4e5F6g7H8i9J0"
 
     async def _fail():

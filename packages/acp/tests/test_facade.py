@@ -1034,6 +1034,32 @@ async def test_token_limit_and_final_answer_without_deltas(tmp_path):
     await facade.shutdown()
 
 
+async def test_no_tool_response_exposes_the_stop_cause(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].deltas = []
+    agents[0].answer = None
+    agents[0].outcome = "no_tool_response"
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 3)["result"] == {
+        "stopReason": "end_turn",
+        "_meta": {"terminal_outcome": "no_tool_response"},
+    }
+    await facade.shutdown()
+
+
 async def test_run_error_is_internal(tmp_path):
     facade, writer, agents = _open(tmp_path)
     await _init(facade)

@@ -146,6 +146,18 @@ def test_trajectory_json_preserves_archived_and_live_reasoning(tmp_path):
     )
 
 
+def test_trajectory_records_no_tool_stop_reason(tmp_path):
+    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
+    state = SimpleNamespace(
+        messages=[{"role": "user", "content": "task"}],
+        terminal_outcome="no_tool_response",
+    )
+    assert agent._write_trajectory(state) == 1
+    payload = json.loads((tmp_path / "trajectory.json").read_text())
+    assert payload["extra"]["terminal_outcome"] == "no_tool_response"
+    assert [step["source"] for step in payload["steps"]] == ["user"]
+
+
 def test_stringify_handles_none_str_and_parts():
     assert _stringify_content(None) == ""
     assert _stringify_content("x") == "x"

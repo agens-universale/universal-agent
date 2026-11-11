@@ -29,6 +29,10 @@ from a2a.helpers.proto_helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.tasks import TaskUpdater
 from a2a.types import a2a_pb2 as pb
+from gc_core.execution.constants import (
+    NO_TOOL_RESPONSE,
+    NO_TOOL_RESPONSE_MESSAGE,
+)
 from gc_core.execution.environment import utc_now
 from gc_core.threads.errors import OperationMismatch
 from gc_core.threads.facade import Threads
@@ -69,7 +73,13 @@ CWD_TEXT = (
 # Досрочная остановка — не ответ: бюджет (шаги, токены, тулы) и недоступная
 # проверка действий судьёй. JSON ``ok: false`` в артефакт не кладём.
 _STOPS = frozenset(
-    {"step_limit", "token_limit", "tool_call_limit", "judge_unavailable"}
+    {
+        "step_limit",
+        "token_limit",
+        "tool_call_limit",
+        "judge_unavailable",
+        NO_TOOL_RESPONSE,
+    }
 )
 #: Ключи состояния фронтенда ``a2a`` треда диалога.
 _CWD_KEY = "cwd"
@@ -666,8 +676,14 @@ class GcAgentExecutor(AgentExecutor):
                 free=False,
             )
             return
-        if turn.failed is not None or stop_outcome(turn.agent) is not None:
-            await updater.failed(_agent_message(updater, PEER_FAILURE_TEXT))
+        outcome = stop_outcome(turn.agent)
+        if turn.failed is not None or outcome is not None:
+            text = (
+                NO_TOOL_RESPONSE_MESSAGE
+                if outcome == NO_TOOL_RESPONSE
+                else PEER_FAILURE_TEXT
+            )
+            await updater.failed(_agent_message(updater, text))
         else:
             await updater.add_artifact(
                 [pb.Part(text=answer_text(turn.agent))], name="answer"

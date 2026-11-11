@@ -162,6 +162,9 @@ class AgentConfig(BaseModel):
     text_answer_mode: Literal["deny", "judge", "allow"] | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True)
     )
+    stop_on_no_tool_response: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True)
+    )
     max_unknown_tool_repeats: int = Field(
         default=5, json_schema_extra=gc_meta(expert=True)
     )

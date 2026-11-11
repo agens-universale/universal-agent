@@ -397,7 +397,6 @@ def test_run_agent_does_not_accept_an_echo_of_the_bridge(monkeypatch):
         return {"role": "user", "id": "m_tech", "content": content}
 
     def _fake_process_user_ask(messages, state, ctx):
-        ctx.runtime = ctx.runtime.with_values(text_answer_mode="allow")
         state.last_finish_reason = "stop"
         return [
             {"role": "assistant", "type": "message", "content": "итог"}
@@ -422,12 +421,12 @@ def test_run_agent_does_not_accept_an_echo_of_the_bridge(monkeypatch):
     ]
     state = _state()
     state.last_finish_reason = "stop"
-    result = run_coro(pr.arun_agent(echo, state, _run_ctx("deny")))
+    result = run_coro(pr.arun_agent(echo, state, _run_ctx("allow")))
     assert result == "итог"
     assert captured["content"] == NO_TOOL_CALL_BOUNCE_MESSAGE
 
 
-def test_run_agent_content_filter_bounces_in_deny(monkeypatch):
+def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
     """content_filter — отказ провайдера, не финальный текст; allow не принимает."""
     from gc_core import processing_responses as pr
     from gc_core.message_policy.no_tool_call_bounce import (
@@ -441,7 +440,6 @@ def test_run_agent_content_filter_bounces_in_deny(monkeypatch):
         return {"role": "user", "id": "m_tech", "content": content}
 
     def _fake_process_user_ask(messages, state, ctx):
-        ctx.runtime = ctx.runtime.with_values(text_answer_mode="allow")
         state.last_finish_reason = "stop"
         return [
             {"role": "assistant", "type": "message", "content": "ok"}
@@ -459,13 +457,13 @@ def test_run_agent_content_filter_bounces_in_deny(monkeypatch):
 
     state = _state()
     state.last_finish_reason = "content_filter"
-    result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx("deny")))
+    result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx("allow")))
     assert result == "ok"
     assert captured["content"] == CONTENT_FILTER_BOUNCE_MESSAGE
 
 
-def test_run_agent_refusal_bounces_in_deny(monkeypatch):
-    """Provider refusals keep the existing nudge in deny mode."""
+def test_run_agent_refusal_bounces_even_in_allow(monkeypatch):
+    """refusal/safety — тот же blocked-kind, не финал в allow."""
     from gc_core import processing_responses as pr
     from gc_core.message_policy.no_tool_call_bounce import (
         PROVIDER_BLOCKED_BOUNCE_MESSAGE,
@@ -478,7 +476,6 @@ def test_run_agent_refusal_bounces_in_deny(monkeypatch):
         return {"role": "user", "id": "m_tech", "content": content}
 
     def _fake_process_user_ask(messages, state, ctx):
-        ctx.runtime = ctx.runtime.with_values(text_answer_mode="allow")
         state.last_finish_reason = "stop"
         return [
             {"role": "assistant", "type": "message", "content": "ok"}
@@ -498,13 +495,15 @@ def test_run_agent_refusal_bounces_in_deny(monkeypatch):
         captured.clear()
         state = _state()
         state.last_finish_reason = blocked
-        result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx("deny")))
+        result = run_coro(
+            pr.arun_agent(_text_msgs(), state, _run_ctx("allow"))
+        )
         assert result == "ok"
         assert captured["content"] == PROVIDER_BLOCKED_BOUNCE_MESSAGE
 
 
 def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
-    """Deny and judge keep the truncation nudge."""
+    """length без tool call — truncation nudge; allow тоже не принимает финалом."""
     from gc_core import processing_responses as pr
     from gc_core.message_policy.no_tool_call_bounce import (
         LENGTH_BOUNCE_MESSAGE,
@@ -534,7 +533,7 @@ def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
         pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
     )
 
-    for mode in ("deny", "judge"):
+    for mode in ("deny", "allow"):
         captured.clear()
         state = _state()
         state.last_finish_reason = "length"
@@ -557,7 +556,6 @@ def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
         return {"role": "user", "id": "m_tech", "content": content}
 
     def _fake_process_user_ask(messages, state, ctx):
-        ctx.runtime = ctx.runtime.with_values(text_answer_mode="allow")
         state.last_finish_reason = "stop"
         return [
             {"role": "assistant", "type": "message", "content": "ok"}
@@ -575,7 +573,7 @@ def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
 
     state = _state()
     state.last_finish_reason = "content_filter"
-    result = run_coro(pr.arun_agent([], state, _run_ctx("deny")))
+    result = run_coro(pr.arun_agent([], state, _run_ctx("allow")))
     assert result == "ok"
     assert captured["content"] == CONTENT_FILTER_BOUNCE_MESSAGE
 
@@ -593,7 +591,6 @@ def test_run_agent_empty_batch_length_uses_truncation_nudge(monkeypatch):
         return {"role": "user", "id": "m_tech", "content": content}
 
     def _fake_process_user_ask(messages, state, ctx):
-        ctx.runtime = ctx.runtime.with_values(text_answer_mode="allow")
         state.last_finish_reason = "stop"
         return [
             {"role": "assistant", "type": "message", "content": "ok"}
@@ -611,6 +608,6 @@ def test_run_agent_empty_batch_length_uses_truncation_nudge(monkeypatch):
 
     state = _state()
     state.last_finish_reason = "length"
-    result = run_coro(pr.arun_agent([], state, _run_ctx("deny")))
+    result = run_coro(pr.arun_agent([], state, _run_ctx("allow")))
     assert result == "ok"
     assert captured["content"] == LENGTH_BOUNCE_MESSAGE

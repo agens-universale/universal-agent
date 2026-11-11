@@ -114,6 +114,7 @@ async def test_fleet_rl_profile_selects_the_rl_system_prompt(monkeypatch):
     config = profile["harbor_job"]["agents"][0]["kwargs"]["gc_cli_config"]
     loaded = _agent(_load_adapter(), **config)._build_settings()
     assert loaded.runtime.text_answer_mode == "allow"
+    assert loaded.settings.agent.stop_on_no_tool_response is True
     prompt_path = Path(
         loaded.settings.paths.chat_completions_system_prompt_path
     )

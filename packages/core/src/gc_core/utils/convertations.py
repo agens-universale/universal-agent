@@ -15,8 +15,8 @@ from gc_core.execution.finish_reason import (
 _MAX_BACKEND_LOG_CHARS = 8000
 
 
-class UnparseableToolCall(ValueError):
-    """The model returned a tool call with no usable name or ID."""
+class UnparseableModelResponse(ValueError):
+    """The provider returned a model payload the agent cannot process."""
 
 
 def _safe_json_for_log(payload, *, max_chars=_MAX_BACKEND_LOG_CHARS):
@@ -133,7 +133,11 @@ def _canonical_message_item(
 
 
 def get_output_list(
-    dct, logger_override=None, *, persist_reasoning_content=False
+    dct,
+    logger_override=None,
+    *,
+    persist_reasoning_content=False,
+    recover_invalid_tool_calls=False,
 ):
     """Transforms chat completion 'choices' into a standardized response 'output' list.
 
@@ -189,7 +193,11 @@ def get_output_list(
         tool_calls = msg_obj.get("tool_calls")
         if tool_calls is not None:
             for tool_call_dict in tool_calls:
-                output_list.append(_function_call_item(tool_call_dict))
+                output_list.append(
+                    _function_call_item(
+                        tool_call_dict, recover_invalid_tool_calls
+                    )
+                )
 
     return output_list
 
@@ -304,29 +312,39 @@ def _message_text_with_tools(
     return _canon_content_text(content, persist_reasoning=False)
 
 
-def _function_call_item(tool_call_dict) -> dict:
-    function = (
-        tool_call_dict.get("function")
-        if isinstance(tool_call_dict, dict)
-        else None
-    )
-    if (
-        not isinstance(function, dict)
-        or tool_call_dict.get("type") != "function"
-        or not all(
-            isinstance(value, str) and value.strip()
-            for value in (tool_call_dict.get("id"), function.get("name"))
-        )
-    ):
-        raise UnparseableToolCall("Model tool call has no usable identity")
+def _function_call_item(tool_call_dict, recover_invalid=False) -> dict:
+    if recover_invalid:
+        tool_call_dict = _normalize_incomplete_tool_call(tool_call_dict)
+    if tool_call_dict["type"] != "function":
+        raise ValueError("Unknown logic")
+    function = tool_call_dict["function"]
     id_tool_call = get_md5_hash(tool_call_dict)
     return {
-        "arguments": function.get("arguments", ""),
+        "arguments": function["arguments"],
         "call_id": tool_call_dict["id"],
         "name": function["name"],
         "type": "function_call",
         "id": "fc_" + id_tool_call,
         "status": "completed",
+    }
+
+
+def _normalize_incomplete_tool_call(tool_call) -> dict:
+    """Keep incomplete calls in the model batch for the shared identity check."""
+    if not isinstance(tool_call, dict) or tool_call.get("type") != "function":
+        tool_call = {}
+    function = tool_call.get("function")
+    if not isinstance(function, dict):
+        function = {}
+    return {
+        **tool_call,
+        "type": "function",
+        "id": tool_call.get("id"),
+        "function": {
+            **function,
+            "name": function.get("name"),
+            "arguments": function.get("arguments", ""),
+        },
     }
 
 
@@ -336,6 +354,7 @@ def output_chat_completion_to_response(
     log_context=None,
     *,
     persist_reasoning_content=False,
+    recover_invalid_tool_calls=False,
 ):
     """Converts a chat completion response dict to a model response format."""
     dct_output = deepcopy(dct)
@@ -353,8 +372,9 @@ def output_chat_completion_to_response(
             dct_output,
             logger_override=logger_override,
             persist_reasoning_content=persist_reasoning_content,
+            recover_invalid_tool_calls=recover_invalid_tool_calls,
         )
-    except Exception:
+    except Exception as exc:
         if logger_override is not None:
             logger_override.error(
                 "Failed to convert chat/completions payload. context=%s payload=%s",
@@ -362,6 +382,12 @@ def output_chat_completion_to_response(
                 _safe_json_for_log(dct),
                 exc_info=True,
             )
+        if recover_invalid_tool_calls and isinstance(
+            exc, (AttributeError, KeyError, TypeError)
+        ):
+            raise UnparseableModelResponse(
+                "Invalid chat completion payload"
+            ) from exc
         raise
     if "system_fingerprint" in dct_output:
         del dct_output["system_fingerprint"]
