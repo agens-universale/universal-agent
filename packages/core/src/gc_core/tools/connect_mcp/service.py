@@ -13,8 +13,8 @@
 
 import asyncio
 import re
+import threading
 import time
-from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -27,11 +27,18 @@ from gc_core.tools.connect_mcp.call_errors import (
 )
 from gc_core.tools.connect_mcp.catalog import read_catalog, write_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
+from gc_core.tools.connect_mcp.consumer import McpConsumer
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 from gc_core.tools.connect_mcp.registry import _discovery_error_text
 from gc_core.tools.connect_mcp.server_identity import (
     connection_fingerprint,
     with_service_defaults,
+)
+from gc_core.tools.connect_mcp.service_records import (
+    SERVICE_CLOSED_TEXT,
+    Failure,
+    McpServiceClosed,
+    ServerEntry,
 )
 
 _TIMEOUTS = (TimeoutError, McpCallTimedOut, httpx.TimeoutException)
@@ -56,38 +63,6 @@ _MCP_ERROR_CODES = {
 _MIN_SECRET_LEN = 8
 _MIN_WORD_SECRET_LEN = 4
 _SECRET_MASK = "***"
-
-
-class McpServiceClosed(RuntimeError):
-    """Обращение к сервису после начала его остановки."""
-
-
-@dataclass(frozen=True)
-class Failure:
-    """Отказ подключения: когда (часы сервиса), код и текст причины."""
-
-    at: float
-    code: str
-    reason: str
-
-
-@dataclass(eq=False)
-class ServerEntry:
-    """Общие факты о сервере для всех потребителей сервиса.
-
-    ``cfg`` — определение без trace (``plain_dump(model, by_alias=True)``)
-    после ``with_service_defaults``; ``tools`` — сырой ответ
-    ``tools/list``, до whitelist и оформления.
-    """
-
-    key: str
-    cfg: dict
-    fingerprint: str
-    discovery_timeout: float
-    tools: tuple = ()
-    from_catalog: bool = False
-    checked_at: float | None = None
-    last_failure: Failure | None = None
 
 
 def _first_leaf(exc: BaseException) -> BaseException:
@@ -180,7 +155,9 @@ class McpService:
     ``_stopped`` и ``_stopped_event`` ставит остановка сервиса. Событие
     создаётся сразу: ``asyncio.Event`` привязывается к циклу только при
     ожидании, поэтому остановка сервиса, ни разу не видевшего цикла,
-    не падает.
+    не падает. ``_consumers`` — открытые потребители; его, как и
+    ``_stopped`` при выдаче потребителя, читают под ``_lock``: потребителя
+    открывают с любого потока.
     """
 
     def __init__(
@@ -201,6 +178,8 @@ class McpService:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopped = False
         self._stopped_event = asyncio.Event()
+        self._lock = threading.Lock()
+        self._consumers: set[McpConsumer] = set()
 
     @property
     def os_backend(self) -> Any:
@@ -229,6 +208,23 @@ class McpService:
             self._loop = loop
         elif self._loop is not loop:
             raise RuntimeError("McpService работает на другом цикле событий")
+
+    def open_consumer(self, label: str) -> McpConsumer:
+        """Новый потребитель со своим владельцем сессий; с любого потока.
+
+        После начала остановки сервиса — ``McpServiceClosed``.
+        """
+        with self._lock:
+            if self._stopped:
+                raise McpServiceClosed(SERVICE_CLOSED_TEXT)
+            consumer = McpConsumer(self, label)
+            self._consumers.add(consumer)
+        return consumer
+
+    def _forget_consumer(self, consumer: McpConsumer) -> None:
+        """Закрытый потребитель больше не числится за сервисом."""
+        with self._lock:
+            self._consumers.discard(consumer)
 
     def entry(
         self, server_key: str, server_cfg: dict, *, discovery_timeout: float
@@ -260,8 +256,7 @@ class McpService:
         перезаписывается, только если список стал известен или изменился."""
         self._bind_loop()
         listed = tuple(tools)
-        known = entry.from_catalog or entry.checked_at is not None
-        if not known or listed != entry.tools:
+        if not entry.tools_known or listed != entry.tools:
             write_catalog(entry.key, entry.cfg, list(listed))
         entry.tools = listed
         entry.checked_at = self._clock()
@@ -277,10 +272,4 @@ class McpService:
         return failure
 
 
-__all__ = [
-    "Failure",
-    "McpService",
-    "McpServiceClosed",
-    "ServerEntry",
-    "classify_failure",
-]
+__all__ = ["McpService", "classify_failure"]

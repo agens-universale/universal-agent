@@ -21,11 +21,8 @@ from gc_core.tools.connect_mcp.catalog import read_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
-from gc_core.tools.connect_mcp.service import (
-    Failure,
-    McpService,
-    classify_failure,
-)
+from gc_core.tools.connect_mcp.service import McpService, classify_failure
+from gc_core.tools.connect_mcp.service_records import Failure
 from gc_testkit.mcp import FakeClock, seed_catalog, stdio_cfg
 from gc_testkit.mcp.fixtures import mcp_home
 from mcp.shared.exceptions import McpError
