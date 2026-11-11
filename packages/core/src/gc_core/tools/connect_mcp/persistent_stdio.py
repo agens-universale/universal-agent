@@ -57,6 +57,7 @@ from collections.abc import Iterator
 from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
 from gc_core.tools.connect_mcp.call_errors import (
     McpCallTimedOut,
     McpServerGone,
@@ -288,6 +289,8 @@ async def _aterminate_process_tree(
 
 
 _NOT_RUNNING_MSG = "persistent stdio MCP process is not running"
+_CLOSED_MSG = "сессия stdio MCP закрыта"
+_ABANDONED_MSG = "вызов брошен: новая сессия stdio MCP не заводится"
 
 
 def _user_stop_requested() -> bool:
@@ -323,6 +326,9 @@ class PersistentStdioSession:
     def __init__(self, server_cfg: Dict[str, Any]) -> None:
         self._server_cfg = server_cfg
         self._proc: Optional[subprocess.Popen] = None
+        # Закрытую сессию не запускаем: закрытие могло прийти, пока поток
+        # обмена ещё поднимает процесс, и такой процесс остался бы ничьим.
+        self._closed = False
         self._lock = threading.Lock()
         # Запись в stdin отдельно от ``_lock``: отмена приходит с loop, пока
         # ``call`` держит ``_lock`` и сидит в чтении. Вставать в тот же лок
@@ -365,7 +371,7 @@ class PersistentStdioSession:
             except Exception:
                 pass
 
-        self._proc = _spawn_detached_stdio_process(self._server_cfg)
+        self._start_process()
         self._next_id = 2
         with self._inflight_guard:
             self._inflight_id = None
@@ -376,6 +382,29 @@ class PersistentStdioSession:
         # Ответ на initialize читаем, но его содержимое нам не нужно.
         self._read_matching(_INIT_PAYLOAD["id"], timeout)
         self._write_line(_INITIALIZED_PAYLOAD)
+
+    def _start_process(self) -> None:
+        """Поднять процесс сессии; закрытой сессии — ``ConnectionError``.
+
+        Флаг смотрится и после запуска: закрытие, пришедшее посреди
+        запуска, процесса ещё не видело (``_detach_nowait`` нашёл пустое
+        место), поэтому его гасим здесь. Запрос при этом не ушёл.
+        """
+        if self._closed:
+            raise ConnectionError(_CLOSED_MSG)
+        proc = _spawn_detached_stdio_process(self._server_cfg)
+        self._proc = proc
+        if not self._closed:
+            return
+        self._proc = None
+        try:
+            run_coro_blocking(
+                _aterminate_process_tree(proc, graceful_timeout=5.0)
+            )
+        except Exception:
+            pass
+        forget_stdio_reader(proc.stdout)
+        raise ConnectionError(_CLOSED_MSG)
 
     def call(
         self,
@@ -485,6 +514,7 @@ class PersistentStdioSession:
         и `atexit` ждал бы его до ``request_timeout_sec`` (по умолчанию 600 с).
         До появления atexit-хука процесс просто выходил.
         """
+        self._closed = True
         proc, had_lock = self._detach_nowait()
         if proc is not None:
             if had_lock:
@@ -517,6 +547,7 @@ class PersistentStdioSession:
         Процесс берётся из отцепления, до первого ``await``: прервать нас
         между ними нечему, а ``self._proc`` после отцепления уже пуст.
         """
+        self._closed = True
         proc, had_lock = self._detach_nowait()
         if proc is None:
             return
@@ -838,6 +869,13 @@ class PersistentStdioRegistry:
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
+                # Брошенный вызов новую сессию не заводит. Проверка под
+                # замком реестра: вызывающий бросает вызов раньше, чем
+                # закрывает сессии владельца (а закрытие берёт этот же
+                # замок), поэтому сессия либо попадёт под закрытие, либо
+                # не появится вовсе — ничьей она не останется.
+                if current_call_abandoned():
+                    raise ConnectionError(_ABANDONED_MSG)
                 session = PersistentStdioSession(server_cfg)
                 self._sessions[key] = session
             return session
