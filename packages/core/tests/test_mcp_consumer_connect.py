@@ -23,8 +23,8 @@ from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp import consumer as consumer_module
 from gc_core.tools.connect_mcp import persistent_stdio, stream_client
 from gc_core.tools.connect_mcp.client import _MCP_SESSIONS
-from gc_core.tools.connect_mcp.consumer import (
-    RETRY_PAUSES_SEC,
+from gc_core.tools.connect_mcp.consumer import RETRY_PAUSES_SEC
+from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CACHED,
     STATE_CONNECTED,
     STATE_CONNECTING,

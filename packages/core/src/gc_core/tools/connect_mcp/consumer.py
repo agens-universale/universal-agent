@@ -20,7 +20,6 @@ import contextvars
 import dataclasses
 import logging
 import threading
-from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +31,13 @@ from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config
 from gc_core.tools.connect_mcp.client import (
     forget_owner_sessions,
     forget_session,
+)
+from gc_core.tools.connect_mcp.consumer_status import (
+    ATTEMPT_INTERVAL_SEC,
+    INTERRUPTED_REASON,
+    ServerStatus,
+    server_status,
+    shared_failure,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
@@ -58,60 +64,16 @@ logger = logging.getLogger(__name__)
 
 #: Паузы фоновых повторов сетевого сервера у потребителя «на старте».
 RETRY_PAUSES_SEC = (1, 3, 10, 30, 60)
-#: Правило 30 с: не раньше этого после последнего отказа — новая попытка.
-ATTEMPT_INTERVAL_SEC = 30
-STATE_CACHED = "cached"
-STATE_CONNECTING = "connecting"
-STATE_CONNECTED = "connected"
-STATE_FAILED = "failed"
 
 _SLOTS_PER_CONSUMER = 8
 #: Внутренний срок списка длиннее внешнего срока подключения: истёкшее
 #: время подключения приходит как ``TimeoutError`` внешнего ожидания.
 _LIST_SLACK_SEC = 5
-_INTERRUPTED = "подключение прервано"
 _INTERNAL_ERROR = "внутренняя ошибка подключения"
-
-
-@dataclass(frozen=True)
-class ServerStatus:
-    """Статус сервера у потребителя (спека §5.5).
-
-    ``from_catalog`` — тулы взяты из записи, а не из своей сессии
-    (``connecting`` с известным списком и ``cached``); ``retry`` — номер
-    идущего повтора серии; ``tools`` — сырой список записи, у ``failed``
-    пуст.
-    """
-
-    state: str
-    reason_code: str = ""
-    reason: str = ""
-    retry: int = 0
-    from_catalog: bool = False
-    checked_at: float | None = None
-    tools: tuple = ()
 
 
 def _session_key_of(entry: ServerEntry) -> str:
     return session_key(entry.key, entry.fingerprint)
-
-
-def _is_interrupted(failure: Failure) -> bool:
-    return failure.code == "other" and failure.reason == _INTERRUPTED
-
-
-def _shared_failure(entry: ServerEntry) -> Failure | None:
-    """Последний отказ записи, если он позже её последней удачи.
-
-    Удача другого потребителя после отказа значит, что сервер уже
-    поднимается: такой отказ правило 30 с не держит.
-    """
-    failure = entry.last_failure
-    if failure is None:
-        return None
-    if entry.checked_at is not None and failure.at <= entry.checked_at:
-        return None
-    return failure
 
 
 def _describe(exc: BaseException, entry: ServerEntry) -> str:
@@ -126,16 +88,6 @@ def _describe(exc: BaseException, entry: ServerEntry) -> str:
 def _succeeded(task: asyncio.Task) -> bool:
     """Попытка завершилась удачей (не отменена, без исключения, истина)."""
     return not task.cancelled() and task.exception() is None and task.result()
-
-
-def _failed(failure: Failure, entry: ServerEntry, retry: int = 0):
-    return ServerStatus(
-        STATE_FAILED,
-        reason_code=failure.code,
-        reason=failure.reason,
-        retry=retry,
-        checked_at=entry.checked_at,
-    )
 
 
 class McpConsumer:
@@ -204,7 +156,7 @@ class McpConsumer:
             if self._attempting(key):
                 return False
             own = self._failures.get(key)
-        failures = (own, _shared_failure(entry))
+        failures = (own, shared_failure(entry))
         since = [f.at for f in failures if f is not None]
         if not since:
             return True
@@ -348,7 +300,9 @@ class McpConsumer:
             if self._connects.get(key) is task:
                 del self._connects[key]
             if task.cancelled():
-                self._failures[key] = Failure(started, "other", _INTERRUPTED)
+                self._failures[key] = Failure(
+                    started, "other", INTERRUPTED_REASON
+                )
                 return
         if self._unexpected_failure(entry, task):
             return
@@ -427,40 +381,14 @@ class McpConsumer:
             attempting = self._attempting(key)
             own = self._failures.get(key)
             retry = self._retry.get(key, 0)
-        if connected:
-            return ServerStatus(
-                STATE_CONNECTED, checked_at=entry.checked_at, tools=entry.tools
-            )
-        if attempting:
-            return ServerStatus(
-                STATE_CONNECTING,
-                from_catalog=entry.tools_known,
-                checked_at=entry.checked_at,
-                tools=entry.tools,
-            )
-        if own is not None and not (
-            entry.tools_known and _is_interrupted(own)
-        ):
-            return _failed(own, entry, retry)
-        return self._idle_status(entry)
-
-    def _idle_status(self, entry: ServerEntry) -> ServerStatus:
-        """Своей попытки и своего отказа нет (или попытка прервана при
-        известных тулах)."""
-        if entry.tools_known:
-            return ServerStatus(
-                STATE_CACHED,
-                from_catalog=True,
-                checked_at=entry.checked_at,
-                tools=entry.tools,
-            )
-        shared = _shared_failure(entry)
-        if shared is not None:
-            fresh = self._service._clock() - shared.at < ATTEMPT_INTERVAL_SEC
-            if fresh:
-                return _failed(shared, entry)
-        # Первая попытка начнётся в той же сверке.
-        return ServerStatus(STATE_CONNECTING, checked_at=entry.checked_at)
+        return server_status(
+            entry,
+            connected=connected,
+            attempting=attempting,
+            own=own,
+            retry=retry,
+            now=self._service._clock(),
+        )
 
     async def aclose(self) -> None:
         """Отказать в новой работе, снять попытки и серии, дождаться
@@ -504,13 +432,4 @@ class McpConsumer:
                         self._service._forget_consumer(self)
 
 
-__all__ = [
-    "ATTEMPT_INTERVAL_SEC",
-    "RETRY_PAUSES_SEC",
-    "STATE_CACHED",
-    "STATE_CONNECTED",
-    "STATE_CONNECTING",
-    "STATE_FAILED",
-    "McpConsumer",
-    "ServerStatus",
-]
+__all__ = ["RETRY_PAUSES_SEC", "McpConsumer"]
