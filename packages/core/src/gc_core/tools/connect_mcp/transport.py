@@ -351,7 +351,8 @@ class _LineReader:
             pass
         finally:
             # None — маркер «поток кончился»: без него читатель ждал бы таймаут
-            # на каждой строке после смерти процесса.
+            # на каждой строке после смерти процесса. Маркер один, поэтому
+            # чтения после него смотрят на ``_ended``.
             self._ended = True
             self._queue.put(None)
 
@@ -377,7 +378,8 @@ class _LineReader:
             try:
                 return self._queue.get(timeout=min(0.02, remaining))
             except queue.Empty:
-                continue
+                if self._ended:
+                    return None
 
     async def areadline(self, timeout: float) -> "str | None":
         """То же, но ожиданием очереди не занимает ни поток, ни loop.
@@ -402,7 +404,8 @@ class _LineReader:
             try:
                 return self._queue.get_nowait()
             except queue.Empty:
-                pass
+                if self._ended:
+                    return None
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
                 return None

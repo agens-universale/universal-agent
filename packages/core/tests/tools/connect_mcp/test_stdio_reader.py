@@ -8,6 +8,7 @@ import threading
 import time
 
 from gc_core.tools.connect_mcp.transport import (
+    _areadline_with_timeout,
     _readline_with_timeout,
     forget_stdio_reader,
 )
@@ -103,6 +104,33 @@ def test_closed_stream_stops_returning_lines():
         assert time.monotonic() - started < 1, (
             "ждали таймаут вместо маркера конца"
         )
+    finally:
+        forget_stdio_reader(stream)
+
+
+def test_every_read_after_end_returns_none_at_once():
+    """Маркер конца один, а чтений после конца бывает несколько.
+
+    Пустой ответ на ``initialize`` упавшего сервера съедает маркер, и
+    следующее чтение (ответ ``tools/list``) ждало весь срок вместо конца.
+    """
+    stream = _SlowStream([])
+    try:
+        assert _readline_with_timeout(stream, 2) is None
+        started = time.monotonic()
+        assert _readline_with_timeout(stream, 5) is None
+        assert time.monotonic() - started < 1, "второе чтение ждало срок"
+    finally:
+        forget_stdio_reader(stream)
+
+
+async def test_async_read_after_end_returns_none_at_once():
+    stream = _SlowStream([])
+    try:
+        assert await _areadline_with_timeout(stream, 2) is None
+        started = time.monotonic()
+        assert await _areadline_with_timeout(stream, 5) is None
+        assert time.monotonic() - started < 1, "второе чтение ждало срок"
     finally:
         forget_stdio_reader(stream)
 
