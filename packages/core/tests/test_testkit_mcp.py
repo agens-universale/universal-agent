@@ -513,6 +513,26 @@ async def test_wait_for_times_out():
         await wait_for(lambda: False, timeout=0.2)
 
 
+async def test_call_tool_is_bounded_as_a_whole(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    """Потолок ``call_tool`` держит и запуск: сервер молчит на initialize.
+
+    Постоянная сессия ждёт ответ ``initialize`` весь срок чтения и только
+    потом зовёт тул, так что вызов целиком длиннее потолка. Без потолка
+    всего вызова помощник вернул бы ответ тула позже срока; внешний
+    ``wait_for`` шире потолка и держит сам тест.
+    """
+    control = tmp_path / "s.json"
+    set_behavior(control, start_delay=60)
+    cfg = {**stdio_cfg(control), "persistent_session": True}
+
+    with pytest.raises(AssertionError, match="echo сервера slow"):
+        await asyncio.wait_for(
+            call_tool("slow", cfg, "echo", {}, timeout=0.5), _TIMEOUT
+        )
+
+
 def test_stdio_server_without_control_refuses_to_start(tmp_path):
     env = {k: v for k, v in os.environ.items() if k != "GC_TEST_CONTROL"}
     server = stdio_cfg(tmp_path / "unused.json")["args"][0]

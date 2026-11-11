@@ -24,8 +24,7 @@ from gc_testkit.mcp.fixtures import mcp_owner, mcp_reaper
 # секунд, потолок только не даёт прогону повиснуть.
 _READ_CEILING_SEC = 5.0
 
-#: Шаг подставных часов на одну строку двойника и число его строк.
-_LINE_STEP_SEC = 0.2
+#: Число строк двойника до конца потока.
 _LINES_BEFORE_EOF = 40
 
 _NOTIFICATION = (
@@ -56,24 +55,25 @@ _READS = {
 
 
 class _ChattyReader:
-    """Двойник чтения строки: уведомление каждые 0,2 с по подставным часам.
+    """Двойник чтения строки: уведомление каждые ``step`` с подставных часов.
 
     Как настоящий читатель, ждёт строку не дольше переданного срока: срок
     меньше шага — истёк, строки нет. После 40 строк — конец потока.
     """
 
-    def __init__(self, clock: FakeClock) -> None:
+    def __init__(self, clock: FakeClock, step: float) -> None:
         self._clock = clock
+        self._step = step
         self.timeouts: list[float] = []
 
     def readline(self, stream, timeout: float) -> str | None:
         self.timeouts.append(timeout)
-        if timeout < _LINE_STEP_SEC:
+        if timeout < self._step:
             self._clock.advance(timeout)
             return None
         if len(self.timeouts) > _LINES_BEFORE_EOF:
             return None
-        self._clock.advance(_LINE_STEP_SEC)
+        self._clock.advance(self._step)
         return _NOTIFICATION
 
     async def areadline(self, stream, timeout: float) -> str | None:
@@ -102,20 +102,43 @@ async def test_non_json_lines_are_skipped(tmp_path, mcp_reaper, mcp_owner):
     assert out["text"] == "hi"
 
 
-@pytest.mark.parametrize("read", sorted(_READS))
-def test_deadline_is_total_not_per_line(monkeypatch, read):
+def _chatty(monkeypatch, step: float) -> _ChattyReader:
+    """Подставить часы и двойник чтения строки в модуль сессии."""
     clock = FakeClock()
-    reader = _ChattyReader(clock)
+    reader = _ChattyReader(clock, step)
     monkeypatch.setattr(ps, "_clock", clock.now)
     monkeypatch.setattr(ps, "_readline_with_timeout", reader.readline)
     monkeypatch.setattr(ps, "_areadline_with_timeout", reader.areadline)
+    return reader
+
+
+@pytest.mark.parametrize("read", sorted(_READS))
+def test_deadline_is_total_not_per_line(monkeypatch, read):
+    reader = _chatty(monkeypatch, step=0.2)
     proc = SimpleNamespace(stdout=object())
 
     got = _READS[read](_session(proc), proc, 1.0)
 
     assert got == {}
-    assert len(reader.timeouts) <= 10
-    assert reader.timeouts[:5] == pytest.approx([1.0, 0.8, 0.6, 0.4, 0.2])
+    assert len(reader.timeouts) == 5
+    assert reader.timeouts == pytest.approx([1.0, 0.8, 0.6, 0.4, 0.2])
+
+
+@pytest.mark.parametrize("read", sorted(_READS))
+def test_lines_arriving_until_the_deadline_stop_on_it(monkeypatch, read):
+    """Строки приходят ровно в срок: чтение кончает сам срок, не читатель.
+
+    Шаг 0,25 точен в двоичной записи: каждая из четырёх строк приходит,
+    после четвёртой остаток ровно ноль, и пятого чтения нет.
+    """
+    reader = _chatty(monkeypatch, step=0.25)
+    proc = SimpleNamespace(stdout=object())
+
+    got = _READS[read](_session(proc), proc, 1.0)
+
+    assert got == {}
+    assert reader.timeouts == [1.0, 0.75, 0.5, 0.25]
+    assert all(t > 0 for t in reader.timeouts)
 
 
 @pytest.mark.parametrize("read", sorted(_READS))

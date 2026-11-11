@@ -157,11 +157,21 @@ async def call_tool(
 ) -> dict:
     """Вызвать тул через ``AgentRuntimeClient`` под текущим владельцем.
 
-    Возвращает разобранный ответ тула; ошибка сервера или пустой ответ —
-    ``RuntimeError``.
+    ``timeout`` — потолок ВСЕГО вызова: запуск процесса, ``initialize``,
+    повторы клиента и чтение ответа. Вышел срок — ``AssertionError`` с
+    именами сервера и тула, поэтому вызывающему тесту своя обёртка не
+    нужна. Возвращает разобранный ответ тула; ошибка сервера или пустой
+    ответ — ``RuntimeError``.
     """
     client = AgentRuntimeClient(server_name, server_cfg)
-    response = await client.acall_tool(tool, arguments, timeout=timeout)
+    try:
+        response = await asyncio.wait_for(
+            client.acall_tool(tool, arguments, timeout=timeout), timeout
+        )
+    except TimeoutError:
+        raise AssertionError(
+            f"вызов {tool} сервера {server_name} не уложился в {timeout} с"
+        ) from None
     return _tool_payload(response)
 
 
