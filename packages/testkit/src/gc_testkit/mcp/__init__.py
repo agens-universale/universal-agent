@@ -35,6 +35,10 @@ JOURNAL_SUFFIX = ".mcp-journal"
 _STREAM_TRANSPORTS = {"stream_http": "streamable-http", "stream_sse": "sse"}
 _POLL_SEC = 0.02
 _STOP_SEC = 5.0
+#: Запас потолка ``call_tool`` над сроком тула: запуск процесса,
+#: ``initialize`` и повторы клиента. Потолок строго больше срока, чтобы
+#: поведение продукта по сроку тула оставалось видимым тесту.
+_CEILING_MARGIN_SEC = 10.0
 
 
 def stdio_cfg(control: Path) -> dict:
@@ -154,24 +158,32 @@ async def call_tool(
     arguments: dict,
     *,
     timeout: float = 20.0,
+    ceiling: float | None = None,
 ) -> dict:
     """Вызвать тул через ``AgentRuntimeClient`` под текущим владельцем.
 
-    ``timeout`` — потолок ВСЕГО вызова: запуск процесса, ``initialize``,
-    повторы клиента и чтение ответа. Вышел срок — ``AssertionError`` с
-    именами сервера и тула, поэтому вызывающему тесту своя обёртка не
-    нужна. Возвращает разобранный ответ тула; ошибка сервера или пустой
-    ответ — ``RuntimeError``.
+    Два срока. ``timeout`` — срок тула, уходит в ``acall_tool``: его
+    истечение — поведение продукта, и тест его видит. ``ceiling`` —
+    потолок теста на ВЕСЬ вызов (запуск процесса, ``initialize``, повторы
+    клиента, чтение ответа), по умолчанию ``timeout + 10``; вышел именно
+    он — ``AssertionError`` с именами сервера и тула, поэтому вызывающему
+    тесту своя обёртка не нужна. ``TimeoutError`` изнутри клиента
+    пробрасывается как есть. Возвращает разобранный ответ тула; ошибка
+    сервера или пустой ответ — ``RuntimeError``.
     """
+    limit = timeout + _CEILING_MARGIN_SEC if ceiling is None else ceiling
     client = AgentRuntimeClient(server_name, server_cfg)
     try:
-        response = await asyncio.wait_for(
-            client.acall_tool(tool, arguments, timeout=timeout), timeout
-        )
+        async with asyncio.timeout(limit) as scope:
+            response = await client.acall_tool(
+                tool, arguments, timeout=timeout
+            )
     except TimeoutError:
-        raise AssertionError(
-            f"вызов {tool} сервера {server_name} не уложился в {timeout} с"
-        ) from None
+        if scope.expired():
+            raise AssertionError(
+                f"вызов {tool} сервера {server_name} не уложился в {limit} с"
+            ) from None
+        raise
     return _tool_payload(response)
 
 

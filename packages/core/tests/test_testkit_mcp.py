@@ -518,10 +518,10 @@ async def test_call_tool_is_bounded_as_a_whole(
 ):
     """Потолок ``call_tool`` держит и запуск: сервер молчит на initialize.
 
-    Постоянная сессия ждёт ответ ``initialize`` весь срок чтения и только
-    потом зовёт тул, так что вызов целиком длиннее потолка. Без потолка
-    всего вызова помощник вернул бы ответ тула позже срока; внешний
-    ``wait_for`` шире потолка и держит сам тест.
+    Постоянная сессия ждёт ответ ``initialize`` весь срок тула (2 с) и
+    только потом зовёт тул, так что потолок 0,5 с истекает раньше любого
+    исхода внутри клиента. Внешний ``wait_for`` шире потолка и держит
+    сам тест.
     """
     control = tmp_path / "s.json"
     set_behavior(control, start_delay=60)
@@ -529,8 +529,42 @@ async def test_call_tool_is_bounded_as_a_whole(
 
     with pytest.raises(AssertionError, match="echo сервера slow"):
         await asyncio.wait_for(
-            call_tool("slow", cfg, "echo", {}, timeout=0.5), _TIMEOUT
+            call_tool("slow", cfg, "echo", {}, timeout=2, ceiling=0.5),
+            _TIMEOUT,
         )
+
+
+async def test_call_tool_leaves_the_tool_timeout_to_the_product(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    """Срок тула меньше потолка: по сроку отвечает продукт, не потолок.
+
+    Сегодня продукт по сроку отдаёт пустой ответ, и помощник бросает
+    ``RuntimeError``. Внешний ``wait_for`` (5 с) короче умолчательного
+    потолка (1 + 10 с): сработай потолок вместо срока тула, тест упал бы
+    на ``TimeoutError``.
+    """
+    control = tmp_path / "s.json"
+    set_behavior(control)
+    cfg = {**stdio_cfg(control), "persistent_session": True}
+
+    with pytest.raises(RuntimeError, match="вызов тула не удался"):
+        await asyncio.wait_for(
+            call_tool("srv", cfg, "nap", {"seconds": 30}, timeout=1),
+            _TIMEOUT,
+        )
+
+
+async def test_call_tool_passes_a_client_timeout_through(monkeypatch):
+    """``TimeoutError`` изнутри клиента — не потолок: идёт как есть."""
+
+    async def _times_out(self, tool, arguments, *, timeout):
+        raise TimeoutError("клиент")
+
+    monkeypatch.setattr(AgentRuntimeClient, "acall_tool", _times_out)
+
+    with pytest.raises(TimeoutError, match="клиент"):
+        await call_tool("srv", {"transport": "stdio"}, "echo", {})
 
 
 def test_stdio_server_without_control_refuses_to_start(tmp_path):
