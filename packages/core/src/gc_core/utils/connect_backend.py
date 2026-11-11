@@ -299,9 +299,10 @@ def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
 
 
 def _log_last_chunk(logger, last_chunk: str) -> None:
-    """Последний чанк ответа responses — сырой вывод модели: только на debug,
-    строкой его маскировка секретов по имени ключа не видит. Текст — в самом
-    сообщении: format text полей события не выводит."""
+    """Последний чанк незавершённого потока responses — на debug. Это сырой
+    вывод модели, но новой утечки нет: на develop он был в тексте исключения,
+    которое политика ретраев пишет на error. В сообщении, а не в поле:
+    format text полей события не выводит."""
     logger.debug(
         "backend_responses_last_chunk: %s",
         clip_middle(last_chunk, _MAX_LAST_CHUNK_LOG_CHARS),
@@ -635,7 +636,6 @@ async def _arequest_backend_responses_once(
                     "last_chunk_chars": len(last_chunk),
                 },
             )
-            _log_last_chunk(logger, last_chunk)
         raise e
 
     if result.get("type") != "response.completed":

@@ -1,7 +1,7 @@
 import unittest
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from gc_core.utils.convertations import (
     get_output_list,
@@ -521,8 +521,8 @@ async def test_salvaged_think_is_not_text_answer_even_in_allow():
 def test_get_output_list_warns_on_unparsable_tool_arguments():
     """Бэкенд закрыл вызов как готовый, а аргументы — обрывок JSON: сборка
     не меняется (модель получит ошибку разбора), в логе — предупреждение с
-    метаданными, по которым видно, кто оборвал. Сам обрывок — только на
-    debug: строкой его маскировка секретов по имени ключа не видит."""
+    метаданными, по которым видно, кто оборвал. Текст обрывка в лог не
+    пишется: строкой его маскировка секретов по имени ключа не видит."""
     log = MagicMock()
     broken = '{"path": "a.toml", "include_line_count": '
     calls = [
@@ -542,27 +542,7 @@ def test_get_output_list_warns_on_unparsable_tool_arguments():
     assert "fs_file_info" in msg and "cut" in msg
     assert f"chars={len(broken)}" in msg
     assert broken not in msg
-    debug = [c.args[0] % c.args[1:] for c in log.debug.call_args_list]
-    assert any(broken in m for m in debug)
-
-
-def test_long_unparsable_arguments_keep_their_tail_in_the_log():
-    """Обрыв — в конце аргументов: у длинной записи в debug-логе остаются
-    конец и полная длина, а не только начало."""
-    log = MagicMock()
-    broken = '{"path": "a.txt", "content": "' + "x" * 20000 + "TAIL"
-    get_output_list(
-        _dct(
-            "tool_calls",
-            content=None,
-            tool_calls=[_tool_call("cut", arguments=broken)],
-        ),
-        logger_override=log,
-    )
-    msg = log.debug.call_args[0][0] % log.debug.call_args[0][1:]
-    assert msg.endswith("xTAIL")
-    assert f"total_chars={len(broken)}" in msg
-    assert '{"path": "a.txt"' in msg
+    assert not log.debug.called
 
 
 @pytest.mark.parametrize(

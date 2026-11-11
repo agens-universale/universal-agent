@@ -190,13 +190,12 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
         )
     _flush(logger)
     recs = _records(path)
-    # Ошибка — с размером чанка; сам чанк (сырой вывод модели) — на debug:
-    # строкой его маскировка секретов по имени ключа не видит.
+    # Ошибка — с размером чанка; сам чанк (сырой вывод модели) не пишется:
+    # на develop его не было в файле лога, только в stdout.
     errs = [r for r in recs if r["event"] == "backend_responses_json_error"]
     assert errs and errs[0]["last_chunk_chars"] == len("data: not-json-at-all")
     assert "not-json-at-all" not in json.dumps(errs[0])
-    raw = [r for r in recs if r["event"] == "backend_responses_last_chunk"]
-    assert raw and "not-json-at-all" in json.dumps(raw[0])
+    assert not any("not-json-at-all" in json.dumps(r) for r in recs)
 
 
 def test_last_chunk_is_readable_in_text_log(tmp_path, monkeypatch):

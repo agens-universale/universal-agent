@@ -211,7 +211,8 @@ def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
     """Аргументы вызова — не JSON: предупреждение с метаданными. Сборка не
     меняется, модель и так получит ошибку разбора; лог нужен, чтобы отличить
     обрыв у бэкенда (вызов закрыт как готовый) от потери на нашей стороне.
-    Сам обрывок — только на debug (см. `_log_raw_payload`)."""
+    Текст обрывка не пишется ни на каком уровне: format text пишет в файл и
+    debug, а ответ, отброшенный автороутингом, в журнал диалога не попадёт."""
     if logger is None or not isinstance(tool_call, dict):
         return
     # Мусорный вызов (функция не словарь) — не обрыв аргументов: его
@@ -232,11 +233,6 @@ def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
         fn.get("name"),
         tool_call.get("id"),
         len(arguments),
-    )
-    logger.debug(
-        "chat/completions tool call arguments (call_id=%s): %s",
-        tool_call.get("id"),
-        clip_middle(arguments, _MAX_BACKEND_LOG_CHARS),
     )
 
 
