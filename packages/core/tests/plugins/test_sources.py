@@ -197,20 +197,39 @@ def test_clone_url_never_read_as_git_option(tmp_path, monkeypatch):
     monkeypatch.setattr(sources, "_git", _git)
     url = "--upload-pack=touch x"
     sources._clone(url, None, tmp_path / "a")
-    sources._clone(url, "abc1234" + "0" * 33, tmp_path / "b")
+    sources._clone(url, "abc1234", tmp_path / "b")
 
     clone, remote = calls[0], calls[2]
     assert clone[-3:] == ["--", url, str(tmp_path / "a.tmp")]
     assert remote == ["remote", "add", "origin", "--", url]
 
 
-def test_short_commit_hash_is_rejected_in_config():
-    """Git забирает коммит с сервера только по полному хешу: короткий в
-    ``ref`` — понятная ошибка конфига, а не «репозиторий не получен»."""
-    from pydantic import ValidationError
+def test_short_commit_hash_notice_explains_full_hash(tmp_path, monkeypatch):
+    """Сервер git отдаёт коммит только по полному хешу: источник с коротким
+    пропускается, а уведомление называет причину. Агент работает дальше."""
+    _isolate(tmp_path, monkeypatch)
+    repo, first = _repo(tmp_path)
 
-    with pytest.raises(ValidationError, match="полный"):
-        PluginSource(git="o/r", ref="abc1234")
+    snap = catalog.build_plugin_snapshot(
+        _loaded({"git": f"file://{repo}", "ref": first[:7]}), clone=True
+    )
+
+    assert snap.plugins == ()
+    assert len(snap.notices) == 1
+    assert "полный (40 знаков)" in snap.notices[0]
+
+
+def test_tag_of_hex_digits_still_clones(tmp_path, monkeypatch):
+    """Тег из шестнадцатеричных знаков (дата) похож на короткий хеш, но
+    скачивается, как и раньше."""
+    _isolate(tmp_path, monkeypatch)
+    repo, first = _repo(tmp_path)
+    _run(repo, "tag", "20240312", first)
+    src = PluginSource(git=f"file://{repo}", ref="20240312")
+
+    snap = catalog.build_plugin_snapshot(_loaded(src), clone=True)
+
+    assert [p.name for p in snap.plugins] == ["gitplug"]
 
 
 def test_short_commit_hash_is_rejected_on_install(tmp_path, monkeypatch):
