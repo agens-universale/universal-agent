@@ -5,15 +5,17 @@
 * ``mcp_owner`` — свой владелец сессий на тест: реестры сессий процессные, и
   сессия прошлого теста под тем же именем досталась бы следующему. В конце
   закрывает все сессии владельца в трёх реестрах.
-* ``mcp_reaper`` — после теста добивает каждый процесс из журналов под
-  ``tmp_path`` и закрывает объекты, переданные в ``track``.
+* ``mcp_reaper`` — после теста закрывает объекты, переданные в ``track``, и
+  добивает каждый процесс из журналов тестовых серверов под ``tmp_path``.
 
 ``mcp_owner`` и ``mcp_reaper`` асинхронные: сессии закрываются на цикле
-теста, где их открывали.
+теста, где их открывали. Каждое закрытие — с потолком ``_CLOSE_SEC``:
+зависшее закрытие не вешает прогон, а падает ``AssertionError``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import signal
@@ -28,8 +30,11 @@ from gc_core.tools.connect_mcp import client as mcp_client
 from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 
-from gc_testkit.mcp import alive, wait_for
+from gc_testkit.mcp import JOURNAL_SUFFIX, alive, children, launches, wait_for
 
+#: Потолок одного закрытия: объекта из ``track`` или сессий владельца.
+#: С запасом над бюджетом закрытия постоянного stdio (SIGTERM → 5 с → SIGKILL).
+_CLOSE_SEC = 15.0
 #: Сколько ждать, пока добитые процессы исчезнут.
 _REAP_SEC = 5.0
 
@@ -56,16 +61,22 @@ async def mcp_owner() -> AsyncIterator[str]:
         try:
             yield owner
         finally:
-            await _close_owner_sessions(owner)
+            try:
+                await asyncio.wait_for(
+                    _close_owner_sessions(owner), _CLOSE_SEC
+                )
+            except TimeoutError:
+                raise AssertionError(
+                    f"сессии владельца {owner} не закрылись за {_CLOSE_SEC} с"
+                ) from None
 
 
 def _logged_pids(root: Path) -> list[int]:
+    """pid запусков и потомков из всех журналов тестовых серверов."""
     pids = []
-    for log in root.rglob("*.log"):
-        for line in log.read_text(encoding="utf-8").splitlines():
-            parts = line.split()
-            if len(parts) == 2 and parts[0] in ("start", "child"):
-                pids.append(int(parts[1]))
+    for path in root.rglob(f"*{JOURNAL_SUFFIX}"):
+        control = Path(str(path)[: -len(JOURNAL_SUFFIX)])
+        pids += launches(control) + children(control)
     return pids
 
 
@@ -82,6 +93,15 @@ def _kill(pid: int) -> None:
             os.kill(pid, signal.SIGKILL)
 
 
+async def _close(obj: Any) -> None:
+    closing = getattr(obj, "aclose", None)
+    if closing is not None:
+        await closing()
+    else:
+        # Синхронное закрытие — в потоке: иначе потолок его не прервёт.
+        await asyncio.to_thread(obj.close)
+
+
 class McpReaper:
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -92,22 +112,37 @@ class McpReaper:
         self._tracked.append(obj)
         return obj
 
-    async def reap(self) -> None:
-        """Закрыть отданное в ``track``, добить процессы из журналов."""
+    async def _close_tracked(self) -> list[str]:
+        errors = []
         while self._tracked:
             obj = self._tracked.pop()
-            with contextlib.suppress(Exception):
-                closing = getattr(obj, "aclose", None)
-                if closing is not None:
-                    await closing()
-                else:
-                    obj.close()
+            try:
+                await asyncio.wait_for(_close(obj), _CLOSE_SEC)
+            except TimeoutError:
+                errors.append(f"{obj!r}: закрытие дольше {_CLOSE_SEC} с")
+            except Exception as exc:
+                errors.append(f"{obj!r}: {exc!r}")
+        return errors
+
+    async def reap(self) -> None:
+        """Закрыть отданное в ``track``, добить процессы из журналов.
+
+        Процессы гасятся при любом исходе закрытий; ошибки и сроки
+        собираются и в конце падают одним ``AssertionError``.
+        """
+        errors = await self._close_tracked()
         pids = [pid for pid in _logged_pids(self._root) if alive(pid)]
         for pid in pids:
             _kill(pid)
-        await wait_for(
-            lambda: not any(alive(pid) for pid in pids), timeout=_REAP_SEC
-        )
+        try:
+            await wait_for(
+                lambda: not any(alive(pid) for pid in pids),
+                timeout=_REAP_SEC,
+            )
+        except AssertionError as exc:
+            errors.append(f"процессы не погасли: {exc}")
+        if errors:
+            raise AssertionError("уборка MCP: " + "; ".join(errors))
 
 
 @pytest.fixture

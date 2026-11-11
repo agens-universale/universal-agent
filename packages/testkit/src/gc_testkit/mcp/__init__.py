@@ -2,8 +2,9 @@
 
 Серверы — исполняемые файлы рядом (``stdio_server.py``, ``stream_server.py``).
 Поведение stdio-сервера задаёт JSON-файл «управления» (``set_behavior``);
-оба сервера дописывают журнал ``<control>.log`` — по нему тест видит запуски,
-выходы и запросы (``events``, ``launches``, ``exits``). Фикстуры — в
+оба сервера дописывают журнал ``<control>.mcp-journal`` — по нему тест видит
+запуски, потомков, выходы и запросы (``events``, ``launches``, ``children``,
+``exits``). Фикстуры — в
 :mod:`gc_testkit.mcp.fixtures`.
 """
 
@@ -26,6 +27,10 @@ _HERE = Path(__file__).parent
 _STDIO_SERVER = _HERE / "stdio_server.py"
 _STREAM_SERVER = _HERE / "stream_server.py"
 _CONTROL_ENV = "GC_TEST_CONTROL"
+#: Суффикс журнала к пути управления. Свой, а не ``.log``: уборка ищет журналы
+#: под ``tmp_path`` по маске, и логи агента туда попадать не должны. Серверы
+#: держат ту же строку у себя — они запускаются без тест-кита.
+JOURNAL_SUFFIX = ".mcp-journal"
 #: Транспорт ядра → имя транспорта FastMCP в argv сервера.
 _STREAM_TRANSPORTS = {"stream_http": "streamable-http", "stream_sse": "sse"}
 _POLL_SEC = 0.02
@@ -33,7 +38,7 @@ _STOP_SEC = 5.0
 
 
 def stdio_cfg(control: Path) -> dict:
-    """Определение stdio-сервера, поведение которого читается из ``control``."""
+    """Определение stdio-сервера с поведением из файла ``control``."""
     return {
         "transport": "stdio",
         "command": sys.executable,
@@ -56,7 +61,7 @@ def set_behavior(control: Path, **keys: Any) -> None:
 
 def _journal(control: Path) -> Path:
     """Путь журнала сервера с этим управлением."""
-    return Path(f"{control}.log")
+    return Path(f"{control}{JOURNAL_SUFFIX}")
 
 
 def events(control: Path) -> list[str]:
@@ -69,16 +74,22 @@ def events(control: Path) -> list[str]:
 
 
 def _pids(control: Path, kind: str) -> list[int]:
+    """pid из строк ``<kind> <pid>``; единственный разбор этих строк."""
     return [
         int(parts[1])
         for parts in (line.split() for line in events(control))
-        if len(parts) == 2 and parts[0] == kind
+        if len(parts) == 2 and parts[0] == kind and parts[1].isdigit()
     ]
 
 
 def launches(control: Path) -> list[int]:
     """pid каждого запуска сервера по порядку."""
     return _pids(control, "start")
+
+
+def children(control: Path) -> list[int]:
+    """pid каждого порождённого сервером потомка по порядку."""
+    return _pids(control, "child")
 
 
 def exits(control: Path) -> list[int]:
@@ -112,7 +123,7 @@ def alive(pid: int) -> bool:
 async def wait_for(
     predicate: Callable[[], bool], timeout: float = 10.0
 ) -> None:
-    """Дождаться истинности ``predicate``; не дождались — ``AssertionError``."""
+    """Дождаться истинности ``predicate``, иначе ``AssertionError``."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while not predicate():
@@ -232,9 +243,11 @@ class FakeClock:
 
 
 __all__ = [
+    "JOURNAL_SUFFIX",
     "FakeClock",
     "alive",
     "call_tool",
+    "children",
     "events",
     "exits",
     "free_port",

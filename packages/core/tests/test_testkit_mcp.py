@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 
 import pytest
@@ -26,6 +27,7 @@ from gc_testkit.mcp import (
     FakeClock,
     alive,
     call_tool,
+    children,
     events,
     exits,
     free_port,
@@ -35,6 +37,7 @@ from gc_testkit.mcp import (
     stream_server,
     wait_for,
 )
+from gc_testkit.mcp import fixtures as mcp_fixtures
 from gc_testkit.mcp.fixtures import mcp_home, mcp_owner, mcp_reaper
 
 pytestmark = pytest.mark.skipif(
@@ -121,14 +124,6 @@ def _tool_out(reply: dict) -> dict:
 class _NullLog:
     def info(self, *args, **kwargs) -> None:
         del args, kwargs
-
-
-def _children(control) -> list[int]:
-    return [
-        int(line.split()[1])
-        for line in events(control)
-        if line.startswith("child ")
-    ]
 
 
 # --- stdio-сервер через клиент ядра ---------------------------------------
@@ -293,7 +288,7 @@ async def test_ignore_term_and_child(tmp_path, mcp_reaper):
     set_behavior(control, ignore_term=True, spawn_child=True)
     async with _raw(stdio_cfg(control)) as proc:
         await _initialize(proc)
-        [child] = _children(control)
+        [child] = children(control)
 
         proc.send_signal(signal.SIGTERM)
         # Ответ после сигнала: сигнал уже доставлен и проигнорирован.
@@ -313,7 +308,7 @@ async def test_child_ignores_term(tmp_path, mcp_reaper):
     set_behavior(control, child_ignores_term=True)
     async with _raw(stdio_cfg(control)) as proc:
         await _initialize(proc)
-        [child] = _children(control)
+        [child] = children(control)
 
         # Сигнал всей группе — как при закрытии сессии: лидер выходит,
         # глухой потомок остаётся (форма node + Chromium).
@@ -381,7 +376,7 @@ async def test_exit_on_method_leaves_without_reply(tmp_path, mcp_reaper):
     async with _raw(stdio_cfg(control)) as proc:
         await _initialize(proc)
         assert await _rpc(proc, 1, "tools/list") is None
-        assert await asyncio.wait_for(proc.wait(), _TIMEOUT) != 0
+        assert await asyncio.wait_for(proc.wait(), _TIMEOUT) == 1
 
     assert "req tools/list 1" in events(control)
     assert exits(control) == []
@@ -495,6 +490,10 @@ async def test_stream_server_logs_every_request_with_session(
     assert {"initialize", "tools/list", "tools/call"} <= methods
     assert call_sessions == {str(out["session"])}
     assert all(len(row) == 4 for row in requests)
+    opened = [row[3] for row in requests if row[1] == "initialize"]
+    # Номер у каждой новой сессии свой: не адрес объекта, который
+    # достаётся следующей сессии после сборки прошлой.
+    assert len(set(opened)) == len(opened) >= 2
 
 
 # --- помощники и фикстуры -------------------------------------------------
@@ -512,6 +511,24 @@ async def test_fake_clock_sleep_advances():
 async def test_wait_for_times_out():
     with pytest.raises(AssertionError):
         await wait_for(lambda: False, timeout=0.2)
+
+
+def test_stdio_server_without_control_refuses_to_start(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k != "GC_TEST_CONTROL"}
+    server = stdio_cfg(tmp_path / "unused.json")["args"][0]
+
+    done = subprocess.run(
+        [sys.executable, server],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        cwd=tmp_path,
+        env=env,
+        timeout=_TIMEOUT,
+        check=False,
+    )
+
+    assert done.returncode == 1
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_alive_is_false_for_a_zombie():
@@ -552,3 +569,58 @@ async def test_reaper_closes_tracked_objects(mcp_reaper):
     await mcp_reaper.reap()
 
     assert sorted(closed) == ["async", "sync"]
+
+
+class _HungClose:
+    async def aclose(self):
+        await asyncio.Event().wait()
+
+
+class _FailingClose:
+    async def aclose(self):
+        raise RuntimeError("закрытие сломалось")
+
+
+async def test_reaper_bounds_a_hung_close_and_still_kills(
+    tmp_path, mcp_reaper, monkeypatch
+):
+    monkeypatch.setattr(mcp_fixtures, "_CLOSE_SEC", 0.2)
+    control = tmp_path / "s.json"
+    async with _raw(stdio_cfg(control)) as proc:
+        await _initialize(proc)
+        mcp_reaper.track(_HungClose())
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+
+        with pytest.raises(AssertionError, match="закрытие дольше"):
+            await mcp_reaper.reap()
+
+        assert loop.time() - started < 0.2 + _TIMEOUT
+        assert not alive(proc.pid)
+
+
+async def test_reaper_reports_a_failing_close(mcp_reaper):
+    mcp_reaper.track(_FailingClose())
+
+    with pytest.raises(AssertionError, match="закрытие сломалось"):
+        await mcp_reaper.reap()
+
+
+async def test_reaper_reads_only_server_journals(tmp_path, mcp_reaper):
+    stranger = subprocess.Popen(["sleep", "300"])
+    try:
+        agent_log = tmp_path / "gc" / "agent.log"
+        agent_log.parent.mkdir()
+        agent_log.write_text(
+            f"start {stranger.pid}\nstart не-число\n", encoding="utf-8"
+        )
+        (tmp_path / "s.json.mcp-journal").write_text(
+            "start не-число\nchild\n", encoding="utf-8"
+        )
+
+        await mcp_reaper.reap()
+
+        assert alive(stranger.pid)
+    finally:
+        stranger.kill()
+        stranger.wait()

@@ -30,8 +30,8 @@
 stdin читает отдельный поток, каждый запрос исполняется в своём: пока идёт
 ``nap``, следующие запросы обслуживаются.
 
-Журнал ``<control>.log``: ``start <pid>``, ``child <pid>``, ``exit <pid>``,
-``req <method> <id>``, ``cancelled <id>``. ``exit`` пишется при штатном
+Журнал ``<control>.mcp-journal``: ``start <pid>``, ``child <pid>``,
+``exit <pid>``, ``req <method> <id>``, ``cancelled <id>``. ``exit`` пишется при штатном
 выходе — по концу stdin и по SIGTERM; аварийные (``fail_start``, ``exit_on``,
 ``crash``) его не пишут.
 """
@@ -46,7 +46,7 @@ import time
 
 PID = os.getpid()
 CONTROL = os.environ.get("GC_TEST_CONTROL", "")
-JOURNAL = CONTROL + ".log"
+JOURNAL = CONTROL + ".mcp-journal"  # gc_testkit.mcp.JOURNAL_SUFFIX
 DEFAULT_TOOLS = ["echo", "nap"]
 SCHEMAS = {
     "echo": {"text": {"type": "string"}},
@@ -267,6 +267,8 @@ def read_stdin() -> None:
 
 
 def main() -> None:
+    if not CONTROL:
+        sys.exit("GC_TEST_CONTROL не задан: журнал писать некуда")
     cfg = behavior()
     term = signal.SIG_IGN if cfg.get("ignore_term") else on_term
     signal.signal(signal.SIGTERM, term)
