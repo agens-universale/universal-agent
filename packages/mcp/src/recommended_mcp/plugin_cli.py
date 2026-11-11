@@ -17,7 +17,7 @@ def _build() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("install", help="установить плагин")
     p.add_argument("source", help="путь, URL или owner/repo (GitHub)")
-    p.add_argument("--ref", help="ветка, тег или хеш коммита")
+    p.add_argument("--ref", help="ветка, тег или полный хеш коммита")
     p.add_argument("--subdir", help="каталог плагина внутри репозитория")
     p.add_argument(
         "--force", action="store_true", help="заменить установленный"

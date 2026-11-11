@@ -3,6 +3,7 @@
 import os
 import subprocess
 
+import pytest
 from gc_core.config_modules.plugins import PluginSource
 from gc_core.plugins import catalog, sources
 from gc_testkit.settings import make_settings
@@ -196,8 +197,27 @@ def test_clone_url_never_read_as_git_option(tmp_path, monkeypatch):
     monkeypatch.setattr(sources, "_git", _git)
     url = "--upload-pack=touch x"
     sources._clone(url, None, tmp_path / "a")
-    sources._clone(url, "abc1234", tmp_path / "b")
+    sources._clone(url, "abc1234" + "0" * 33, tmp_path / "b")
 
     clone, remote = calls[0], calls[2]
     assert clone[-3:] == ["--", url, str(tmp_path / "a.tmp")]
     assert remote == ["remote", "add", "origin", "--", url]
+
+
+def test_short_commit_hash_is_rejected_in_config():
+    """Git забирает коммит с сервера только по полному хешу: короткий в
+    ``ref`` — понятная ошибка конфига, а не «репозиторий не получен»."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="полный"):
+        PluginSource(git="o/r", ref="abc1234")
+
+
+def test_short_commit_hash_is_rejected_on_install(tmp_path, monkeypatch):
+    from gc_core.plugins import installed
+
+    _isolate(tmp_path, monkeypatch)
+    repo, first = _repo(tmp_path)
+    with pytest.raises(ValueError, match="полный"):
+        with installed.prepare(f"file://{repo}", ref=first[:7]):
+            pass

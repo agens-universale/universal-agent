@@ -10,11 +10,24 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_PLUGIN_HOOK_TIMEOUT_SEC = 30
+
+_SHORT_COMMIT_RE = re.compile(r"^[0-9a-f]{7,39}$")
+SHORT_COMMIT_ERROR = (
+    "короткий хеш коммита не поддерживается: укажите полный (40 знаков), "
+    "ветку или тег"
+)
+
+
+def is_short_commit(ref: str | None) -> bool:
+    """Короткий хеш коммита: сервер git отдаёт коммит только по полному."""
+    return bool(ref) and _SHORT_COMMIT_RE.match(ref) is not None
 
 
 class PluginSource(BaseModel):
@@ -28,6 +41,13 @@ class PluginSource(BaseModel):
     ref: str | None = None
     # Каталог плагина внутри репозитория (если плагин не в корне).
     subdir: str | None = None
+
+    @field_validator("ref")
+    @classmethod
+    def _full_commit(cls, ref: str | None) -> str | None:
+        if is_short_commit(ref):
+            raise ValueError(SHORT_COMMIT_ERROR)
+        return ref
 
 
 class PluginsConfig(BaseModel):

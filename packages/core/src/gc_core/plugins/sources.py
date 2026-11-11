@@ -19,10 +19,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from gc_core.config_modules.plugins import SHORT_COMMIT_ERROR, is_short_commit
+
 logger = logging.getLogger(__name__)
 
 _SHORT = re.compile(r"^[\w.-]+/[\w.-]+$")
-_SHA = re.compile(r"^[0-9a-f]{7,40}$")
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 _GIT_TIMEOUT_SEC = 120
 
 _resolved: dict[tuple[str, str, str], Path | None] = {}
@@ -66,6 +68,8 @@ def _git(args: list[str], cwd: Path | None = None) -> None:
 
 
 def _clone(url: str, ref: str | None, target: Path) -> None:
+    if is_short_commit(ref):
+        raise ValueError(SHORT_COMMIT_ERROR)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
