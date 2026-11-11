@@ -741,6 +741,33 @@ async def test_ap_skill_symlink_outside_root_skipped(tmp_path):
     assert "x:evil" not in ids
 
 
+async def test_ap_skill_symlink_inside_root_is_loaded(tmp_path):
+    """Скилл по ссылке внутри плагина работает: отсекается только ссылка
+    за корень. Реестр и подсчёт ядра для витрин видят одно и то же."""
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "x"})
+    shared = root / "shared" / "linked"
+    shared.mkdir(parents=True)
+    (shared / "SKILL.md").write_text(
+        "---\nname: linked\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "linked").symlink_to(shared, target_is_directory=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    reg = SkillsRegistry(
+        system_root=str(empty),
+        user_root=str(empty),
+        project_root=str(empty),
+        plugin_roots=[SkillRoot("x", str(root / "skills"), str(root))],
+    )
+    ids = {
+        s["id"] if isinstance(s, dict) else s.id
+        for s in await reg.list_skills()
+    }
+    assert {"x:a", "x:linked"} <= ids
+    plugin = load_plugin(root)
+    assert catalog.plugin_skill_ids(plugin) == ["x:a", "x:linked"]
+
+
 def test_cc_plugin_unaffected_by_ap_rules(tmp_path):
     plugin = load_plugin(_make_plugin(tmp_path))
     assert plugin.format == "claude-code"
