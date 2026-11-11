@@ -134,6 +134,9 @@ ALLOWED: dict[str, str] = {
     _TESTKIT + "develop_files.py": _TESTKIT_REASON,
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,
+    _TESTKIT + "mcp/__init__.py": "файл поведения тестового сервера",
+    _TESTKIT + "mcp/stdio_server.py": "журнал тестового сервера",
+    _TESTKIT + "mcp/stream_server.py": "журнал тестового сервера",
     _TESTKIT + "plugin_store.py": _TESTKIT_REASON,
     _TESTKIT + "tui_fixtures/stub_executor.py": _TESTKIT_REASON,
 }
