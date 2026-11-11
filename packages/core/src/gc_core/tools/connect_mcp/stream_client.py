@@ -5,8 +5,17 @@ import logging
 import os
 import weakref
 from datetime import timedelta
-from functools import wraps
-from typing import Any, Dict, List, Optional, Tuple, Union
+from functools import partial, wraps
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -550,8 +559,27 @@ async def alist_tools_stream_sse(
 ) -> List[Dict[str, Any]]:
     """Список тулов по SSE, не занимая поток.
 
+    С ключом постоянной сессии — по ней (см. ``_alist_tools_persistent``).
     url: базовый URL сервера из конфига (без /sse в конце).
     """
+    server_key = _list_session_key(server_cfg)
+    if server_key is not None:
+        return await _alist_tools_persistent(
+            partial(
+                _arequest_persistent,
+                server_key=server_key,
+                open_session=partial(
+                    _aopen_persistent_sse_session,
+                    server_key,
+                    url,
+                    server_cfg,
+                    token,
+                    timeout,
+                ),
+            ),
+            server_key=server_key,
+            timeout=timeout,
+        )
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
@@ -659,75 +687,121 @@ async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
     return session, (transport_cm, session)
 
 
-@_in_session_task
-async def _call_tool_stream_sse_persistent(
-    server_key: str,
-    base_url: str,
-    token: Optional[str],
-    extra_headers: Optional[Dict[str, str]],
-    timeout: float,
-    verify: Union[bool, str],
-    tool_name: str,
-    arguments: Dict[str, Any],
-    cert: Optional[Tuple[str, str]] = None,
+async def _acall_tool_on_session(
+    s: ClientSession, tool_name: str, arguments: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Persistent вариант: держим открытой одну ClientSession поверх живого
-    SSE-коннекта в постоянной задаче текущего event loop.
+    result = await _call_tool_request(s, tool_name, arguments)
+    content_items: List[Any] = []
+    for item in getattr(result, "content", []) or []:
+        if hasattr(item, "model_dump"):
+            content_items.append(
+                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
+            )
+        else:
+            content_items.append(item)
+    return {
+        "content": content_items,
+        "isError": bool(getattr(result, "isError", False)),
+    }
+
+
+async def _alist_tools_on_session(s: ClientSession) -> List[Dict[str, Any]]:
+    result = await s.list_tools()
+    return [_tool_to_dict(tool) for tool in result.tools]
+
+
+@_in_session_task
+async def _arequest_persistent(
+    server_key: str,
+    open_session: Callable[[], Awaitable[ClientSession]],
+    request: Callable[[ClientSession], Awaitable[Any]],
+) -> Any:
+    """Запрос по постоянной сессии ключа; нет сессии — ``open_session``.
+
+    Работает в задаче сессии. Сломанную сессию из реестра сносим и
+    открываем новую (под durable — ``McpSessionLostError``). Общий путь
+    вызова и списка тулов у ``stream_sse`` и ``stream_stdio``.
     """
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
-
-    async def _open_session() -> ClientSession:
-        endpoint = _build_endpoint(base_url, "/sse")
-        headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
-        httpx_factory = _make_httpx_factory(
-            verify,
-            cert=cert,
-            trust_env=_trust_env_for_url(base_url),
-            url=base_url,
-        )
-        transport_cm = sse_client(
-            endpoint,
-            headers=headers or None,
-            timeout=timeout,
-            httpx_client_factory=httpx_factory,
-        )
-        new_session, cm_stack = await _enter_session(transport_cm)
-        _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
-        return new_session
-
-    async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await _call_tool_request(s, tool_name, arguments)
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(
-                    item.model_dump(
-                        by_alias=True, mode="json", exclude_unset=True
-                    )
-                )
-            else:
-                content_items.append(item)
-        return {
-            "content": content_items,
-            "isError": bool(getattr(result, "isError", False)),
-        }
-
     if session is not None:
         try:
             return await _SESSION_MANAGER.request(
-                server_key, lambda session=session: _call(session)
+                server_key, lambda session=session: request(session)
             )
         except Exception as exc:
             _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
-            session = None
 
-    session = await _open_session()
+    session = await open_session()
     return await _SESSION_MANAGER.request(
-        server_key, lambda session=session: _call(session)
+        server_key, lambda session=session: request(session)
     )
+
+
+def _list_session_key(server_cfg: Dict[str, Any]) -> Optional[str]:
+    """Ключ постоянной сессии для списка тулов; ``None`` — разовый список.
+
+    Только ключ из определения (его ставит потребитель сервиса): без него
+    список, как прежде, идёт разовым соединением.
+    """
+    if not server_cfg.get("persistent_session"):
+        return None
+    return server_cfg.get(SESSION_KEY_FIELD) or None
+
+
+async def _alist_tools_persistent(
+    request_persistent: Callable[..., Awaitable[Any]],
+    *,
+    server_key: str,
+    timeout: float,
+) -> List[Dict[str, Any]]:
+    """Список тулов по постоянной сессии — той, что обслужит вызовы.
+
+    ``request_persistent(request=...)`` — путь запроса транспорта по его
+    постоянной сессии, тот же, что у вызова. Сбой — отказ подключения:
+    сессию сносим, как у вызова, но без разового соединения — иначе
+    процессный сервер стартовал бы второй раз. Срок — на открытие и
+    список вместе: у постоянной сессии stdio своего срока чтения нет.
+    Отмена — как у вызова: идущий запрос снимается и сессия остаётся,
+    отмена посреди открытия сессию закрывает.
+    """
+    try:
+        return await asyncio.wait_for(
+            request_persistent(request=_alist_tools_on_session), timeout
+        )
+    except Exception:
+        await _SESSION_MANAGER.ainvalidate(server_key)
+        require_no_reconnect()
+        raise
+
+
+async def _aopen_persistent_sse_session(
+    server_key: str,
+    base_url: str,
+    server_cfg: Dict[str, Any],
+    token: Optional[str],
+    timeout: float,
+) -> ClientSession:
+    """Открыть SSE-сессию в задаче сессии и положить её в реестр."""
+    headers = _merge_mcp_headers(
+        token=token, extra_headers=server_cfg.get("headers") or None
+    )
+    httpx_factory = _make_httpx_factory(
+        get_verify_ssl(server_cfg),
+        cert=get_client_cert(server_cfg),
+        trust_env=_trust_env_for_url(base_url),
+        url=base_url,
+    )
+    transport_cm = sse_client(
+        _build_endpoint(base_url, "/sse"),
+        headers=headers or None,
+        timeout=timeout,
+        httpx_client_factory=httpx_factory,
+    )
+    new_session, cm_stack = await _enter_session(transport_cm)
+    _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
+    return new_session
 
 
 async def acall_tool_stream_sse(
@@ -752,16 +826,19 @@ async def acall_tool_stream_sse(
     if bool(server_cfg.get("persistent_session")):
         server_key = server_cfg.get(SESSION_KEY_FIELD) or f"stream_sse::{url}"
         try:
-            return await _call_tool_stream_sse_persistent(
+            return await _arequest_persistent(
                 server_key=server_key,
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
+                open_session=partial(
+                    _aopen_persistent_sse_session,
+                    server_key,
+                    url,
+                    server_cfg,
+                    token,
+                    timeout,
+                ),
+                request=lambda s: _acall_tool_on_session(
+                    s, tool_name, arguments
+                ),
             )
         except Exception as exc:
             _raise_rpc_error(exc)
@@ -850,11 +927,28 @@ async def alist_tools_stream_http(
 ) -> List[Dict[str, Any]]:
     """Список тулов по streamable HTTP, не занимая поток.
 
+    С ключом постоянной сессии — по ней (см. ``_alist_tools_persistent``).
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
+    server_key = _list_session_key(server_cfg)
+    if server_key is not None:
+        return await _alist_tools_persistent(
+            partial(
+                _arequest_stream_http_persistent,
+                server_key=server_key,
+                base_url=url,
+                token=token,
+                extra_headers=extra_headers,
+                timeout=timeout,
+                verify=verify,
+                cert=cert,
+            ),
+            server_key=server_key,
+            timeout=timeout,
+        )
     return await _list_tools_stream_http_async(
         base_url=url,
         token=token,
@@ -984,39 +1078,20 @@ async def _aopen_persistent_http_session(
     return new_session
 
 
-async def _acall_tool_on_session(
-    s: ClientSession, tool_name: str, arguments: Dict[str, Any]
-) -> Dict[str, Any]:
-    result = await _call_tool_request(s, tool_name, arguments)
-    content_items: List[Any] = []
-    for item in getattr(result, "content", []) or []:
-        if hasattr(item, "model_dump"):
-            content_items.append(
-                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
-            )
-        else:
-            content_items.append(item)
-    return {
-        "content": content_items,
-        "isError": bool(getattr(result, "isError", False)),
-    }
-
-
 @_in_session_task
-async def _call_tool_stream_http_persistent(
+async def _arequest_stream_http_persistent(
     server_key: str,
     base_url: str,
     token: Optional[str],
     extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
-    tool_name: str,
-    arguments: Dict[str, Any],
+    request: Callable[[ClientSession], Awaitable[Any]],
     cert: Optional[Tuple[str, str]] = None,
-) -> Dict[str, Any]:
+) -> Any:
     """
-    Вызов MCP-тула через Streamable HTTP с персистентной сессией.
-    Сессия кешируется в _SESSION_MANAGER и переиспользуется между вызовами.
+    Запрос через Streamable HTTP с персистентной сессией: вызов тула или
+    список тулов. Сессия кешируется в _SESSION_MANAGER и переиспользуется.
     """
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
@@ -1034,14 +1109,11 @@ async def _call_tool_stream_http_persistent(
             base_url=base_url,
         )
 
-    async def _call(s: ClientSession) -> Dict[str, Any]:
-        return await _acall_tool_on_session(s, tool_name, arguments)
-
     # Try with cached session first
     if session is not None:
         try:
             return await _SESSION_MANAGER.request(
-                server_key, lambda session=session: _call(session)
+                server_key, lambda session=session: request(session)
             )
         except Exception as exc:
             _raise_rpc_error(exc)
@@ -1055,7 +1127,7 @@ async def _call_tool_stream_http_persistent(
         try:
             session = await _open_session(endpoint)
             return await _SESSION_MANAGER.request(
-                server_key, lambda session=session: _call(session)
+                server_key, lambda session=session: request(session)
             )
         except McpError as exc:
             _raise_rpc_error(exc)
@@ -1111,15 +1183,14 @@ async def acall_tool_stream_http(
         return await _stateless()
 
     try:
-        return await _call_tool_stream_http_persistent(
+        return await _arequest_stream_http_persistent(
             server_key=server_key,
             base_url=url,
             token=token,
             extra_headers=extra_headers,
             timeout=timeout,
             verify=verify,
-            tool_name=tool_name,
-            arguments=arguments,
+            request=lambda s: _acall_tool_on_session(s, tool_name, arguments),
             cert=cert,
         )
     except Exception as exc:
@@ -1182,7 +1253,23 @@ async def alist_tools_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """Список тулов по stdio (через SDK), не занимая поток."""
+    """Список тулов по stdio (через SDK), не занимая поток.
+
+    С ключом постоянной сессии — по ней (см. ``_alist_tools_persistent``).
+    """
+    server_key = _list_session_key(server_cfg)
+    if server_key is not None:
+        return await _alist_tools_persistent(
+            partial(
+                _arequest_persistent,
+                server_key=server_key,
+                open_session=partial(
+                    _aopen_persistent_stdio_session, server_key, server_cfg
+                ),
+            ),
+            server_key=server_key,
+            timeout=timeout,
+        )
     return await _list_tools_stream_stdio_async(
         server_cfg=server_cfg,
         timeout=timeout,
@@ -1237,68 +1324,27 @@ async def _call_tool_stream_stdio_async(
         }
 
 
-@_in_session_task
-async def _call_tool_stream_stdio_persistent(
-    server_key: str,
-    server_cfg: Dict[str, Any],
-    timeout: float,  # noqa: ARG001  # единый API транспорта; долгий stdio-тул ждём без таймаута
-    tool_name: str,
-    arguments: Dict[str, Any],
-) -> Dict[str, Any]:
+async def _aopen_persistent_stdio_session(
+    server_key: str, server_cfg: Dict[str, Any]
+) -> ClientSession:
+    """Поднять stdio-сервер в задаче сессии и положить сессию в реестр.
+
+    Один subprocess и одна ClientSession на ключ: живут между вызовами.
     """
-    Persistent вариант: держим stdio MCP-сервер живым (один subprocess +
-    одна ClientSession) в постоянной задаче текущего event loop.
-    """
-    session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
-
-    async def _open_session() -> ClientSession:
-        command = server_cfg.get("command")
-        args = server_cfg.get("args") or []
-        if not isinstance(args, list):
-            args = [args]
-        params = StdioServerParameters(
-            command=_resolve_command(str(command)),
-            args=[str(a) for a in args],
-            env=mcp_stdio_env(server_cfg.get("env") or None),
-            cwd=server_cfg.get("cwd") or None,
-        )
-        transport_cm = stdio_client(params)
-        new_session, cm_stack = await _enter_session(transport_cm)
-        _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
-        return new_session
-
-    async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await _call_tool_request(s, tool_name, arguments)
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(
-                    item.model_dump(
-                        by_alias=True, mode="json", exclude_unset=True
-                    )
-                )
-            else:
-                content_items.append(item)
-        return {
-            "content": content_items,
-            "isError": bool(getattr(result, "isError", False)),
-        }
-
-    if session is not None:
-        try:
-            return await _SESSION_MANAGER.request(
-                server_key, lambda session=session: _call(session)
-            )
-        except Exception as exc:
-            _raise_rpc_error(exc)
-            await _SESSION_MANAGER.ainvalidate(server_key)
-            require_no_reconnect()
-            session = None
-
-    session = await _open_session()
-    return await _SESSION_MANAGER.request(
-        server_key, lambda session=session: _call(session)
+    command = server_cfg.get("command")
+    args = server_cfg.get("args") or []
+    if not isinstance(args, list):
+        args = [args]
+    params = StdioServerParameters(
+        command=_resolve_command(str(command)),
+        args=[str(a) for a in args],
+        env=mcp_stdio_env(server_cfg.get("env") or None),
+        cwd=server_cfg.get("cwd") or None,
     )
+    transport_cm = stdio_client(params)
+    new_session, cm_stack = await _enter_session(transport_cm)
+    _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
+    return new_session
 
 
 async def acall_tool_stream_stdio(
@@ -1325,12 +1371,14 @@ async def acall_tool_stream_stdio(
             or f"stream_stdio::{server_cfg.get('command')}::{args_key}"
         )
         try:
-            return await _call_tool_stream_stdio_persistent(
+            return await _arequest_persistent(
                 server_key=server_key,
-                server_cfg=server_cfg,
-                timeout=timeout,
-                tool_name=tool_name,
-                arguments=arguments,
+                open_session=partial(
+                    _aopen_persistent_stdio_session, server_key, server_cfg
+                ),
+                request=lambda s: _acall_tool_on_session(
+                    s, tool_name, arguments
+                ),
             )
         except Exception as exc:
             _raise_rpc_error(exc)
