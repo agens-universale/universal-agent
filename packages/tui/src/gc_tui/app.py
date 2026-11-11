@@ -406,7 +406,7 @@ class TuiApp(App):
         )
         self.active_runner = None  # AgentRunner | None
         #: Цикл агента приложения, один на все ходы; поток поднимается при
-        #: первом обращении (`AgentLoop.start`).
+        #: первой отдаче работы (`AgentLoop.submit` / `call_soon`).
         self.agent_loop = AgentLoop()
         #: Решения по плану снятого раннера для следующего (`_retire_runner`).
         self._carried_plan: tuple = (None, None)
