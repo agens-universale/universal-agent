@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import secrets
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
@@ -27,6 +28,13 @@ class Surface(Protocol):
     async def astart(self) -> None: ...
 
     async def astop(self) -> None: ...
+
+
+def server_version() -> str:
+    try:
+        return version("gc-server")
+    except PackageNotFoundError:
+        return "0"
 
 
 def install_bearer(

@@ -241,7 +241,7 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
 
     out = await aapply_tool(
         ReadFile.registered_tool_name(),
-        {"path": str(target)},
+        {"path": str(target), "add_line_numbers": False},
         _tools_data(ReadFile),
         ctx=local_ctx(),
     )

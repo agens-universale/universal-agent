@@ -1,15 +1,13 @@
 import json
 
-import pytest
 from gc_core.tools.arguments_validation import (
-    WrongFunctionArgumentsException,
     parse_and_validate_tool_arguments,
     prepare_tool_arguments,
 )
 from gc_core.tools.fs.file_info import FileInfo
 from gc_core.tools.fs.read_file import ReadFile
-from gc_core.utils.fs_size_limits import DEFAULT_FS_READ_MAX_BYTES
 from gc_core.utils.file_text import sha256_hex_of_bytes
+from gc_core.utils.fs_size_limits import DEFAULT_FS_READ_MAX_BYTES
 from gc_testkit.helpers.crossplatform import require_symlinks
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
@@ -300,10 +298,11 @@ def test_schema_and_prompt_have_line_axis_only():
         "add_line_numbers",
     }
     assert props["add_line_numbers"]["type"] == "boolean"
-    assert spec["parameters"]["required"] == ["path", "add_line_numbers"]
+    assert spec["parameters"]["required"] == ["path"]
     assert "do not copy" in props["add_line_numbers"]["description"]
     blob = json.dumps(spec) + ReadFile.prompt_description()
-    assert '"required": ["path", "add_line_numbers"]' in blob
+    assert '"required": ["path"]' in blob
+    assert "add_line_numbers is required" not in blob
     for token in _CHAR_PAGING_KEYS:
         assert token not in blob
     assert "next_char_offset" not in blob
@@ -381,19 +380,18 @@ def test_add_line_numbers_non_bool_is_false(tmp_path):
         assert res["content"] == "a\n", value
 
 
-def test_schema_requires_line_numbers_and_coerces_before_validation():
+def test_schema_allows_missing_line_numbers_and_coerces_before_validation():
     spec = ReadFile.tool_description()
     entry = {"spec": spec, "tool_fabric": ReadFile}
-    with pytest.raises(WrongFunctionArgumentsException):
-        prepared, _service = prepare_tool_arguments({"path": "/tmp/a"}, entry)
-        parse_and_validate_tool_arguments(
-            tool_name="fs_read_file",
-            arguments={"path": "/tmp/a"},
-            tool_spec=spec,
-            allow_empty_for_empty_schema=False,
-            tool_fabric=ReadFile,
-            prepared=prepared,
-        )
+    prepared, _service = prepare_tool_arguments({"path": "/tmp/a"}, entry)
+    assert parse_and_validate_tool_arguments(
+        tool_name="fs_read_file",
+        arguments={"path": "/tmp/a"},
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+        tool_fabric=ReadFile,
+        prepared=prepared,
+    ) == {"path": "/tmp/a"}
     prepared, _service = prepare_tool_arguments(
         {"path": "/tmp/a", "add_line_numbers": 0}, entry
     )

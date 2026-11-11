@@ -25,6 +25,7 @@ from gc_core.auto_routing import state_ops
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
+from gc_core.execution.constants import NO_TOOL_RESPONSE
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.execution.ports import port
@@ -147,6 +148,7 @@ _LIMIT_OUTCOMES = frozenset(
         "token_limit",
         "tool_errors",
         "judge_unavailable",
+        NO_TOOL_RESPONSE,
     }
 )
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import UsageAccount
@@ -142,8 +144,10 @@ async def test_normal_complete_still_ok_true(monkeypatch):
     assert payload["meta"]["finish_reason"] == "completed"
 
 
-async def test_judge_unavailable_in_the_child_is_a_failure_for_the_parent(
+@pytest.mark.parametrize("outcome", ["judge_unavailable", "no_tool_response"])
+async def test_policy_stop_in_the_child_is_a_failure_for_the_parent(
     monkeypatch,
+    outcome,
 ):
     """Проверка действий недоступна: субагент останавливается сам. Родителю
     приходит отказ, а не «успех» с текстом, и свой прогон он продолжает —
@@ -154,8 +158,8 @@ async def test_judge_unavailable_in_the_child_is_a_failure_for_the_parent(
     reason = "The automatic review of actions is unavailable. Run stopped."
 
     async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
-        child_state.terminal_outcome = "judge_unavailable"
-        return reason
+        child_state.terminal_outcome = outcome
+        return reason if outcome == "judge_unavailable" else None
 
     finished = []
 
@@ -168,10 +172,10 @@ async def test_judge_unavailable_in_the_child_is_a_failure_for_the_parent(
     )
     payload = json.loads(out)
     # завершение ребёнка записано как неуспешное (журнал, прогресс, трейс)
-    assert finished == ["judge_unavailable"]
+    assert finished == [outcome]
     assert payload["ok"] is False
-    assert payload["error"]["code"] == "judge_unavailable"
-    assert payload["error"]["message"] == reason
+    assert payload["error"]["code"] == outcome
+    assert payload["error"]["message"]
     assert payload["error"]["retryable"] is False
     assert getattr(orch, "judge_stop_reason", None) is None
     assert getattr(orch, "terminal_outcome", None) is None

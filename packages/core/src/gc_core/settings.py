@@ -37,9 +37,7 @@ class RuntimeEnv:
     project_root: Optional[str] = None
     trace_id: Optional[str] = None
     is_tui: bool = False
-    #: Сигналы поверхности (только TUI): адаптивный bounce текстового ответа
-    #: (``tui.text_answer_mode``) и умный режим судьи финиша (``/gate smart``).
-    #: CLI/server их не ставят — строгий контракт.
+    #: The launch surface selects how to accept a prose answer.
     text_answer_mode: Optional[str] = None
     finish_gate_smart: bool = False
     #: Область инструментов субагента из его файла: белый список (None — без

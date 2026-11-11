@@ -18,7 +18,13 @@ def _bump():
 
 def test_pin_pattern_accepts_workspace_packages():
     bump = _bump()
-    for pkg in ("gc-a2a", "gc-core", "gc-core-temporalio"):
+    for pkg in (
+        "gc-a2a",
+        "gc-core",
+        "gc-core-temporalio",
+        "gc-stores[postgres]",
+        "gc-stores[postgres,redis]",
+    ):
         matched = bump.PIN_RE.search(f'"{pkg}==1.2.3"')
         assert matched is not None
         assert matched.group(1) == pkg

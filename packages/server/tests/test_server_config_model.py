@@ -28,6 +28,28 @@ def test_defaults_without_file_sections(tmp_path):
     assert cfg.config_path.endswith("config_server.yml")
 
 
+def test_webhook_agent_text_answer_mode_reaches_runtime(tmp_path):
+    from gc_server.app import ServerRuntime
+    from gc_server.webhook.surface import webhook_settings
+
+    cfg = load_server_config(
+        _write(
+            tmp_path,
+            {
+                "webhook": {
+                    "agent_overrides": {"agent.text_answer_mode": "allow"}
+                }
+            },
+        )
+    )
+    assert (
+        webhook_settings(
+            ServerRuntime(make_settings({}), cfg)
+        ).runtime.text_answer_mode
+        == "allow"
+    )
+
+
 def test_host_and_token_are_inherited_and_overridable(tmp_path):
     cfg = load_server_config(
         _write(

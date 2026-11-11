@@ -206,7 +206,10 @@ async def test_aprime_default_cwd_uses_configured_cwd_first(tmp_path):
     assert be.default_cwd() == str(tmp_path)
 
 
-async def test_aprime_default_cwd_asks_pwd_when_unset(be):
+async def test_aprime_default_cwd_asks_pwd_when_unset(
+    be, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
     assert (await be.aprime_default_cwd()) == os.getcwd()
 
 

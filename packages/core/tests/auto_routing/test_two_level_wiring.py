@@ -101,7 +101,9 @@ def _fc(name, call_id, arguments):
 def _read(call_id):
     """Неважный вызов с аргументами по схеме; путь свой у каждого вызова."""
     return _fc(
-        "fs_read_file", call_id, json.dumps({"path": f"src/{call_id}.py"})
+        "fs_read_file",
+        call_id,
+        json.dumps({"path": f"src/{call_id}.py", "add_line_numbers": False}),
     )
 
 
@@ -736,9 +738,11 @@ def _muted(calls):
     return [call["muted"] for call in calls]
 
 
-def test_only_the_weak_call_with_a_replay_target_is_muted(monkeypatch):
+@pytest.mark.parametrize("mode", [None, "allow"])
+def test_only_the_weak_call_with_a_replay_target_is_muted(monkeypatch, mode):
     """Вызовы сильной и сам переигранный вызов идут с полным потоком."""
     ctx = _ctx({"value": "auto"})
+    ctx.runtime = ctx.runtime.with_values(text_answer_mode=mode)
     s = _state(ctx)
     calls = _stub_transport(
         monkeypatch,
@@ -792,7 +796,10 @@ def _completion(call_id):
                             "function": {
                                 "name": "fs_read_file",
                                 "arguments": json.dumps(
-                                    {"path": f"src/{call_id}.py"}
+                                    {
+                                        "path": f"src/{call_id}.py",
+                                        "add_line_numbers": False,
+                                    }
                                 ),
                             },
                         }

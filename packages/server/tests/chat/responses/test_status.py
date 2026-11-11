@@ -14,6 +14,7 @@ from gc_server.chat.responses.status import incomplete_details, turn_status
         ("token_limit", "incomplete"),
         ("step_limit", "incomplete"),
         ("tool_call_limit", "incomplete"),
+        ("no_tool_response", "incomplete"),
     ],
 )
 def test_outcome_table(outcome, expected):

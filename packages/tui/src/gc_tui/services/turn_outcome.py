@@ -66,6 +66,11 @@ OUTCOMES: dict[str, Outcome] = {
         "Остановлено: проверка действий недоступна — повторите позже "
         "или смените режим",
     ),
+    "stopped_no_tool": Outcome(
+        _LIMIT_GLYPH,
+        None,
+        "Остановлено: модель не вернула пригодный ответ или вызов инструмента",
+    ),
 }
 
 #: Другие слова того же исхода: статус в meta треда и состояние индикатора.
@@ -119,6 +124,7 @@ _LIMIT_WORDS = {
     "token_limit": "stopped_tokens",
     "tool_call_limit": "stopped_tool_calls",
     "judge_unavailable": "stopped_judge",
+    "no_tool_response": "stopped_no_tool",
 }
 
 _PLAN_REASON = "plan_proposed"
