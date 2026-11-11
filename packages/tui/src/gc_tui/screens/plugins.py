@@ -20,7 +20,7 @@ from gc_tui.screens.mcp import ServerCard
 from gc_tui.services.plugin_cards import general_notices, plugin_cards
 from gc_tui.services.skills_scan import run_off_loop
 
-_FOOTER = "[Enter] раскрыть  [↑↓] плагины  [Esc] back"
+_FOOTER = "↑/↓ — плагины · Enter — раскрыть · Esc — назад"
 _HINT = "Управление: gc-plugin install | enable | disable | uninstall"
 _EMPTY = "Плагинов нет. Установка: gc-plugin install <owner/repo>"
 _LOAD_ERROR = "Не удалось прочитать плагины"
