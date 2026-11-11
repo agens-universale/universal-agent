@@ -209,7 +209,7 @@ class ReadFile(AbstractSimpleTool):
                     "add_line_numbers": {
                         "type": "boolean",
                         "description": (
-                            "Required. When true, prefix each returned line with its absolute "
+                            "Optional (default false). When true, prefix each returned line with its absolute "
                             "1-based file line number, right-aligned (width at least 6), then '|'. "
                             "Example: '     8|    line text'. false, and any non-boolean value, "
                             "returns the raw line text. Prefixes are display-only; do not copy "
@@ -217,7 +217,7 @@ class ReadFile(AbstractSimpleTool):
                         ),
                     },
                 },
-                "required": ["path", "add_line_numbers"],
+                "required": ["path"],
                 "additionalProperties": False,
             },
             "strict": True,
@@ -227,7 +227,7 @@ class ReadFile(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_read_file
-Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256. add_line_numbers is required: true prefixes each line as N|, false returns the raw text.
+Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256. add_line_numbers is optional and defaults to false: true prefixes each line as N|, false or omission returns the raw text.
 Input schema: {
   "type": "object",
   "properties": {
@@ -245,10 +245,10 @@ Input schema: {
     },
     "add_line_numbers": {
       "type": "boolean",
-      "description": "Required. true prefixes each line with its absolute number as N| (right-aligned, width at least 6). false, and any non-boolean value, returns raw line text. Prefixes are display-only; do not copy them into edits."
+      "description": "Optional (default false). true prefixes each line with its absolute number as N| (right-aligned, width at least 6). false, omission, and any non-boolean value return raw line text. Prefixes are display-only; do not copy them into edits."
     }
   },
-  "required": ["path", "add_line_numbers"],
+  "required": ["path"],
   "additionalProperties": false
 }
 
@@ -267,7 +267,7 @@ Return format:
 Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
 - Line range defaults to offset=1 through end of file; narrow with offset/limit when needed.
-- add_line_numbers is required. Pass true for absolute N| prefixes, false for the raw line text. Any non-boolean value is treated as false.
+- Omit add_line_numbers or pass false for raw line text. Pass true for absolute N| prefixes. Any non-boolean value is treated as false.
 - On file_too_large: file_size_bytes is set; error.max_bytes has the limit; follow error.message.
 """
         return description

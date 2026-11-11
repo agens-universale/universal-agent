@@ -26,6 +26,7 @@ from gc_core.security import permission_mode
 from gc_core.security.permission_mode import Mode
 from gc_core.security.permission_store import PermissionStore
 from gc_core.tools.registry import get_builtin_tools_data
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.settings import fake_ctx, make_settings
 
 
@@ -286,7 +287,7 @@ def test_compaction_puts_the_live_mode_into_the_summary(monkeypatch):
 
     async def _fake_summarize(**_kwargs):
         return {
-            "raw_summary": "итог",
+            "raw_summary": valid_summary_xml_for_tests(),
             "num_batches": 1,
             "last_dialog_steps": "",
             "trace": {"memory_patch": {"executed": False}},

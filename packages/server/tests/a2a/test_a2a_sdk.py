@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 import uuid
+from importlib.metadata import version
 from types import SimpleNamespace
 
 import httpx
@@ -201,6 +202,7 @@ async def test_card_declares_streaming_push_and_public_url(tmp_path, stores):
         transport=httpx.ASGITransport(app=surface.http_app), base_url=BASE
     ) as http:
         card = (await http.get("/.well-known/agent-card.json")).json()
+    assert card["version"] == version("gc-server")
     assert card["capabilities"]["streaming"] is True
     assert card["capabilities"]["pushNotifications"] is True
     urls = {

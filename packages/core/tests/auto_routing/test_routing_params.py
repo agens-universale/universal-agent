@@ -554,7 +554,10 @@ def test_child_fallback_resumes_real_loop_without_reexecuting_history(
         if n <= 2:
             name, arguments = (
                 "fs_read_file",
-                {"path": str(tmp_path / f"read-{n}.txt")},
+                {
+                    "path": str(tmp_path / f"read-{n}.txt"),
+                    "add_line_numbers": False,
+                },
             )
         elif resolved.alias == "fast":
             request = httpx.Request("POST", "https://synthetic.invalid")

@@ -107,7 +107,9 @@ def test_tool_arguments_valid_uses_same_order_as_apply_tool():
     from gc_core.tools import tool_arguments_valid
 
     tools_data = {"x": _entry_with_injected()}
-    raw = json.dumps({"audit_tag": "high", "path": "a.py"})
+    raw = json.dumps(
+        {"audit_tag": "high", "path": "a.py", "add_line_numbers": False}
+    )
     assert tool_arguments_valid("x", raw, tools_data) is True
 
 

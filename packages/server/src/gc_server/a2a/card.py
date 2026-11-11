@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from a2a.types import a2a_pb2 as pb
 
-from gc_server.surface import http_origin
+from gc_server.surface import http_origin, server_version
 
-CARD_VERSION = "0.5.0"
 RPC_PATH = "/rpc"
 CARD_PATH = "/.well-known/agent-card.json"
 
@@ -36,7 +35,7 @@ def agent_card(
     card = pb.AgentCard(
         name=name,
         description=description,
-        version=CARD_VERSION,
+        version=server_version(),
         supported_interfaces=[
             pb.AgentInterface(
                 url=rpc_url, protocol_binding="JSONRPC", protocol_version="1.0"
