@@ -291,6 +291,28 @@ def test_short_secret_is_masked_as_a_separate_word():
     assert reason == "wrong pin ***, pinabc1234x stays"
 
 
+def test_secret_in_url_is_masked_in_connect_reason():
+    key = "url-SECRET-0123"
+
+    reason = _reason(
+        ConnectionRefusedError(),
+        url=f"https://h/mcp?api_key={key}",
+        headers={"X-Api-Key": key},
+    )
+
+    assert reason == "нет соединения с https://h/mcp?api_key=***"
+
+
+def test_secret_in_command_is_masked_in_not_found_reason():
+    key = "cmd-SECRET-0123"
+
+    reason = _reason(
+        FileNotFoundError(), command=f"run --key {key}", env={"KEY": key}
+    )
+
+    assert reason == "команда 'run --key ***' не найдена"
+
+
 @pytest.mark.parametrize(
     "exc",
     [McpCallTimedOut(10), RuntimeError("untrue 127.0.0.1:8001 за 10 с")],
