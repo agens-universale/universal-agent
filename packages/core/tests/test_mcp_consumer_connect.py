@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -20,6 +21,8 @@ from gc_core.config_modules.field_meta import plain_dump
 from gc_core.mcp_session_owner import current_owner, use_owner
 from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp import persistent_stdio, stream_client
+from gc_core.tools.connect_mcp.client import _MCP_SESSIONS
 from gc_core.tools.connect_mcp.consumer import (
     RETRY_PAUSES_SEC,
     STATE_CACHED,
@@ -86,7 +89,13 @@ def _entry(service: McpService, settings, key: str = "srv"):
 
 
 async def _connect(consumer, entry) -> None:
+    """Подключить и дождаться; срок ожидания попытку не прерывает."""
     await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+
+
+def _attempt(consumer, entry) -> asyncio.Task:
+    """Сама задача попытки — её отменяют только сверка и закрытие."""
+    return consumer._connects[session_key(entry.key, entry.fingerprint)]
 
 
 def _closed_port_cfg() -> dict:
@@ -184,11 +193,14 @@ async def test_status_is_connecting_before_first_step(
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
-    task = consumer.start_connect(entry)
+    waiting = consumer.start_connect(entry)
+    task = _attempt(consumer, entry)
 
     assert consumer.status_of(entry).state == STATE_CONNECTING
-    assert consumer.start_connect(entry) is task
-    await asyncio.wait_for(task, _CEILING_SEC)
+    again = consumer.start_connect(entry)
+    assert _attempt(consumer, entry) is task
+    assert await asyncio.wait_for(waiting, _CEILING_SEC) is True
+    assert await asyncio.wait_for(again, _CEILING_SEC) is True
     assert consumer.status_of(entry).state == STATE_CONNECTED
 
 
@@ -201,7 +213,8 @@ async def test_cancel_before_first_step_leaves_no_connecting(
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
-    task = consumer.start_connect(entry)
+    consumer.start_connect(entry)
+    task = _attempt(consumer, entry)
     task.cancel()
     await asyncio.wait({task}, timeout=_CEILING_SEC)
 
@@ -246,6 +259,9 @@ async def test_connect_timeout_comes_from_consumer_settings(
 
     status = consumer.status_of(entry)
     assert (status.state, status.reason_code) == (STATE_FAILED, "timeout")
+    # Попытка завершается после закрытия остатка: процесса уже нет.
+    [pid] = launches(control)
+    assert not alive(pid)
 
 
 async def test_empty_list_connected_missing_key_failed(
@@ -521,7 +537,8 @@ async def test_interrupted_attempt_counts_from_its_start(
     )
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
-    task = consumer.start_connect(entry)
+    consumer.start_connect(entry)
+    task = _attempt(consumer, entry)
     await wait_for(lambda: launches(control))
     clock.advance(20)
 
@@ -768,3 +785,249 @@ async def test_open_consumer_after_stop_is_refused(mcp_home):
 
     with pytest.raises(McpServiceClosed, match="сервис MCP остановлен"):
         service.open_consumer("late")
+
+
+@pytest.fixture
+def slow_spawn(monkeypatch):
+    """Запуск stdio-процесса растянут: окно «сессия есть, процесса нет»."""
+    real = persistent_stdio._spawn_detached_stdio_process
+    spawned = []
+
+    def spawn(cfg):
+        time.sleep(0.5)
+        spawned.append(real(cfg))
+        return spawned[-1]
+
+    monkeypatch.setattr(
+        persistent_stdio, "_spawn_detached_stdio_process", spawn
+    )
+    return spawned
+
+
+def _owner_records(consumer) -> list:
+    """Записи владельца потребителя во всех трёх реестрах."""
+    owner = consumer.owner
+    registries = (
+        PersistentStdioRegistry.instance()._sessions,
+        stream_client._SESSION_MANAGER._workers,
+        stream_client._SESSION_MANAGER._cm_stacks,
+        _MCP_SESSIONS,
+    )
+    return [
+        key for keys in registries for key in list(keys) if key[0] == owner
+    ]
+
+
+@pytest.mark.parametrize("how", ["close", "cancel"])
+async def test_close_or_cancel_before_process_start_leaves_no_process(
+    mcp_home, tmp_path, slow_spawn, mcp_reaper, mcp_owner, how
+):
+    control = tmp_path / "s.json"
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+
+    consumer.start_connect(entry)
+    task = _attempt(consumer, entry)
+    await asyncio.sleep(0.15)  # поток уже в запуске, процесса ещё нет
+    if how == "close":
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+    else:
+        task.cancel()
+        await asyncio.wait({task}, timeout=_CEILING_SEC)
+
+    await wait_for(lambda: len(slow_spawn) == 1)
+    [proc] = slow_spawn
+    await wait_for(lambda: proc.poll() is not None)
+    assert _owner_records(consumer) == []
+    assert consumer.status_of(entry).state == STATE_FAILED
+
+
+async def test_interrupted_close_is_finished_by_second_close(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    deaf, stream = tmp_path / "deaf.json", tmp_path / "stream.json"
+    set_behavior(deaf, ignore_term=True, ignore_eof=True)
+    settings = _settings(
+        {
+            "deaf": stdio_cfg(deaf),
+            "stream": {**stdio_cfg(stream), "transport": "stream_stdio"},
+        }
+    )
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entries = [_entry(service, settings, k) for k in ("deaf", "stream")]
+    for entry in entries:
+        await _connect(consumer, entry)
+    pids = launches(deaf) + launches(stream)
+
+    # Срок хоста истекает, пока глухой к SIGTERM сервер ждёт эскалации.
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(consumer.aclose(), 0.3)
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    await wait_for(lambda: not any(alive(p) for p in pids), 15)
+    assert _owner_records(consumer) == []
+    assert consumer not in service._consumers
+
+
+async def test_series_stops_when_connected_during_pause(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    sleep = _ParkedSleep(clock)
+    attempts = _count_attempts(monkeypatch)
+    port = free_port()
+    url = f"http://127.0.0.1:{port}"
+    settings = _settings({"srv": {"transport": "stream_http", "url": url}})
+    service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+    await _connect(consumer, entry)
+    await wait_for(lambda: sleep.pauses == [1])
+
+    async with stream_server(tmp_path, "stream_http", port=port):
+        await _connect(consumer, entry)  # подключение мимо серии
+        assert consumer.status_of(entry).state == STATE_CONNECTED
+        clock.advance(1)
+        await wait_for(lambda: not consumer._series)
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    assert len(attempts) == 2
+
+
+async def test_cancelled_waiter_keeps_attempt_and_series(
+    mcp_home, monkeypatch, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    sleep = _ParkedSleep(clock)
+    gate = asyncio.Event()
+    calls = []
+
+    async def gated_list(server_key, server_cfg, *, timeout):
+        calls.append(server_key)
+        if len(calls) > 1:
+            await gate.wait()
+        raise ConnectionRefusedError("нет соединения")
+
+    monkeypatch.setattr(consumer_module, "alist_raw_tools", gated_list)
+    settings = _settings({"srv": _closed_port_cfg()})
+    service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+    await _connect(consumer, entry)
+    await wait_for(lambda: sleep.pauses == [1])
+    clock.advance(1)
+    await wait_for(lambda: len(calls) == 2)
+
+    # Внешний ожидающий той же попытки сдаётся по своему сроку.
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(consumer.start_connect(entry), 0.1)
+    still_running = not _attempt(consumer, entry).done()
+    series_alive = bool(consumer._series)
+    gate.set()
+    await wait_for(lambda: sleep.pauses == [1, 3])
+
+    assert (still_running, series_alive) == (True, True)
+    status = consumer.status_of(entry)
+    assert (status.state, status.reason_code) == (
+        STATE_FAILED,
+        "connect_error",
+    )
+
+
+async def test_failure_record_error_still_drops_session(
+    mcp_home, tmp_path, monkeypatch, capsys, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "s.json"
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+    await _connect(consumer, entry)
+    [pid] = launches(control)
+
+    def broken_record(entry, exc):
+        raise RuntimeError("классификация сломалась")
+
+    monkeypatch.setattr(service, "record_failure", broken_record)
+    set_behavior(control, exit_on="tools/list")
+    await _connect(consumer, entry)
+
+    status = consumer.status_of(entry)
+    assert (status.state, status.reason_code, status.reason) == (
+        STATE_FAILED,
+        "other",
+        "внутренняя ошибка подключения",
+    )
+    assert not consumer.has_session(entry)
+    await wait_for(lambda: not alive(pid))
+    assert capsys.readouterr().out == ""
+
+
+async def test_start_connect_after_close_is_refused(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    settings = _settings({"srv": stdio_cfg(tmp_path / "s.json")})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    with pytest.raises(McpServiceClosed, match="сервис MCP остановлен"):
+        consumer.start_connect(entry)
+    assert launches(tmp_path / "s.json") == []
+
+
+async def test_close_waits_for_closing_tasks(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "s.json"
+    set_behavior(control, fail_start=True)
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+    started, finished = asyncio.Event(), []
+    real_close = consumer._aclose_session
+
+    async def slow_close(entry):
+        started.set()
+        await asyncio.sleep(0.3)
+        await real_close(entry)
+        finished.append(entry.key)
+
+    consumer._aclose_session = slow_close
+    consumer.start_connect(entry)
+    await asyncio.wait_for(started.wait(), _CEILING_SEC)
+
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    assert finished == ["srv"]
+    assert consumer._closing == set()
+
+
+async def test_cancel_before_first_step_keeps_live_session(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "s.json"
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+    await _connect(consumer, entry)
+    [pid] = launches(control)
+
+    consumer.start_connect(entry)
+    task = _attempt(consumer, entry)
+    task.cancel()
+    await asyncio.wait({task}, timeout=_CEILING_SEC)
+
+    assert consumer.status_of(entry).state == STATE_CONNECTED
+    assert consumer.has_session(entry)
+    with use_owner(consumer.owner):
+        out = await call_tool(
+            "srv", consumer.wrapper_cfg(entry), "echo", {"text": "hi"}
+        )
+    assert out["pid"] == pid

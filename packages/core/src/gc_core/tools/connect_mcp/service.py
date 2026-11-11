@@ -12,7 +12,6 @@
 """
 
 import asyncio
-import re
 import threading
 import time
 from typing import Any, Awaitable, Callable
@@ -30,6 +29,7 @@ from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.consumer import McpConsumer
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 from gc_core.tools.connect_mcp.registry import _discovery_error_text
+from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.server_identity import (
     connection_fingerprint,
     with_service_defaults,
@@ -59,10 +59,6 @@ _MCP_ERROR_CODES = {
     # сервера с этим кодом тоже станет ``connect_error``.
     CONNECTION_CLOSED: "connect_error",
 }
-# Пороги маскировки секретов — см. ``_without_secrets``.
-_MIN_SECRET_LEN = 8
-_MIN_WORD_SECRET_LEN = 4
-_SECRET_MASK = "***"
 
 
 def _first_leaf(exc: BaseException) -> BaseException:
@@ -88,48 +84,6 @@ def _failure_code(exc: BaseException) -> str:
     return "other"
 
 
-def _secret_fragments(server_cfg: dict) -> set[str]:
-    """Значения ``token``, ``headers`` и ``env`` целиком и их части между
-    пробелами (``Bearer <ключ>`` — ещё и ``<ключ>``)."""
-    values = [server_cfg.get("token")]
-    for field in ("headers", "env"):
-        values.extend((server_cfg.get(field) or {}).values())
-    fragments: set[str] = set()
-    for value in values:
-        if isinstance(value, str):
-            fragments.add(value)
-            fragments.update(value.split())
-    return {f for f in fragments if len(f) >= _MIN_WORD_SECRET_LEN}
-
-
-def _mask_fragment(text: str, fragment: str) -> str:
-    if len(fragment) >= _MIN_SECRET_LEN:
-        return text.replace(fragment, _SECRET_MASK)
-    word = rf"(?<!\w){re.escape(fragment)}(?!\w)"
-    return re.sub(word, _SECRET_MASK, text)
-
-
-def _without_secrets(text: str, server_cfg: dict) -> str:
-    """Текст без значений секретов определения.
-
-    Фрагмент от 8 символов заменяется везде, где встретился; от 4 до 7 —
-    только отдельным словом (слева и справа не буква, не цифра и не
-    подчёркивание), чтобы не портить числа и адреса. Длинные фрагменты
-    идут первыми.
-
-    Не покрыто: фрагменты короче 4 символов и значение из 4–7 символов
-    внутри слова; секрет в экранированной форме (``repr`` с ``\\`` или
-    ``'``, JSON- и URL-кодирование) и в другом регистре. Побочный эффект
-    порогов: часть значения из 4–7 символов, стоящая отдельным словом,
-    маскируется, даже если она не секрет (порт ``8001``, ``Bearer``).
-    """
-    for fragment in sorted(
-        _secret_fragments(server_cfg), key=len, reverse=True
-    ):
-        text = _mask_fragment(text, fragment)
-    return text
-
-
 def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     """Код и текст причины отказа подключения.
 
@@ -142,9 +96,9 @@ def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     # границе среза остался бы своим началом.
     # Итоговый текст маскируется ещё раз: шаблоны причины подставляют
     # ``command`` и ``url``, где тоже бывают секреты.
-    message = _without_secrets(str(leaf), server_cfg)
+    message = without_secrets(str(leaf), server_cfg)
     reason = _discovery_error_text(leaf, server_cfg, message)
-    return _failure_code(leaf), _without_secrets(reason, server_cfg)
+    return _failure_code(leaf), without_secrets(reason, server_cfg)
 
 
 class McpService:

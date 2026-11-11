@@ -37,6 +37,7 @@ from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
 )
 from gc_core.tools.connect_mcp.registry import alist_raw_tools
+from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.server_identity import (
     SESSION_KEY_FIELD,
     is_process_transport,
@@ -113,6 +114,20 @@ def _shared_failure(entry: ServerEntry) -> Failure | None:
     return failure
 
 
+def _describe(exc: BaseException, entry: ServerEntry) -> str:
+    """Тип и текст исключения для лога — без значений секретов.
+
+    Трейсбэк в лог не идёт: в цепочке исключений лежит исходная ошибка
+    подключения, а тексты ошибок httpx несут адрес со строкой запроса.
+    """
+    return f"{type(exc).__name__}: {without_secrets(str(exc), entry.cfg)}"
+
+
+def _succeeded(task: asyncio.Task) -> bool:
+    """Попытка завершилась удачей (не отменена, без исключения, истина)."""
+    return not task.cancelled() and task.exception() is None and task.result()
+
+
 def _failed(failure: Failure, entry: ServerEntry, retry: int = 0):
     return ServerStatus(
         STATE_FAILED,
@@ -150,6 +165,8 @@ class McpConsumer:
         self._failures: dict[str, Failure] = {}
         self._retry: dict[str, int] = {}
         self._closing: set[asyncio.Task] = set()
+        # Хвост закрытия (сессии владельца) идёт по одному вызову за раз.
+        self._closing_sessions = asyncio.Lock()
 
     def wrapper_cfg(self, entry: ServerEntry) -> dict:
         """Определение для подключения и обёрток тулов.
@@ -165,6 +182,11 @@ class McpConsumer:
     def has_session(self, entry: ServerEntry) -> bool:
         with self._lock:
             return _session_key_of(entry) in self._sessions
+
+    def _connected(self, key: str) -> bool:
+        """Сессия есть или удача без постоянной сессии. Звать под
+        ``_lock``."""
+        return key in self._sessions or key in self._ok
 
     def _attempting(self, key: str) -> bool:
         """Идёт своя попытка. Звать под ``_lock``."""
@@ -189,13 +211,32 @@ class McpConsumer:
         elapsed = self._service._clock() - max(since)
         return elapsed >= ATTEMPT_INTERVAL_SEC
 
-    def start_connect(self, entry: ServerEntry) -> asyncio.Task:
-        """Одна попытка подключения; идущую попытку возвращает её же.
+    def start_connect(self, entry: ServerEntry) -> asyncio.Future:
+        """Одна попытка подключения; идущая попытка не дублируется.
 
         Попытка числится за потребителем сразу, до первого шага задачи:
-        статус — ``connecting`` с этого момента. Задача отдаёт истину при
-        удаче; отказ и прерывание — в статусе.
+        статус — ``connecting`` с этого момента. Отдаётся отдельное
+        ожидание исхода попытки: его отмена (в том числе срок
+        ``wait_for``) общую попытку не прерывает. Исход — истина при
+        удаче, ложь при отказе, прерывании и внутренней ошибке; причина —
+        в статусе. Саму задачу держит ``_connects``: её
+        отменяют только сверка и закрытие потребителя. Отмена до первого
+        шага живую сессию не трогает — ключ остаётся в ``_sessions``
+        или ``_ok``.
         """
+        task = self._start_attempt(entry)
+        waiting = asyncio.get_running_loop().create_future()
+
+        def settle(done: asyncio.Task) -> None:
+            if not waiting.done():
+                waiting.set_result(_succeeded(done))
+
+        task.add_done_callback(settle)
+        return waiting
+
+    def _start_attempt(self, entry: ServerEntry) -> asyncio.Task:
+        """Задача попытки (идущая или новая); после ``aclose`` —
+        ``McpServiceClosed``."""
         self._service._bind_loop()
         key = _session_key_of(entry)
         with self._lock:
@@ -224,9 +265,11 @@ class McpConsumer:
                 await self._aclose_rest(entry)
                 raise
             except Exception as exc:
-                self._record_failure(entry, exc, started)
+                # Сначала снять сессию и закрыть остаток: если запись
+                # отказа сама бросит, ключ не останется «подключённым».
                 self._drop_connection(key)
                 await self._aclose_rest(entry)
+                self._record_failure(entry, exc, started)
                 return False
 
     async def _alist_and_record(self, entry: ServerEntry) -> None:
@@ -288,12 +331,12 @@ class McpConsumer:
             for close in (registry.aclose_one, manager.ainvalidate):
                 try:
                     await close(key)
-                except Exception:
+                except Exception as exc:
                     logger.warning(
-                        "MCP %s: сессия потребителя %s не закрылась",
+                        "MCP %s: сессия потребителя %s не закрылась: %s",
                         entry.key,
                         self.label,
-                        exc_info=True,
+                        _describe(exc, entry),
                     )
             forget_session(entry.key)
 
@@ -320,10 +363,10 @@ class McpConsumer:
         if exc is None:
             return False
         logger.error(
-            "MCP %s: фоновая работа потребителя %s упала",
+            "MCP %s: фоновая работа потребителя %s упала: %s",
             entry.key,
             self.label,
-            exc_info=exc,
+            _describe(exc, entry),
         )
         failure = Failure(self._service._clock(), "other", _INTERNAL_ERROR)
         with self._lock:
@@ -356,7 +399,15 @@ class McpConsumer:
                     return
                 self._retry[key] = attempt
             await self._service._sleep(pause)
-            if await self.start_connect(entry):
+            with self._lock:
+                # За паузу сервер мог подключиться (вызов, вход в ход):
+                # попытка поверх живой сессии её бы и закрыла при отказе.
+                if self.closed or self._connected(key):
+                    return
+            # Ждём без отмены попытки: снятие серии её не прерывает.
+            task = self._start_attempt(entry)
+            await asyncio.wait({task})
+            if _succeeded(task):
                 return
 
     def _on_series_done(self, entry: ServerEntry, task: asyncio.Task) -> None:
@@ -372,7 +423,7 @@ class McpConsumer:
         """Статус сервера у этого потребителя (спека §5.5)."""
         key = _session_key_of(entry)
         with self._lock:
-            connected = key in self._sessions or key in self._ok
+            connected = self._connected(key)
             attempting = self._attempting(key)
             own = self._failures.get(key)
             retry = self._retry.get(key, 0)
@@ -412,12 +463,15 @@ class McpConsumer:
         return ServerStatus(STATE_CONNECTING, checked_at=entry.checked_at)
 
     async def aclose(self) -> None:
-        """Снять попытки и серии, дождаться закрытия остатков, закрыть все
-        сессии потребителя. Повторный вызов ничего не делает."""
+        """Отказать в новой работе, снять попытки и серии, дождаться
+        закрытия остатков, закрыть все сессии потребителя.
+
+        Каждый вызов проходит весь путь: шаги идемпотентны, поэтому
+        повторный вызов (в том числе после прерванного) доделывает
+        остаток, а не выходит сразу.
+        """
         self._service._bind_loop()
         with self._lock:
-            if self.closed:
-                return
             self.closed = True
             work = [*self._connects.values(), *self._series.values()]
         try:
@@ -429,18 +483,25 @@ class McpConsumer:
             await asyncio.gather(*closing, return_exceptions=True)
         finally:
             await self._aclose_sessions()
-            self._service._forget_consumer(self)
 
     async def _aclose_sessions(self) -> None:
-        with self._lock:
-            self._sessions.clear()
-            self._ok.clear()
-        with use_owner(self.owner):
-            await PersistentStdioRegistry.instance().aclose_all()
-            await stream_client._SESSION_MANAGER.aclose_all(
-                in_owner_task=False
-            )
-            forget_owner_sessions()
+        """Сессии владельца во всех реестрах; шаги не зависят друг от
+        друга — прерывание одного не отменяет остальных."""
+        async with self._closing_sessions:
+            with self._lock:
+                self._sessions.clear()
+                self._ok.clear()
+            with use_owner(self.owner):
+                try:
+                    await PersistentStdioRegistry.instance().aclose_all()
+                finally:
+                    try:
+                        await stream_client._SESSION_MANAGER.aclose_all(
+                            in_owner_task=False
+                        )
+                    finally:
+                        forget_owner_sessions()
+                        self._service._forget_consumer(self)
 
 
 __all__ = [
