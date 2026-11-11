@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -27,7 +28,7 @@ from gc_core.tools.connect_mcp.call_errors import (
 from gc_core.tools.connect_mcp.catalog import read_catalog, write_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
-from gc_core.tools.connect_mcp.registry import _humanize_discovery_error
+from gc_core.tools.connect_mcp.registry import _discovery_error_text
 from gc_core.tools.connect_mcp.server_identity import (
     connection_fingerprint,
     with_service_defaults,
@@ -47,11 +48,13 @@ _AUTH_STATUSES = frozenset({401, 403})
 # Ошибки SDK ``mcp``, которые означают не ответ сервера, а срок или обрыв.
 _MCP_ERROR_CODES = {
     httpx.codes.REQUEST_TIMEOUT: "timeout",
+    # -32000 — ещё и начало диапазона серверных ошибок JSON-RPC: ответ
+    # сервера с этим кодом тоже станет ``connect_error``.
     CONNECTION_CLOSED: "connect_error",
 }
-# Короче — не маскируем: в ``env`` бывают «1» и «true», замена их
-# в тексте причины испортила бы числа и адреса.
+# Пороги маскировки секретов — см. ``_without_secrets``.
 _MIN_SECRET_LEN = 8
+_MIN_WORD_SECRET_LEN = 4
 _SECRET_MASK = "***"
 
 
@@ -110,18 +113,40 @@ def _failure_code(exc: BaseException) -> str:
     return "other"
 
 
-def _secret_values(server_cfg: dict) -> list[str]:
+def _secret_fragments(server_cfg: dict) -> set[str]:
+    """Значения ``token``, ``headers`` и ``env`` целиком и их части между
+    пробелами (``Bearer <ключ>`` — ещё и ``<ключ>``)."""
     values = [server_cfg.get("token")]
     for field in ("headers", "env"):
         values.extend((server_cfg.get(field) or {}).values())
-    return [
-        v for v in values if isinstance(v, str) and len(v) >= _MIN_SECRET_LEN
-    ]
+    fragments: set[str] = set()
+    for value in values:
+        if isinstance(value, str):
+            fragments.add(value)
+            fragments.update(value.split())
+    return {f for f in fragments if len(f) >= _MIN_WORD_SECRET_LEN}
+
+
+def _mask_fragment(text: str, fragment: str) -> str:
+    if len(fragment) >= _MIN_SECRET_LEN:
+        return text.replace(fragment, _SECRET_MASK)
+    word = rf"(?<!\w){re.escape(fragment)}(?!\w)"
+    return re.sub(word, _SECRET_MASK, text)
 
 
 def _without_secrets(text: str, server_cfg: dict) -> str:
-    for secret in sorted(_secret_values(server_cfg), key=len, reverse=True):
-        text = text.replace(secret, _SECRET_MASK)
+    """Текст без значений секретов определения.
+
+    Фрагмент от 8 символов заменяется везде, где встретился; от 4 до 7 —
+    только отдельным словом (слева и справа не буква, не цифра и не
+    подчёркивание), чтобы не портить числа и адреса. Остаток: фрагменты
+    короче 4 символов не маскируются, а короткое значение внутри слова
+    остаётся. Длинные фрагменты идут первыми.
+    """
+    for fragment in sorted(
+        _secret_fragments(server_cfg), key=len, reverse=True
+    ):
+        text = _mask_fragment(text, fragment)
     return text
 
 
@@ -133,8 +158,11 @@ def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     ``other``. Значения секретов определения в текст не попадают.
     """
     leaf = _first_leaf(exc)
-    reason = _humanize_discovery_error(leaf, server_cfg)
-    return _failure_code(leaf), _without_secrets(reason, server_cfg)
+    # Маскировка до обрезки длинного текста: иначе секрет на границе
+    # среза остался бы своим началом.
+    message = _without_secrets(str(leaf), server_cfg)
+    reason = _discovery_error_text(leaf, server_cfg, message)
+    return _failure_code(leaf), reason
 
 
 class McpService:
@@ -184,7 +212,11 @@ class McpService:
         return self._stopped
 
     def _bind_loop(self) -> None:
-        """Привязать сервис к текущему циклу; чужой цикл — ``RuntimeError``."""
+        """Привязать сервис к текущему циклу; чужой цикл — ``RuntimeError``.
+
+        Проверка и установка цикла идут без замка: они рассчитаны на
+        обращения с одного потока — потока цикла хоста.
+        """
         loop = asyncio.get_running_loop()
         if self._loop is None:
             self._loop = loop

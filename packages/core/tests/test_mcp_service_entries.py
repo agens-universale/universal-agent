@@ -21,7 +21,11 @@ from gc_core.tools.connect_mcp.catalog import read_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
-from gc_core.tools.connect_mcp.service import Failure, McpService
+from gc_core.tools.connect_mcp.service import (
+    Failure,
+    McpService,
+    classify_failure,
+)
 from gc_testkit.mcp import FakeClock, seed_catalog, stdio_cfg
 from gc_testkit.mcp.fixtures import mcp_home
 from mcp.shared.exceptions import McpError
@@ -182,6 +186,16 @@ def _status_error(code: int) -> httpx.HTTPStatusError:
     )
 
 
+def _secret_definition(**secrets) -> dict:
+    """Сетевое определение с секретами — так, как его строит хост."""
+    server = {"transport": "stream_http", "url": _URL, "command": "npx"}
+    return _definition(_settings({"a": {**server, **secrets}}), "a")
+
+
+def _reason(exc: BaseException, **secrets) -> str:
+    return classify_failure(exc, _secret_definition(**secrets))[1]
+
+
 _FAILURES = [
     # В 3.11+ asyncio.TimeoutError — встроенный TimeoutError.
     (asyncio.TimeoutError(), "timeout"),
@@ -220,14 +234,9 @@ _FAILURES = [
 async def test_failure_keeps_tools_and_classifies(mcp_home, exc, code):
     clock = FakeClock()
     service = McpService(connect_on_start=True, clock=clock.now)
-    cfg = {
-        "transport": "stream_http",
-        "url": _URL,
-        "command": "npx",
-        "token": _TOKEN,
-        "headers": {"X-Key": _HEADER},
-        "env": {"API_KEY": _ENV},
-    }
+    cfg = _secret_definition(
+        token=_TOKEN, headers={"X-Key": _HEADER}, env={"API_KEY": _ENV}
+    )
     entry = service.entry("a", cfg, discovery_timeout=5)
     service.record_success(entry, [{"name": "echo"}])
     clock.advance(4)
@@ -243,7 +252,60 @@ async def test_failure_keeps_tools_and_classifies(mcp_home, exc, code):
         assert secret not in failure.reason
 
 
-async def test_failure_is_frozen(mcp_home):
+def _fragments(secret: str, size: int = 4) -> list[str]:
+    return [secret[i : i + size] for i in range(len(secret) - size + 1)]
+
+
+def test_secret_on_truncation_boundary_is_masked_whole():
+    """Маскировка идёт до обрезки длинного текста: от секрета на границе
+    среза не остаётся ни одного фрагмента."""
+    token = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"
+    message = "." * 101 + " " + token + " конец"
+
+    reason = _reason(RuntimeError(message), token=token)
+
+    assert reason.startswith("." * 101)
+    for fragment in _fragments(token):
+        assert fragment not in reason
+
+
+def test_parts_of_header_value_are_masked():
+    """Ответ сервера несёт ключ без префикса значения заголовка."""
+    key = "KEY-0123456789"
+
+    reason = _reason(
+        RuntimeError(f"invalid token {key}"),
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+    assert key not in reason
+    assert reason == "invalid token ***"
+
+
+def test_short_secret_is_masked_as_a_separate_word():
+    reason = _reason(
+        RuntimeError("wrong pin abc1234, pinabc1234x stays"),
+        env={"PIN": "abc1234"},
+    )
+
+    assert reason == "wrong pin ***, pinabc1234x stays"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [McpCallTimedOut(10), RuntimeError("untrue 127.0.0.1:8001 за 10 с")],
+    ids=["timeout", "address"],
+)
+def test_tiny_env_values_do_not_spoil_text(exc):
+    plain = _reason(exc)
+
+    spoiled = _reason(exc, env={"DEBUG": "1", "VERBOSE": "true"})
+
+    assert spoiled == plain
+    assert "***" not in spoiled
+
+
+def test_failure_is_frozen():
     failure = Failure(at=1.0, code="other", reason="r")
 
     with pytest.raises(AttributeError):

@@ -16,6 +16,17 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     while getattr(exc, "exceptions", None) and depth < 5:
         exc = exc.exceptions[0]
         depth += 1
+    return _discovery_error_text(exc, server_cfg, str(exc))
+
+
+def _discovery_error_text(
+    exc: BaseException, server_cfg: dict, message: str
+) -> str:
+    """Причина отказа по типу ``exc`` (группа уже развёрнута).
+
+    ``message`` — текст исключения для типов без своей формулировки;
+    вызывающий может подать его уже очищенным. Длинный текст обрезается.
+    """
     if isinstance(exc, FileNotFoundError):
         cmd = server_cfg.get("command") or "?"
         return f"команда '{cmd}' не найдена"
@@ -29,7 +40,7 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     ):
         target = server_cfg.get("url") or server_cfg.get("command") or "?"
         return f"нет соединения с {target}"
-    msg = str(exc).strip()
+    msg = message.strip()
     return (msg[:120] + "…") if len(msg) > 121 else (msg or name)
 
 
