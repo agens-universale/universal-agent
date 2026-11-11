@@ -14,9 +14,9 @@ def test_sink_begin_update_snapshot():
 
 def test_finish_records_outcome():
     sink = McpProgress()
-    assert sink.outcome() is None
+    assert sink.state()[1] is None
     sink.finish(True)
-    assert sink.outcome() is True
+    assert sink.state()[1] is True
 
 
 def test_state_is_one_consistent_snapshot():

@@ -52,9 +52,7 @@ class StartHeader(ColumnStatic):
         outcome: bool | None,
     ) -> None:
         """Снимок загрузки MCP; новый `source` — новое поколение."""
-        before = self._state()
-        self._peephole.sync(source, servers, outcome)
-        if self._state() != before:
+        if self._peephole.sync(source, servers, outcome):
             self._advance(layout=True)
 
     def finished(self, source: object) -> bool:
@@ -66,17 +64,6 @@ class StartHeader(ColumnStatic):
         if available != self._update:
             self._update = available
             self._redraw()
-
-    def _state(self) -> tuple:
-        p = self._peephole
-        return (
-            p.generation,
-            p.phase,
-            p.outcome,
-            p.total,
-            p.connected,
-            p.shown,
-        )
 
     def _tick(self) -> None:
         if textual_compat.is_selecting(self.screen):

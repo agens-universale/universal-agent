@@ -76,16 +76,28 @@ class McpPeephole:
         source: object,
         servers: Mapping[str, Mapping | None],
         outcome: bool | None,
-    ) -> None:
+    ) -> bool:
+        """Принять снимок; True — изменилось то, что видно на экране.
+        Число серверов задаёт поколение: список фиксируется до публикации."""
+        before = self._view()
         if source is not self._source:
             self._source = source
             self._generation += 1
             self._reset(len(servers))
-        if self._phase == "failed":
-            return
-        self._total = len(servers)
-        self._enqueue_reported(servers)
-        self._apply_outcome(servers, outcome)
+        if self._phase != "failed":
+            self._enqueue_reported(servers)
+            self._apply_outcome(servers, outcome)
+        return self._view() != before
+
+    def _view(self) -> tuple:
+        return (
+            self._generation,
+            self._phase,
+            self._outcome,
+            self._total,
+            self._connected,
+            self._shown,
+        )
 
     def _enqueue_reported(self, servers: Mapping[str, Mapping | None]) -> None:
         for name, status in servers.items():
