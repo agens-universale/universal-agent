@@ -83,6 +83,13 @@ def test_missing_positional_is_empty():
     assert expand_command(make_cmd("r", "[$2]"), "one") == "[]"
 
 
+def test_dollar_in_arguments_is_kept():
+    """Аргументы подставляются в шаблон один раз: ``$5`` в словах
+    пользователя — текст, а не ссылка на пятое слово."""
+    cmd = make_cmd("fix", "Исправь: $ARGUMENTS ($1)")
+    assert expand_command(cmd, "cost $5 bug") == "Исправь: cost $5 bug (cost)"
+
+
 def test_short_name_ambiguous_across_commands_and_skills():
     r = resolve_slash_name("review", [("a", make_cmd("review"))], ["b:review"])
     assert r.kind == "ambiguous" and r.candidates == ("a:review", "b:review")
