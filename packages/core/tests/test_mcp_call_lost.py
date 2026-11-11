@@ -25,6 +25,7 @@ from gc_core.tools.connect_mcp.durable_scope import (
     durable_mcp_calls,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
+    _NOT_RUNNING_MSG,
     PersistentStdioRegistry,
     PersistentStdioSession,
 )
@@ -207,6 +208,15 @@ async def test_server_dying_after_initialize_fails_discovery(
     assert tools == []
     assert status["status"] == "failed"
     assert status["reason"] == "сервер завершился, не ответив"
+
+
+def test_close_before_the_request_is_not_running(monkeypatch):
+    """Сессию закрыли между запуском и запросом: не ``AttributeError``."""
+    session = PersistentStdioSession({"transport": "stdio"})
+    monkeypatch.setattr(session, "_ensure_started", lambda timeout: None)
+
+    with pytest.raises(RuntimeError, match=_NOT_RUNNING_MSG):
+        session.call("tools/call", {}, 1.0)
 
 
 def test_read_matching_on_closed_stream_still_empty():

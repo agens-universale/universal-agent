@@ -389,6 +389,8 @@ class PersistentStdioSession:
             # ``self._proc``, а писать, читать и решать об исходе надо по
             # этому процессу.
             proc = self._proc
+            if proc is None:  # закрыли до запроса: он не ушёл, повтор можно
+                raise RuntimeError(_NOT_RUNNING_MSG)
             if _user_stop_requested():
                 raise UserStopInterrupt(kind="mcp", started=True)
             req_id = self._next_id
