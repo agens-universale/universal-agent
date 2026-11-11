@@ -152,20 +152,6 @@ def test_glance_hidden_when_show_reasoning():
     ) == ("answer", False)
 
 
-def test_reasoning_seconds_runs_then_freezes():
-    """Время фазы мысли строке ленты: идёт, пока мысль идёт, застывает с
-    первой `answer` / `tool`; мысли нет — None."""
-    clk = {"t": 10.0}
-    s = StreamSink(clock=lambda: clk["t"])
-    assert s.reasoning_seconds() is None
-    s.push("think", "a")
-    clk["t"] = 13.0
-    assert s.reasoning_seconds() == 3.0
-    s.push("tool", "{}")
-    clk["t"] = 20.0
-    assert s.reasoning_seconds() == 3.0
-
-
 def test_clear_answer_keeps_thought_and_attempt():
     """Строка ленты закоммичена под флагом мыслей: уходит только канал
     ответа — мысль, метка попытки и фаза мысли остаются."""
@@ -179,7 +165,7 @@ def test_clear_answer_keeps_thought_and_attempt():
     s.clear_answer()
     assert s.snapshot() == ("план", "")
     assert s.attempt() == attempt
-    assert s.reasoning_seconds() == 2.0
+    assert s.reasoning_state() == ("done", 2.0)
 
 
 def test_take_thoughts_keeps_each_attempt_until_taken():
@@ -202,6 +188,20 @@ def test_take_thoughts_keeps_each_attempt_until_taken():
     assert (second.attempt, second.text, second.live) == ("a2", "вторая", True)
     assert second.started_at.second == 2
     assert [t.attempt for t in s.take_thoughts()] == ["a2"]
+
+
+def test_thought_seconds_freeze_at_tool_call():
+    """Время мысли в снимке застывает с первым вызовом инструмента: шаг ушёл
+    в вызов, а строка мысли в ленте дальше не тикает."""
+    clk = {"t": 10.0}
+    s = StreamSink(clock=lambda: clk["t"])
+    s.push("reset", "")
+    s.push("think", "план")
+    clk["t"] = 13.0
+    s.push("tool", "{}")
+    clk["t"] = 20.0
+    (snap,) = s.take_thoughts()
+    assert (snap.seconds, snap.live) == (3.0, False)
 
 
 def test_screen_reset_keeps_thought_and_discard_drops_it():

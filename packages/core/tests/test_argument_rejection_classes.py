@@ -31,7 +31,11 @@ def _validate(specs: dict, tool: str, args: dict) -> dict:
 
 
 def test_class_1_missing_reason(specs):
-    args = _validate(specs, "fs_read_file", {"path": "/testbed/a.py"})
+    args = _validate(
+        specs,
+        "fs_read_file",
+        {"path": "/testbed/a.py", "add_line_numbers": False},
+    )
     assert args["path"] == "/testbed/a.py"
 
 
@@ -55,6 +59,7 @@ def test_class_3_numeric_strings(specs):
         {
             "reason": "r",
             "path": "/testbed/a.py",
+            "add_line_numbers": False,
             "offset": "500.0",
             "limit": "200.0",
         },

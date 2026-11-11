@@ -101,7 +101,9 @@ def _fc(name, call_id, arguments):
 def _read(call_id):
     """Неважный вызов с аргументами по схеме; путь свой у каждого вызова."""
     return _fc(
-        "fs_read_file", call_id, json.dumps({"path": f"src/{call_id}.py"})
+        "fs_read_file",
+        call_id,
+        json.dumps({"path": f"src/{call_id}.py", "add_line_numbers": False}),
     )
 
 
@@ -792,7 +794,10 @@ def _completion(call_id):
                             "function": {
                                 "name": "fs_read_file",
                                 "arguments": json.dumps(
-                                    {"path": f"src/{call_id}.py"}
+                                    {
+                                        "path": f"src/{call_id}.py",
+                                        "add_line_numbers": False,
+                                    }
                                 ),
                             },
                         }
