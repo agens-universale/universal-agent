@@ -25,6 +25,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gc_core.execution.constants import NO_TOOL_RESPONSE
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
@@ -648,6 +649,12 @@ class GcCliExternal(BaseAgent):
                 ),
                 steps=steps,
                 final_metrics=FinalMetrics(total_steps=len(steps)),
+                extra=(
+                    {"terminal_outcome": NO_TOOL_RESPONSE}
+                    if getattr(state, "terminal_outcome", None)
+                    == NO_TOOL_RESPONSE
+                    else None
+                ),
             )
             path = self.logs_dir / "trajectory.json"
             path.parent.mkdir(parents=True, exist_ok=True)

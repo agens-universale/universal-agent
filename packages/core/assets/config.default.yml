@@ -118,6 +118,11 @@ agent:
     enabled: true
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
+  # Для gc-cli и вебхука. allow принимает пригодную прозу как итог хода.
+  # text_answer_mode: allow
+  # Для автономных запусков. Если пригодного вызова инструмента или финала нет,
+  # остановить ход с причиной no_tool_response вместо служебного сообщения user.
+  # stop_on_no_tool_response: true
   # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
   # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
   exec_output_capture_max_chars: 40000

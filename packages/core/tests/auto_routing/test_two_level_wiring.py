@@ -738,9 +738,11 @@ def _muted(calls):
     return [call["muted"] for call in calls]
 
 
-def test_only_the_weak_call_with_a_replay_target_is_muted(monkeypatch):
+@pytest.mark.parametrize("mode", [None, "allow"])
+def test_only_the_weak_call_with_a_replay_target_is_muted(monkeypatch, mode):
     """Вызовы сильной и сам переигранный вызов идут с полным потоком."""
     ctx = _ctx({"value": "auto"})
+    ctx.runtime = ctx.runtime.with_values(text_answer_mode=mode)
     s = _state(ctx)
     calls = _stub_transport(
         monkeypatch,
