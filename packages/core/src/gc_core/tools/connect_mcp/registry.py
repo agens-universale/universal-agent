@@ -152,9 +152,17 @@ def _registry_entry(
 
 
 def _apply_tools_whitelist(
-    server_name: str, server_cfg: Dict[str, Any], tools_raw: list
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list,
+    *,
+    quiet: bool = False,
 ) -> list:
-    """Отфильтровать tools_raw по mcp.servers.<name>.whitelist (если enabled)."""
+    """Отфильтровать tools_raw по mcp.servers.<name>.whitelist (если enabled).
+
+    ``quiet`` — без строк в лог: срез из каталога строится на каждой сборке
+    и входе в ход, и одни и те же строки повторялись бы на каждом.
+    """
     wl = server_cfg.get("whitelist") if isinstance(server_cfg, dict) else None
     if not isinstance(wl, dict) or not wl.get("enabled"):
         return tools_raw
@@ -163,7 +171,7 @@ def _apply_tools_whitelist(
     }
     present = {str(t.get("name")) for t in tools_raw if isinstance(t, dict)}
     missing = sorted(allowed - present)
-    if missing:
+    if missing and not quiet:
         logger.warning(
             "[MCP] %s: whitelist names not provided by server: %s",
             server_name,
@@ -174,7 +182,7 @@ def _apply_tools_whitelist(
         for t in tools_raw
         if isinstance(t, dict) and str(t.get("name")) in allowed
     ]
-    if len(filtered) != len(tools_raw):
+    if len(filtered) != len(tools_raw) and not quiet:
         logger.info(
             "[MCP] %s: %d of %d tools whitelisted",
             server_name,
@@ -182,6 +190,123 @@ def _apply_tools_whitelist(
             len(tools_raw),
         )
     return filtered
+
+
+_TRANSPORTS = (
+    "http",
+    "sse",
+    "stdio",
+    "stream_sse",
+    "stream_http",
+    "stream_stdio",
+)
+
+
+def _check_server_cfg(server_cfg: Any) -> tuple[str, str]:
+    """Проверить определение сервера: ``(транспорт, url)``.
+
+    У stdio-транспортов url пустой: они его не используют. Негодное
+    определение — ``ValueError`` с причиной для человека.
+    """
+    if not isinstance(server_cfg, dict):
+        raise ValueError("server_cfg не dict")
+    url = server_cfg.get("url")
+    transport = server_cfg.get("transport")
+    if transport not in _TRANSPORTS:
+        raise ValueError(f"неподдерживаемый transport: {transport!r}")
+    if transport in ("stdio", "stream_stdio"):
+        if not server_cfg.get("command"):
+            raise ValueError("не задан command для stdio")
+        return transport, ""
+    if not url:
+        raise ValueError("не задан url")
+    return transport, url
+
+
+def _normalized_tools(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list,
+    *,
+    transport: str,
+    url: str,
+    quiet: bool = False,
+) -> list:
+    """Сырой список тулов → нормализованные tool-dict'ы после whitelist."""
+    tools_raw = _apply_tools_whitelist(
+        server_name, server_cfg, tools_raw, quiet=quiet
+    )
+    # Поддержку опечатки «serever-name» в конфиге оставим.
+    server_display_name = (
+        server_cfg.get("server-name")
+        or server_cfg.get("serever-name")
+        or server_name
+    )
+    tools: list = []
+    for tool in tools_raw:
+        normalized = _normalize_tool(
+            server_name,
+            tool,
+            transport=transport,
+            url=url,
+            server_display_name=server_display_name,
+            server_description=server_cfg.get("description") or "",
+        )
+        if normalized is not None:
+            tools.append(normalized)
+    return tools
+
+
+def _entries_of(
+    server_name: str, server_cfg: Dict[str, Any], tools: list
+) -> Dict[str, Dict[str, Any]]:
+    """Записи реестра ``{полное имя: {"tool", "metadata"}}`` одного сервера."""
+    return {
+        mcp_tool_full_name(server_name, tool["name"]): _registry_entry(
+            server_name, server_cfg=server_cfg, tool=tool
+        )
+        for tool in tools
+        if tool.get("name")
+    }
+
+
+async def alist_raw_tools(
+    server_name: str, server_cfg: Dict[str, Any], *, timeout: float
+) -> list[Dict[str, Any]]:
+    """Сырой ответ ``tools/list`` сервера — до whitelist и оформления.
+
+    Его хранит каталог на диске. Строгий разбор: ответ без списка тулов —
+    ``McpProtocolError``, а не пустой список. Негодное определение —
+    ``ValueError``; ошибки связи — как у клиента.
+    """
+    _check_server_cfg(server_cfg)
+    client = resolve_mcp_client(server_name, server_cfg)
+    return await client.alist_tools(timeout=timeout, strict=True)
+
+
+def build_registry_entries(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list[Dict[str, Any]],
+    *,
+    quiet: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """Записи реестра тулов сервера из сырого списка — ответа или каталога.
+
+    Те же записи, что даёт дискавери (``_abuild_tools_registry``): whitelist,
+    описание и полное имя ``mcp_<ключ>_<тул>`` берутся из ``server_cfg``
+    вызывающего. ``quiet`` — без строк whitelist в лог.
+    """
+    transport, url = _check_server_cfg(server_cfg)
+    tools = _normalized_tools(
+        server_name,
+        server_cfg,
+        tools_raw,
+        transport=transport,
+        url=url,
+        quiet=quiet,
+    )
+    return _entries_of(server_name, server_cfg, tools)
 
 
 async def _adiscover_one(
@@ -210,53 +335,14 @@ async def _adiscover_one(
     """
     t0 = time.monotonic()
     try:
-        if not isinstance(server_cfg, dict):
-            raise ValueError("server_cfg не dict")
-
-        url = server_cfg.get("url")
-        transport = server_cfg.get("transport")
-        if transport not in (
-            "http",
-            "sse",
-            "stdio",
-            "stream_sse",
-            "stream_http",
-            "stream_stdio",
-        ):
-            raise ValueError(f"неподдерживаемый transport: {transport!r}")
-        if transport in ("stdio", "stream_stdio"):
-            if not server_cfg.get("command"):
-                raise ValueError("не задан command для stdio")
-            url = ""  # stdio не использует url
-        elif not url:
-            raise ValueError("не задан url")
-
+        transport, url = _check_server_cfg(server_cfg)
         client = resolve_mcp_client(
             server_name, server_cfg, os_backend=os_backend
         )
         tools_raw = await client.alist_tools(timeout=timeout)
-        tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
-
-        server_display_name = (
-            server_cfg.get("server-name")
-            or server_cfg.get(
-                "serever-name"
-            )  # поддержку опечатки в конфиге оставим
-            or server_name
+        tools = _normalized_tools(
+            server_name, server_cfg, tools_raw, transport=transport, url=url
         )
-        tools: list = []
-        for tool in tools_raw:
-            normalized = _normalize_tool(
-                server_name,
-                tool,
-                transport=transport,
-                url=url,
-                server_display_name=server_display_name,
-                server_description=server_cfg.get("description") or "",
-            )
-            if normalized is not None:
-                tools.append(normalized)
-
         return tools, {
             "status": "connected",
             "reason": None,
@@ -370,13 +456,7 @@ async def _abuild_tools_registry(
             if on_progress is not None:
                 on_progress(name, status)
         status_map[name] = status
-        for tool in tools:
-            base = tool.get("name")
-            if not base:
-                continue
-            all_tools[mcp_tool_full_name(name, base)] = _registry_entry(
-                name, server_cfg=cfg, tool=tool
-            )
+        all_tools.update(_entries_of(name, cfg, tools))
     return all_tools, status_map
 
 
@@ -541,4 +621,6 @@ class ToolsCache:
 __all__ = [
     "ToolsCache",
     "_abuild_tools_registry",
+    "alist_raw_tools",
+    "build_registry_entries",
 ]

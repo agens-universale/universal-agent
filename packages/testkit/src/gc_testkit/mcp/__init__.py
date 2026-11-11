@@ -21,7 +21,10 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
+from gc_core.config_modules.field_meta import plain_dump
+from gc_core.tools.connect_mcp.catalog import write_catalog
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 
 _HERE = Path(__file__).parent
 _STDIO_SERVER = _HERE / "stdio_server.py"
@@ -185,6 +188,18 @@ async def call_tool(
             ) from None
         raise
     return _tool_payload(response)
+
+
+def seed_catalog(settings: Any, server_key: str, tools: list[str]) -> None:
+    """Записать каталог тулов сервера, как его увидит сверка.
+
+    Определение — то же, что строит сборка: ``plain_dump(model,
+    by_alias=True)`` из ``effective_mcp_servers(settings)``; тулы — записи
+    ``{"name": …}``. Сервер не запускается, его журнал не трогается.
+    """
+    model = effective_mcp_servers(settings)[server_key]
+    cfg = plain_dump(model, by_alias=True)
+    write_catalog(server_key, cfg, [{"name": name} for name in tools])
 
 
 def free_port() -> int:

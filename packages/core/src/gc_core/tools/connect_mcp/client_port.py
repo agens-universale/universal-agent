@@ -15,6 +15,7 @@ from gc_core.tools.connect_mcp.client import (
     _acall_mcp_tool,
     _aget_or_init_session_id,
     _atools_list_request,
+    _tools_from,
     forget_session,
 )
 from gc_core.tools.connect_mcp.durable_scope import require_no_reconnect
@@ -177,7 +178,9 @@ class AgentRuntimeClient(McpClientPort):
         token = self.server_cfg.get("token")
         return str(token) if token else None
 
-    def list_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
+    def list_tools(
+        self, *, timeout: float, strict: bool = False
+    ) -> List[Dict[str, Any]]:
         """Только долгоживущий stdio. Остальные транспорты — асинхронной формой.
 
         Метод остался ради одного случая: обмен с долгоживущей сессией
@@ -187,6 +190,8 @@ class AgentRuntimeClient(McpClientPort):
         Легаси `http`/`sse` отсюда УШЛИ: до них доходила только синхронная
         дискавери, а форм дискавери больше не две. Транспорты SDK сюда не
         попадали и раньше.
+
+        ``strict`` — как у :meth:`alist_tools`.
         """
         self._require_transport()
         if not is_persistent_stdio(self.server_cfg):
@@ -199,9 +204,7 @@ class AgentRuntimeClient(McpClientPort):
             resp = session.call("tools/list", {}, timeout)
         finally:
             self._unbind_stdio_session(session)
-        result = resp.get("result") if isinstance(resp, dict) else None
-        tools = result.get("tools", []) if isinstance(result, dict) else []
-        return tools if isinstance(tools, list) else []
+        return _tools_from(resp, strict=strict)
 
     def call_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
@@ -247,7 +250,14 @@ class AgentRuntimeClient(McpClientPort):
         if getattr(self, "_stdio_session", None) is session:
             self._stdio_session = None
 
-    async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
+    async def alist_tools(
+        self, *, timeout: float, strict: bool = False
+    ) -> List[Dict[str, Any]]:
+        """``strict`` — ответ без списка тулов даёт ``McpProtocolError``.
+
+        Касается разбора здесь (долгоживущий и разовый stdio, легаси-http):
+        потоковые клиенты SDK такой ответ отвергают сами.
+        """
         transport = self._require_transport()
         effective = _effective_transport(self.server_cfg)
         url = self._url()
@@ -276,7 +286,9 @@ class AgentRuntimeClient(McpClientPort):
             # asyncio-подпроцесс привязан к создавшему его loop, а эту сессию
             # заводит дискавери, зовут тулы и закрывает `arun` — три разных
             # loop. Прервать блокирующий обмен нечем, поэтому поток-демон.
-            return await run_abandonable(self.list_tools, timeout=timeout)
+            return await run_abandonable(
+                self.list_tools, timeout=timeout, strict=strict
+            )
 
         session_id = await _aget_or_init_session_id(
             self.server_name, url, self.server_cfg, token=token
@@ -291,6 +303,7 @@ class AgentRuntimeClient(McpClientPort):
                 session_id=session_id,
                 server_cfg=self.server_cfg,
                 token=token,
+                strict=strict,
             )
         except httpx.HTTPStatusError:
             forget_session(self.server_name)
@@ -306,6 +319,7 @@ class AgentRuntimeClient(McpClientPort):
                 session_id=session_id,
                 server_cfg=self.server_cfg,
                 token=token,
+                strict=strict,
             )
 
     async def acall_tool(
