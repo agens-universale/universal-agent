@@ -11,6 +11,7 @@ from gc_core.execution.finish_reason import (
     nonempty_reasoning_text,
     normalize_finish_reason,
 )
+from gc_core.utils.log_text import clip_middle
 
 _MAX_BACKEND_LOG_CHARS = 8000
 
@@ -185,9 +186,37 @@ def get_output_list(
         tool_calls = msg_obj.get("tool_calls")
         if tool_calls is not None:
             for tool_call_dict in tool_calls:
+                _warn_unparsable_arguments(
+                    tool_call_dict,
+                    dct_choice.get("finish_reason"),
+                    logger_override,
+                )
                 output_list.append(_function_call_item(tool_call_dict))
 
     return output_list
+
+
+def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
+    """Аргументы вызова — не JSON: в лог сырой строкой. Сборка не меняется,
+    модель и так получит ошибку разбора; лог нужен, чтобы отличить обрыв у
+    бэкенда (вызов закрыт как готовый) от потери на нашей стороне."""
+    if logger is None:
+        return
+    fn = tool_call.get("function") or {}
+    arguments = fn.get("arguments")
+    # Пустые аргументы — вызов без параметров, не обрывок.
+    if not isinstance(arguments, str) or not arguments.strip():
+        return
+    if _has_valid_json_arguments(fn):
+        return
+    logger.warning(
+        "chat/completions tool call arguments are not valid JSON "
+        "(finish_reason=%r, tool=%s, call_id=%s): arguments=%s",
+        finish_reason,
+        fn.get("name"),
+        tool_call.get("id"),
+        clip_middle(arguments, _MAX_BACKEND_LOG_CHARS),
+    )
 
 
 def _accept_choice_finish_reason(

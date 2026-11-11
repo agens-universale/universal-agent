@@ -54,6 +54,7 @@ from gc_core.utils.http_auth import (
     server_authorization_attempts,
 )
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.log_text import clip_middle
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.ssl_config import get_backend_client_cert
@@ -67,6 +68,8 @@ _MODEL_REQUEST_STOPPED = "Ход остановлен"
 # Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
 # ResolvedModel.backend_overrides (см. backend_override_value).
 NO_BACKEND_OVERRIDE = object()
+# Отброшенный чанк стрима в лог — с потолком: битая строка бывает любой длины.
+_MAX_DROPPED_CHUNK_LOG_CHARS = 2000
 
 
 def get_async_client(*args, **kwargs):
@@ -277,6 +280,24 @@ def _log_backend_request(
             "payload": logged,
         },
     )
+
+
+def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
+    if logger is None:
+        return
+    for payload in assembler.dropped_payloads:
+        logger.warning(
+            "chat/completions stream chunk dropped (not a JSON object): %s",
+            clip_middle(payload, _MAX_DROPPED_CHUNK_LOG_CHARS),
+        )
+    unlogged = assembler.dropped_count - len(assembler.dropped_payloads)
+    if unlogged:
+        logger.warning(
+            "chat/completions stream: %d chunks dropped in total, "
+            "%d not logged",
+            assembler.dropped_count,
+            unlogged,
+        )
 
 
 def _log_backend_response(logger, api_mode: str, response: Any) -> None:
@@ -602,6 +623,22 @@ async def _arequest_backend_responses_once(
     return response_obj, r_headers
 
 
+async def _afeed_sse(r, assembler: StreamAssembler) -> None:
+    """Скормить сборщику строки SSE до `[DONE]` или конца тела."""
+    async for line in _aiter_utf8_lines(r):
+        _raise_if_model_stopped()
+        assembler.feed_line(line)
+        if assembler.done:
+            # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
+            # нельзя: закрывает его сервер, а корп-прокси вправе держать
+            # соединение сколько угодно. Ход ждал бы read-timeout (600 с
+            # по умолчанию), а тот считается поводом повторить ВЕСЬ
+            # запрос: показанный ответ стирается и генерируется заново.
+            # Синхронный путь до переезда выходил здесь же —
+            # `iter_sse_data_lines` делала на маркере `return`.
+            break
+
+
 async def _astream_chat_completions(
     client,
     url: str,
@@ -642,18 +679,12 @@ async def _astream_chat_completions(
         on_delta("reset", "")
 
         assembler = StreamAssembler(on_delta=on_delta)
-        async for line in _aiter_utf8_lines(r):
-            _raise_if_model_stopped()
-            assembler.feed_line(line)
-            if assembler.done:
-                # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
-                # нельзя: закрывает его сервер, а корп-прокси вправе держать
-                # соединение сколько угодно. Ход ждал бы read-timeout (600 с
-                # по умолчанию), а тот считается поводом повторить ВЕСЬ
-                # запрос: показанный ответ стирается и генерируется заново.
-                # Синхронный путь до переезда выходил здесь же —
-                # `iter_sse_data_lines` делала на маркере `return`.
-                break
+        try:
+            await _afeed_sse(r, assembler)
+        finally:
+            # Обрыв, стоп или ошибка в потоке — как раз тогда важно видеть,
+            # что из пришедшего мы не разобрали.
+            _log_dropped_chunks(logger, assembler)
         _raise_if_model_stopped()
         assembler.flush()
         assembled = assembler.result()

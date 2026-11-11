@@ -516,5 +516,48 @@ async def test_salvaged_think_is_not_text_answer_even_in_allow():
     assert "reasoning_content" not in outbound
 
 
+def test_get_output_list_warns_on_unparsable_tool_arguments():
+    """Бэкенд закрыл вызов как готовый, а аргументы — обрывок JSON: сборка
+    не меняется (модель получит ошибку разбора), но в логе — предупреждение
+    с сырыми аргументами, чтобы было видно, кто оборвал."""
+    log = MagicMock()
+    broken = '{"path": "a.toml", "include_line_count": '
+    calls = [
+        _tool_call("ok", arguments='{"path": "b"}'),
+        _tool_call("cut", name="fs_file_info", arguments=broken),
+        _tool_call("empty", arguments=""),
+    ]
+    out = get_output_list(
+        _dct("tool_calls", content=None, tool_calls=calls),
+        logger_override=log,
+    )
+    assert [o["arguments"] for o in out] == ['{"path": "b"}', broken, ""]
+    log.warning.assert_called_once()
+    msg = log.warning.call_args[0][0] % log.warning.call_args[0][1:]
+    assert "not valid JSON" in msg
+    assert "finish_reason='tool_calls'" in msg
+    assert "fs_file_info" in msg and "cut" in msg
+    assert broken in msg
+
+
+def test_long_unparsable_arguments_keep_their_tail_in_the_log():
+    """Обрыв — в конце аргументов: у длинной записи в логе остаются конец
+    и полная длина, а не только начало."""
+    log = MagicMock()
+    broken = '{"path": "a.txt", "content": "' + "x" * 20000 + "TAIL"
+    get_output_list(
+        _dct(
+            "tool_calls",
+            content=None,
+            tool_calls=[_tool_call("cut", arguments=broken)],
+        ),
+        logger_override=log,
+    )
+    msg = log.warning.call_args[0][0] % log.warning.call_args[0][1:]
+    assert msg.endswith("xTAIL")
+    assert f"total_chars={len(broken)}" in msg
+    assert '{"path": "a.txt"' in msg
+
+
 if __name__ == "__main__":
     unittest.main()

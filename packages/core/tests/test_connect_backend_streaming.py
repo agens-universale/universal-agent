@@ -192,7 +192,7 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(
         "data: [DONE]\n\n"
     ).encode()
 
-    def handler(request):
+    def handler(_request):
         return httpx.Response(
             200,
             content=body,
@@ -260,3 +260,114 @@ async def test_stream_stops_at_done_even_if_the_server_holds_the_body_open(
 
     assert res["choices"][0]["message"]["content"] == "hi"
     assert ("answer", "hi") in deltas
+
+
+def test_stream_logs_dropped_chunk(monkeypatch):
+    """Чанк, не разобранный как JSON-объект, в сборку не идёт, но и не
+    пропадает молча: транспорт пишет его в лог предупреждением."""
+    from unittest.mock import MagicMock
+
+    body = (
+        'data: {"id": "x", "choices": [{"index": 0, "delta": {"content": "a"}}]}\n\n'
+        'data: {"choices": [{"delta": {"content": "b"\n\n'
+        'data: {"id": "x", "choices": [{"index": 0, "delta": {}, '
+        '"finish_reason": "stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, text=body, headers={"content-type": "text/event-stream"}
+        ),
+    )
+    log = MagicMock()
+    res = run_coro(
+        connect_backend.arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            url="http://x",
+            verify=True,
+            on_delta=lambda k, t: None,
+            logger=log,
+        )
+    )
+    assert res["choices"][0]["message"]["content"] == "a"
+    warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
+    assert warnings == [
+        "chat/completions stream chunk dropped (not a JSON object): "
+        '{"choices": [{"delta": {"content": "b"'
+    ]
+
+
+async def test_dropped_chunk_is_logged_even_if_the_stream_breaks(monkeypatch):
+    """Обрыв соединения после неразобранного чанка: именно тогда важно
+    видеть, что потерялось у нас, — запись в лог не должна зависеть от
+    того, дочитан ли поток."""
+    from unittest.mock import MagicMock
+
+    async def body():
+        yield b'data: {"choices": [{"delta": {"content": "b"\n\n'
+        raise httpx.ReadError("обрыв")
+
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, content=body(), headers={"content-type": "text/event-stream"}
+        ),
+    )
+    log = MagicMock()
+    with pytest.raises(httpx.ReadError):
+        await connect_backend.arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            url="http://x",
+            verify=True,
+            on_delta=lambda k, t: None,
+            logger=log,
+        )
+    warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
+    assert (
+        "chat/completions stream chunk dropped (not a JSON object): "
+        '{"choices": [{"delta": {"content": "b"'
+    ) in warnings
+
+
+def test_dropped_chunks_log_is_capped_with_a_total(monkeypatch):
+    """Поток в нечитаемом формате: в лог первые обрывки и итог, сколько
+    отброшено всего, — не по предупреждению на каждый чанк."""
+    from unittest.mock import MagicMock
+
+    from gc_core.utils.stream_assembler import MAX_DROPPED_PAYLOADS
+
+    extra = 5
+    bad = "".join(
+        f"data: {{bad {i}\n\n" for i in range(MAX_DROPPED_PAYLOADS + extra)
+    )
+    body = (
+        bad + 'data: {"id": "x", "choices": [{"index": 0, '
+        '"delta": {"content": "a"}, "finish_reason": "stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, text=body, headers={"content-type": "text/event-stream"}
+        ),
+    )
+    log = MagicMock()
+    run_coro(
+        connect_backend.arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            url="http://x",
+            verify=True,
+            on_delta=lambda k, t: None,
+            logger=log,
+        )
+    )
+    warnings = [c.args[0] % c.args[1:] for c in log.warning.call_args_list]
+    assert len(warnings) == MAX_DROPPED_PAYLOADS + 1
+    assert warnings[-1] == (
+        f"chat/completions stream: {MAX_DROPPED_PAYLOADS + extra} chunks "
+        f"dropped in total, {extra} not logged"
+    )

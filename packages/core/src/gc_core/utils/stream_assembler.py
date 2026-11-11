@@ -46,6 +46,8 @@ def _raise_stream_error(err: Any) -> None:
 
 _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
+# Сколько неразобранных чанков хранить для лога; остальные только считаются.
+MAX_DROPPED_PAYLOADS = 20
 
 
 def _partial_prefix_len(buf: str, tag: str) -> int:
@@ -136,6 +138,12 @@ class StreamAssembler:
         self._model: Optional[str] = None
         self._resp_id: Optional[str] = None
         self.done = False
+        # Чанки, не разобранные как JSON: в сборку не идут, транспорт пишет
+        # их в лог — иначе потерянный хвост аргументов не отличить от обрыва
+        # у бэкенда. Хранятся первые MAX_DROPPED_PAYLOADS, остальные только
+        # считаются: поток целиком в чужом формате не копит их тысячами.
+        self.dropped_payloads: List[str] = []
+        self.dropped_count = 0
 
     # --- вход ---------------------------------------------------------------
 
@@ -156,11 +164,16 @@ class StreamAssembler:
 
     def feed_payload(self, payload: str) -> None:
         """Скормить JSON-пейлоад одного чанка (без обёртки `data:`)."""
+        if not payload.strip():  # пустой `data:` — не чанк и не обрывок
+            return
         try:
             chunk = json.loads(payload)
         except (ValueError, TypeError):
-            return
+            chunk = None
         if not isinstance(chunk, dict):
+            self.dropped_count += 1
+            if len(self.dropped_payloads) < MAX_DROPPED_PAYLOADS:
+                self.dropped_payloads.append(payload)
             return
         # Провайдер вернул error-событие внутри 200-стрима — не глотать: поднять
         # с реальным сообщением, иначе сборка выйдет пустой и downstream даст
