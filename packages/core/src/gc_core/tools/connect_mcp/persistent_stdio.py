@@ -53,6 +53,7 @@ import signal
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
 from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
@@ -282,6 +283,21 @@ _NOT_RUNNING_MSG = "persistent stdio MCP process is not running"
 def _user_stop_requested() -> bool:
     stop = current_user_stop()
     return stop is not None and stop.requested
+
+
+#: Часы срока чтения ответа; тесты подменяют их подставными.
+_clock = time.monotonic
+
+
+def _line_budgets(timeout: float) -> Iterator[float]:
+    """Остаток общего срока перед каждой строкой; срок вышел — конец.
+
+    Срок считается один раз от начала чтения: уведомления сервера, сколько
+    бы их ни было, его не продлевают и ответ не вытесняют.
+    """
+    deadline = _clock() + timeout
+    while (left := deadline - _clock()) > 0:
+        yield left
 
 
 class PersistentStdioSession:
@@ -681,9 +697,9 @@ class PersistentStdioSession:
         """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
-        for _ in range(32):
+        for left in _line_budgets(timeout):
             done, obj = self._match_response(
-                await _areadline_with_timeout(proc.stdout, timeout), req_id
+                await _areadline_with_timeout(proc.stdout, left), req_id
             )
             if done:
                 return obj
@@ -695,9 +711,9 @@ class PersistentStdioSession:
         """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
-        for _ in range(32):
+        for left in _line_budgets(timeout):
             done, obj = self._match_response(
-                _readline_with_timeout(proc.stdout, timeout), req_id
+                _readline_with_timeout(proc.stdout, left), req_id
             )
             if done:
                 return obj
@@ -705,16 +721,16 @@ class PersistentStdioSession:
 
     def _read_matching(self, req_id: Any, timeout: float) -> Dict[str, Any]:
         """
-        Прочитать JSON-RPC ответ с нужным id.
-        Неcовпадающие/невалидные строки (например, уведомления сервера) пропускаем,
-        но не больше небольшого числа итераций на один вызов, чтобы не зависнуть.
+        Прочитать JSON-RPC ответ с нужным id за общий срок ``timeout``.
+        Несовпадающие и невалидные строки (например, уведомления сервера)
+        пропускаем без ограничения числа: зависнуть не даёт срок.
         """
         proc = self._proc
         if proc is None or proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
-        for _ in range(32):
+        for left in _line_budgets(timeout):
             done, obj = self._match_response(
-                _readline_with_timeout(proc.stdout, timeout), req_id
+                _readline_with_timeout(proc.stdout, left), req_id
             )
             if done:
                 return obj
