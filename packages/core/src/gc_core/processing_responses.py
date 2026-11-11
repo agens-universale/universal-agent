@@ -100,6 +100,7 @@ from gc_core.execution.progress import (
     todo_items_from_arguments,
     tool_args_summary,
 )
+from gc_core.execution.tool_feedback import failed_call_output
 from gc_core.execution.turn_clock import (
     TurnClock,
     begin_call_time,
@@ -179,12 +180,13 @@ from gc_core.runtime_notices import (
     maybe_push_level_reroute_notice,
     maybe_push_llm_failure_notice,
 )
+from gc_core.security.log_redaction import Redactor
 from gc_core.security.permission_mode import (
     offers_plan_tool,
     resolve_mode,
     tools_for_mode,
 )
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, runtime_of, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.summarize.summary_validation import SummaryRejectedError
@@ -234,6 +236,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_responses as create_call_data,
 )
 from gc_core.utils.convertations import (
+    UnparseableToolCall,
     output_chat_completion_to_response,
     sanitize_messages_for_chat_completions,
 )
@@ -1963,6 +1966,12 @@ async def _amaybe_reroute_for_floors(
     её серию заново. Расход сохраняется, а мемо такта фиксирует новый уровень."""
     if getattr(state, "current_level", None) is None:
         return resp_messages, response_id, res_headers
+    if runtime_of(
+        ctx
+    ).text_answer_mode == "allow" and not _batch_has_pending_function_calls(
+        resp_messages
+    ):
+        return resp_messages, response_id, res_headers
     params = _routing_params(ctx, state)
     source = ctx
     verdict = floor_verdict(
@@ -2334,6 +2343,22 @@ def _emit_tool_start(
     )
 
 
+def _tool_result_with_failure_details(output, tool_name, arguments, ctx):
+    ok, error_brief = parse_tool_result_status(output)
+    if ok is False:
+        redact_cfg = settings_of(ctx).logging.redact_secrets
+        output = failed_call_output(
+            output,
+            tool_name=tool_name,
+            arguments=arguments,
+            redactor=Redactor(
+                extra_keys=redact_cfg.extra_keys,
+                extra_patterns=redact_cfg.extra_patterns,
+            ),
+        )
+    return output, ok, error_brief
+
+
 async def _aexecute_tool_call(
     m: Dict,
     tool_name: str,
@@ -2400,7 +2425,9 @@ async def _aexecute_tool_call(
         # В историю треда это не пишется.
         elapsed = clock() - started_at
         elapsed_ms = int(elapsed * 1000)
-        ok, error_brief = parse_tool_result_status(tool_res_raw)
+        tool_res_raw, ok, error_brief = _tool_result_with_failure_details(
+            tool_res_raw, tool_name, tool_arguments, ctx
+        )
         if is_intermediate:
             await _aemit_intermediate_reply(
                 ctx,
@@ -3250,6 +3277,8 @@ class _AgentLoop:
             # с ValueError('Empty messages list'). Вместо этого генерируем понятное
             # сообщение‑обратную связь для агента.
             if not messages:
+                if runtime_of(self.ctx).text_answer_mode == "allow":
+                    return self._stop_without_tool().result
                 messages = self._bounce_empty_messages()
                 continue
             step = await self._astep(messages, _get_backend_api_mode(self.ctx))
@@ -3304,6 +3333,8 @@ class _AgentLoop:
             messages, mode, early = await self._aprepare_batch(
                 messages, backend_mode
             )
+        except UnparseableToolCall:
+            return self._stop_without_tool()
         except ExecutionFailure:
             raise
         except Exception as e:
@@ -3328,6 +3359,10 @@ class _AgentLoop:
             outcome = _Outcome(
                 self._bounce_wrong_arguments(e), completed_step=True
             )
+        except UnparseableToolCall:
+            if runtime_of(self.ctx).text_answer_mode != "allow":
+                raise
+            return self._stop_without_tool()
         except ExecutionFailure:
             raise
         except ModelRequestStopped:
@@ -3496,6 +3531,15 @@ class _AgentLoop:
         self.tool_error_cnt += 1
         self.state.steps += 1
         return self._finish_reason_bounce()
+
+    def _stop_without_tool(self) -> _Outcome:
+        self.state.terminal_outcome = "no_tool_response"
+        self.state.steps += 1
+        self.run_logger.warning(
+            "No usable final answer or tool call (finish_reason=%s)",
+            getattr(self.state, "last_finish_reason", None),
+        )
+        return _Outcome(result=None)
 
     def _bounce_on_error(self, e: Exception) -> List[Dict]:
         self.run_logger.error(e, exc_info=True)
@@ -3692,6 +3736,15 @@ class _AgentLoop:
         """
         state = self.state
         self._log_incoming(messages)
+        if runtime_of(self.ctx).text_answer_mode == "allow":
+            for message in messages:
+                if message.get("type") == "function_call" and not all(
+                    isinstance(value, str) and value.strip()
+                    for value in (message.get("call_id"), message.get("name"))
+                ):
+                    raise UnparseableToolCall(
+                        "Model tool call has no usable identity"
+                    )
         messages = self._sanitize_batch(messages)
         # Весь батч сразу в истории. Последний ответ и соседи за ним
         # (реплика, картинка) на диск — после сводки: без неё уже с подсказками.
@@ -3726,7 +3779,14 @@ class _AgentLoop:
             )
             return messages, None, "Agent tools call errors."
 
-        mode = check_mode(messages, self.run_logger)
+        try:
+            mode = check_mode(messages, self.run_logger)
+        except ValueError:
+            if runtime_of(self.ctx).text_answer_mode != "allow":
+                raise
+            raise UnparseableToolCall(
+                "Model response has no usable message"
+            ) from None
         return messages, mode, _NO_RETURN
 
     def _history_replaced(self, previous: Any) -> bool:
@@ -4326,6 +4386,8 @@ class _AgentLoop:
                     await await_callback(self.mark_finalizing(False))
             return await self._aclose_turn(assistant_text)
         # === reject ===
+        if runtime_of(ctx).text_answer_mode == "allow":
+            return self._stop_without_tool()
         state.tick_signals.add(NO_TOOL_BOUNCE)
         self.tool_error_cnt += 1
         bounce_msg = self._text_reject_bounce_msg(

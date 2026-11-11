@@ -159,6 +159,9 @@ class AgentConfig(BaseModel):
     # См. docs_md/actual/2026-08-01-limit-trace-summary-spec.md
     limit_trace_summary: bool = True
     no_tool_call_max_count: int = 5
+    text_answer_mode: Literal["deny", "judge", "allow"] | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     max_unknown_tool_repeats: int = Field(
         default=5, json_schema_extra=gc_meta(expert=True)
     )

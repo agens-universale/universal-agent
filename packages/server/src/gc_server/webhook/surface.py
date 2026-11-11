@@ -72,10 +72,12 @@ KEEP_CALLBACK = object()
 def webhook_settings(runtime: ServerRuntime, name: str = "webhook"):
     """Настройки агента вебхука: за ним нет человека, слова — запрос
     внешней системы, режим запуска — сервер."""
-    return runtime.surface_settings(name).with_runtime(
+    loaded = runtime.surface_settings(name)
+    return loaded.with_runtime(
         run_mode=RUN_MODE_SERVER,
         human_channel=False,
         external_user_words=True,
+        text_answer_mode=loaded.settings.agent.text_answer_mode,
     )
 
 

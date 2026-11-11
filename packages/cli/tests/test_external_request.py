@@ -35,3 +35,11 @@ def test_without_the_flag_the_channel_is_detected_as_before(monkeypatch):
     runtime = _load(["gc-cli", "-q", "x"], monkeypatch)
     assert runtime.human_channel is None
     assert runtime.external_user_words is False
+    assert runtime.text_answer_mode is None
+
+
+def test_agent_text_answer_mode_reaches_cli_runtime(monkeypatch):
+    runtime = _load(
+        ["gc-cli", "-q", "x", "--agent.text_answer_mode", "allow"], monkeypatch
+    )
+    assert runtime.text_answer_mode == "allow"

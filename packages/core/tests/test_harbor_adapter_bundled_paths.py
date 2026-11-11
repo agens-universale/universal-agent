@@ -6,7 +6,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from gc_testkit.paths import HARBOR
+import yaml
+from gc_core.agent_store.file_store import FileAgentStore
+from gc_core.run_preparation import PromptPreparationRequest, aload_run_prompts
+from gc_core.utils.local_render_system_prompt import render_system_prompt
+from gc_testkit.paths import ASSETS, HARBOR, INTEGRATIONS
 
 _TEST_URL = "http://test-backend/v1/chat/completions"
 
@@ -98,6 +102,47 @@ def test_security_guards_pinned_off_for_benches(monkeypatch):
     assert security.write_guard.enabled is False
     assert security.url_policy.enabled is False
     assert security.command_moderation.mode == "allow"
+
+
+async def test_fleet_rl_profile_selects_the_rl_system_prompt(monkeypatch):
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
+    profile = yaml.safe_load(
+        (INTEGRATIONS / "bench_configs" / "uag_rl.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    config = profile["harbor_job"]["agents"][0]["kwargs"]["gc_cli_config"]
+    loaded = _agent(_load_adapter(), **config)._build_settings()
+    assert loaded.runtime.text_answer_mode == "allow"
+    prompt_path = Path(
+        loaded.settings.paths.chat_completions_system_prompt_path
+    )
+    relative_path = prompt_path.relative_to("/opt/gc-harbor-adapters")
+    assert relative_path == Path(
+        "prompts/chat_completions_system_prompt_rl.md"
+    )
+
+    local = loaded.with_overrides(
+        {
+            "paths.chat_completions_system_prompt_path": str(
+                ASSETS / relative_path
+            )
+        }
+    )
+    prepared = await aload_run_prompts(
+        PromptPreparationRequest.from_config(local, verbose=False),
+        store=FileAgentStore(local),
+    )
+    rendered = render_system_prompt(
+        prepared.system_prompt,
+        tools_spec=[],
+        project_info={},
+        specific_role=None,
+        special_instructions=prepared.special_instructions,
+    )
+    assert "you must call `turn_finish`" in rendered
+    assert "do not ask for clarification or confirmation" in rendered
+    assert "ask one concise question" not in rendered
 
 
 def test_no_backend_url_fails_fast(monkeypatch):

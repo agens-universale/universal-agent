@@ -15,6 +15,10 @@ from gc_core.execution.finish_reason import (
 _MAX_BACKEND_LOG_CHARS = 8000
 
 
+class UnparseableToolCall(ValueError):
+    """The model returned a tool call with no usable name or ID."""
+
+
 def _safe_json_for_log(payload, *, max_chars=_MAX_BACKEND_LOG_CHARS):
     try:
         raw = json.dumps(payload, ensure_ascii=False, default=str)
@@ -301,13 +305,25 @@ def _message_text_with_tools(
 
 
 def _function_call_item(tool_call_dict) -> dict:
-    if tool_call_dict["type"] != "function":
-        raise ValueError("Unknown logic")
+    function = (
+        tool_call_dict.get("function")
+        if isinstance(tool_call_dict, dict)
+        else None
+    )
+    if (
+        not isinstance(function, dict)
+        or tool_call_dict.get("type") != "function"
+        or not all(
+            isinstance(value, str) and value.strip()
+            for value in (tool_call_dict.get("id"), function.get("name"))
+        )
+    ):
+        raise UnparseableToolCall("Model tool call has no usable identity")
     id_tool_call = get_md5_hash(tool_call_dict)
     return {
-        "arguments": tool_call_dict["function"]["arguments"],
+        "arguments": function.get("arguments", ""),
         "call_id": tool_call_dict["id"],
-        "name": tool_call_dict["function"]["name"],
+        "name": function["name"],
         "type": "function_call",
         "id": "fc_" + id_tool_call,
         "status": "completed",

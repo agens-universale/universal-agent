@@ -145,6 +145,7 @@ _LIMIT_OUTCOMES = frozenset(
         "token_limit",
         "tool_errors",
         "judge_unavailable",
+        "no_tool_response",
     }
 )
 

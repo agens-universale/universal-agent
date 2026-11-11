@@ -1,6 +1,9 @@
 import difflib
 import json
+import re
 from typing import Any, Dict, Iterable
+
+from gc_core.security.log_redaction import MASK, Redactor
 
 _LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
 
@@ -23,6 +26,39 @@ def _truncate_for_tool_output(text: str, cap: int) -> str:
     if cap <= 3:
         return text[:cap]
     return text[: cap - 3] + "..."
+
+
+def failed_call_output(
+    output: str, *, tool_name: str, arguments: str, redactor: Redactor
+) -> str:
+    """Include an argument preview alongside an existing structured error."""
+    try:
+        payload = json.loads(output)
+    except (TypeError, ValueError):
+        return output
+    if not isinstance(payload, dict) or payload.get("ok") is not False:
+        return output
+
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        # A broken JSON object can still contain a recognizable secret field.
+        keys = dict.fromkeys(re.findall(r'"([^"\\]+)"\s*:', arguments), True)
+        preview = MASK if redactor.redact(keys) != keys else arguments
+    else:
+        redacted = redactor.redact(parsed)
+        preview = (
+            arguments
+            if redacted == parsed
+            else json.dumps(redacted, ensure_ascii=False)
+        )
+
+    payload = redactor.redact(payload)
+    payload["tool"] = tool_name
+    payload["arguments"] = _truncate_for_tool_output(
+        redactor.redact(preview), 500
+    )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def format_internal_tool_error_output(
