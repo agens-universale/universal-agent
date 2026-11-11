@@ -1,0 +1,290 @@
+"""Сервис MCP: общие записи серверов, каталог и классификация отказов.
+
+Запись — общие для потребителей факты о сервере (сырой список тулов,
+время проверки, последний отказ) по паре «ключ, отпечаток». Сервис в сеть
+не ходит: записи обновляют исходы подключений потребителей.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import httpx
+import pytest
+from gc_core.config_modules.field_meta import plain_dump
+from gc_core.config_modules.root import AppConfig
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallTimedOut,
+    McpServerGone,
+)
+from gc_core.tools.connect_mcp.catalog import read_catalog
+from gc_core.tools.connect_mcp.client import McpProtocolError
+from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+from gc_core.tools.connect_mcp.service import Failure, McpService
+from gc_testkit.mcp import FakeClock, seed_catalog, stdio_cfg
+from gc_testkit.mcp.fixtures import mcp_home
+from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED, ErrorData
+
+#: Потолок одного ожидания в тесте: зависание не повесит прогон.
+_CEILING_SEC = 30.0
+_TOKEN = "tok-SECRET-1"
+_HEADER = "hdr-SECRET-2"
+_ENV = "env-SECRET-3"
+_URL = "http://127.0.0.1:1/mcp"
+
+
+def _settings(servers: dict) -> AppConfig:
+    return AppConfig.model_validate({"mcp": {"servers": servers}})
+
+
+def _definition(settings: AppConfig, key: str) -> dict:
+    """Определение так, как его строит хост: по алиасам, без trace."""
+    return plain_dump(effective_mcp_servers(settings)[key], by_alias=True)
+
+
+def _stdio_definition(tmp_path, key: str = "a", **extra) -> dict:
+    cfg = {**stdio_cfg(tmp_path / f"{key}.json"), **extra}
+    return _definition(_settings({key: cfg}), key)
+
+
+async def test_new_entry_takes_tools_from_catalog(mcp_home, tmp_path):
+    settings = _settings(
+        {
+            "a": stdio_cfg(tmp_path / "a.json"),
+            "b": stdio_cfg(tmp_path / "b.json"),
+        }
+    )
+    seed_catalog(settings, "a", ["echo", "nap"])
+    service = McpService(connect_on_start=True)
+
+    a = service.entry("a", _definition(settings, "a"), discovery_timeout=5)
+    b = service.entry("b", _definition(settings, "b"), discovery_timeout=5)
+
+    assert a.tools == ({"name": "echo"}, {"name": "nap"})
+    assert a.from_catalog is True
+    assert a.checked_at is None
+    assert b.tools == ()
+    assert b.from_catalog is False
+
+
+async def test_definition_keeps_aliases(mcp_home):
+    settings = _settings(
+        {
+            "a": {
+                "transport": "stream_http",
+                "url": _URL,
+                "verify-ssl": False,
+                "client-cert": "/certs/client.pem",
+            }
+        }
+    )
+    service = McpService(connect_on_start=True)
+
+    entry = service.entry("a", _definition(settings, "a"), discovery_timeout=5)
+
+    assert entry.cfg["verify-ssl"] is False
+    assert "client-cert" in entry.cfg
+    assert "verify_ssl" not in entry.cfg
+    assert "client_cert" not in entry.cfg
+    # Умолчание сервиса раскрыто: сетевой сервер без флага — разовый.
+    assert entry.cfg["persistent_session"] is False
+
+
+async def test_same_definition_shares_entry(mcp_home, tmp_path):
+    service = McpService(connect_on_start=True)
+    first = service.entry(
+        "a", _stdio_definition(tmp_path), discovery_timeout=5
+    )
+
+    same = service.entry("a", _stdio_definition(tmp_path), discovery_timeout=7)
+    listed = service.entry(
+        "a",
+        _stdio_definition(
+            tmp_path, whitelist={"enabled": True, "tools": ["echo"]}
+        ),
+        discovery_timeout=7,
+    )
+    other_args = service.entry(
+        "a", _stdio_definition(tmp_path, args=["-V"]), discovery_timeout=7
+    )
+
+    assert same is first
+    assert listed is first
+    assert other_args is not first
+    assert other_args.fingerprint != first.fingerprint
+    # Срок подключения — из настроек последнего обращения.
+    assert first.discovery_timeout == 7
+    assert first.cfg["persistent_session"] is True
+
+
+async def test_success_writes_catalog_only_on_change(mcp_home, tmp_path):
+    clock = FakeClock()
+    service = McpService(connect_on_start=True, clock=clock.now)
+    cfg = _stdio_definition(tmp_path)
+    entry = service.entry("a", cfg, discovery_timeout=5)
+    tools = [{"name": "echo"}]
+    changed = [{"name": "echo"}, {"name": "nap"}]
+
+    clock.advance(3)
+    service.record_success(entry, tools)
+    assert read_catalog("a", cfg) == tools
+    assert (entry.tools, entry.checked_at) == (tuple(tools), 3)
+    catalog_files = list((mcp_home / "cache").rglob("*.json"))
+    assert len(catalog_files) == 1
+    catalog_files[0].unlink()
+
+    clock.advance(2)
+    service.record_success(entry, list(tools))
+    assert read_catalog("a", cfg) is None
+    assert entry.checked_at == 5
+
+    service.record_success(entry, changed)
+    assert read_catalog("a", cfg) == changed
+    assert entry.tools == tuple(changed)
+    assert entry.from_catalog is False
+
+
+async def test_first_success_with_empty_list_is_cataloged(mcp_home, tmp_path):
+    """Пустой список — известный ответ сервера, а не «тулов не знаем»."""
+    service = McpService(connect_on_start=True)
+    cfg = _stdio_definition(tmp_path)
+    entry = service.entry("a", cfg, discovery_timeout=5)
+
+    service.record_success(entry, [])
+
+    assert read_catalog("a", cfg) == []
+    assert entry.checked_at is not None
+
+
+async def test_success_after_catalog_with_same_list_keeps_file(
+    mcp_home, tmp_path
+):
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    seed_catalog(settings, "a", ["echo"])
+    service = McpService(connect_on_start=True)
+    cfg = _definition(settings, "a")
+    entry = service.entry("a", cfg, discovery_timeout=5)
+    next((mcp_home / "cache").rglob("*.json")).unlink()
+
+    service.record_success(entry, [{"name": "echo"}])
+
+    assert read_catalog("a", cfg) is None
+    assert entry.from_catalog is False
+
+
+def _status_error(code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", _URL)
+    response = httpx.Response(code, request=request)
+    return httpx.HTTPStatusError(
+        f"status {code}", request=request, response=response
+    )
+
+
+_FAILURES = [
+    # В 3.11+ asyncio.TimeoutError — встроенный TimeoutError.
+    (asyncio.TimeoutError(), "timeout"),
+    (McpCallTimedOut(5), "timeout"),
+    (httpx.ConnectTimeout("connect"), "timeout"),
+    (McpError(ErrorData(code=408, message="Timed out")), "timeout"),
+    (FileNotFoundError("npx"), "command_not_found"),
+    (_status_error(401), "auth"),
+    (_status_error(403), "auth"),
+    (_status_error(500), "other"),
+    (McpProtocolError("сервер не вернул список тулов"), "protocol"),
+    (ConnectionRefusedError(), "connect_error"),
+    (ConnectionError("initialize: сервер завершился"), "connect_error"),
+    (httpx.ConnectError("refused"), "connect_error"),
+    (McpServerGone(), "connect_error"),
+    (McpSessionLostError("сервер завершился, не ответив"), "connect_error"),
+    (
+        McpError(ErrorData(code=CONNECTION_CLOSED, message="closed")),
+        "connect_error",
+    ),
+    (ExceptionGroup("g", [OSError()]), "connect_error"),
+    (
+        ExceptionGroup("g", [ExceptionGroup("h", [_status_error(401)])]),
+        "auth",
+    ),
+    (McpError(ErrorData(code=-32601, message="no method")), "other"),
+    (RuntimeError(f"bad {_TOKEN} {_HEADER} {_ENV}"), "other"),
+]
+
+
+@pytest.mark.parametrize(
+    ("exc", "code"),
+    _FAILURES,
+    ids=[f"{type(e).__name__}-{c}" for e, c in _FAILURES],
+)
+async def test_failure_keeps_tools_and_classifies(mcp_home, exc, code):
+    clock = FakeClock()
+    service = McpService(connect_on_start=True, clock=clock.now)
+    cfg = {
+        "transport": "stream_http",
+        "url": _URL,
+        "command": "npx",
+        "token": _TOKEN,
+        "headers": {"X-Key": _HEADER},
+        "env": {"API_KEY": _ENV},
+    }
+    entry = service.entry("a", cfg, discovery_timeout=5)
+    service.record_success(entry, [{"name": "echo"}])
+    clock.advance(4)
+
+    failure = service.record_failure(entry, exc)
+
+    assert failure.code == code
+    assert failure.at == 4
+    assert failure.reason
+    assert entry.last_failure is failure
+    assert entry.tools == ({"name": "echo"},)
+    for secret in (_TOKEN, _HEADER, _ENV):
+        assert secret not in failure.reason
+
+
+async def test_failure_is_frozen(mcp_home):
+    failure = Failure(at=1.0, code="other", reason="r")
+
+    with pytest.raises(AttributeError):
+        failure.code = "timeout"  # type: ignore[misc]
+
+
+async def test_service_on_another_loop_is_rejected(mcp_home, tmp_path):
+    service = McpService(connect_on_start=True)
+    cfg = _stdio_definition(tmp_path)
+    service.entry("a", cfg, discovery_timeout=5)
+
+    async def touch() -> None:
+        service.entry("a", cfg, discovery_timeout=5)
+
+    def on_other_loop() -> BaseException | None:
+        try:
+            asyncio.run(touch())
+        except BaseException as exc:
+            return exc
+        return None
+
+    error = await asyncio.wait_for(
+        asyncio.to_thread(on_other_loop), _CEILING_SEC
+    )
+
+    assert isinstance(error, RuntimeError)
+    assert "другом цикле" in str(error)
+    # Свой цикл по-прежнему обслуживается.
+    service.entry("a", cfg, discovery_timeout=5)
+
+
+def test_stop_event_of_unbound_service_can_be_set():
+    """Сервис, ни разу не привязанный к циклу, можно пометить остановленным
+    (так закроет его aclose), а ожидание остановки потом не ломается."""
+    service = McpService(connect_on_start=False)
+
+    service._stopped = True
+    service._stopped_event.set()
+
+    async def wait_stopped() -> None:
+        await asyncio.wait_for(service._stopped_event.wait(), _CEILING_SEC)
+
+    asyncio.run(wait_stopped())
+    assert service.closed is True
