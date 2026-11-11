@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from gc_core.plugins import installed as _store
-from gc_core.plugins.catalog import plugin_entries
+from gc_core.plugins.catalog import plugin_entries, plugin_skill_ids
 from gc_core.plugins.installed import list_installed
 from gc_core.plugins.manifest import Plugin, PluginAgent, load_plugin
 from gc_core.settings import runtime_of
@@ -46,23 +46,6 @@ def general_notices(settings: Any) -> list[str]:
         n
         for n in runtime_of(settings).plugins.notices
         if notice_owner(n) is None
-    ]
-
-
-def _entries(root: Path) -> list[Path]:
-    """Содержимое каталога; пропавший снаружи каталог — пусто."""
-    try:
-        return sorted(root.iterdir())
-    except OSError:
-        return []
-
-
-def _skill_ids(plugin: Plugin) -> list[str]:
-    return [
-        f"{plugin.name}:{d.name}"
-        for root in plugin.skills_dirs
-        for d in _entries(root)
-        if (d / "SKILL.md").is_file()
     ]
 
 
@@ -178,7 +161,7 @@ def _plugin_card(settings: Any, plugin: Plugin, item: Any) -> dict:
         "format": plugin.format,
         "source": _source(item) if from_store else "config",
         "enabled": True,
-        "skills": _skill_ids(plugin),
+        "skills": plugin_skill_ids(plugin),
         "commands": [c.name for c in plugin.commands],
         "hooks": [
             f"{event} {group.matcher or '*'}"

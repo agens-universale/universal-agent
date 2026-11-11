@@ -143,6 +143,11 @@ def _skill_ids(roots: tuple[SkillRoot, ...]) -> frozenset[str]:
     return frozenset(ids)
 
 
+def plugin_skill_ids(plugin: Plugin) -> list[str]:
+    """Id skills одного плагина по правилу реестра — для витрин."""
+    return sorted(_skill_ids(skill_roots((plugin,))))
+
+
 def _plugin_commands(
     plugins: tuple[Plugin, ...], roots: tuple[SkillRoot, ...]
 ) -> tuple[tuple[tuple[str, PluginCommand], ...], tuple[str, ...]]:
