@@ -236,6 +236,13 @@ def forget_session(server_key: str) -> None:
     _MCP_SESSIONS.pop((current_owner(), server_key), None)
 
 
+def forget_owner_sessions() -> None:
+    """Забыть session_id всех серверов ТЕКУЩЕГО владельца."""
+    owner = current_owner()
+    for key in [key for key in _MCP_SESSIONS if key[0] == owner]:
+        _MCP_SESSIONS.pop(key, None)
+
+
 async def _aget_or_init_session_id(
     server_key: str,
     url: str,
@@ -264,5 +271,6 @@ __all__ = [
     "_aget_or_init_session_id",
     "_atools_list_request",
     "_normalize_url",
+    "forget_owner_sessions",
     "forget_session",
 ]

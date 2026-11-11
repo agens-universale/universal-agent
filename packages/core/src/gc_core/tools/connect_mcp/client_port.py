@@ -22,6 +22,7 @@ from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     is_persistent_stdio,
 )
+from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.stream_client import (
     acall_tool_stream_http,
     acall_tool_stream_sse,
@@ -235,8 +236,9 @@ class AgentRuntimeClient(McpClientPort):
         return session.cancel_inflight()
 
     def _bind_stdio_session(self):
+        server_key = self.server_cfg.get(SESSION_KEY_FIELD) or self.server_name
         session = PersistentStdioRegistry.instance().get_or_create(
-            self.server_name, self.server_cfg
+            server_key, self.server_cfg
         )
         self._stdio_session = session
         return session

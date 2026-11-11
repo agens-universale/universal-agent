@@ -22,6 +22,7 @@ from gc_core.tools.connect_mcp.durable_scope import (
     call_tool_with_progress,
     require_no_reconnect,
 )
+from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.session_task import SessionTask
 from gc_core.tools.connect_mcp.transport import _resolve_command
 from gc_core.utils.async_http import build_ssl_context
@@ -749,7 +750,7 @@ async def acall_tool_stream_sse(
     extra_headers = server_cfg.get("headers") or None
 
     if bool(server_cfg.get("persistent_session")):
-        server_key = f"stream_sse::{url}"
+        server_key = server_cfg.get(SESSION_KEY_FIELD) or f"stream_sse::{url}"
         try:
             return await _call_tool_stream_sse_persistent(
                 server_key=server_key,
@@ -1092,7 +1093,7 @@ async def acall_tool_stream_http(
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
-    server_key = f"stream_http::{url}"
+    server_key = server_cfg.get(SESSION_KEY_FIELD) or f"stream_http::{url}"
 
     async def _stateless() -> Dict[str, Any]:
         return await _call_tool_stream_http_async(
@@ -1319,7 +1320,10 @@ async def acall_tool_stream_stdio(
         args_key = ",".join(
             str(a) for a in (args if isinstance(args, list) else [args])
         )
-        server_key = f"stream_stdio::{server_cfg.get('command')}::{args_key}"
+        server_key = (
+            server_cfg.get(SESSION_KEY_FIELD)
+            or f"stream_stdio::{server_cfg.get('command')}::{args_key}"
+        )
         try:
             return await _call_tool_stream_stdio_persistent(
                 server_key=server_key,

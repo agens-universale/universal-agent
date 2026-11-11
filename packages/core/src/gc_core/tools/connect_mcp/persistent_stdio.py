@@ -900,6 +900,20 @@ class PersistentStdioRegistry:
         if cancelled is not None:
             raise cancelled
 
+    async def aclose_one(self, server_key: str) -> bool:
+        """Закрыть сессию ``server_key`` текущего владельца.
+
+        ``False`` — такой сессии нет. Закрытие под ``shield``, как в
+        ``aclose_all``: отмена вызывающего не обрывает его на середине,
+        иначе сервер получил бы SIGKILL без штатного закрытия.
+        """
+        with self._lock:
+            session = self._sessions.pop((current_owner(), server_key), None)
+        if session is None:
+            return False
+        await asyncio.shield(session.aclose())
+        return True
+
     def close_everything(self) -> None:
         """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.
 
