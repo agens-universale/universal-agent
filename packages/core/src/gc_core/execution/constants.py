@@ -2,6 +2,9 @@
 
 _MAX_CONTEXT_OVERFLOW_RETRIES = 3
 
+NO_TOOL_RESPONSE = "no_tool_response"
+NO_TOOL_RESPONSE_MESSAGE = "The model returned no usable answer or tool call."
+
 _SESSION_COMPACT_RESUME_USER_TEXT = (
     "session_compact finished. The dialog summary user message in the trace is the new "
     "baseline (updated session memory, last_dialog_steps, user intent). Continue from "

@@ -26,6 +26,7 @@ from gc_core.security import permission_mode
 from gc_core.security.permission_mode import Mode
 from gc_core.security.permission_store import PermissionStore
 from gc_core.tools.registry import get_builtin_tools_data
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.settings import fake_ctx, make_settings
 
 
@@ -282,12 +283,11 @@ def test_compaction_puts_the_live_mode_into_the_summary(monkeypatch):
     а не отметка, с которой модель жила до сжатия."""
     from gc_core.states import State
     from gc_core.summarize.compaction import arun_summary_compaction
-    from gc_core.summarize.summary_spec import assemble_summary_xml
     from gc_testkit import run_coro
 
     async def _fake_summarize(**_kwargs):
         return {
-            "raw_summary": assemble_summary_xml({"task_and_context": "итог"}),
+            "raw_summary": valid_summary_xml_for_tests(),
             "num_batches": 1,
             "last_dialog_steps": "",
             "trace": {"memory_patch": {"executed": False}},

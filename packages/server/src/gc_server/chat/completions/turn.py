@@ -6,13 +6,17 @@ import asyncio
 import logging
 from typing import Any
 
+from gc_core.execution.constants import (
+    NO_TOOL_RESPONSE,
+    NO_TOOL_RESPONSE_MESSAGE,
+)
 from gc_core.threads.facade import Threads
 from gc_core.tools.turn.turn_close import close_view, closing_reply_of
 
 from gc_server.chat.completions.content import ContentMap
 from gc_server.chat.completions.history import SYSTEM, forget_thread
 from gc_server.chat.completions.status import finish_reason
-from gc_server.chat.errors import error_payload
+from gc_server.chat.errors import ApiError, error_payload
 from gc_server.chat.model_errors import model_api_error
 from gc_server.chat.tool_flow import ToolFlow
 from gc_server.chat.turn_common import (
@@ -146,7 +150,15 @@ def _terminal(
     if failed is not None:
         exc = model_api_error(failed)
         return ("error", error_payload(exc))
-    return ("finish", finish_reason(outcome_of(agent)))
+    outcome = outcome_of(agent)
+    if outcome == NO_TOOL_RESPONSE:
+        return (
+            "error",
+            error_payload(
+                ApiError(500, NO_TOOL_RESPONSE, NO_TOOL_RESPONSE_MESSAGE)
+            ),
+        )
+    return ("finish", finish_reason(outcome))
 
 
 async def _safe_aclose(agent: Any) -> None:

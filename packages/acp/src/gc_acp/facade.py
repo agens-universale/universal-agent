@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.execution.constants import NO_TOOL_RESPONSE
 from gc_core.execution.message_keys import make_message_key
 from gc_core.security.permission_mode import Mode
 from gc_core.thread_store import validate_thread_id
@@ -935,8 +936,11 @@ class AcpFacade:
             )
             return
         await self._emit_usage(live)
-        reason = stop_reason(_outcome(live), cancelled=False)
-        await self._send(result_message(request_id, {"stopReason": reason}))
+        outcome = _outcome(live)
+        result = {"stopReason": stop_reason(outcome, cancelled=False)}
+        if outcome == NO_TOOL_RESPONSE:
+            result["_meta"] = {"terminal_outcome": NO_TOOL_RESPONSE}
+        await self._send(result_message(request_id, result))
 
     async def _emit_usage(self, live: LiveSession) -> None:
         choice = session_choice(self._settings, live.choice)

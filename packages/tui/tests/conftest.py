@@ -38,15 +38,9 @@ _SNAPSHOT_DRIFT: set[str] = set()
 
 
 @pytest.fixture(autouse=True)
-def _snapshot_color_mode(request, monkeypatch):
-    """Цветные эталоны не должны зависеть от NO_COLOR терминала или CI.
-
-    Textual читает NO_COLOR при создании App и переводит кадр в оттенки
-    серого. Снимаем переменную только для snap_compare: обычные тесты
-    и проверка пользовательского режима без цвета сохраняют окружение.
-    """
-    if "snap_compare" in request.fixturenames:
-        monkeypatch.delenv("NO_COLOR", raising=False)
+def _tui_color_mode(monkeypatch):
+    """Keep palette assertions independent of the terminal or CI environment."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
 
 
 @pytest.fixture

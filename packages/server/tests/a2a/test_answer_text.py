@@ -7,7 +7,7 @@
 import json
 from types import SimpleNamespace
 
-from gc_server.a2a.executor import answer_text
+from gc_server.a2a.executor import answer_text, stop_outcome
 
 
 def _agent(reply: str, last: dict) -> SimpleNamespace:
@@ -15,6 +15,13 @@ def _agent(reply: str, last: dict) -> SimpleNamespace:
         executor=SimpleNamespace(last_closing_reply=reply),
         last_answer=json.dumps(last),
     )
+
+
+def test_no_tool_response_is_a_stop_outcome():
+    agent = SimpleNamespace(
+        executor=SimpleNamespace(last_terminal_outcome="no_tool_response")
+    )
+    assert stop_outcome(agent) == "no_tool_response"
 
 
 def test_answer_text_reply_and_summary():

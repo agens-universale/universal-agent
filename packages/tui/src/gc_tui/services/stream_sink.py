@@ -3,7 +3,8 @@
 Fed by RunContext.on_stream_delta from the agent worker thread; drained by the
 TUI poll tick. `format_stream_block` renders the answer text only (inline <think>
 stripped); reasoning is surfaced via the ThinkingIndicator. The sink also tracks
-a self-counted progress counter and reasoning start/end timing for that indicator.
+a self-counted progress counter, reasoning start/end timing for that indicator
+and per-attempt thought snapshots (text and duration) for the ribbon.
 Presentation layer — no business logic, not a substitute for the thread store.
 """
 

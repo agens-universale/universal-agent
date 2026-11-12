@@ -69,6 +69,7 @@ async def test_preview_summary_marker_collapsed_then_toggles():
     pytest.importorskip("textual")
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.trace_row import SummaryMarker
+    from gc_testkit.tui_support import wait_until
     from textual.app import App
 
     # seg0 [вопрос] сжат → СИНТЕЗ; seg1 (live) [ответ]
@@ -115,6 +116,9 @@ async def test_preview_summary_marker_collapsed_then_toggles():
         )
         prefix = lambda: marker._content.plain
         # свёрнут по умолчанию — стрелка вправо
+        await wait_until(
+            pilot, lambda: "▸" in prefix(), "collapsed summary marker"
+        )
         assert body.has_class("hidden")
         assert "▸" in prefix() and "▾" not in prefix()
 

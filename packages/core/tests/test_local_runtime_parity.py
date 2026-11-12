@@ -42,13 +42,15 @@ REFERENCE = (
 #:
 #: - ``requests`` во всех сценариях: в запрос к модели входят служебные наджи
 #:   и живой блок режима разрешений.
-#: - ``memory_two_turns``, ``file_roundtrip``: наджи записаны в output тула,
-#:   поэтому меняются ещё ``thread``, ``meta`` и ``state``. Число вызовов и
-#:   шагов прежнее.
+#: - In memory_two_turns, nudges in tool output change thread, meta, and
+#:   state. Step and call counts are unchanged.
 #: - ``invalid_json``: вызов с битым JSON остаётся в треде и исполняется.
 #:   Вызовов и шагов на один больше; меняются ``thread``, ``meta``, ``state``
 #:   и счётчики. В запросе к модели этот вызов не подменяется служебной
 #:   репликой, если ответ уже записан, поэтому ``requests`` тоже другой.
+#: - Optional fs_read_file line numbering changes the tool schema in requests.
+#:   In file_roundtrip both reads succeed without the flag and match the
+#:   frozen reference for thread, meta, and state.
 ACCEPTED_TRACE_CHANGES = (
     Path(__file__).parent
     / "fixtures/local_runtime_accepted_trace_changes.json"
@@ -516,6 +518,14 @@ async def run_scenario(
         ), "Нарушены пары call/output"
         if name == "file_roundtrip":
             assert (workspace / "result.txt").read_text() == "TOTAL=1350\n"
+            read_outputs = {output["call_id"]: output for output in outputs}
+            for call_id, content in (
+                ("c1", "3 items at 450 each\n"),
+                ("verify", "TOTAL=1350\n"),
+            ):
+                result = json.loads(read_outputs[call_id]["output"])
+                assert result["ok"] is True
+                assert result["content"] == content
         if name == "memory_two_turns":
             assert "TOTAL=1350" in state.shared.working_memory["knowledge"]
             assert state.session_todo[0]["status"] == "completed"

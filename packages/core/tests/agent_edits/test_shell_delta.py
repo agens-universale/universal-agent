@@ -1270,6 +1270,8 @@ def test_mass_delete_without_eol_attrs_reads_blobs_in_one_batch(
     """Пути, чьё содержимое фильтры выкладки не меняют, читаются одной
     пачкой, а не процессом на файл."""
     launch_root, threads_dir = repo
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     for i in range(50):
         (launch_root / f"f{i:02}.txt").write_bytes(b"x\n")
     _git(launch_root, "add", "-A")
