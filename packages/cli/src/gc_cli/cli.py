@@ -1,6 +1,9 @@
 import asyncio
+import logging
 import os
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
 
 from gc_core import config_sync, onboarding
@@ -45,6 +48,8 @@ from gc_core.stores import Stores, run_store_kwargs
 from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
+from gc_core.tools.connect_mcp.consumer import McpConsumer
+from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
@@ -72,6 +77,12 @@ from gc_cli.structured_output import (
     aemit_structured_result,
     read_format_description,
 )
+
+logger = logging.getLogger(__name__)
+
+#: Общий бюджет закрытия MCP на выходе прогона: потребитель, затем сервис
+#: (спека §5.12). Закрытие возвращается не позже него и отсрочки сервиса.
+_MCP_CLOSE_BUDGET_SEC = 10.0
 
 
 def _ensure_project_gc_dir() -> None:
@@ -624,6 +635,52 @@ def _print_startup_notices(
         print(render_notices_for_cli(notices), file=sys.stderr)
 
 
+@asynccontextmanager
+async def _mcp_service_scope() -> AsyncIterator[McpConsumer]:
+    """Сервис MCP прогона ``gc-cli`` и его потребитель (спека §5.1, §6).
+
+    Звать на цикле прогона, до сборки контекста: потребитель привязывает
+    сервис к циклу, на котором открыт. Сервис подключает серверы на старте,
+    и сборка ждёт подключения всех (решение В5): у ``gc-cli`` весь заход —
+    один ход. На выходе при любом исходе — ``_aclose_mcp``: исключение
+    тела выходит как есть, отказ закрытия его не подменяет.
+    """
+    service = McpService(connect_on_start=True, wait_all=True)
+    consumer = service.open_consumer("cli")
+    try:
+        yield consumer
+    finally:
+        await _aclose_mcp(service, consumer)
+
+
+async def _aclose_mcp(service: McpService, consumer: McpConsumer) -> None:
+    """Закрыть потребителя, затем сервис, в общий ``_MCP_CLOSE_BUDGET_SEC``.
+
+    У закрытия потребителя своего срока нет (сессии закрываются по
+    очереди), поэтому его ждут не дольше бюджета и не снимают: недоделанное
+    доделает закрытие сервиса остатком бюджета, а оно возвращается не позже
+    бюджета и своей отсрочки. Отказы обоих закрытий — в лог.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _MCP_CLOSE_BUDGET_SEC
+    closing = loop.create_task(consumer.aclose())
+    closing.add_done_callback(_log_consumer_close)
+    try:
+        await asyncio.wait({closing}, timeout=_MCP_CLOSE_BUDGET_SEC)
+    finally:
+        try:
+            await service.aclose(budget=max(deadline - loop.time(), 0.0))
+        except Exception as exc:
+            logger.warning("gc-cli: сервис MCP не закрылся: %r", exc)
+
+
+def _log_consumer_close(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning(
+            "gc-cli: потребитель MCP не закрылся: %r", task.exception()
+        )
+
+
 async def _run_init_agents_md() -> int:
     """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
 
@@ -651,12 +708,41 @@ async def _run_init_agents_md() -> int:
 
 async def _arun_init_with(loaded: Any, stores: Stores | None) -> int:
     """``--init`` после загрузки настроек и открытия хранилищ."""
+    auth_connector = build_auth_connector(loaded)
+    force_legacy = cli_forces_legacy_model(loaded)
+    from gc_core.utils.async_http import aclose_clients
+
+    try:
+        async with _mcp_service_scope() as consumer:
+            await _arun_init_turn(
+                loaded,
+                stores,
+                consumer,
+                auth_connector=auth_connector,
+                force_legacy=force_legacy,
+            )
+    finally:
+        # Тот же `finally`, что и у `arun_cli`: свой `asyncio.run` — свой пул
+        # клиентов, и закрыть его больше некому. Без этого `--init` уходил с
+        # открытым сокетом и «Event loop is closed» на закрытии loop.
+        await aclose_clients()
+    print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
+    return 0
+
+
+async def _arun_init_turn(
+    loaded: Any,
+    stores: Stores | None,
+    consumer: McpConsumer,
+    *,
+    auth_connector: Any,
+    force_legacy: bool,
+) -> None:
+    """Контекст ``--init`` на потребителе прогона и ход агента."""
     from gc_core.agent_store import agent_store_of
     from gc_core.instructions.init_agents_md import abuild_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
-    auth_connector = build_auth_connector(loaded)
-    force_legacy = cli_forces_legacy_model(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
@@ -665,6 +751,7 @@ async def _arun_init_with(loaded: Any, stores: Stores | None) -> int:
         loaded,
         auth_connector=auth_connector,
         force_legacy=force_legacy,
+        mcp_consumer=consumer,
         **run_store_kwargs(loaded, stores),
     )
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
@@ -676,22 +763,12 @@ async def _arun_init_with(loaded: Any, stores: Stores | None) -> int:
 
     _print_startup_notices(loaded, ctx)
 
-    from gc_core.utils.async_http import aclose_clients
-
     prompt = await abuild_init_prompt(
         store=agent_store_of(ctx),
         cwd=os.getcwd(),
         can_ask=confirm_available(ctx),
     )
-    try:
-        await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
-    finally:
-        # Тот же `finally`, что и у `arun_cli`: свой `asyncio.run` — свой пул
-        # клиентов, и закрыть его больше некому. Без этого `--init` уходил с
-        # открытым сокетом и «Event loop is closed» на закрытии loop.
-        await aclose_clients()
-    print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
-    return 0
+    await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
 
 
 async def _run_service_command() -> int | None:
@@ -896,23 +973,21 @@ async def _acreate_cli_context(
     store_kwargs: dict[str, Any],
     auth_connector: Any,
     force_legacy: bool,
-    image_store: ImageStore,
-    auto_mcp: bool,
+    mcp_consumer: McpConsumer,
 ) -> RunContext | None:
-    """RunContext прогона. Каталог логов недоступен на запись — строка в
-    stderr (каталог и что сделать) вместо трейсбека, уборка и ``None``."""
+    """RunContext прогона на потребителе MCP. Каталог логов недоступен на
+    запись — строка в stderr (каталог и что сделать) вместо трейсбека и
+    ``None``; уборку делает ``finally`` прогона."""
     try:
         return await acreate_run_context(
             loaded,
             auth_connector=auth_connector,
             force_legacy=force_legacy,
+            mcp_consumer=mcp_consumer,
             **store_kwargs,
         )
     except RunLogDirUnavailable as exc:
         print(f"[gc] {exc}", file=sys.stderr)
-        image_store.clear_own_staging()
-        if auto_mcp:
-            shutdown_mcp_daemons()
         return None
 
 
@@ -1118,40 +1193,92 @@ async def _arun_loaded(
             loaded,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
-    # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
-    # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
-    # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
-    ctx = await _acreate_cli_context(
-        loaded,
-        store_kwargs=run_store_kwargs(loaded, stores),
-        auth_connector=auth_connector,
-        force_legacy=force_legacy,
-        image_store=image_store,
-        auto_mcp=auto_mcp,
-    )
-    if ctx is None:
+    try:
+        async with _mcp_service_scope() as consumer:
+            # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и
+            # синхронный create_run_context морозил бы loop на всё
+            # MCP-дискавери (замер: 2.01 с против 0.01 с). Сервер и SDK
+            # давно ходят через acreate_run_context.
+            ctx = await _acreate_cli_context(
+                loaded,
+                store_kwargs=run_store_kwargs(loaded, stores),
+                auth_connector=auth_connector,
+                force_legacy=force_legacy,
+                mcp_consumer=consumer,
+            )
+            if ctx is None:
+                return 1
+            # Порт «спросить человека». Без него ядро читает stdin через
+            # `to_thread`: поток из пула, который `asyncio.run` ждёт на
+            # выходе, и Ctrl+C во время вопроса отменяет прогон целиком
+            # вместо штатного «отвечать не стали».
+            from gc_cli.ask_human_port import make_cli_ask_human_port
+
+            ctx.ask_human = make_cli_ask_human_port()
+
+            _print_startup_notices(loaded, ctx, upgrade_info=_upgrade_info)
+
+            user_parts, attachments = _cli_user_parts(
+                arg_parser.run_args.query,
+                images,
+                first_n=first_image_n,
+                wrap_technical=arg_parser.run_args.wrap_technical,
+                forced_skill_id=forced_skill_id,
+            )
+            turn = await _arun_cli_turn(
+                ctx,
+                loaded,
+                user_parts,
+                attachments,
+                format_text=format_text,
+                approve_mode=approve_mode,
+                thread_id=thread_id,
+                start_new_thread=start_new_thread,
+            )
+    finally:
+        # После закрытия MCP и при любом исходе прогона. Пул httpx привязан
+        # к этому loop — закрыть его надо до его остановки, иначе на выходе
+        # получим «Event loop is closed» из деструктора.
+        from gc_core.utils.async_http import aclose_clients
+
+        await aclose_clients()
+        # Карман процесса больше не нужен: с `-t` ядро уже скопировало
+        # картинки в тред, без `-t` запуск кончился вместе с ними.
+        image_store.clear_own_staging()
+        if auto_mcp:
+            shutdown_mcp_daemons()
+    if turn.structured_exit is not None:
+        return turn.structured_exit
+    outcome = getattr(turn.executor, "last_terminal_outcome", None)
+    if outcome == NO_TOOL_RESPONSE:
+        print(NO_TOOL_RESPONSE_MESSAGE, file=sys.stderr)
         return 1
-    # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
-    # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
-    # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
-    from gc_cli.ask_human_port import make_cli_ask_human_port
+    _print_agent_response(turn.response, loaded, ctx)
+    return 0
 
-    ctx.ask_human = make_cli_ask_human_port()
 
-    _print_startup_notices(loaded, ctx, upgrade_info=_upgrade_info)
+class _CliTurn(NamedTuple):
+    executor: AgentExecutor
+    response: Any
+    structured_exit: int | None
 
-    user_parts, attachments = _cli_user_parts(
-        arg_parser.run_args.query,
-        images,
-        first_n=first_image_n,
-        wrap_technical=arg_parser.run_args.wrap_technical,
-        forced_skill_id=forced_skill_id,
-    )
 
-    verbose = arg_parser.run_args.verbose
-
+async def _arun_cli_turn(
+    ctx: RunContext,
+    loaded: Any,
+    user_parts: list[str],
+    attachments: Any,
+    *,
+    format_text: str | None,
+    approve_mode: str | None,
+    thread_id: str | None,
+    start_new_thread: bool,
+) -> _CliTurn:
+    """Ход прогона с одобрением плана и перефразом; Ctrl+C на время хода
+    ставит стоп. Клиенты, MCP и карман убирает ``finally`` прогона."""
     from gc_cli.run_stop import install_run_sigint, restore_run_sigint
 
+    verbose = arg_parser.run_args.verbose
     executor = AgentExecutor(ctx)
     _sigint_previous = install_run_sigint(executor)
     # Флаг запуска — выбор режима на эту сессию: он сильнее сохранённого в
@@ -1177,8 +1304,8 @@ async def _arun_loaded(
             account_run=not close_accounting_after,
         )
         ran = True
-        # До уборки ниже: продолжение после одобрения — ещё один прогон тем
-        # же процессом, ему нужны те же клиенты и MCP-демоны.
+        # До уборки прогона: продолжение после одобрения — ещё один ход тем
+        # же процессом, ему нужны те же клиенты, сессии MCP и демоны.
         response = await arun_plan_approval(
             executor,
             response,
@@ -1196,31 +1323,11 @@ async def _arun_loaded(
         )
     finally:
         restore_run_sigint(_sigint_previous)
-        # Запись меты может бросить исключение. Если она стоит первой
-        # строкой finally, клиенты и демоны `-a` этого запуска не гасятся.
-        # Учёт — в своём try, уборка — во внутреннем finally.
-        try:
-            if ran and close_accounting_after:
-                await executor.aclose_run_accounting()
-        finally:
-            # Пул httpx привязан к этому loop — закрыть его надо до его
-            # остановки, иначе на выходе получим «Event loop is closed»
-            # из деструктора.
-            from gc_core.utils.async_http import aclose_clients
-
-            await aclose_clients()
-            # Карман процесса больше не нужен: с `-t` ядро уже скопировало
-            # картинки в тред, без `-t` запуск кончился вместе с ними.
-            image_store.clear_own_staging()
-            if auto_mcp:
-                shutdown_mcp_daemons()
-    if structured_exit is not None:
-        return structured_exit
-    if getattr(executor, "last_terminal_outcome", None) == NO_TOOL_RESPONSE:
-        print(NO_TOOL_RESPONSE_MESSAGE, file=sys.stderr)
-        return 1
-    _print_agent_response(response, loaded, ctx)
-    return 0
+        # Запись меты может бросить исключение: уборка прогона от него не
+        # зависит — она во внешнем `finally`.
+        if ran and close_accounting_after:
+            await executor.aclose_run_accounting()
+    return _CliTurn(executor, response, structured_exit)
 
 
 def main() -> int:
