@@ -101,8 +101,12 @@ _URL_SECRET_URL = "http://127.0.0.1:9/mcp?apikey=qry-s3cret-value"
     [
         RuntimeError(f"отказ: {_HEADER_SECRET} для {_URL_SECRET_URL}"),
         ConnectionRefusedError("refused"),
+        ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [RuntimeError(f"отказ: {_HEADER_SECRET} для {_URL_SECRET_URL}")],
+        ),
     ],
-    ids=["текст-исключения", "шаблон-с-адресом"],
+    ids=["текст-исключения", "шаблон-с-адресом", "группа-задач"],
 )
 async def test_failure_reason_has_no_secrets(
     monkeypatch, capsys, caplog, error
@@ -131,3 +135,5 @@ async def test_failure_reason_has_no_secrets(
     assert "MCP discovery failed for srv" in caplog.text
     for text in (printed, caplog.text, status["reason"]):
         assert "s3cret" not in text
+    # В журнал — развёрнутая причина, а не обёртка группы задач.
+    assert "TaskGroup" not in caplog.text

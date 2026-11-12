@@ -11,13 +11,18 @@ from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.secret_mask import without_secrets
 
 
-def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
+def _discovery_leaf(exc: BaseException) -> BaseException:
     # Развернуть ExceptionGroup/TaskGroup (anyio в stream_http) → внутренняя ошибка,
     # иначе причина выглядит как «unhandled errors in a TaskGroup».
     depth = 0
     while getattr(exc, "exceptions", None) and depth < 5:
         exc = exc.exceptions[0]
         depth += 1
+    return exc
+
+
+def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
+    exc = _discovery_leaf(exc)
     # Без секретов определения, как у причины сервиса: сообщение — до
     # обрезки (иначе секрет на границе среза остался бы началом), итог — ещё
     # раз (шаблоны подставляют ``url`` и ``command``).
@@ -415,10 +420,12 @@ async def _adiscover_one(
     except Exception as exc:  # дискавери никогда не бросает наверх
         cfg = server_cfg if isinstance(server_cfg, dict) else {}
         reason = _humanize_discovery_error(exc, cfg)
+        leaf = _discovery_leaf(exc)
         logger.warning(
-            "MCP discovery failed for %s: %s",
+            "MCP discovery failed for %s: %s: %s",
             server_name,
-            without_secrets(str(exc), cfg),
+            type(leaf).__name__,
+            without_secrets(str(leaf), cfg),
         )
         print(unavailable_line(server_name, reason))
         return [], {
