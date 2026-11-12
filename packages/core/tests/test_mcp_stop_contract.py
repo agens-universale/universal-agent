@@ -13,6 +13,7 @@ from gc_core.tools.connect_mcp.os_backend_client import (
 from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
 from gc_core.utils.aretry import retry_with_backoff_async
 from mcp.shared.exceptions import McpError
+from mcp import types
 from mcp.types import ErrorData
 
 
@@ -276,10 +277,48 @@ async def test_tool_error_or_stop_is_not_repeated_by_outer_retry(
         else UserStopInterrupt(kind="mcp", started=error_kind == "started")
     )
 
+    def fail():
+        raise failure
+
+    with pytest.raises(type(failure), match=str(failure)):
+        await _call_with_outer_retry(monkeypatch, fail, calls)
+    assert calls == ["effect"]
+
+
+def _invalid_structured_content():
+    # Так SDK отвечает на ``structuredContent`` не по схеме вывода тула.
+    raise RuntimeError("Invalid structured content returned by tool action")
+
+
+def _invalid_result():
+    types.CallToolResult.model_validate({"content": "не список"})
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [_invalid_structured_content, _invalid_result],
+    ids=["схема-вывода", "форма-результата"],
+)
+async def test_invalid_answer_after_send_is_tool_error_sent_once(
+    monkeypatch, fail
+):
+    """Ответ на ``tools/call`` пришёл, но SDK его отверг: вызов уже
+    исполнен — ошибка тула, автоповтор второй раз его не шлёт."""
+    calls = []
+
+    with pytest.raises(sc.McpToolCallError):
+        await _call_with_outer_retry(monkeypatch, fail, calls)
+    assert calls == ["effect"]
+
+
+async def _call_with_outer_retry(monkeypatch, fail, calls):
+    """Вызов через ``acall_mcp_tool`` с автоповтором; сессия на каждый
+    ``call_tool`` пишет ``effect`` в ``calls`` и зовёт ``fail``."""
+
     class Session:
         async def call_tool(self, *_args, **_kwargs):
             calls.append("effect")
-            raise failure
+            fail()
 
     async def request(*_args, **_kwargs):
         return await sc._call_tool_request(Session(), "action", {})
@@ -292,8 +331,6 @@ async def test_tool_error_or_stop_is_not_repeated_by_outer_retry(
         use_retry=True,
     )
     monkeypatch.setattr(api, "_prepare_mcp_call", lambda *a, **kw: target)
-    with pytest.raises(type(failure), match=str(failure)):
-        await asyncio.wait_for(
-            api.acall_mcp_tool("mcp_test_action", {}, {}, {}), 1
-        )
-    assert calls == ["effect"]
+    return await asyncio.wait_for(
+        api.acall_mcp_tool("mcp_test_action", {}, {}, {}), 1
+    )

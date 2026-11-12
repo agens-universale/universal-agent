@@ -25,7 +25,8 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
-from mcp.types import CONNECTION_CLOSED
+from mcp.types import CONNECTION_CLOSED, INTERNAL_ERROR, ErrorData
+from pydantic import ValidationError
 
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
@@ -337,12 +338,20 @@ def _is_request_timeout(exc: McpError) -> bool:
     )
 
 
+#: Ответ на ``tools/call`` пришёл, но SDK его отверг: ``RuntimeError`` —
+#: проверка ``structuredContent`` по схеме вывода тула, ``ValidationError``
+#: — форма результата.
+_SDK_REJECTED_ANSWER = (RuntimeError, ValidationError)
+
+
 async def _call_tool_request(session, name, arguments, timeout=None):
     """``tools/call``; ``timeout`` — срок ответа (у сетевых транспортов).
 
     Срок нужен самому запросу: SDK потокового http глотает обрыв и срок
     чтения потока ответа, и без него запрос ждал бы без конца. Истёкший
-    срок — ``McpCallTimedOut``: ответа нет, сессия жива.
+    срок — ``McpCallTimedOut``: ответа нет, сессия жива. Отвергнутый SDK
+    ответ — тоже ``McpToolCallError``: вызов уже исполнен, и ни
+    автоповтор, ни переоткрытие сессии не должны слать его второй раз.
     """
     try:
         return await call_tool_with_progress(session, name, arguments, timeout)
@@ -350,6 +359,9 @@ async def _call_tool_request(session, name, arguments, timeout=None):
         if timeout is not None and _is_request_timeout(exc):
             raise McpCallTimedOut(timeout) from exc
         raise McpToolCallError(exc.error) from exc
+    except _SDK_REJECTED_ANSWER as exc:
+        error = ErrorData(code=INTERNAL_ERROR, message=str(exc))
+        raise McpToolCallError(error) from exc
 
 
 #: Исходы вызова, известные вызывающему: на них решают, повторять ли.
