@@ -222,8 +222,10 @@ def _sigterm_kills_mcp(service: McpService | None) -> Iterator[None]:
     try:
         yield
     finally:
-        service.kill_processes_now()
-        restore_sigterm()
+        try:
+            service.kill_processes_now()
+        finally:
+            restore_sigterm()
 
 
 async def _create_agent(

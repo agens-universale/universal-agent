@@ -20,7 +20,7 @@ import pytest
 from gc_cli import cli
 from gc_cli.run_stop import install_run_sigint, restore_run_sigint
 from gc_core.tools.connect_mcp.exit_signals import kill_mcp_on_sigterm
-from test_cli_mcp_service import _arun_cli, fake, host
+from test_cli_mcp_service import _arun_cli, _FakeService, fake, host
 
 
 async def test_scope_installs_handler_before_build(fake, monkeypatch):
@@ -55,21 +55,47 @@ async def test_scope_installs_handler_before_build(fake, monkeypatch):
     assert service._fake is fake  # сервис, созданный областью
 
 
+def _record_handler(fake, monkeypatch) -> None:
+    def _install(service):
+        return lambda: fake.events.append("restore")
+
+    monkeypatch.setattr(cli, "kill_mcp_on_sigterm", _install)
+
+
 async def test_interrupted_close_still_kills(fake, monkeypatch):
     """Второй Ctrl+C посреди закрытия: прерывание выходит наружу, а
-    процессы всё равно гасятся."""
+    процессы всё равно гасятся, и обработчик SIGTERM снимается."""
 
     async def _interrupted(service, consumer, budget):
         fake.events.append("close")
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli, "_aclose_mcp", _interrupted)
+    _record_handler(fake, monkeypatch)
 
     with pytest.raises(KeyboardInterrupt):
         async with cli._mcp_service_scope():
             pass
 
-    assert fake.events[-2:] == ["close", "service.kill"]
+    assert fake.events[-3:] == ["close", "service.kill", "restore"]
+
+
+async def test_interrupted_kill_still_restores_handler(fake, monkeypatch):
+    """Третий Ctrl+C во время гашения: обработчик SIGTERM всё равно
+    снимается."""
+
+    def _interrupted_kill(service) -> None:
+        fake.events.append("service.kill")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_FakeService, "kill_processes_now", _interrupted_kill)
+    _record_handler(fake, monkeypatch)
+
+    with pytest.raises(KeyboardInterrupt):
+        async with cli._mcp_service_scope():
+            pass
+
+    assert fake.events[-2:] == ["service.kill", "restore"]
 
 
 class _Service:

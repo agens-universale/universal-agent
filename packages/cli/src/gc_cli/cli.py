@@ -683,8 +683,10 @@ async def _mcp_service_scope() -> AsyncIterator[McpConsumer]:
         finally:
             await _aclose_mcp(service, consumer, budget)
     finally:
-        service.kill_processes_now()
-        restore_sigterm()
+        try:
+            service.kill_processes_now()
+        finally:
+            restore_sigterm()
 
 
 async def _aclose_mcp(
