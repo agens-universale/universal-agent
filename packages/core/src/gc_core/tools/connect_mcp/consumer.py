@@ -12,6 +12,7 @@ import asyncio
 import gc
 from typing import TYPE_CHECKING, Any
 
+from gc_core.backends.protocol import base_backend
 from gc_core.config_modules.field_meta import plain_dump
 from gc_core.mcp_session_owner import new_owner_token
 from gc_core.settings import settings_of
@@ -77,8 +78,8 @@ class McpConsumer:
     ``_executor`` — исполнитель вызова по этим соединениям.
     ``_pinned`` — закреплённый срез ``{ключ: (запись, статус)}``;
     ``_backend_cache`` — кэш тулов серверов, исполняемых внутри бэкенда
-    сборки (§5.10), пока бэкенд сборки — тот же объект. Оба меняются
-    только на цикле сервиса.
+    сборки (§5.10), пока исходный бэкенд сборки (под обёрткой записи
+    правок) — тот же объект. Оба меняются только на цикле сервиса.
     """
 
     def __init__(self, service: "McpService", label: str) -> None:
@@ -157,14 +158,20 @@ class McpConsumer:
         return view
 
     def _backend_tools_cache(self, os_backend: Any) -> ToolsCache:
-        """Кэш бэкенда сервиса, если он есть; иначе свой — с бэкендом
-        сборки, новый, когда бэкенд сборки — другой объект."""
+        """Кэш бэкенда сервиса, если он есть; иначе свой — с исходным
+        бэкендом сборки, новый, когда исходный бэкенд — другой объект.
+
+        Сравнивается бэкенд под обёрткой записи правок: сборка контекста,
+        пересборка на входе в ход и сборка субагента получают один бэкенд
+        в разных обёртках, и обнаружение не должно повторяться.
+        """
         shared = self._service.backend_tools_cache()
         if shared is not None:
             return shared
+        backend = base_backend(os_backend)
         cache = self._backend_cache
-        if cache is None or cache.os_backend is not os_backend:
-            cache = self._backend_cache = ToolsCache(os_backend=os_backend)
+        if cache is None or cache.os_backend is not backend:
+            cache = self._backend_cache = ToolsCache(os_backend=backend)
         return cache
 
     async def aensure(

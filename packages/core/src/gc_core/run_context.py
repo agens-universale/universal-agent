@@ -32,7 +32,7 @@ from gc_core.auto_routing.levels import (
 from gc_core.auto_routing.policy import RoutingParams
 from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.backends.factory import resolve_os_backend
-from gc_core.backends.protocol import FsBackend
+from gc_core.backends.protocol import FsBackend, base_backend
 from gc_core.config_modules.chat_completions import (
     ChatCompletionsLlmConfig,
     auxiliary_llm_from_config_dict,
@@ -646,8 +646,10 @@ async def arefresh_context_tools(ctx: RunContext) -> None:
 
     Сети нет: MCP-часть — закреплённый срез источника тулов контекста.
     Источник — двойник контекста с уже найденными определениями
-    субагентов: дискавери не повторяется. Предупреждения сборки не
-    повторяются (без логгера). Пять полей набора заменяются вместе.
+    субагентов: дискавери не повторяется. Бэкенд — тот, что получила
+    сборка тулов контекста: обёртку записи правок контекст ставит после
+    неё. Предупреждения сборки не повторяются (без логгера). Пять полей
+    набора заменяются вместе.
     """
     registered: list[str] = []
     source = SimpleNamespace(
@@ -660,7 +662,7 @@ async def arefresh_context_tools(ctx: RunContext) -> None:
     with use_owner(ctx.mcp_session_owner):
         tools = await abuild_tools_data(
             source,
-            os_backend=ctx.os_backend,
+            os_backend=base_backend(ctx.os_backend),
             skills_registry=ctx.skills_registry,
             logger=None,
             tools_cache=ctx.tools_cache,
@@ -1014,5 +1016,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 __all__ = [
     "RunContext",
     "acreate_run_context",
+    "arefresh_context_tools",
     "assemble_run_context",
 ]

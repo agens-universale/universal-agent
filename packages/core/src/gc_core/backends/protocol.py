@@ -611,3 +611,17 @@ class FsBackend(ABC):
 
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...
+
+
+def base_backend(backend: Any) -> Any:
+    """Исходный бэкенд под обёртками порта.
+
+    Обёртка бэкенда (``TrackingFsBackend`` записи правок) отдаёт исходный
+    бэкенд свойством ``inner``. Свойство ищется у класса, а не у объекта:
+    подставные бэкенды (``MagicMock``, ``SimpleNamespace``) обёртками не
+    считаются. Нужен там, где один бэкенд под разными обёртками должен
+    оставаться тем же объектом (ключ кэша, бэкенд сборки тулов).
+    """
+    while isinstance(getattr(type(backend), "inner", None), property):
+        backend = backend.inner
+    return backend

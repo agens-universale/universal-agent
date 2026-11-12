@@ -17,16 +17,22 @@ import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from gc_core import agent_executor
+from gc_core import run_context as run_context_module
+from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.agent_executor import AgentExecutor
+from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.protocol import base_backend
 from gc_core.mcp_session_owner import current_owner
-from gc_core.run_context import acreate_run_context
+from gc_core.run_context import acreate_run_context, arefresh_context_tools
 from gc_core.thread_store import _thread_paths, resolve_threads_dir
 from gc_core.tools.connect_mcp import (
     consumer_connections as connections_module,
 )
+from gc_core.tools.connect_mcp import registry as registry_module
 from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CONNECTED,
@@ -668,3 +674,103 @@ async def test_context_without_consumer_untouched(
     backend.assert_clean()
     assert all(a is b for a, b in zip(before, after))
     assert rebuilt == []
+
+
+_BK_ECHO = mcp_tool_full_name("bk", "echo")
+#: Сервер, исполняемый внутри изолированного бэкенда (§5.10).
+_BACKEND_SERVER = {
+    "transport": "stdio",
+    "command": "absent",
+    "execute_on": "os_backend",
+}
+
+
+class _IsolatedLocal(LocalFsBackend):
+    """Локальный бэкенд, исполняющий команды в изоляции (как песочница)."""
+
+    isolates_exec = True
+
+
+def _count_backend_discovery(monkeypatch) -> list:
+    """Обнаружение серверов бэкенда кэшем тулов: бэкенд каждого обхода."""
+    seen: list = []
+
+    async def fake_registry(servers_cfg, **kwargs):
+        seen.append(kwargs["os_backend"])
+        tool = {
+            "name": "echo",
+            "description": "эхо",
+            "inputSchema": {"type": "object", "properties": {}},
+        }
+        entry = {"tool": tool, "metadata": {"mcp_server_key": "bk"}}
+        return {_BK_ECHO: entry}, {"bk": {"status": "connected"}}
+
+    monkeypatch.setattr(
+        registry_module, "_abuild_tools_registry", fake_registry
+    )
+    return seen
+
+
+def _bound_backend(ctx) -> object:
+    """Бэкенд, через который обёртка тула сервера бэкенда его вызовет."""
+    return ctx.tools_data[_BK_ECHO]["tool_fabric"]()._os_backend
+
+
+async def test_rebuild_with_tracking_backend_reuses_backend_cache(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper
+):
+    seen = _count_backend_discovery(monkeypatch)
+    raw = _IsolatedLocal()
+    monkeypatch.setattr(
+        run_context_module, "resolve_os_backend", lambda *_a, **_k: raw
+    )
+    settings = _cfg(tmp_path, monkeypatch, {"bk": _BACKEND_SERVER})
+    monkeypatch.chdir(tmp_path)
+    consumer = _consumer(mcp_reaper, FakeClock())
+
+    # TUI: запись правок включена — контекст оборачивает бэкенд.
+    async with _context(settings, mcp_consumer=consumer, is_tui=True) as ctx:
+        wrapped = ctx.os_backend
+        cache = consumer._backend_cache
+        built = _bound_backend(ctx)
+        await asyncio.wait_for(arefresh_context_tools(ctx), _CEILING_SEC)
+        rebuilt = _bound_backend(ctx)
+
+    assert isinstance(wrapped, TrackingFsBackend)
+    assert seen == [raw]
+    assert consumer._backend_cache is cache
+    assert built is raw
+    assert rebuilt is raw
+
+
+async def test_view_through_wrapper_takes_same_backend_cache(
+    mcp_home, monkeypatch, mcp_reaper
+):
+    seen = _count_backend_discovery(monkeypatch)
+    settings = make_settings({"mcp": {"servers": {"bk": _BACKEND_SERVER}}})
+    consumer = _consumer(mcp_reaper, FakeClock())
+    raw = _IsolatedLocal()
+
+    first = await asyncio.wait_for(
+        consumer.aview(settings, os_backend=raw), _CEILING_SEC
+    )
+    cache = consumer._backend_cache
+    # Сборка субагента: бэкенд родителя под обёрткой записи правок.
+    wrapped = TrackingFsBackend(raw, SimpleNamespace())
+    second = await asyncio.wait_for(
+        consumer.aview(settings, os_backend=wrapped), _CEILING_SEC
+    )
+
+    assert seen == [raw]
+    assert consumer._backend_cache is cache
+    assert list(first.registry) == list(second.registry) == [_BK_ECHO]
+
+
+def test_base_backend_unwraps_only_real_wrappers():
+    raw = LocalFsBackend()
+    mock = MagicMock()
+
+    assert base_backend(TrackingFsBackend(raw, SimpleNamespace())) is raw
+    assert base_backend(raw) is raw
+    assert base_backend(mock) is mock
+    assert base_backend(None) is None
