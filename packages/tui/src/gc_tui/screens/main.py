@@ -279,7 +279,6 @@ from gc_tui.widgets.trace_row import (
 )
 from gc_tui.widgets.turn_line import (
     TURN_LINE_HELD,
-    TURN_LINE_LATEST,
     TurnLine,
 )
 
@@ -794,6 +793,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # записи не имеет, строка — по статусу сессии.
         self._last_turn_outcome: Optional[TurnOutcome] = None
         self._outcome_superseded: bool = False
+        # Свежая строка хода — та, что последней получила `freshen`
+        # (`_freshen_turn_line`); снятую `_fresh_turn_line` не отдаёт.
+        self._fresh_line: Optional[TurnLine] = None
         # Сводка правок закрытого хода открытого треда (`_close_turn_edits`):
         # строка итога получает её, когда встанет, — запись стопа может
         # дочитаться позже спадающего фронта.
@@ -2955,7 +2957,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._reveal_held()
         line = build_turn_line(outcome)
         # Причина записи хранится и у осевшей строки (освежить её снова).
-        line.freshen(summary, outcome_error(outcome))
+        self._freshen_turn_line(line, summary, outcome_error(outcome))
         if not fresh:
             line.settle()
         if self._bar_wanted():
@@ -2995,18 +2997,37 @@ class TraceScreen(TraceFollowMixin, Screen):
             w.state == "pending" for w in self._queued_tail(trace, sent=True)
         )
 
+    def _freshen_turn_line(
+        self, line: TurnLine, summary, error: Optional[str]
+    ) -> None:
+        """Единственный путь `freshen` на экране: прежняя свежая строка
+        оседает — свежей бывает не больше одной."""
+        if self._fresh_line is not line:
+            self._settle_turn_line()
+        line.freshen(summary, error)
+        self._fresh_line = line
+
     def _fresh_turn_line(self) -> Optional[TurnLine]:
-        """Свежая строка последнего хода в ленте; None — её нет."""
-        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
-        return lines[-1] if lines else None
+        """Свежая строка последнего хода в ленте; None — её нет. Ссылка
+        чинится сама: снятая любым путём или осевшая строка — None."""
+        line = self._fresh_line
+        if (
+            line is None
+            or not line.is_attached
+            or textual_compat.is_being_removed(line)
+            or not line.is_fresh
+        ):
+            return None
+        return line
 
     def _settle_turn_line(self) -> bool:
         """Начался новый ход: строка прошлого оседает в ленте. True — было
         чему оседать."""
-        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
-        for line in lines:
-            line.settle()
-        return bool(lines)
+        line = self._fresh_turn_line()
+        if line is None:
+            return False
+        line.settle()
+        return True
 
     def _turn_started_after_record(self, *, live: bool) -> None:
         """Реплика за записью итога — следующий ход. Пришла хвостом посреди
@@ -3137,7 +3158,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         line = self._fresh_turn_line()
         if outcome is not None:
             if line is not None:
-                line.freshen(summary, outcome_error(outcome))
+                self._freshen_turn_line(line, summary, outcome_error(outcome))
             return
         error = self._active_run_error() if word == "failed" else None
         if line is None or line.recorded:
@@ -3145,10 +3166,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             line = build_turn_line(
                 word=word, plan=plan, opened_by=self._last_user_message_id
             )
-            line.freshen(summary, error)
+            self._freshen_turn_line(line, summary, error)
             self._trace_mount(line, above_sent=True)
             return
-        line.freshen(summary, error)
+        self._freshen_turn_line(line, summary, error)
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
@@ -8819,7 +8840,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             if w.opened_by != msg_id and not textual_compat.is_being_removed(w)
         ]
         if lines:
-            lines[-1].freshen(lines[-1].summary, lines[-1].error)
+            line = lines[-1]
+            self._freshen_turn_line(line, line.summary, line.error)
         snapshot, self._pre_run_tui_meta = self._pre_run_tui_meta, None
         if snapshot is not None and snapshot[0] == self._active_task_id:
             self._write_tui_meta(*snapshot)
