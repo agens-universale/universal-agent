@@ -187,17 +187,34 @@ class _ParkedSleep:
             await asyncio.sleep(0.01)
 
 
-async def _kill_deaf(pid: int) -> None:
-    """Добить глухой сервер (это часть аварийного гашения, не закрытия) и
-    дождаться фоновых задач: его закрытие под ``shield`` доигрывает в
-    фоне, пока процесс жив."""
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(pid, signal.SIGKILL)
-    await wait_for(lambda: not alive(pid), _CEILING_SEC)
+async def _kill_deaf(*pids: int) -> None:
+    """Добить глухие серверы (это часть аварийного гашения, не закрытия) и
+    дождаться фоновых задач: закрытия их сессий доигрывают в фоне, пока
+    процессы живы."""
+    for pid in pids:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGKILL)
+    await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)
     others = asyncio.all_tasks() - {asyncio.current_task()}
     if others:
         _, pending = await asyncio.wait(others, timeout=_CEILING_SEC)
         assert not pending
+
+
+def _cancel_session_close(monkeypatch, times: int) -> None:
+    """Первые ``times`` закрытий сессии постоянного stdio проходят до
+    конца и кончаются ``CancelledError`` — отменой самой сессии, как из
+    её cancel scope; вызывающего никто не отменял."""
+    real = PersistentStdioSession.aclose
+    left = [times]
+
+    async def cancelled_close(self) -> None:
+        await real(self)
+        if left[0] > 0:
+            left[0] -= 1
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(PersistentStdioSession, "aclose", cancelled_close)
 
 
 async def test_close_closes_all_consumers_sessions(
@@ -412,24 +429,58 @@ async def test_session_close_cancel_is_not_callers_cancel(
     """Реестр постоянного stdio отдаёт ``CancelledError``, если отменилось
     закрытие одной его сессии; вызывающего закрытие сервиса никто не
     отменял."""
-    real = PersistentStdioSession.aclose
-
-    async def cancelled_close(self) -> None:
-        await real(self)
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(PersistentStdioSession, "aclose", cancelled_close)
+    _cancel_session_close(monkeypatch, times=1)
     control = tmp_path / "a.json"
     service = mcp_reaper.track(McpService(connect_on_start=True))
     consumer = await _ready(service, _settings({"a": stdio_cfg(control)}))
     [pid] = launches(control)
 
-    with caplog.at_level(logging.WARNING, logger=service_module.__name__):
+    with caplog.at_level(logging.WARNING):
         await _close(service)
 
     assert service.closed and consumer.closed
     assert not alive(pid)
-    assert "потребитель c закрылся не до конца: CancelledError" in caplog.text
+    assert "потребителя c не завершено" in caplog.text
+
+
+async def test_consumer_close_absorbs_session_close_cancel(
+    mcp_home, tmp_path, monkeypatch, caplog, mcp_reaper, mcp_owner
+):
+    _cancel_session_close(monkeypatch, times=1)
+    control = tmp_path / "a.json"
+    service = mcp_reaper.track(McpService(connect_on_start=True))
+    consumer = await _ready(service, _settings({"a": stdio_cfg(control)}))
+    [pid] = launches(control)
+
+    with caplog.at_level(logging.WARNING, logger=connections_module.__name__):
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    assert not alive(pid)
+    assert "потребителя c не завершено" in caplog.text
+    # Закрытие не завершено: потребитель за сервисом, его дозакроет сервис.
+    assert consumer in service._consumers
+    await _close(service)
+    assert not service._consumers
+    assert _owner_records(consumer) == []
+
+
+async def test_cancelled_consumer_close_stays_cancelled(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    deaf = tmp_path / "deaf.json"
+    service = mcp_reaper.track(McpService(connect_on_start=True))
+    consumer = await _ready(service, _settings({"a": _deaf(deaf)}))
+    [pid] = launches(deaf)
+
+    closing = asyncio.create_task(consumer.aclose())
+    await asyncio.sleep(0.3)  # хвост ждёт эскалации глухого сервера
+    closing.cancel()
+    await asyncio.wait({closing}, timeout=_CEILING_SEC)
+
+    assert closing.cancelled()
+    assert consumer in service._consumers
+    await _close(service)
+    await _kill_deaf(pid)
 
 
 async def test_interrupted_consumer_close_is_finished_by_service_close(

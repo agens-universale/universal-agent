@@ -786,8 +786,14 @@ class McpConnections:
         остаток, а не выходит сразу. ``finish`` — последний шаг хвоста
         закрытия, под его замком, только если сессии закрылись без
         исключения и прерывания.
+
+        ``CancelledError``, когда вызывающего не отменяли (отменилось
+        закрытие одной сессии реестра постоянного stdio), — в лог, не
+        наружу: закрытие не завершено, потребитель остаётся за сервисом,
+        и его дозакроет закрытие сервиса. Отмена вызывающего — отмена.
         """
         self._service._bind_loop()
+        cancels = asyncio.current_task().cancelling()
         with self._lock:
             self.closed = True
             work = [
@@ -804,7 +810,23 @@ class McpConnections:
                 closing = list(self._closing)
             await asyncio.gather(*closing, return_exceptions=True)
         finally:
+            await self._aclose_sessions_once(finish, cancels)
+
+    async def _aclose_sessions_once(
+        self, finish: Callable[[], None], cancels: int
+    ) -> None:
+        """Хвост закрытия; чужая отмена (счётчик отмен задачи не вырос с
+        ``cancels``) — в лог."""
+        try:
             await self._aclose_sessions(finish)
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling() > cancels:
+                raise
+            logger.warning(
+                "MCP: закрытие сессий потребителя %s не завершено: "
+                "отменилось закрытие сессии",
+                self.label,
+            )
 
     async def _aclose_sessions(self, finish: Callable[[], None]) -> None:
         """Сессии владельца во всех реестрах; шаги не зависят друг от
