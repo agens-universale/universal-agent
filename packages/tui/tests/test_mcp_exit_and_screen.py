@@ -15,6 +15,7 @@ import threading
 import time
 
 import pytest
+from gc_core.tools.connect_mcp import service as service_module
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CACHED,
     STATE_CONNECTED,
@@ -197,10 +198,15 @@ async def test_unmount_closes_service_between_runner_and_loop(tmp_path):
         "loop_shutdown",
         "mcp_kill",
     ]
-    # Потолок выше худшего возврата `aclose` (бюджет 10 с + отсрочка 3 с
-    # + добивание по журналу 2 с).
+    # Потолок выше худшего возврата `aclose`: бюджет + отсрочка +
+    # добивание по журналу, с запасом на очередь цикла агента.
     (timeout,) = loop.timeouts
-    assert timeout > 15.0
+    worst = (
+        service_module.CLOSE_BUDGET_SEC
+        + service_module.CLOSE_GRACE_SEC
+        + service_module.KILL_WAIT_SEC
+    )
+    assert timeout > worst
 
 
 async def test_unmount_without_consumer_does_not_start_loop(tmp_path):
@@ -345,7 +351,7 @@ async def test_exit_with_deaf_server_is_bounded_by_ceiling(
         (pid,) = launches(control)
         started = time.monotonic()
 
-    assert time.monotonic() - started < ceiling + _LOOP_SHUTDOWN_SEC
+    assert time.monotonic() - started < ceiling + _LOOP_SHUTDOWN_SEC + 2
     # Сервер добит аварийным гашением на выходе, а не позже.
     await wait_for(lambda: not alive(pid), 1.0)
     assert not app.agent_loop.thread.is_alive()

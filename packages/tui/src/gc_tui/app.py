@@ -37,7 +37,12 @@ from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CONNECTED,
     STATE_FAILED,
 )
-from gc_core.tools.connect_mcp.service import McpService
+from gc_core.tools.connect_mcp.service import (
+    CLOSE_BUDGET_SEC,
+    CLOSE_GRACE_SEC,
+    KILL_WAIT_SEC,
+    McpService,
+)
 from gc_core.tools.mcp_snapshot import overlay_service_statuses
 from gc_core.tools.registry import all_builtin_tool_names
 from textual.app import App
@@ -182,12 +187,16 @@ _FINAL_MCP_STATES = frozenset({STATE_CONNECTED, STATE_FAILED})
 
 
 #: Потолок ожидания закрытия сервиса MCP на выходе (`_close_mcp_service`).
-#: `McpService.aclose()` с бюджетом по умолчанию возвращается не позже
-#: 15 с (бюджет 10 с + отсрочка 3 с + добивание по журналу 2 с), и это
-#: время идёт по часам цикла агента. Запас — на очередь цикла и постановку
-#: корутины: потолок должен срабатывать только на занятом цикле. Сработал
-#: он — процессы гасит `kill_processes_now`, как и после остановки цикла.
-MCP_CLOSE_TIMEOUT_SEC = 16.0
+#: Худший возврат `McpService.aclose()` с бюджетом по умолчанию — бюджет
+#: + отсрочка + добивание по журналу (10 + 3 + 2 = 15 с) по часам цикла
+#: агента, а срок `agent_loop.run` идёт от постановки корутины. Запас 3 с —
+#: на очередь занятого цикла: потолок не должен обрывать штатное закрытие
+#: (гашение оборвало бы close-тул сервера). Сработал — процессы гасит
+#: `kill_processes_now`. Худший выход окна с двумя гашениями: стоп 2 с +
+#: потолок 18 с + гашение 2 с + остановка цикла 5 с + гашение 2 с = 29 с.
+MCP_CLOSE_TIMEOUT_SEC = (
+    CLOSE_BUDGET_SEC + CLOSE_GRACE_SEC + KILL_WAIT_SEC + 3.0
+)
 
 
 def _report_final_statuses(progress, names, statuses: dict) -> None:
