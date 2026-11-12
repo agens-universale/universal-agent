@@ -357,6 +357,51 @@ def test_rebuild_without_changes_settles_immediately(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rebuild_with_settled_servers_never_shows_loading(
+    tmp_path, monkeypatch
+):
+    """Пересборка, когда серверы уже определились у потребителя (откат
+    отправки, первый ход после `/new`): поколение публикуется с их
+    статусами, и шапка посреди сборки показывает прежний итог, а не
+    «подключаю MCP» (спека §5.7)."""
+    mid_build: list = []
+
+    def _capture():
+        progress = app._mcp_progress
+        mid_build.append((progress, progress.state()))
+
+    _patch_build(monkeypatch, _Builds(during=_capture))
+    service = _Service({"srv": _connected("echo")})
+    app = _app(tmp_path, _SRV, service, mounted=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(
+            asyncio.to_thread(app._build_real_executor), _CEILING_SEC
+        )
+        app.screen._feed_start_header()
+        _spin_header(app)
+        await pilot.pause()
+        settled = _header_status(app)
+        assert settled.startswith("✓") and "MCP 1/1" in settled
+
+        await asyncio.wait_for(
+            asyncio.to_thread(app._build_real_executor), _CEILING_SEC
+        )
+        progress, (servers, outcome) = mid_build[-1]
+        assert progress is not mid_build[0][0]
+        assert servers["srv"]["status"] == STATE_CONNECTED
+        assert outcome is None
+        app.screen._brand.feed(progress, servers, outcome)
+        await pilot.pause()
+        assert _header_status(app) == settled
+
+        app.screen._feed_start_header()
+        _spin_header(app)
+        await pilot.pause()
+        assert _header_status(app) == settled
+        assert app._mcp_progress.state()[1] is True
+
+
+@pytest.mark.asyncio
 async def test_final_failed_status_reaches_startup_notices(
     tmp_path, monkeypatch
 ):

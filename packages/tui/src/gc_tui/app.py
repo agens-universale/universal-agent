@@ -180,6 +180,7 @@ _log = logging.getLogger(__name__)
 #: `connecting` и `cached` — сервер ещё подключается.
 _FINAL_MCP_STATES = frozenset({STATE_CONNECTED, STATE_FAILED})
 
+
 #: Потолок ожидания закрытия сервиса MCP на выходе (`_close_mcp_service`).
 #: `McpService.aclose()` с бюджетом по умолчанию возвращается не позже
 #: 13 с (бюджет 10 с + отсрочка 3 с), и это время идёт по часам цикла
@@ -187,6 +188,22 @@ _FINAL_MCP_STATES = frozenset({STATE_CONNECTED, STATE_FAILED})
 #: должен срабатывать только на занятом цикле, а не обрывать закрытие,
 #: которое ещё в пределах своего срока.
 MCP_CLOSE_TIMEOUT_SEC = 16.0
+
+
+def _report_final_statuses(progress, names, statuses: dict) -> None:
+    """Окончательные статусы потребителя (`_FINAL_MCP_STATES`) серверов
+    ``names`` — в поколение шапки; остальные ждут."""
+    for name in names:
+        status = statuses.get(name)
+        if status is not None and status.state in _FINAL_MCP_STATES:
+            progress.update(
+                name,
+                {
+                    "status": status.state,
+                    "reason": status.reason or None,
+                    "tool_count": len(status.tools),
+                },
+            )
 
 
 def _release_runner(runner) -> None:
@@ -2180,19 +2197,9 @@ class TuiApp(App):
             return
         names, outside, settings = built
         statuses = self._service_statuses()
-        for name in names:
-            status = statuses.get(name)
-            if name in outside:
-                progress.update(name, outside[name])
-            elif status is not None and status.state in _FINAL_MCP_STATES:
-                progress.update(
-                    name,
-                    {
-                        "status": status.state,
-                        "reason": status.reason or None,
-                        "tool_count": len(status.tools),
-                    },
-                )
+        for name in names & outside.keys():
+            progress.update(name, outside[name])
+        _report_final_statuses(progress, names - outside.keys(), statuses)
         if any(
             statuses[name].state not in _FINAL_MCP_STATES
             for name in names
@@ -2202,6 +2209,22 @@ class TuiApp(App):
         if self._mcp_progress is progress:
             self._overlay_service_statuses(statuses, settings)
         progress.finish(True)
+
+    def _report_settled_servers(self, progress) -> None:
+        """Серверы, уже определившиеся у потребителя окна, — в поколение
+        до его публикации: пересборка без изменений не показывает загрузку
+        (спека §5.7). Сбой чтения статусов — предупреждение в лог, сборку
+        он не роняет: поколение ждёт статусов, как на первой сборке."""
+        try:
+            statuses = self._service_statuses()
+        except Exception as exc:
+            _log.warning(
+                "MCP: статусы сервиса не прочитаны до сборки: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return
+        _report_final_statuses(progress, progress.state()[0], statuses)
 
     def _assemble_executor(self, progress, publish):
         """Сборка executor; прогресс MCP встаёт на app (`publish`) после
@@ -2224,6 +2247,7 @@ class TuiApp(App):
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress.begin(list(effective_mcp_servers(loaded)))
+        self._report_settled_servers(progress)
         publish()
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 
