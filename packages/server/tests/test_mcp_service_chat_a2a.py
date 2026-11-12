@@ -46,8 +46,6 @@ from server_harness import runtime
 
 #: Потолок одного ожидания в тесте: зависание не повесит прогон.
 _CEILING_SEC = 30.0
-#: Бюджет закрытия сервиса по умолчанию (``McpService.aclose``).
-_SERVICE_BUDGET_SEC = 10.0
 _ECHO = mcp_tool_full_name("srv", "echo")
 _POSIX = pytest.mark.skipif(os.name != "posix", reason="процессы POSIX")
 
@@ -328,7 +326,8 @@ async def test_stop_closes_deaf_servers_within_one_budget(
     await asyncio.wait_for(surface.astop(), _CEILING_SEC * 2)
     elapsed = time.monotonic() - started
 
-    assert elapsed < _SERVICE_BUDGET_SEC + service_module._CLOSE_GRACE_SEC
+    limit = service_module.CLOSE_BUDGET_SEC + service_module.CLOSE_GRACE_SEC
+    assert elapsed < limit
     assert not any(alive(pid) for pid in launches(control))
 
 

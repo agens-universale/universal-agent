@@ -50,7 +50,9 @@ logger = logging.getLogger(__name__)
 #: дальше без новых отмен, и что не уложилось в отсрочку, доигрывает в
 #: фоне. Худший возврат ``aclose`` — бюджет плюс отсрочка, от числа
 #: серверов и сессий не зависит.
-_CLOSE_GRACE_SEC = 3.0
+CLOSE_GRACE_SEC = 3.0
+#: Бюджет ``aclose`` по умолчанию: в него укладывается close-тул сервера.
+CLOSE_BUDGET_SEC = 10.0
 
 
 def _warn_bad_catalog(server_key: str, cfg: dict, tools: list) -> None:
@@ -204,7 +206,7 @@ class McpService:
         with self._lock:
             self._consumers.discard(consumer)
 
-    async def aclose(self, budget: float = 10.0) -> None:
+    async def aclose(self, budget: float = CLOSE_BUDGET_SEC) -> None:
         """Закрыть сервис: отказать в работе и закрыть всех потребителей
         параллельно, в общий бюджет ``budget`` секунд (спека §5.12).
 
@@ -219,7 +221,7 @@ class McpService:
         повторные и одновременные вызовы ждут ту же задачу, их бюджет не
         действует, после истёкшего бюджета повторный вызов возвращается
         сразу. Отмена вызывающего — его отмена, закрытие идёт дальше.
-        Возврат — не позже ``budget + _CLOSE_GRACE_SEC``: по сроку бюджета
+        Возврат — не позже ``budget + CLOSE_GRACE_SEC``: по сроку бюджета
         предупреждение в лог (не исключение), незакрытые потребители
         снимаются, а их хвост закрытия сессий доигрывает в фоне;
         добивает процессы аварийное гашение. Задача закрытия живёт, пока
@@ -246,7 +248,7 @@ class McpService:
         Остановка уже стоит под замком, поэтому снимок полон: нового
         потребителя после неё не открыть. По сроку — предупреждение,
         незакрытые снимаются один раз и ждутся не дольше
-        ``_CLOSE_GRACE_SEC``. Исход каждого закрытия — в лог (у
+        ``CLOSE_GRACE_SEC``. Исход каждого закрытия — в лог (у
         доигрывающих в фоне — по завершении); наружу исключения не идут.
         """
         with self._lock:
@@ -263,7 +265,7 @@ class McpService:
             )
             for task in pending:
                 task.cancel()
-            _, pending = await asyncio.wait(pending, timeout=_CLOSE_GRACE_SEC)
+            _, pending = await asyncio.wait(pending, timeout=CLOSE_GRACE_SEC)
         for task, consumer in tasks.items():
             if task in pending:
                 task.add_done_callback(partial(_report_close, consumer))
@@ -326,4 +328,4 @@ class McpService:
         return failure
 
 
-__all__ = ["McpService"]
+__all__ = ["CLOSE_BUDGET_SEC", "CLOSE_GRACE_SEC", "McpService"]

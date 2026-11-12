@@ -589,7 +589,7 @@ async def test_return_is_bounded_by_budget_and_grace(
         await _close(service, budget=0.5)
     elapsed = loop.time() - started
 
-    grace = service_module._CLOSE_GRACE_SEC
+    grace = service_module.CLOSE_GRACE_SEC
     assert elapsed < 0.5 + grace + 1
     assert service.closed
     assert "не уложилось в 0.5 с" in caplog.text

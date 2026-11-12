@@ -41,8 +41,6 @@ from test_facade import (
 
 #: Потолок одного ожидания: зависание не повесит прогон.
 _CEILING_SEC = 30.0
-#: Бюджет закрытия сервиса по умолчанию (``McpService.aclose``).
-_SERVICE_BUDGET_SEC = 10.0
 
 
 class FakeService:
@@ -323,5 +321,6 @@ async def test_shutdown_closes_deaf_servers_within_one_budget(
     await asyncio.wait_for(facade.shutdown(), _CEILING_SEC * 2)
     elapsed = time.monotonic() - started
 
-    assert elapsed < _SERVICE_BUDGET_SEC + service_module._CLOSE_GRACE_SEC
+    limit = service_module.CLOSE_BUDGET_SEC + service_module.CLOSE_GRACE_SEC
+    assert elapsed < limit
     assert not any(alive(pid) for pid in launches(control))
