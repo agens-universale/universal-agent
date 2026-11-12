@@ -3352,13 +3352,17 @@ class TraceScreen(TraceFollowMixin, Screen):
         `desired_height`), лента берёт остаток.
 
         Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
-        раздувает chrome и выдавливает поле ввода за край экрана."""
+        раздувает chrome и выдавливает поле ввода за край экрана.
+
+        Без оверлея и баннера капать нечего — выход до замеров хрома."""
+        overlay = self._open_overlay_widget()
+        banner = self._sticky_banner_widget()
+        if overlay is None and banner is None:
+            return
         try:
             root = self.query_one(_SEL_ROOT, Vertical)
         except Exception:
             return
-        overlay = self._open_overlay_widget()
-        banner = self._sticky_banner_widget()
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
         # Баннер/оверлей исключаем — их желаемую высоту считаем отдельно (иначе
         # ещё не ужатый region баннера раздувает chrome до available<=0).

@@ -1,19 +1,33 @@
-"""Поиск по прокрутке ленты без Textual (спека P3 §2.6)."""
+"""Поиск по прокрутке ленты — чистые функции без геометрии экрана
+(спека P3 §2.6, П5)."""
 
 from __future__ import annotations
 
 from bisect import bisect_left
-from typing import Callable, Sequence, TypeVar
+from typing import TYPE_CHECKING, Callable, Protocol, Sequence
 
-T = TypeVar("T")
+if TYPE_CHECKING:
+    from textual.geometry import Region
+    from textual.widget import Widget
+
+
+class Placement(Protocol):
+    """Ребёнок ленты в координатах её содержимого."""
+
+    region: Region
+    widget: Widget
 
 
 def reply_above(
-    replies: Sequence[T], scroll_y: int, top: Callable[[T], int]
-) -> T | None:
+    placements: Sequence[Placement],
+    scroll_y: int,
+    is_reply: Callable[[Widget], bool],
+) -> Widget | None:
     """Ближайшая реплика, чья верхняя строка выше верхнего края видимой
-    области (`top(reply) < scroll_y`). `replies` — в порядке ленты, верх
-    по возрастанию; `top` читается в момент поиска и только у реплик,
-    которые смотрит бисекция."""
-    index = bisect_left(replies, scroll_y, key=top)
-    return replies[index - 1] if index else None
+    области (`region.y < scroll_y`). `placements` — дети ленты в её
+    порядке, верх по возрастанию; реплику отличает `is_reply`."""
+    index = bisect_left(placements, scroll_y, key=lambda p: p.region.y)
+    for placement in reversed(placements[:index]):
+        if is_reply(placement.widget):
+            return placement.widget
+    return None

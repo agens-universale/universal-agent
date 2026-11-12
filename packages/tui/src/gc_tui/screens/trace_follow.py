@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
 from textual.widget import Widget
@@ -26,6 +24,7 @@ from gc_tui.widgets.trace_overlays import (
     StickyReply,
     pill_label,
 )
+from gc_tui.widgets.user_reply import UserReplyContainer
 
 _SEL_TRACE = "#trace"
 _SEL_STICKY = "#trace-sticky-reply"
@@ -40,6 +39,10 @@ def trace_overlays(trace: Widget) -> tuple[StickyReply, ScrollEndPill]:
     )
 
 
+def _is_top_reply(widget: Widget) -> bool:
+    return isinstance(widget, UserReplyContainer)
+
+
 class TraceFollowMixin:
     """Лента у низа, детект ухода вверх и накладки «не внизу»."""
 
@@ -49,9 +52,6 @@ class TraceFollowMixin:
         super().__init__(*args, **kwargs)
         self._stick = True  # намерение «липнуть к низу» (_stick_bottom)
         self._last_auto_y = 0  # куда в прошлый раз программно прижали ленту
-        # Кэш реплик ленты для липкой реплики (_trace_replies).
-        self._trace_replies_key: Optional[tuple] = None
-        self._trace_replies_cache: list = []
 
     def _watch_trace_follow(self) -> None:
         """Отклик на прокрутку ленты и на выделение — по событию."""
@@ -113,13 +113,18 @@ class TraceFollowMixin:
     def _refresh_trace_overlays(self) -> None:
         """Накладки над лентой (спека P3 §2.6): «не внизу» — липкая реплика
         (ближайшая выше края) и плашка «в конец»; внизу — обе скрыты.
-        Зовётся на каждый шаг прокрутки: реплики ищутся по кэшу верхних
-        реплик (`_trace_replies`), без обхода ленты."""
+        Зовётся на каждый шаг прокрутки и в тике опроса. Реплика ищется по
+        раскладке самой ленты (П5): координаты содержимого из её кэша, без
+        геометрии экрана — чтение невидимых строк пересобрало бы полную
+        карту виджетов. Геометрия читается, только когда накладки
+        показывают или прячут."""
         try:
             trace = self.query_one(_SEL_TRACE, VerticalScroll)
             sticky = self.query_one(_SEL_STICKY, StickyReply)
             pill = self.query_one(_SEL_PILL, ScrollEndPill)
         except NoMatches:
+            return
+        if self._stick_bottom and not (sticky.display or pill.display):
             return
         # Коробка накладок — ширина подложки реплики в ленте: без колонки
         # скроллбара (решение 27). Плашка центруется по ней же.
@@ -128,10 +133,11 @@ class TraceFollowMixin:
             sticky.show(None, box)
             pill.show(None, box)
             return
-        replies = self._trace_replies(trace)
-        reply = reply_above(
-            replies, round(trace.scroll_y), lambda r: r.virtual_region.y
-        )
+        # Размер — ровно тот, что ленте передаёт компоновщик: попадание в
+        # кэш раскладки. Иной размер пересчитал бы её и сбил якорь
+        # (`AnchoredScroll.arrange`).
+        placements = trace.arrange(box.size).placements
+        reply = reply_above(placements, round(trace.scroll_y), _is_top_reply)
         sticky.show(reply, box)
         pill.show(self._end_pill_label(), box, self._pill_row(trace))
 
@@ -142,25 +148,6 @@ class TraceFollowMixin:
     def _end_pill_label(self) -> str:
         """Подпись плашки: без счётчика новых реплик и без Enter."""
         return pill_label(0, enter=False)
-
-    def _trace_replies(self, trace: VerticalScroll) -> list:
-        """Реплики верхнего уровня ленты по порядку. Кэшируется только
-        состав; верх каждой читается живым при поиске, поэтому сдвиг
-        реплик кэш не портит. Ключ — число детей и первый с последним:
-        точный ключ (все дети) стоил бы столько же, сколько пересборка;
-        этот ловит и снятие с монтированием в конец за один такт."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
-        children = trace.children
-        key = (len(children), children[0], children[-1]) if children else ()
-        if key != self._trace_replies_key:
-            self._trace_replies_key = key
-            self._trace_replies_cache = [
-                child
-                for child in trace.children
-                if isinstance(child, UserReplyContainer)
-            ]
-        return self._trace_replies_cache
 
     def _toggle_trace_block(self, views, message: BlockToggle) -> None:
         """Раскрыть / свернуть блок ленты моделями `views` (§9.3): внизу —
