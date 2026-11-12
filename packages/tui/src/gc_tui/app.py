@@ -2077,7 +2077,22 @@ class TuiApp(App):
         когда ни один сервер не остался `connecting` или `cached`; тогда
         же снимок и статусы окна получают окончательные статусы сервиса —
         тосты итога видят их — по настройкам сборки поколения и только у
-        поколения, которое стоит на приложении."""
+        поколения, которое стоит на приложении.
+
+        Сбой любого шага — предупреждение в лог и итог «собрано»: ни тик
+        интерфейса, ни удачную сборку он не роняет, копии окна прежние."""
+        try:
+            self._settle_generation(progress)
+        except Exception as exc:
+            _log.warning(
+                "MCP: шапка не получила статусы потребителя: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            progress.finish(True)
+
+    def _settle_generation(self, progress) -> None:
+        """Шаг `settle_mcp_progress` без прикрытия."""
         built = progress.built()
         if built is None or progress.state()[1] is not None:
             return

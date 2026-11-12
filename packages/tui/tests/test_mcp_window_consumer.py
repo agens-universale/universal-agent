@@ -529,6 +529,36 @@ async def test_overlay_failure_on_tick_keeps_window_copies(
         assert "не наложены на снимок окна" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_status_failure_on_tick_keeps_window_copies(
+    tmp_path, monkeypatch, caplog
+):
+    """Сбой чтения статусов сервиса на тике шапки — предупреждение в лог
+    с типом и текстом, тик не бросает, копии окна прежние."""
+    import logging
+
+    _patch_build(monkeypatch, _Builds())
+    service = _Service({"srv": ServerStatus(STATE_CONNECTING)})
+    app = _app(tmp_path, _SRV, service, mounted=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(
+            asyncio.to_thread(app._build_real_executor), _CEILING_SEC
+        )
+        snapshot, status = app._mcp_snapshot, app._mcp_status
+
+        def _broken_status(_consumer):
+            raise RuntimeError("статус недоступен")
+
+        service.status = _broken_status
+        with caplog.at_level(logging.WARNING, logger="gc_tui.app"):
+            app.screen._feed_start_header()
+        await pilot.pause()
+
+        assert app._mcp_snapshot is snapshot
+        assert app._mcp_status is status
+        assert "RuntimeError: статус недоступен" in caplog.text
+
+
 def test_failed_header_step_keeps_successful_build(
     tmp_path, monkeypatch, caplog
 ):
