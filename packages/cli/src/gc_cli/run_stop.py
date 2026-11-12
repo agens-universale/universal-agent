@@ -62,13 +62,15 @@ def install_run_sigint(executor: Any):
 def _wake_loop_on_sigint(loop: asyncio.AbstractEventLoop) -> bool:
     """Сигнал будит цикл: ``add_signal_handler`` ставит процессу wakeup-fd
     цикла. Сам колбэк цикла пуст — нажатие разбирает обработчик Python,
-    который ставится поверх. Цикл без поддержки (Windows) — ``False``:
-    там цикл и так просыпается по сигналу сам."""
+    который ставится поверх. Цикл без поддержки (Windows) — ``False``,
+    остаётся прежний способ: ``ProactorEventLoop`` (умолчание там) сам
+    ставит wakeup-fd и просыпается по сигналу, селекторный цикл Windows —
+    нет, как и до этой правки."""
     try:
         loop.add_signal_handler(signal.SIGINT, _woken)
     # ``NotImplementedError`` (цикл без поддержки) — подкласс
     # ``RuntimeError``.
-    except (RuntimeError, ValueError):
+    except (RuntimeError, ValueError, OSError):
         return False
     return True
 
@@ -80,8 +82,11 @@ def _woken() -> None:
 def restore_run_sigint(installed: Any) -> None:
     if installed is None:
         return
-    if installed.woken is not None and not installed.woken.is_closed():
-        installed.woken.remove_signal_handler(signal.SIGINT)
+    try:
+        if installed.woken is not None and not installed.woken.is_closed():
+            installed.woken.remove_signal_handler(signal.SIGINT)
+    except (RuntimeError, ValueError, OSError):
+        pass  # прежний обработчик вернуть всё равно
     try:
         signal.signal(signal.SIGINT, installed.previous)
     except (ValueError, OSError, TypeError):

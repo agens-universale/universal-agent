@@ -8,7 +8,11 @@ import signal
 import threading
 
 import pytest
-from gc_cli.run_stop import install_run_sigint, restore_run_sigint
+from gc_cli.run_stop import (
+    _Installed,
+    install_run_sigint,
+    restore_run_sigint,
+)
 from gc_core.utils.sigint_waits import intercept_sigint
 
 
@@ -97,3 +101,25 @@ def test_press_wakes_a_loop_asleep_without_events():
     finally:
         loop.close()
     assert stopped_after and stopped_after[0] < 1.0
+
+
+def test_restore_returns_previous_handler_when_loop_refuses():
+    """Сбой снятия пробуждения у цикла не мешает вернуть прежний
+    обработчик."""
+
+    class _Loop:
+        def is_closed(self) -> bool:
+            return False
+
+        def remove_signal_handler(self, _sig) -> bool:
+            raise RuntimeError("цикл не снял обработчик")
+
+    def previous(signum, frame) -> None:
+        del signum, frame
+
+    before = signal.getsignal(signal.SIGINT)
+    try:
+        restore_run_sigint(_Installed(previous, _Loop()))
+        assert signal.getsignal(signal.SIGINT) is previous
+    finally:
+        signal.signal(signal.SIGINT, before)
