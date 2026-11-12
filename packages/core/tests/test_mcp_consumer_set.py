@@ -201,7 +201,8 @@ async def test_stale_build_does_not_change_set(
     servers = {key: stdio_cfg(tmp_path / f"{key}.json") for key in "ab"}
     for key in servers:
         seed_catalog(_settings(servers), key, ["echo"])
-    consumer = _open(mcp_reaper, McpService(connect_on_start=False))
+    service = McpService(connect_on_start=False)
+    consumer = _open(mcp_reaper, service)
     old, new = consumer.next_build(), consumer.next_build()
 
     await asyncio.wait_for(
@@ -213,6 +214,8 @@ async def test_stale_build_does_not_change_set(
 
     assert set(consumer.servers()) == {"a"}
     assert launches(tmp_path / "b.json") == []
+    # Быстрый путь: устаревшая сборка не заводит записей сервиса.
+    assert [key for key, _ in service._entries] == ["a"]
 
 
 @pytest.mark.parametrize("cataloged", [True, False])
@@ -631,8 +634,7 @@ async def test_rest_close_is_tracked_by_key(
     )
     await asyncio.wait_for(entered.wait(), _CEILING_SEC)
     entry = consumer.servers()["a"]
-    key = session_key(entry.key, entry.fingerprint)
-    assert consumer._closing_keys.get(key)
+    assert consumer._closing_servers.get("a")
 
     await _ensure(consumer, _settings({}))
     await asyncio.wait_for(building, _CEILING_SEC)
@@ -798,3 +800,38 @@ async def test_old_close_keeps_legacy_session_of_changed_server(
     await _settle(consumer)
 
     assert _MCP_SESSIONS.get((consumer.owner, "a")) == "sid-new"
+
+
+async def test_changed_server_waits_for_old_process_close(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Изменённый сервер (другой отпечаток) подключается только после
+    закрытия прежней сессии: старый процесс мог держать порт или
+    профиль."""
+    control = tmp_path / "a.json"
+    cfg = stdio_cfg(control)
+    consumer = _open(mcp_reaper, McpService(connect_on_start=True))
+    await _ensure(consumer, _settings({"a": cfg}))
+    [old_pid] = launches(control)
+    gate, entered = _gate_close(consumer, "a")
+
+    building = asyncio.create_task(
+        consumer.aensure(
+            consumer.next_build(),
+            _settings({"a": _with_args(cfg, "--changed")}),
+        )
+    )
+    await asyncio.wait_for(entered.wait(), _CEILING_SEC)
+    # Прежний учёт пустил бы новую попытку сразу: даём ей время
+    # запуститься и только потом отпускаем закрытие старой сессии.
+    with contextlib.suppress(AssertionError):
+        await wait_for(lambda: len(launches(control)) == 2, 1.0)
+    gate.set()
+    await asyncio.wait_for(building, _CEILING_SEC)
+    await _settle(consumer)
+
+    _, new_pid = launches(control)
+    journal = events(control)
+    assert journal.index(f"exit {old_pid}") < journal.index(f"start {new_pid}")
+    assert _state(consumer, "a") == STATE_CONNECTED
+    assert alive(new_pid)

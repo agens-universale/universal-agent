@@ -124,8 +124,10 @@ class McpConsumer:
     ``_series`` — серия повторов; ``_failures`` — своя последняя неудачная
     или прерванная попытка; ``_retry`` — номер повтора серии; ``_closing`` —
     закрытие остатков сессий после отказа или отмены попытки и сессий
-    серверов, ушедших из набора; ``_closing_keys`` — те же закрытия по
-    ключу сессии: новое подключение ключа дожидается всех его закрытий.
+    серверов, ушедших из набора; ``_closing_servers`` — те же закрытия по
+    ключу сервера: новое подключение сервера дожидается всех его закрытий,
+    какого бы отпечатка они ни были (у изменённого сервера старый процесс
+    ещё держит порт или профиль).
     ``_servers`` — набор (записи серверов последней начатой сборки),
     ``_build`` — последний выданный номер сборки, ``_pinned`` —
     закреплённый срез ``{ключ: (отпечаток, статус)}``.
@@ -147,7 +149,7 @@ class McpConsumer:
         self._failures: dict[str, Failure] = {}
         self._retry: dict[str, int] = {}
         self._closing: set[asyncio.Task] = set()
-        self._closing_keys: dict[str, set[asyncio.Task]] = {}
+        self._closing_servers: dict[str, set[asyncio.Task]] = {}
         self._build = 0
         self._servers: dict[str, ServerEntry] = {}
         self._pinned: dict[str, tuple[str, ServerStatus]] = {}
@@ -232,10 +234,12 @@ class McpConsumer:
             if running is not None and not running.done():
                 return running
             started = self._service._clock()
-            # Закрытия прежней сессии того же ключа (сервер убрали из
-            # набора и вернули) должны кончиться до новой сессии: иначе
-            # они закрыли бы её, а сервер с одним экземпляром отказал бы.
-            closing = set(self._closing_keys.get(key, ()))
+            # Закрытия прежних сессий этого сервера (его убрали и вернули
+            # или изменили) должны кончиться до новой сессии: иначе они
+            # закрыли бы её, а старый процесс держал бы исключительный
+            # ресурс (порт, профиль браузера). Ждём только закрытия,
+            # начатые до попытки, — циклов ожидания нет.
+            closing = set(self._closing_servers.get(entry.key, ()))
             task = asyncio.get_running_loop().create_task(
                 self._aconnect(entry, started, closing),
                 context=contextvars.Context(),
@@ -310,24 +314,24 @@ class McpConsumer:
         task = asyncio.get_running_loop().create_task(
             self._aclose_session(entry), context=contextvars.Context()
         )
-        self._track_closing(task, _session_key_of(entry))
+        self._track_closing(task, entry.key)
         await asyncio.shield(task)
 
-    def _track_closing(self, task: asyncio.Task, key: str) -> None:
+    def _track_closing(self, task: asyncio.Task, server_key: str) -> None:
         """Закрытие числится за потребителем (его ждёт ``aclose``) и за
-        ключом сессии (его ждёт новое подключение этого ключа)."""
+        ключом сервера (его ждёт новое подключение этого сервера)."""
         with self._lock:
             self._closing.add(task)
-            self._closing_keys.setdefault(key, set()).add(task)
-        task.add_done_callback(partial(self._forget_closing, key))
+            self._closing_servers.setdefault(server_key, set()).add(task)
+        task.add_done_callback(partial(self._forget_closing, server_key))
 
-    def _forget_closing(self, key: str, task: asyncio.Task) -> None:
+    def _forget_closing(self, server_key: str, task: asyncio.Task) -> None:
         with self._lock:
             self._closing.discard(task)
-            pending = self._closing_keys.get(key, set())
+            pending = self._closing_servers.get(server_key, set())
             pending.discard(task)
             if not pending:
-                self._closing_keys.pop(key, None)
+                self._closing_servers.pop(server_key, None)
 
     async def _aclose_session(self, entry: ServerEntry) -> None:
         """Сессия сервера у потребителя — во всех трёх реестрах."""
@@ -484,6 +488,12 @@ class McpConsumer:
         """
         self._service._bind_loop()
         self._refuse_if_closed()
+        with self._lock:
+            # Быстрый путь: устаревшая сборка не трогает записи и каталог.
+            # Решающая проверка — в ``_replace_set``, под замком замены.
+            stale = build < self._build
+        if stale:
+            return
         timeout = settings_of(settings).mcp.meta.discovery_timeout_sec
         entries = {
             key: self._service.entry(key, cfg, discovery_timeout=timeout)
@@ -538,14 +548,14 @@ class McpConsumer:
         в фоне под владельцем потребителя.
 
         Начатый по этой сессии вызов получает ошибку закрытой сессии, а
-        не зависает. Закрытие дожидается снятых задач и прежнего закрытия
-        того же ключа: так закрытия одного ключа идут по порядку.
+        не зависает. Закрытие дожидается снятых задач и прежних закрытий
+        этого сервера: так закрытия одного сервера идут по порядку.
         """
         key = _session_key_of(entry)
         with self._lock:
             work = {self._connects.pop(key, None), self._series.pop(key, None)}
             work.discard(None)
-            earlier = set(self._closing_keys.get(key, ()))
+            earlier = set(self._closing_servers.get(entry.key, ()))
             self._retry.pop(key, None)
             self._sessions.discard(key)
             self._ok.discard(key)
@@ -555,7 +565,7 @@ class McpConsumer:
             self._aclose_left(entry, work | earlier),
             context=contextvars.Context(),
         )
-        self._track_closing(closing, key)
+        self._track_closing(closing, entry.key)
 
     async def _aclose_left(
         self, entry: ServerEntry, work: set[asyncio.Task]
