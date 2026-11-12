@@ -214,8 +214,7 @@ class AcpFacade:
             return CONFIRM_TIMED_OUT
 
     async def shutdown(self) -> None:
-        """Отменить живые ходы, закрыть простаивающих агентов, затем сервис
-        MCP.
+        """Отменить ходы, закрыть простаивающих агентов, затем сервис MCP.
 
         Идущий ход не ждём: stop() кооперативный, команда может занять
         весь таймаут, а stdin после выхода уже закрыт. Сессии MCP агентов с
@@ -225,7 +224,7 @@ class AcpFacade:
         try:
             await self._aclose_agents()
         finally:
-            await _aclose_service(self._mcp_service)
+            await _safe_aclose(self._mcp_service)
 
     async def _aclose_agents(self) -> None:
         self._pending.cancel_all(cancelled_reply())
@@ -1265,16 +1264,6 @@ async def _safe_aclose(agent: Any) -> None:
         await close()
     except Exception:
         logger.exception("acp aclose")
-
-
-async def _aclose_service(service: Any) -> None:
-    """Закрыть сервис MCP; его отказ — в лог, остановку не роняет."""
-    if service is None:
-        return
-    try:
-        await service.aclose()
-    except Exception:
-        logger.exception("acp mcp service close")
 
 
 def _unique(messages) -> list[dict]:
