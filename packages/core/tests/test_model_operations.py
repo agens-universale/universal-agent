@@ -501,7 +501,7 @@ async def test_billed_retry_exhaustion_keeps_usage_with_and_without_port(
         return {"choices": [{"error": {"code": 503, "message": "failed"}}]}
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", transport)
-    monkeypatch.setattr(policy.asyncio, "sleep", AsyncMock())
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
     accounts = []
     for with_port in (False, True):
         state = _state()

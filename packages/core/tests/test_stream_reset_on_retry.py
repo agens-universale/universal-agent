@@ -8,7 +8,7 @@ def test_on_delta_reset_between_retried_attempts(monkeypatch):
         return None
 
     # Пауза между попытками стала кооперативной (Задача 11 async-переезда).
-    monkeypatch.setattr(policy.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr("asyncio.sleep", _no_sleep)
     events = []
     calls = {"n": 0}
 

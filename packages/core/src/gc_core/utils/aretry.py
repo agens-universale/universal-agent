@@ -53,23 +53,29 @@ async def _wait_before_retry(delay: float) -> None:
         await asyncio.sleep(delay)
         return
     task = asyncio.current_task()
-    cancelled_by_stop = False
+    outer_cancels = task.cancelling()
+    pause: Optional[asyncio.Future] = None
 
     async def release():
-        nonlocal cancelled_by_stop
-        cancelled_by_stop = task.cancel()
+        # Стоп отменяет только саму паузу, не задачу хода.
+        if pause is not None:
+            pause.cancel()
 
     try:
         async with stop.arm(kind="retry", release=release):
-            await asyncio.sleep(delay)
+            pause = asyncio.ensure_future(asyncio.sleep(delay))
+            await pause
     except UserStopInterrupt:
         # Остановлена пауза после уже начатой попытки, а не новый инструмент.
         raise UserStopInterrupt(kind="retry", started=True) from None
     except asyncio.CancelledError:
-        if not cancelled_by_stop:
+        if task.cancelling() > outer_cancels:
             raise
-        task.uncancel()
         raise UserStopInterrupt(kind="retry", started=True) from None
+    if stop.requested:
+        # Стоп нажат в паузе, а снятие не успело до её конца: новую попытку
+        # не начинаем.
+        raise UserStopInterrupt(kind="retry", started=True)
 
 
 async def _run_with_retries_async(

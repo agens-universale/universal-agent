@@ -122,7 +122,7 @@ def test_policy_retries_error_with_whitespace_reasoning_then_succeeds(
     async def no_sleep(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(policy.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr("asyncio.sleep", no_sleep)
     attempts = []
 
     async def request(payload, *_args, **_kwargs):
