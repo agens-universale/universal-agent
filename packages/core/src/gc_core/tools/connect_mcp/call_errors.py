@@ -2,7 +2,13 @@
 
 Исполнился ли вызов на сервере — неизвестно, поэтому автоповтор его не
 повторяет. Пустой ответ вместо этих ошибок модель приняла бы за успех.
+
+Здесь же — общая для сервиса и исполнителя вызова таблица «истёк срок
+вызова» и разворот группы исключений до листа: одна классификация на
+подключение и вызов.
 """
+
+import httpx
 
 
 class McpCallOutcomeUnknown(Exception):
@@ -24,4 +30,28 @@ class McpCallTimedOut(McpCallOutcomeUnknown):
         self.timeout = timeout
 
 
-__all__ = ["McpCallOutcomeUnknown", "McpCallTimedOut", "McpServerGone"]
+#: Истёк срок вызова: сервер жив, ответа за срок нет. Сроки соединения
+#: (``ConnectTimeout``, ``PoolTimeout``) сюда не входят — для вызова это
+#: ошибка соединения, а не срок.
+CALL_TIMEOUTS = (
+    McpCallTimedOut,
+    TimeoutError,
+    httpx.ReadTimeout,
+    httpx.WriteTimeout,
+)
+
+
+def first_leaf(exc: BaseException) -> BaseException:
+    """Первый лист группы исключений; не группа — само исключение."""
+    while isinstance(exc, BaseExceptionGroup):
+        exc = exc.exceptions[0]
+    return exc
+
+
+__all__ = [
+    "CALL_TIMEOUTS",
+    "McpCallOutcomeUnknown",
+    "McpCallTimedOut",
+    "McpServerGone",
+    "first_leaf",
+]

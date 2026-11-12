@@ -21,8 +21,9 @@ from mcp.shared.exceptions import McpError
 from mcp.types import CONNECTION_CLOSED
 
 from gc_core.tools.connect_mcp.call_errors import (
-    McpCallTimedOut,
+    CALL_TIMEOUTS,
     McpServerGone,
+    first_leaf,
 )
 from gc_core.tools.connect_mcp.catalog import read_catalog, write_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
@@ -45,7 +46,8 @@ from gc_core.tools.connect_mcp.service_records import (
     ServerEntry,
 )
 
-_TIMEOUTS = (TimeoutError, McpCallTimedOut, httpx.TimeoutException)
+# У подключения срок — любой: и срок вызова, и срок соединения.
+_TIMEOUTS = (*CALL_TIMEOUTS, httpx.TimeoutException)
 # Связь с сервером потеряна или не установлена. Потерянная сессия под
 # durable — та же смерть сервера или срок постоянного stdio, но исход
 # вызова неизвестен; для записи это обрыв связи.
@@ -63,12 +65,6 @@ _MCP_ERROR_CODES = {
     # сервера с этим кодом тоже станет ``connect_error``.
     CONNECTION_CLOSED: "connect_error",
 }
-
-
-def _first_leaf(exc: BaseException) -> BaseException:
-    while isinstance(exc, BaseExceptionGroup):
-        exc = exc.exceptions[0]
-    return exc
 
 
 def _failure_code(exc: BaseException) -> str:
@@ -95,7 +91,7 @@ def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     ``command_not_found``, ``auth``, ``protocol``, ``connect_error``,
     ``other``. Значения секретов определения в текст не попадают.
     """
-    leaf = _first_leaf(exc)
+    leaf = first_leaf(exc)
     # Сообщение маскируется до обрезки длинного текста: иначе секрет на
     # границе среза остался бы своим началом.
     # Итоговый текст маскируется ещё раз: шаблоны причины подставляют

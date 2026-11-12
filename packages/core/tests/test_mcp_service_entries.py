@@ -300,6 +300,16 @@ def test_secret_in_url_is_masked_in_connect_reason():
     assert reason == "нет соединения с https://h/mcp?api_key=***"
 
 
+def test_query_value_of_url_is_masked_without_secret_fields():
+    """Секрет только в адресе (``?apikey=…``) — в причине его нет."""
+    reason = _reason(
+        ConnectionRefusedError(),
+        url="https://h/mcp?apikey=URL-SECRET-0123&v=1",
+    )
+
+    assert reason == "нет соединения с https://h/mcp?apikey=***&v=1"
+
+
 def test_secret_in_command_is_masked_in_not_found_reason():
     key = "cmd-SECRET-0123"
 

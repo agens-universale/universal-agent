@@ -24,6 +24,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED
 
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
@@ -293,6 +294,25 @@ def _in_session_task(function):
 
 class McpToolCallError(McpError):
     """Сервер ответил ошибкой на tools/call: повтор может дублировать эффект."""
+
+
+#: Текст, с которым SDK завершает ожидающие запросы при разрыве потока.
+_SDK_CONNECTION_CLOSED = "Connection closed"
+
+
+def is_connection_closed(exc: BaseException) -> bool:
+    """Ошибка — разрыв соединения SDK, а не ответ сервера.
+
+    ``_call_tool_request`` заворачивает в ``McpToolCallError`` и его: так
+    цепочка «открыть заново и повторить» не шлёт запрос второй раз. Код
+    −32000 один не годится — это и начало диапазона серверных ошибок
+    JSON-RPC, — поэтому сверяется и текст SDK.
+    """
+    return (
+        isinstance(exc, McpError)
+        and exc.error.code == CONNECTION_CLOSED
+        and exc.error.message == _SDK_CONNECTION_CLOSED
+    )
 
 
 async def _call_tool_request(session, name, arguments):
@@ -1400,4 +1420,5 @@ __all__ = [
     "alist_tools_stream_http",
     "alist_tools_stream_sse",
     "alist_tools_stream_stdio",
+    "is_connection_closed",
 ]

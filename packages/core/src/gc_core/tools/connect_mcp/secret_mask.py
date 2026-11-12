@@ -1,10 +1,12 @@
 """Маскировка значений секретов определения MCP-сервера в тексте.
 
 Чистые функции: текст причины отказа и строки лога не должны нести
-значения ``token``, ``headers`` и ``env`` определения.
+значения ``token``, ``headers`` и ``env`` определения, а также значения
+параметров строки запроса и пароль адреса ``url`` (``?apikey=…``).
 """
 
 import re
+from urllib.parse import parse_qsl, urlsplit
 
 # Пороги маскировки секретов — см. ``without_secrets``.
 _MIN_SECRET_LEN = 8
@@ -12,10 +14,19 @@ _MIN_WORD_SECRET_LEN = 4
 _SECRET_MASK = "***"
 
 
+def _url_secrets(url: object) -> list[str]:
+    """Значения параметров строки запроса и пароль адреса сервера."""
+    if not isinstance(url, str):
+        return []
+    parts = urlsplit(url)
+    values = [value for _, value in parse_qsl(parts.query)]
+    return [*values, parts.password or ""]
+
+
 def _secret_fragments(server_cfg: dict) -> set[str]:
-    """Значения ``token``, ``headers`` и ``env`` целиком и их части между
-    пробелами (``Bearer <ключ>`` — ещё и ``<ключ>``)."""
-    values = [server_cfg.get("token")]
+    """Значения ``token``, ``headers``, ``env`` и секреты адреса целиком и
+    их части между пробелами (``Bearer <ключ>`` — ещё и ``<ключ>``)."""
+    values = [server_cfg.get("token"), *_url_secrets(server_cfg.get("url"))]
     for field in ("headers", "env"):
         values.extend((server_cfg.get(field) or {}).values())
     fragments: set[str] = set()
