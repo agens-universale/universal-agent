@@ -2,8 +2,9 @@
 
 Сервис один на процесс: его создаёт ``build_facade``, агент каждой сессии
 ACP открывает у него своего потребителя (``mcp_service=`` фабрики), сессии
-MCP живут, пока живёт агент сессии. ``shutdown`` закрывает агентов, затем
-сервис — тот закрывает и потребителей агентов с идущим ходом.
+MCP живут, пока живёт агент сессии. ``shutdown`` снимает ходы, закрывает
+сервис — тот закрывает потребителей всех агентов разом, в общий бюджет, —
+затем простаивающих агентов.
 """
 
 from __future__ import annotations
@@ -12,12 +13,21 @@ import asyncio
 import io
 import logging
 import os
+import time
 
 import pytest
 from gc_acp import main as acp_main
 from gc_acp.facade import AcpFacade
 from gc_core.tools.connect_mcp.registry import ToolsCache
-from gc_testkit.mcp import alive, exits, launches, stdio_cfg, wait_for
+from gc_core.tools.connect_mcp import service as service_module
+from gc_testkit.mcp import (
+    alive,
+    exits,
+    launches,
+    set_behavior,
+    stdio_cfg,
+    wait_for,
+)
 from gc_testkit.mcp.fixtures import mcp_home, mcp_reaper
 from gc_testkit.settings import make_settings
 from test_facade import (
@@ -31,6 +41,8 @@ from test_facade import (
 
 #: Потолок одного ожидания: зависание не повесит прогон.
 _CEILING_SEC = 30.0
+#: Бюджет закрытия сервиса по умолчанию (``McpService.aclose``).
+_SERVICE_BUDGET_SEC = 10.0
 
 
 class FakeService:
@@ -109,7 +121,7 @@ async def test_factory_receives_service_not_cache(tmp_path):
     await facade.shutdown()
 
 
-async def test_shutdown_closes_service_after_agents(tmp_path):
+async def test_shutdown_closes_service_before_agents(tmp_path):
     events: list[str] = []
     fake = FakeService(events)
     facade, _writer, _agents = _open(tmp_path, events=events, service=fake)
@@ -119,7 +131,30 @@ async def test_shutdown_closes_service_after_agents(tmp_path):
 
     await asyncio.wait_for(facade.shutdown(), _CEILING_SEC)
 
-    assert events == ["agent0.aclose", "agent1.aclose", "service.aclose"]
+    assert events == ["service.aclose", "agent0.aclose", "agent1.aclose"]
+
+
+async def test_shutdown_stops_turns_before_service(tmp_path):
+    """Ходы снимаются до закрытия сервиса, агенты закрываются после."""
+    events: list[str] = []
+    fake = FakeService(events)
+    facade, writer, agents = _open(tmp_path, events=events, service=fake)
+    await _init(facade)
+    await _new(facade, "/a", request_id=2)
+    await _hang_turn(facade, writer, agents[0])
+    await _new(facade, "/b", request_id=4)
+    stop = agents[0].stop
+
+    def recording_stop() -> None:
+        events.append("agent0.stop")
+        stop()
+
+    agents[0].stop = recording_stop
+
+    await asyncio.wait_for(facade.shutdown(), _CEILING_SEC)
+
+    assert events == ["agent0.stop", "service.aclose", "agent1.aclose"]
+    agents[0].release.set()
 
 
 async def test_shutdown_with_running_turn_still_closes_service(tmp_path):
@@ -176,7 +211,7 @@ async def test_service_close_failure_does_not_break_shutdown(tmp_path, caplog):
     with caplog.at_level(logging.ERROR, logger="gc_acp.facade"):
         await asyncio.wait_for(facade.shutdown(), _CEILING_SEC)
 
-    assert events == ["agent0.aclose", "service.aclose"]
+    assert events == ["service.aclose", "agent0.aclose"]
     assert "сервис не закрылся" in caplog.text
 
 
@@ -253,3 +288,40 @@ async def test_acp_sessions_own_separate_mcp_processes(
 
     assert exits(control) == [first_pid, second_pid]
     assert facade._mcp_service.closed
+
+
+@pytest.mark.skipif(os.name != "posix", reason="процессы POSIX")
+async def test_shutdown_closes_deaf_servers_within_one_budget(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper
+):
+    """Сессии агентов с серверами, глухими к завершению, закрываются за
+    один бюджет сервиса (плюс отсрочка), а не за сумму по агентам."""
+    control = tmp_path / "srv.json"
+    set_behavior(control, ignore_term=True, ignore_eof=True)
+    loaded = make_settings(
+        {
+            "paths.threads_data_path": str(tmp_path / "threads"),
+            "os_backend": "local",
+            "mcp.servers": {"srv": stdio_cfg(control)},
+            "mcp.meta.discovery_timeout_sec": 30,
+            "logging.save_logs": False,
+        }
+    )
+    monkeypatch.chdir(tmp_path)
+    facade = acp_main.build_facade(loaded, io.StringIO())
+    facade._writer = MemoryWriter()
+    mcp_reaper.track(facade._mcp_service)
+    await _init(facade)
+    sessions = 4
+    for request_id in range(2, 2 + sessions):
+        await asyncio.wait_for(
+            _new(facade, str(tmp_path), request_id), _CEILING_SEC
+        )
+    await wait_for(lambda: len(launches(control)) == sessions, _CEILING_SEC)
+
+    started = time.monotonic()
+    await asyncio.wait_for(facade.shutdown(), _CEILING_SEC * 2)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < _SERVICE_BUDGET_SEC + service_module._CLOSE_GRACE_SEC
+    assert not any(alive(pid) for pid in launches(control))

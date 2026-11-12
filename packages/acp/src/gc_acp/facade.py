@@ -214,27 +214,34 @@ class AcpFacade:
             return CONFIRM_TIMED_OUT
 
     async def shutdown(self) -> None:
-        """Отменить ходы, закрыть простаивающих агентов, затем сервис MCP.
+        """Отменить ходы, закрыть сервис MCP, затем простаивающих агентов.
 
         Идущий ход не ждём: stop() кооперативный, команда может занять
-        весь таймаут, а stdin после выхода уже закрыт. Сессии MCP агентов с
-        идущим ходом закрывает сервис: его закрытие закрывает всех
-        оставшихся потребителей и укладывается в свой бюджет.
+        весь таймаут, а stdin после выхода уже закрыт. Сервис — до агентов:
+        он закрывает потребителей всех агентов разом, в общий бюджет, а
+        закрытие агентов по одному шло бы без бюджета и складывалось бы по
+        агентам. Потребитель агента к его закрытию уже закрыт — оно быстрое.
+        Агента с идущим ходом не закрываем: его потребителя закрыл сервис.
         """
         try:
-            await self._aclose_agents()
+            idle = self._stop_turns()
         finally:
             await _safe_aclose(self._mcp_service)
+        for agent in idle:
+            await _safe_aclose(agent)
 
-    async def _aclose_agents(self) -> None:
+    def _stop_turns(self) -> list[Any]:
+        """Снять ожидания и идущие ходы; агенты простаивающих сессий."""
         self._pending.cancel_all(cancelled_reply())
         leftover = list(self._sessions.values())
         self._sessions.clear()
+        idle = []
         for live in leftover:
             if _prompt_running(live):
                 _mark_cancel(live)
-                continue
-            await _safe_aclose(live.agent)
+            else:
+                idle.append(live.agent)
+        return idle
 
     async def _dispatch(self, incoming: Incoming) -> None:
         if incoming.method in _SILENT:
