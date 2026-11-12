@@ -738,6 +738,7 @@ class McpConsumer:
                         )
                     finally:
                         forget_owner_sessions()
+                        self._backend_cache = None
                         self._service._forget_consumer(self)
 
 

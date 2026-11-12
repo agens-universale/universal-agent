@@ -335,7 +335,8 @@ async def test_service_backend_cache_serves_backend_part(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
     control = tmp_path / "a.json"
-    agent_side = stdio_cfg(tmp_path / "b.json")
+    agent_control = tmp_path / "b.json"
+    agent_side = stdio_cfg(agent_control)
     settings = _settings(
         {
             "a": {**stdio_cfg(control), "execute_on": "os_backend"},
@@ -359,6 +360,11 @@ async def test_service_backend_cache_serves_backend_part(
     assert view_a.registry == view_b.registry
     assert set(view_a.status) == {"a", "b"}
     assert launches(control) == []
+    # В кэш бэкенда ушёл только сервер бэкенда: агентный b не обнаруживался
+    # прежним путём и остался со статусом сервиса.
+    assert launches(agent_control) == []
+    assert view_a.status["b"]["status"] == STATE_CACHED
+    assert SESSION_KEY_FIELD in view_a.servers_cfg["b"]
 
 
 async def test_status_snapshot_from_another_thread(
@@ -413,6 +419,54 @@ async def test_overlay_matches_build_snapshot(
     assert "b" not in status
 
 
+async def test_overlay_keeps_connecting_and_empties_failed(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """``connecting`` наложение не трогает; у ``failed`` тулов нет, причина
+    и код — из статуса сервиса."""
+    failing, slow = tmp_path / "a.json", tmp_path / "c.json"
+    set_behavior(failing, fail_start=True)
+    set_behavior(slow, start_delay=10)
+    settings = _settings({"a": stdio_cfg(failing), "c": stdio_cfg(slow)})
+    seed_catalog(settings, "c", ["echo"])
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    statuses = service.status(consumer)
+    assert statuses["c"].state == "connecting"
+    assert statuses["a"].state == STATE_FAILED
+    # Снимок сборки с прежними значениями: у a — тулы, у c — свои отметки.
+    stale_tool = {"name": _ECHO, "description": "", "tool": "echo"}
+    snap0 = {
+        "a": {
+            "status": STATE_CONNECTED,
+            "reason": None,
+            "description": "",
+            "tools": [stale_tool],
+        },
+        "c": {
+            "status": "unknown",
+            "reason": None,
+            "description": "",
+            "tools": [],
+        },
+    }
+    status0 = {
+        "a": {"status": STATE_CONNECTED, "reason": None, "tool_count": 1},
+        "c": {"status": "unknown", "reason": None, "tool_count": 0},
+    }
+
+    snap, status = overlay_service_statuses(snap0, status0, settings, statuses)
+
+    assert snap["c"] is snap0["c"]
+    assert status["c"] is status0["c"]
+    assert snap["a"]["status"] == STATE_FAILED
+    assert snap["a"]["tools"] == []
+    assert snap["a"]["reason"] == statuses["a"].reason
+    assert status["a"]["reason_code"] == statuses["a"].reason_code
+    assert status["a"]["tool_count"] == 0
+    assert snap0["a"]["tools"] == [stale_tool]
+
+
 async def test_closed_consumer_view_is_pinned(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
@@ -430,7 +484,8 @@ async def test_closed_consumer_status_is_not_connecting(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
     """Закрытый потребитель не подключается: сервер без тулов и без
-    попыток — «подключение прервано», а не вечное ``connecting``."""
+    попыток показывает свежий отказ записи, а после 30 с — «подключение
+    прервано», а не вечное ``connecting``."""
     control = tmp_path / "a.json"
     set_behavior(control, fail_start=True)
     settings = _settings({"a": stdio_cfg(control)})
@@ -441,10 +496,22 @@ async def test_closed_consumer_status_is_not_connecting(
     assert len(launches(control)) == 1
 
     await asyncio.wait_for(idle.aclose(), _CEILING_SEC)
+    fresh = service.status(idle)["a"]
     clock.advance(30)
+    later = service.status(idle)["a"]
 
-    status = service.status(idle)["a"]
-    assert (status.state, status.reason) == (STATE_FAILED, INTERRUPTED_REASON)
+    shared = idle.servers()["a"].last_failure
+    assert (fresh.state, fresh.reason_code, fresh.reason) == (
+        STATE_FAILED,
+        shared.code,
+        shared.reason,
+    )
+    assert fresh.reason != INTERRUPTED_REASON
+    assert (later.state, later.reason_code, later.reason) == (
+        STATE_FAILED,
+        "other",
+        INTERRUPTED_REASON,
+    )
     assert service.status(failing)["a"].state == STATE_FAILED
 
 
