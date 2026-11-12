@@ -68,15 +68,17 @@ class CompletionsFacade:
         thread_id = validate_thread_id(str(uuid.uuid4()))
         cwd = cwd_for_new(incoming.cwd_sent, self._launch_root)
         agent = await self._agent_for(thread_id, cwd)
+        # До старта хода агентом владеет запрос: отказ закрывает его, иначе
+        # его потребитель MCP остался бы у сервиса поверхности.
         try:
             bind_ask_human(agent)
             await seed_prior(self._threads, thread_id, incoming.prior)
+            return await self._begin(incoming, thread_id, cwd, agent)
         except Exception:
-            logger.exception("completions seed")
+            logger.exception("completions open")
             await _safe_aclose(agent)
             await _forget_quietly(self._threads, thread_id)
             raise
-        return await self._begin(incoming, thread_id, cwd, agent)
 
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         del thread_id

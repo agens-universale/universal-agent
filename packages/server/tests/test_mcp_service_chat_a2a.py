@@ -10,6 +10,7 @@ stdio-сервера настоящие; модель не нужна: тул в
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -25,12 +26,15 @@ from gc_server.a2a import executor as a2a_executor_mod
 from gc_server.a2a import surface as a2a_surface_mod
 from gc_server.a2a.surface import A2aSurface
 from gc_server.chat import surface as chat_surface_mod
+from gc_server.chat.completions import facade as completions_mod
 from gc_server.chat.responses import facade as responses_mod
 from gc_server.chat.surface import ChatSurface
 from gc_testkit.mcp import (
+    FakeClock,
     alive,
     exits,
     launches,
+    set_behavior,
     stdio_cfg,
     wait_for,
 )
@@ -422,6 +426,100 @@ async def test_completions_request_leaves_no_server_process(
     assert launches(control) == pids
     assert not service.closed
     assert not service._consumers
+
+
+def _attempting(agent) -> bool:
+    """У потребителя агента идёт своя попытка подключения."""
+    connects = agent._mcp_consumer._connections._connects
+    return any(not task.done() for task in connects.values())
+
+
+@_POSIX
+async def test_hung_server_does_not_launch_on_every_completions_request(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Сервер без каталога не отвечает: агент на запрос, закрытый посреди
+    своей попытки, держит правило 30 с у записи. Запросы подряд не
+    запускают сервер каждый раз; через 30 с — одна новая попытка."""
+    clock = FakeClock()
+    monkeypatch.setattr(
+        chat_surface_mod,
+        "McpService",
+        functools.partial(McpService, clock=clock.now, sleep=clock.sleep),
+    )
+    control = tmp_path / "srv.json"
+    set_behavior(control, start_delay=20)
+    settings = {**_settings(control), "mcp.meta.discovery_timeout_sec": 1}
+    surface = ChatSurface(runtime(tmp_path, **settings))
+    mcp_reaper.track(surface._mcp_service)
+
+    async def build():
+        return mcp_reaper.track(
+            await asyncio.wait_for(
+                surface.completions._agent_for("t", str(tmp_path)),
+                _CEILING_SEC,
+            )
+        )
+
+    async def request() -> None:
+        """Запрос без вызова тула: агент собран и после ответа закрыт."""
+        count = len(launches(control))
+        agent = await build()
+        if _attempting(agent):
+            # Попытка начата этим запросом: дождаться её процесса — цены.
+            await wait_for(
+                lambda: len(launches(control)) > count, _CEILING_SEC
+            )
+        await asyncio.wait_for(agent.aclose(), _CEILING_SEC)
+
+    # Первая сборка ждёт срок; попытка кончается отказом по сроку.
+    first = await build()
+    (entry,) = surface._mcp_service._entries.values()
+    await wait_for(lambda: entry.last_failure is not None, _CEILING_SEC)
+    await asyncio.wait_for(first.aclose(), _CEILING_SEC)
+    counts = [len(launches(control))]
+    clock.advance(30)
+    for _ in range(3):
+        await request()
+        counts.append(len(launches(control)))
+    clock.advance(30)
+    await request()
+    counts.append(len(launches(control)))
+
+    assert counts == [1, 2, 2, 2, 3]
+
+
+@_POSIX
+async def test_completions_open_failure_closes_agent(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Отказ после создания агента (чтение хвоста треда) закрывает агента:
+    его потребитель не остаётся у сервиса, процесс сервера выходит."""
+    control = tmp_path / "srv.json"
+    surface = _chat(tmp_path, control)
+    service = mcp_reaper.track(surface._mcp_service)
+    real_factory = surface.completions._agent_factory
+    made: list[AsyncAgent] = []
+
+    async def factory(settings, **kwargs):
+        made.append(mcp_reaper.track(await real_factory(settings, **kwargs)))
+        return made[-1]
+
+    async def broken_start(*_args, **_kwargs):
+        raise RuntimeError("хвост треда не прочитан")
+
+    surface.completions._agent_factory = factory
+    monkeypatch.setattr(completions_mod.ToolFlow, "start", broken_start)
+    body = {"model": "GC-UA", "messages": [{"role": "user", "content": "x"}]}
+
+    with pytest.raises(RuntimeError, match="хвост треда не прочитан"):
+        await asyncio.wait_for(surface.completions.open(body), _CEILING_SEC)
+
+    (agent,) = made
+    assert agent.closed
+    assert not service._consumers
+    (pid,) = launches(control)
+    await wait_for(lambda: pid in exits(control), _CEILING_SEC)
 
 
 def _server_stop_tools() -> list[str]:
