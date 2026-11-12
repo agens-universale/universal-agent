@@ -6247,6 +6247,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # выделенный текст; после разморозки снимок возьмётся свежий.
         if not _frozen:
             self._feed_start_header()
+        # Копии статусов MCP окна следуют за сервисом и после итога шапки:
+        # уведомления, значок футера, `/mcp` (спека §5.7).
+        self.app.refresh_mcp_snapshot()
         # Замок выбора в открытом пикере (`/profile` во время хода) снимается
         # с концом хода — без переоткрытия.
         if self._arg_picker is not None:
@@ -8442,6 +8445,8 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _cmd_mcp(self) -> None:
         from gc_tui.screens.mcp import McpScreen
 
+        # Экран читает снимок окна: перед открытием — по статусам сервиса.
+        self.app.refresh_mcp_snapshot()
         self.app.push_screen(
             McpScreen(
                 settings=self.app.base_settings(),

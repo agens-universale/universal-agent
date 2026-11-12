@@ -6,20 +6,12 @@ from gc_core.tools.connect_mcp.agent_tools import (
     _assemble_mcp_tools_data,
     mcp_cache_config,
 )
-from gc_core.tools.connect_mcp.consumer_status import (
-    STATE_CACHED,
-    STATE_CONNECTED,
-    STATE_FAILED,
-    ServerStatus,
-)
+from gc_core.tools.connect_mcp.consumer_status import ServerStatus
 from gc_core.tools.connect_mcp.consumer_view import (
     server_offer,
     status_record,
 )
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
-
-#: Статусы сервиса, которые заменяют статус сборки в снимке.
-_SETTLED = frozenset({STATE_CACHED, STATE_CONNECTED, STATE_FAILED})
 
 
 def build_mcp_tools_snapshot(
@@ -61,19 +53,16 @@ def overlay_service_statuses(
     settings: Any,
     statuses: Dict[str, ServerStatus],
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """Снимок и статусы сборки с окончательными статусами сервиса (§5.7).
+    """Снимок и статусы сборки со статусами сервиса (§5.7).
 
-    Серверы ``statuses`` в ``cached``, ``connected`` и ``failed`` получают
-    статус, причину и тулы сервиса — тем же путём, что сборка: записи
-    реестра → ``tools_data`` → снимок. Остальные серверы (``connecting``,
-    вне сервиса) остаются как были. Входные словари не меняются.
+    Серверы ``statuses`` получают статус, причину и тулы сервиса (у
+    ``connecting`` и ``cached`` — тулы записи, «из каталога») тем же
+    путём, что сборка: записи реестра → ``tools_data`` → снимок. Серверы
+    вне сервиса и вне ``settings`` остаются как были. Входные словари не
+    меняются.
     """
     servers = mcp_cache_config(settings)["mcp-servers"]
-    keys = [
-        key
-        for key, status in statuses.items()
-        if status.state in _SETTLED and key in servers
-    ]
+    keys = [key for key in statuses if key in servers]
     registry: Dict[str, Dict[str, Any]] = {}
     fresh_status: Dict[str, Dict[str, Any]] = {}
     for key in keys:

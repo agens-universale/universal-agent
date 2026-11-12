@@ -51,6 +51,7 @@ class _Service:
         self.statuses: dict[str, ServerStatus] = dict(statuses or {})
         self.opened: list[_Consumer] = []
         self.closes = 0
+        self.closed = False
 
     def open_consumer(self, label: str) -> _Consumer:
         # Контракт открытия (`McpService.open_consumer`): из потока без
@@ -66,6 +67,7 @@ class _Service:
 
     async def aclose(self, budget: float = 10.0) -> None:
         self.closes += 1
+        self.closed = True
 
 
 class _Ctx:
@@ -221,12 +223,14 @@ async def test_stop_and_send_undo_keep_consumer(tmp_path, monkeypatch):
         await asyncio.wait_for(
             asyncio.to_thread(second._ensure_executor), _CEILING_SEC
         )
+        # Ни стоп, ни откат потребителя не закрывают; закрывает выход.
+        assert service.closes == 0
 
     consumers = {id(k["mcp_consumer"]) for k in builds.kwargs}
     assert len(builds.kwargs) >= 2
     assert consumers == {id(service.opened[0])}
     assert len(service.opened) == 1
-    assert service.closes == 0
+    assert service.closes == 1
 
 
 def test_main_passes_service_to_app(monkeypatch, tmp_path):

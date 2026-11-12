@@ -385,11 +385,12 @@ async def test_overlay_matches_build_snapshot(
     assert "b" not in status
 
 
-async def test_overlay_keeps_connecting_and_empties_failed(
+async def test_overlay_takes_connecting_and_empties_failed(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
-    """``connecting`` наложение не трогает; у ``failed`` тулов нет, причина
-    и код — из статуса сервиса."""
+    """``connecting`` получает статус и тулы записи («из каталога»): копии
+    окна следуют за сервисом; у ``failed`` тулов нет, причина и код — из
+    статуса сервиса."""
     failing, slow = tmp_path / "a.json", tmp_path / "c.json"
     set_behavior(failing, fail_start=True)
     set_behavior(slow, start_delay=10)
@@ -423,8 +424,12 @@ async def test_overlay_keeps_connecting_and_empties_failed(
 
     snap, status = overlay_service_statuses(snap0, status0, settings, statuses)
 
-    assert snap["c"] is snap0["c"]
-    assert status["c"] is status0["c"]
+    assert snap["c"]["status"] == STATE_CONNECTING
+    assert [t["name"] for t in snap["c"]["tools"]] == [
+        mcp_tool_full_name("c", "echo")
+    ]
+    assert status["c"]["from_catalog"] is True
+    assert snap0["c"]["status"] == "unknown"
     assert snap["a"]["status"] == STATE_FAILED
     assert snap["a"]["tools"] == []
     assert snap["a"]["reason"] == statuses["a"].reason
