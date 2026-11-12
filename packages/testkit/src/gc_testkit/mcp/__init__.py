@@ -5,7 +5,8 @@
 оба сервера дописывают журнал ``<control>.mcp-journal`` — по нему тест видит
 запуски, потомков, выходы и запросы (``events``, ``launches``, ``children``,
 ``exits``). Потребитель — ``connections_of``, ``count_attempts``,
-``closed_port_cfg``. Фикстуры — в :mod:`gc_testkit.mcp.fixtures`.
+``closed_port_cfg``; журнал процессов сервиса — ``journal_records``.
+Фикстуры — в :mod:`gc_testkit.mcp.fixtures`.
 """
 
 from __future__ import annotations
@@ -296,6 +297,12 @@ class FakeClock:
 def connections_of(consumer: Any) -> Any:
     """Соединения потребителя MCP — владелец его состояния."""
     return consumer._connections
+
+
+def journal_records(service: Any) -> list:
+    """Записи журнала процессов сервиса MCP; журнала ещё нет — пусто."""
+    journal = service._journal
+    return journal.records() if journal is not None else []
 
 
 def count_attempts(monkeypatch: Any) -> list[str]:

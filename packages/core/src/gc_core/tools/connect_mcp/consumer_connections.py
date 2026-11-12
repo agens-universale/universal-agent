@@ -180,12 +180,13 @@ class McpConnections:
         """Определение для подключения и обёрток тулов.
 
         Из настроек сборки (алиасы и trace этой сборки), с умолчаниями
-        сервиса и ключом сессии потребителя.
+        сервиса и ключом сессии потребителя; процесс сервера — через
+        пускатель журнала сервиса.
         """
         servers = mcp_cache_config(self._settings)["mcp-servers"]
         cfg = with_service_defaults(servers[entry.key])
         cfg[SESSION_KEY_FIELD] = session_key_of(entry)
-        return cfg
+        return self._service.with_launcher(entry.key, cfg)
 
     def discovery_timeout(self) -> float:
         """Срок подключения по настройкам последней сверки."""
@@ -386,7 +387,8 @@ class McpConnections:
                 self._closing_servers.pop(server_key, None)
 
     async def _aclose_session(self, entry: ServerEntry) -> None:
-        """Сессия сервера у потребителя — во всех трёх реестрах."""
+        """Сессия сервера у потребителя — во всех трёх реестрах; затем
+        журнал процессов сервиса снимает записи вышедших."""
         key = session_key_of(entry)
         registry = PersistentStdioRegistry.instance()
         manager = stream_client._SESSION_MANAGER
@@ -408,6 +410,7 @@ class McpConnections:
                 current = self._servers.get(entry.key)
             if current is None or current is entry:
                 forget_session(entry.key)
+        await self._service.aprune_journal()
 
     def _on_connect_done(
         self, entry: ServerEntry, started: float, task: asyncio.Task
@@ -870,7 +873,8 @@ class McpConnections:
         """Сессии владельца во всех реестрах; шаги не зависят друг от
         друга — прерывание одного не отменяет остальных. ``finish`` —
         только после всех шагов без исключения: иначе снятый с учёта
-        потребитель с незакрытыми сессиями не закрыл бы и сервис."""
+        потребитель с незакрытыми сессиями не закрыл бы и сервис. После
+        него журнал процессов сервиса снимает записи вышедших."""
         async with self._closing_sessions:
             with self._lock:
                 self._sessions.clear()
@@ -886,6 +890,7 @@ class McpConnections:
                     finally:
                         forget_owner_sessions()
             finish()
+        await self._service.aprune_journal()
 
 
 __all__ = ["RETRY_PAUSES_SEC", "McpConnections", "session_key_of"]

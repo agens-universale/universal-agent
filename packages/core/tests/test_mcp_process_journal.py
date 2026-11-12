@@ -343,6 +343,33 @@ async def test_launch_error_is_only_the_newest_record(
     assert journal.launch_error("srv") is None
 
 
+async def test_prune_does_not_revive_superseded_launch_error(
+    mcp_home, mcp_reaper, procs, tmp_path
+):
+    # Сбой, после которого ключ запускался заново, — уже не причина: когда
+    # prune снимет запись вышедшего удачного запуска, сбой не всплывёт.
+    journal = ProcessJournal()
+    cmd, args = journal.launch_argv("no-such-binary-xyz", [], "srv")
+    failed = subprocess.Popen([cmd, *args], stderr=subprocess.DEVNULL)
+    procs.append(failed)
+    assert failed.wait(_TIMEOUT) == 127
+    other = journal.launch_argv("no-such-binary-xyz", [], "other")
+    lone = subprocess.Popen([other[0], *other[1]], stderr=subprocess.DEVNULL)
+    procs.append(lone)
+    assert lone.wait(_TIMEOUT) == 127
+    time.sleep(0.01)
+    control = tmp_path / "s.json"
+    proc = _spawn(procs, journal, control)
+    await _started(journal, control, proc)
+    proc.stdin.close()
+    proc.wait(_TIMEOUT)
+
+    journal.prune()
+
+    assert journal.launch_error("srv") is None
+    assert [r.pid for r in journal.records()] == [lone.pid]
+
+
 async def test_exec_failure_recorded(mcp_home, procs, tmp_path):
     journal = ProcessJournal()
     cmd, args = journal.launch_argv(str(tmp_path), [], "srv")

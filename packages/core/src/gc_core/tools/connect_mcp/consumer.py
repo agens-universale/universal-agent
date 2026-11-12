@@ -208,6 +208,7 @@ class McpConsumer:
         При ``wait_all`` не подключившийся к сроку сервер получает отказ
         ``timeout``: его попытка снимается, сессия закрывается.
         После остановки сервиса или закрытия — ``McpServiceClosed``.
+        Перед ожиданием журнал процессов сервиса снимает записи вышедших.
         """
         self._service._bind_loop()
         self._refuse_if_closed()
@@ -234,6 +235,8 @@ class McpConsumer:
             task = self._connect_for_build(entry)
             if task is not None:
                 waits.add(task)
+        # После замены набора: отмена сверки его уже не откатывает.
+        await self._service.aprune_journal()
         await self._await_build(waits, timeout)
         self._refuse_if_closed()
         # Обогнанная сборка не закрепляет срез: иначе вход в ход не увидел

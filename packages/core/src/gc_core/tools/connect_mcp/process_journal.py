@@ -133,14 +133,18 @@ class ProcessJournal:
     def prune(self) -> None:
         """Снять файлы процессов, которых уже нет (или их не узнать).
 
-        Остаются записи со сбоем ``exec`` (их читает ``launch_error``,
-        уходят они с каталогом) и записи непожатого зомби-лидера: пока он
-        держит группу, ``kill_all`` гасит по ней глухих потомков.
+        Остаются записи непожатого зомби-лидера (пока он держит группу,
+        ``kill_all`` гасит по ней глухих потомков) и последний сбой
+        ``exec`` ключа — его читает ``launch_error``, уходит он с
+        каталогом. Сбой, после которого ключ запускался снова, снимается:
+        иначе он всплыл бы причиной, когда снимется запись того запуска.
         """
         records = self.records()
         states = _states_of(records)
+        superseded = _superseded_errors(records)
         for record in records:
-            if record.error is None and not _matches(record, states):
+            gone = record.error is None and not _matches(record, states)
+            if gone or record.path in superseded:
                 record.path.unlink(missing_ok=True)
 
     def kill_all(self, *, wait_sec: float = 2.0) -> None:
@@ -312,6 +316,17 @@ def _str_or_none(value: object) -> str | None:
 
 def _states_of(records: Iterable[ProcessRecord]) -> _States:
     return process_start_states(r.pid for r in records)
+
+
+def _superseded_errors(records: list[ProcessRecord]) -> set[Path]:
+    """Сбои ``exec``, после которых тот же ключ запускался снова
+    (``records`` — от старых к новым)."""
+    newest = {r.server: r.path for r in records}
+    return {
+        r.path
+        for r in records
+        if r.error is not None and newest[r.server] != r.path
+    }
 
 
 def _matches(record: ProcessRecord, states: _States) -> bool:

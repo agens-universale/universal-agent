@@ -16,6 +16,7 @@
 import asyncio
 import contextvars
 import logging
+import os
 import threading
 import time
 from functools import partial
@@ -26,12 +27,14 @@ from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.consumer import McpConsumer
 from gc_core.tools.connect_mcp.consumer_status import ServerStatus
 from gc_core.tools.connect_mcp.failure_reason import classify_failure
+from gc_core.tools.connect_mcp.process_journal import ProcessJournal
 from gc_core.tools.connect_mcp.registry import (
     ToolsCache,
     build_checked_entries,
 )
 from gc_core.tools.connect_mcp.server_identity import (
     connection_fingerprint,
+    is_process_transport,
     with_service_defaults,
 )
 from gc_core.tools.connect_mcp.service_records import (
@@ -40,6 +43,7 @@ from gc_core.tools.connect_mcp.service_records import (
     McpServiceClosed,
     ServerEntry,
 )
+from gc_core.tools.connect_mcp.transport import _resolve_command
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,33 @@ logger = logging.getLogger(__name__)
 CLOSE_GRACE_SEC = 3.0
 #: Бюджет ``aclose`` по умолчанию: в него укладывается close-тул сервера.
 CLOSE_BUDGET_SEC = 10.0
+#: Сбой ``exec`` пускателя — исключение, которым кончился бы запуск без
+#: пускателя; прочие сбои — ``OSError``. Причина отказа та же, что без него.
+_LAUNCH_ERRORS = {"command_not_found": FileNotFoundError}
+
+
+def _launches_process(server_cfg: dict) -> bool:
+    """Процесс сервера с постоянной сессией на POSIX — запускается через
+    пускатель и учитывается в журнале (спека §5.12).
+
+    Постоянный stdio и SDK порождают такой процесс в новой сессии, поэтому
+    группа процесса равна его pid и групповой сигнал по записи журнала его
+    берёт. Разовый stdio (процесс в группе хоста) и Windows — без пускателя.
+    """
+    return (
+        os.name == "posix"
+        and is_process_transport(server_cfg)
+        and bool(server_cfg.get("persistent_session"))
+        and bool(server_cfg.get("command"))
+    )
+
+
+def _launch_args(server_cfg: dict) -> list[str]:
+    """Аргументы команды — как их готовит запуск без пускателя."""
+    args = server_cfg.get("args") or []
+    if not isinstance(args, list):
+        args = [args]
+    return [str(a) for a in args]
 
 
 def _warn_bad_catalog(server_key: str, cfg: dict, tools: list) -> None:
@@ -97,7 +128,8 @@ class McpService:
     открывают с любого потока. ``_backend_cache`` — кэш тулов серверов,
     исполняемых внутри бэкенда сервиса (§5.10); заводится при первом
     запросе. ``_close_task`` — задача закрытия: её ждут все вызовы
-    ``aclose``.
+    ``aclose``. ``_journal`` — журнал процессов серверов (§5.12);
+    заводится при первой подстановке пускателя.
     """
 
     def __init__(
@@ -122,6 +154,7 @@ class McpService:
         self._consumers: set[McpConsumer] = set()
         self._backend_cache: ToolsCache | None = None
         self._close_task: asyncio.Task | None = None
+        self._journal: ProcessJournal | None = None
 
     @property
     def connect_on_start(self) -> bool:
@@ -196,6 +229,47 @@ class McpService:
         if self._backend_cache is None:
             self._backend_cache = ToolsCache(os_backend=self._os_backend)
         return self._backend_cache
+
+    def with_launcher(self, server_key: str, server_cfg: dict) -> dict:
+        """Определение для запуска: процесс сервера с постоянной сессией
+        на POSIX — копия, где команда сервера идёт через пускатель журнала
+        сервиса; иначе ``server_cfg`` как есть. Звать с цикла сервиса.
+
+        Команда раскрывается так же, как при запуске без пускателя (``~``,
+        mcp-env); поиск по PATH пускатель делает в окружении сервера, а
+        ``cwd`` и ``env`` наследует без изменений. Отпечаток и ключ сессии
+        считаются по определению до подстановки.
+        """
+        if not _launches_process(server_cfg):
+            return server_cfg
+        if self._journal is None:
+            self._journal = ProcessJournal()
+        command, args = self._journal.launch_argv(
+            _resolve_command(str(server_cfg["command"])),
+            _launch_args(server_cfg),
+            server_key,
+        )
+        return {**server_cfg, "command": command, "args": args}
+
+    async def aprune_journal(self) -> None:
+        """Снять из журнала записи вышедших процессов — в рабочем потоке
+        (на macOS метка процесса читается через ``ps``). Журнала нет —
+        ничего."""
+        journal = self._journal
+        if journal is not None:
+            await asyncio.to_thread(journal.prune)
+
+    def _launch_failure(self, entry: ServerEntry) -> OSError | None:
+        """Последний запуск сервера не дошёл до его команды (сбой ``exec``
+        пускателя) — исключение, которым кончился бы запуск без пускателя;
+        иначе ``None``."""
+        if self._journal is None or not _launches_process(entry.cfg):
+            return None
+        record = self._journal.launch_error(entry.key)
+        if record is None:
+            return None
+        error = _LAUNCH_ERRORS.get(record.error, OSError)
+        return error(record.detail or record.error)
 
     def _forget_consumer(self, consumer: McpConsumer) -> None:
         """Закрытый потребитель больше не числится за сервисом."""
@@ -313,9 +387,15 @@ class McpService:
     def record_failure(
         self, entry: ServerEntry, exc: BaseException
     ) -> Failure:
-        """Отказ подключения; тулы записи остаются."""
+        """Отказ подключения; тулы записи остаются.
+
+        Процесс сервера не запустился (сбой ``exec`` пускателя) — причина
+        из журнала: транспорт видит только сервер, вышедший до ответа.
+        """
         self._bind_loop()
-        failure = Failure(self._clock(), *classify_failure(exc, entry.cfg))
+        launch = self._launch_failure(entry)
+        cause = exc if launch is None else launch
+        failure = Failure(self._clock(), *classify_failure(cause, entry.cfg))
         entry.last_failure = failure
         return failure
 
