@@ -325,6 +325,29 @@ async def test_reason_codes_end_to_end(
     assert {consumer.status_of(e).state for e in entries} == {STATE_FAILED}
 
 
+async def test_failure_warning_speaks_to_user(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, caplog
+):
+    """Предупреждение об отказе подключения видит и пользователь gc-cli
+    (stderr): в нём сервер и причина, без внутренних терминов."""
+    import logging
+
+    missing = str(tmp_path / "no-such-command")
+    settings = _settings(
+        {"missing": {"transport": "stdio", "command": missing}}
+    )
+    service = McpService(connect_on_start=False)
+    consumer = _consumer(mcp_reaper, service, settings, label="cli")
+    entry = _entry(service, settings, "missing")
+
+    with caplog.at_level(logging.WARNING):
+        await _connect(consumer, entry)
+
+    reason = consumer.status_of(entry).reason
+    assert f"MCP missing: не подключился: {reason}" in caplog.messages
+    assert "потребител" not in caplog.text
+
+
 async def test_trace_reaches_server_on_connect(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):

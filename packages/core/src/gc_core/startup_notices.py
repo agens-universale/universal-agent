@@ -59,7 +59,9 @@ def _stop_tools_unknown(
     ]
 
 
-def _mcp_failed(mcp_status: Optional[Dict[str, Any]]) -> List[Notice]:
+def _mcp_failed(
+    mcp_status: Optional[Dict[str, Any]], *, is_tui: bool
+) -> List[Notice]:
     if not isinstance(mcp_status, dict):
         return []
     failed = sorted(
@@ -69,11 +71,14 @@ def _mcp_failed(mcp_status: Optional[Dict[str, Any]]) -> List[Notice]:
     )
     if not failed:
         return []
+    # Экран `/mcp` — только в TUI.
+    hint = " (/mcp)" if is_tui else ""
     return [
         Notice(
             "warning",
             "mcp_failed",
-            f"MCP не подключились: {', '.join(failed)}. Проверьте конфиг/доступность (/mcp).",
+            f"MCP не подключились: {', '.join(failed)}. "
+            f"Проверьте конфиг/доступность{hint}.",
             highlights=tuple(failed),
         )
     ]
@@ -411,7 +416,7 @@ def collect_startup_notices(
     for n in (
         _stop_tools_unknown(settings, builtin_tool_names, known_tool_names)
         + _subagent_definitions(settings)
-        + _mcp_failed(mcp_status)
+        + _mcp_failed(mcp_status, is_tui=is_tui)
         + _agentsmd(settings, is_tui=is_tui)
         + _auto_routing(source)
         + _unknown_model(source)

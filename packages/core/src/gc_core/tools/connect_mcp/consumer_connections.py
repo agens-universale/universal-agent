@@ -338,12 +338,8 @@ class McpConnections:
     ) -> None:
         """Отказ — в запись; свой отказ считается от начала попытки."""
         failure = self._service.record_failure(entry, exc)
-        logger.warning(
-            "MCP %s: подключение потребителя %s не удалось: %s",
-            entry.key,
-            self.label,
-            failure.reason,
-        )
+        # Видит и пользователь gc-cli (stderr): без внутренних терминов.
+        logger.warning("MCP %s: не подключился: %s", entry.key, failure.reason)
         with self._lock:
             self._failures[session_key_of(entry)] = dataclasses.replace(
                 failure, at=started
