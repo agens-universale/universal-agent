@@ -528,6 +528,30 @@ async def test_failed_server_is_printed_with_reason(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="процессы POSIX")
+async def test_init_prints_failed_server_with_reason(
+    host, monkeypatch, capsys, mcp_home, mcp_reaper, mcp_owner
+):
+    """``--init`` печатает отказ сервера той же строкой, что и прогон."""
+    _install_tools_model(monkeypatch)
+    missing = {"transport": "stdio", "command": str(host / "нет"), "args": []}
+    _set_args(
+        monkeypatch, "--init", "--config", _config(host, {"bad": missing})
+    )
+    monkeypatch.setattr(
+        "gc_core.security.confirm_port.confirm_available",
+        lambda _ctx: False,
+    )
+
+    code = await asyncio.wait_for(cli._run_init_agents_md(), _CEILING_SEC)
+
+    assert code == 0
+    (line,) = _skipped(capsys.readouterr().out)
+    assert line.startswith("[MCP] bad: недоступен — ")
+    assert "не найдена" in line
+    assert line.endswith(" (пропущен)")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="процессы POSIX")
 @pytest.mark.parametrize("cataloged", [False, True])
 async def test_late_server_is_skipped(
     cataloged, host, monkeypatch, capsys, mcp_home, mcp_reaper, mcp_owner
