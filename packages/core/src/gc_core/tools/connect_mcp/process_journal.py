@@ -7,10 +7,20 @@
 ``<gc_state>/mcp/processes/<boot_id>-<pid>-<метка хоста>-<случайное>/``,
 в нём ``owner.json`` = ``{"pid", "mark", "node", "boot_id"}`` хозяина.
 Хозяин разбирается только по ``owner.json``, имя каталога — для людей.
+Каталоги ``0700``, файлы ``0600``; файлы чужого пользователя не читаются.
 
-Правило всех сигналов: процесс доказан своим — жив, не зомби, метка
-личности совпала с записью, а групповой сигнал получает только лидер
-группы (``pgid == pid``). Несовпавшая запись не трогается.
+Правило всех сигналов: процесс доказан своим — метка личности лидера
+совпала с записью, а групповой сигнал получает только лидер группы
+(``pgid == pid``). Несовпавшая запись не трогается. Непожатый зомби-лидер
+своим считается: он хранит то же время старта и держит pid и номер
+группы, пока его не пожмут, поэтому сигнал его группе безопасен (так
+гасится глухой потомок вышедшего лидера). В ожидании выхода зомби —
+вышедший.
+
+Между сверкой метки и сигналом есть окно. Оно безопасно, пока в группе
+есть хоть один процесс (зомби тоже): номер группы занят и никому не
+достанется. Опасен только полный оборот pid за время ожидания (≤ 2 с)
+после того, как группа опустела целиком, — допущение спеки §5.12.
 
 Linux и macOS — полноценно; на других ОС пускателя нет (команда идёт как
 есть), журнал пуст, уборка ничего не делает.
@@ -33,12 +43,17 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from gc_core.config_modules.env_vars import gc_paths
 from gc_core.utils.atomic_io import atomic_replace
-from gc_core.utils.process_identity import boot_id, process_start_mark
+from gc_core.utils.process_identity import (
+    boot_id,
+    process_start_mark,
+    process_start_states,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +64,8 @@ _NOT_ALNUM = re.compile(r"[^A-Za-z0-9]")
 _POLL_STEP_SEC = 0.05
 #: Ожидание сирот после SIGTERM до SIGKILL.
 _ORPHAN_WAIT_SEC = 2.0
+
+_States = dict[int, tuple[str, bool]]
 
 
 def journal_root() -> Path:
@@ -96,43 +113,53 @@ class ProcessJournal:
         if directory is None:
             return command, args
         launcher = [str(_LAUNCHER), str(directory), server_key, "--"]
-        return sys.executable, ["-I", *launcher, command, *args]
+        return sys.executable, ["-I", "-S", *launcher, command, *args]
 
     def records(self) -> list[ProcessRecord]:
-        """Целые файлы запусков, от старых к новым; битые пропускаются."""
+        """Целые свои файлы запусков, от старых к новым; битые пропускаются."""
         directory = self._dir
         return _read_records(directory) if directory is not None else []
 
     def launch_error(self, server_key: str) -> ProcessRecord | None:
-        """Самая свежая запись сервера со сбоем ``exec``."""
-        failed = [
-            r
-            for r in self.records()
-            if r.server == server_key and r.error is not None
-        ]
-        return failed[-1] if failed else None
+        """Самая свежая запись ключа, если в ней сбой ``exec``.
+
+        Удачный запуск после сбоя прежнюю причину гасит.
+        """
+        own = [r for r in self.records() if r.server == server_key]
+        if own and own[-1].error is not None:
+            return own[-1]
+        return None
 
     def prune(self) -> None:
-        """Снять файлы процессов, которых уже нет (или их не узнать)."""
-        for record in self.records():
-            if not _is_same_process(record):
+        """Снять файлы процессов, которых уже нет (или их не узнать).
+
+        Остаются записи со сбоем ``exec`` (их читает ``launch_error``,
+        уходят они с каталогом) и записи непожатого зомби-лидера: пока он
+        держит группу, ``kill_all`` гасит по ней глухих потомков.
+        """
+        records = self.records()
+        states = _states_of(records)
+        for record in records:
+            if record.error is None and not _matches(record, states):
                 record.path.unlink(missing_ok=True)
 
     def kill_all(self, *, wait_sec: float = 2.0) -> None:
         """Погасить все доказанно свои группы: SIGTERM, ожидание, SIGKILL.
 
         После круга журнал читается ещё раз: запуск, начатый до вызова,
-        мог записаться во время ожидания — он получает свой круг.
+        мог записаться во время ожидания — он получает свой круг. Срок
+        ``wait_sec`` общий на оба круга.
         """
+        deadline = time.monotonic() + wait_sec
         first = _provably_ours(self.records())
-        _terminate_groups(first, wait_sec)
+        _terminate_groups(first, deadline)
         handled = {(r.pid, r.mark) for r in first}
         late = [
             r
             for r in _provably_ours(self.records())
             if (r.pid, r.mark) not in handled
         ]
-        _terminate_groups(late, wait_sec)
+        _terminate_groups(late, deadline)
 
     def remove(self) -> None:
         """Удалить каталог журнала; следующий запуск заведёт новый."""
@@ -153,11 +180,15 @@ def sweep_orphans(
 ) -> int:
     """Убрать журналы мёртвых хозяев этого узла; вернуть число SIGTERM.
 
-    Каталог другой загрузки удаляется без сигналов. Журнал другого узла
-    и живого хозяина не трогается. У мёртвого хозяина доказанно своим
-    группам — SIGTERM; через ``wait_sec`` тем, чей лидер жив с той же
-    меткой, — SIGKILL; затем каталог удаляется. Группа мёртвого лидера
-    не трогается: её номер мог достаться чужому.
+    Журнал другого узла и живого хозяина не трогается. Мёртвый хозяин
+    другой загрузки — каталог удаляется без сигналов. Мёртвый хозяин этой
+    загрузки: доказанно своим группам — SIGTERM; через ``wait_sec`` тем,
+    чей лидер всё ещё с той же меткой (зомби тоже), — SIGKILL; затем
+    каталог удаляется. Группа пожатого лидера не трогается: её номер мог
+    достаться чужому.
+
+    Две одновременные уборки могут обе послать SIGTERM одной сироте и обе
+    её посчитать: число тогда завышено, сигналы безопасны.
     """
     if not _tracking_supported():
         return 0
@@ -172,9 +203,10 @@ def sweep_orphans(
         if verdict:
             targets.extend(_provably_ours(_read_records(directory)))
     signalled = [r for r in targets if _signal_group(r.pgid, signal.SIGTERM)]
-    _await_exit(signalled, wait_sec)
+    _await_exit(signalled, time.monotonic() + wait_sec)
+    states = _states_of(signalled)
     for record in signalled:
-        if _is_same_process(record):
+        if _matches(record, states):
             _signal_group(record.pgid, signal.SIGKILL)
     for directory in doomed:
         shutil.rmtree(directory, ignore_errors=True)
@@ -202,7 +234,8 @@ def _create_dir(root: Path) -> Path | None:
         "boot_id": boot,
     }
     try:
-        directory.mkdir(parents=True)
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.mkdir(mode=0o700)
         _write_json(directory / _OWNER_FILE, owner)
     except OSError as exc:
         logger.warning("[MCP] журнал процессов не создан: %s", exc)
@@ -212,6 +245,7 @@ def _create_dir(root: Path) -> Path | None:
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    """Файл ``0600`` (``mkstemp``) и атомарная замена."""
     fd, staged = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -223,9 +257,13 @@ def _write_json(path: Path, payload: dict) -> None:
         raise
 
 
-def _read_json(path: Path) -> object:
+def _read_own_json(path: Path) -> tuple[object, int] | None:
+    """(данные, mtime_ns) файла своего пользователя; иначе ``None``."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        info = path.stat()
+        if info.st_uid != os.getuid():
+            return None
+        return json.loads(path.read_text(encoding="utf-8")), info.st_mtime_ns
     except (OSError, ValueError):
         return None
 
@@ -239,11 +277,10 @@ def _read_records(directory: Path) -> list[ProcessRecord]:
     for path in entries:
         if not path.stem.isdigit():
             continue
-        record = _parse_record(path, _read_json(path))
-        if record is None:
-            continue
-        with contextlib.suppress(OSError):
-            ranked.append((path.stat().st_mtime_ns, path.name, record))
+        found = _read_own_json(path)
+        record = _parse_record(path, found[0]) if found else None
+        if found and record is not None:
+            ranked.append((found[1], path.name, record))
     ranked.sort(key=lambda item: item[:2])
     return [record for _, _, record in ranked]
 
@@ -273,11 +310,23 @@ def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _is_same_process(record: ProcessRecord) -> bool:
-    """Процесс записи жив, не зомби, и метка та же."""
-    return record.mark is not None and (
-        process_start_mark(record.pid) == record.mark
+def _states_of(records: Iterable[ProcessRecord]) -> _States:
+    return process_start_states(r.pid for r in records)
+
+
+def _matches(record: ProcessRecord, states: _States) -> bool:
+    """Процесс записи тот же (жив или непожатый зомби)."""
+    found = states.get(record.pid)
+    return (
+        record.mark is not None
+        and found is not None
+        and (found[0] == record.mark)
     )
+
+
+def _running(record: ProcessRecord, states: _States) -> bool:
+    """Процесс записи тот же и ещё не вышел (не зомби)."""
+    return _matches(record, states) and not states[record.pid][1]
 
 
 def _provably_ours(records: list[ProcessRecord]) -> list[ProcessRecord]:
@@ -286,10 +335,11 @@ def _provably_ours(records: list[ProcessRecord]) -> list[ProcessRecord]:
     Своя группа хоста исключена на случай подделанной записи.
     """
     own_group = os.getpgrp()
+    states = _states_of(records)
     return [
         r
         for r in records
-        if r.pgid == r.pid and r.pgid != own_group and _is_same_process(r)
+        if r.pgid == r.pid and r.pgid != own_group and _matches(r, states)
     ]
 
 
@@ -312,32 +362,34 @@ def _signal_group(pgid: int, sig: int) -> bool:
     return True
 
 
-def _await_exit(records: list[ProcessRecord], wait_sec: float) -> None:
-    """Ждать до ``wait_sec``, пока не выйдут лидеры всех групп.
+def _await_exit(records: list[ProcessRecord], deadline: float) -> None:
+    """Ждать до ``deadline`` (монотонные часы), пока выйдут все лидеры.
 
-    Зомби считается вышедшим: лидера, которого хозяин ещё не пожал, по
-    пустоте группы не дождаться.
+    Один опрос ОС на шаг. Зомби считается вышедшим: лидера, которого
+    хозяин ещё не пожал, по пустоте группы не дождаться.
     """
-    deadline = time.monotonic() + wait_sec
-    while any(_is_same_process(r) for r in records):
+    while records:
+        states = _states_of(records)
+        if not any(_running(r, states) for r in records):
+            return
         left = deadline - time.monotonic()
         if left <= 0:
             return
         time.sleep(min(_POLL_STEP_SEC, left))
 
 
-def _terminate_groups(records: list[ProcessRecord], wait_sec: float) -> None:
-    """SIGTERM группам, ожидание лидеров, SIGKILL каждой группе.
+def _terminate_groups(records: list[ProcessRecord], deadline: float) -> None:
+    """SIGTERM группам, ожидание дошедших, SIGKILL каждой группе.
 
     SIGKILL уходит и группе вышедшего лидера: глухой к SIGTERM потомок
     послушного лидера (``node`` и Chromium) иначе переживёт хоста. Пока в
-    группе есть процессы, её номер никому не достанется.
+    группе есть процессы, её номер никому не достанется. Ждутся только
+    группы, которым SIGTERM дошёл: EPERM не тянет весь срок.
     """
     if not records:
         return
-    for record in records:
-        _signal_group(record.pgid, signal.SIGTERM)
-    _await_exit(records, wait_sec)
+    signalled = [r for r in records if _signal_group(r.pgid, signal.SIGTERM)]
+    _await_exit(signalled, deadline)
     for record in records:
         _signal_group(record.pgid, signal.SIGKILL)
 
@@ -351,19 +403,27 @@ def _owner_dirs(base: Path) -> list[Path]:
 
 def _orphan_verdict(directory: Path) -> bool | None:
     """Судьба каталога: ``None`` — не трогать, ``False`` — удалить без
-    сигналов (другая загрузка), ``True`` — хозяин мёртв, гасить сирот."""
-    owner = _read_json(directory / _OWNER_FILE)
+    сигналов (другая загрузка), ``True`` — хозяин мёртв, гасить сирот.
+
+    Живой хозяин проверяется до загрузки: сбой ``boot_id()`` (``"0"``)
+    не должен удалить журнал живого соседа.
+    """
+    found = _read_own_json(directory / _OWNER_FILE)
+    owner = found[0] if found else None
     if not isinstance(owner, dict) or owner.get("node") != platform.node():
         return None
-    if owner.get("boot_id") != boot_id():
-        return False
     pid = owner.get("pid")
-    if not _is_int(pid):
+    if not _is_int(pid) or _owner_alive(pid, owner.get("mark")):
         return None
+    return owner.get("boot_id") == boot_id()
+
+
+def _owner_alive(pid: int, mark: object) -> bool:
+    """Хозяин жив: метка совпала; без метки в ``owner.json`` — pid жив."""
     current = process_start_mark(pid)
-    mark = _str_or_none(owner.get("mark"))
-    alive = current is not None and (mark is None or current == mark)
-    return None if alive else True
+    if not isinstance(mark, str):
+        return current is not None
+    return current == mark
 
 
 __all__ = [

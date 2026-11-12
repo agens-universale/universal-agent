@@ -6,9 +6,14 @@
 метку сверяют — иначе сигнал уйдёт чужому процессу с тем же номером.
 
 Linux — поле ``starttime`` из ``/proc/<pid>/stat``; macOS — ``lstart`` из
-``ps`` с ``LC_ALL=C`` (вывод не зависит от локали). Зомби и отсутствующий
-процесс метки не имеют: зомби уже вышел, его номер держится только до того,
-как родитель его пожмёт. На других ОС метки нет (``None``).
+``/bin/ps`` с ``LC_ALL=C`` (вывод не зависит от локали). Утилиты — по
+абсолютным путям: ``PATH`` бывает чужим (окружение сервера) или без
+``/bin``. На других ОС метки нет.
+
+Зомби хранит время старта до того, как родитель его пожмёт, и всё это
+время держит свой pid и номер группы. ``process_start_states`` отдаёт метку
+вместе с признаком «зомби» — для отбора групп под сигнал;
+``process_start_mark`` зомби считает вышедшим и метки ему не даёт.
 
 Время старта считается от загрузки системы (Linux) или с секундной
 точностью (macOS), поэтому метку хранят вместе с ``boot_id``: после
@@ -20,8 +25,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
+_PS = "/bin/ps"
+_SYSCTL = "/usr/sbin/sysctl"
 #: Потолок вызова ``ps`` и ``sysctl`` на macOS.
 _TOOL_TIMEOUT_SEC = 5.0
 
@@ -37,42 +45,60 @@ def parse_linux_stat(text: str) -> tuple[str, str]:
     return fields[0], fields[19]
 
 
-def parse_ps_line(text: str) -> tuple[str, str]:
-    """(состояние, время старта) из вывода ``ps -o stat=,lstart= -p <pid>``.
+def parse_ps_table(text: str) -> dict[int, tuple[str, str]]:
+    """{pid: (состояние, время старта)} из ``ps -o pid=,stat=,lstart=``.
 
-    Пробелы времени схлопываются: ``ps`` выравнивает день месяца.
+    Пробелы времени схлопываются (``ps`` выравнивает день месяца);
+    строки, которые не разобрать, пропускаются.
     """
-    state, *start = text.split()
-    return state, " ".join(start)
+    table: dict[int, tuple[str, str]] = {}
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) > 2 and fields[0].isdigit():
+            table[int(fields[0])] = (fields[1], " ".join(fields[2:]))
+    return table
+
+
+def process_start_states(pids: Iterable[int]) -> dict[int, tuple[str, bool]]:
+    """{pid: (метка, зомби ли)} для найденных процессов; один опрос ОС.
+
+    Нет процесса, ошибка чтения, другая ОС — pid в ответе нет.
+    """
+    wanted = sorted({pid for pid in pids if pid > 0})
+    if not wanted:
+        return {}
+    if sys.platform.startswith("linux"):
+        raw = _linux_states(wanted)
+    elif sys.platform == "darwin":
+        raw = _ps_states(wanted)
+    else:
+        return {}
+    return {
+        pid: (start, state.startswith("Z"))
+        for pid, (state, start) in raw.items()
+        if start
+    }
 
 
 def process_start_mark(pid: int) -> str | None:
-    """Метка личности процесса; зомби, нет процесса, другая ОС — ``None``."""
-    if pid <= 0:
+    """Метка живого процесса; зомби, нет процесса, другая ОС — ``None``."""
+    found = process_start_states([pid]).get(pid)
+    if found is None or found[1]:
         return None
-    try:
-        if sys.platform.startswith("linux"):
-            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-            state, start = parse_linux_stat(stat)
-        elif sys.platform == "darwin":
-            state, start = parse_ps_line(_ps_identity(pid))
-        else:
-            return None
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-        return None
-    if state.startswith("Z") or not start:
-        return None
-    return start
+    return found[0]
 
 
 def boot_id() -> str:
-    """Идентификатор текущей загрузки системы; не узнать — ``"0"``."""
+    """Идентификатор текущей загрузки системы; не узнать — ``"0"``.
+
+    macOS — ``kern.bootsessionuuid``: UUID загрузки, как ``boot_id`` Linux.
+    """
     try:
         if sys.platform.startswith("linux"):
             path = Path("/proc/sys/kernel/random/boot_id")
             value = path.read_text(encoding="utf-8")
         elif sys.platform == "darwin":
-            value = _run(["sysctl", "-n", "kern.boottime"])
+            value = _run([_SYSCTL, "-n", "kern.bootsessionuuid"], check=True)
         else:
             return "0"
     except (OSError, subprocess.SubprocessError):
@@ -80,18 +106,35 @@ def boot_id() -> str:
     return value.strip() or "0"
 
 
-def _ps_identity(pid: int) -> str:
-    return _run(["ps", "-o", "stat=,lstart=", "-p", str(pid)])
+def _linux_states(pids: list[int]) -> dict[int, tuple[str, str]]:
+    states: dict[int, tuple[str, str]] = {}
+    for pid in pids:
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            states[pid] = parse_linux_stat(stat)
+        except (OSError, ValueError, IndexError):
+            continue
+    return states
 
 
-def _run(argv: list[str]) -> str:
+def _ps_states(pids: list[int]) -> dict[int, tuple[str, str]]:
+    """Один ``ps`` на все pid; отсутствующие он пропускает (код 1)."""
+    argv = [_PS, "-o", "pid=,stat=,lstart=", "-p", ",".join(map(str, pids))]
+    try:
+        return parse_ps_table(_run(argv, check=False))
+    except (OSError, subprocess.SubprocessError):
+        return {}
+
+
+def _run(argv: list[str], *, check: bool) -> str:
     result = subprocess.run(
         argv,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=_TOOL_TIMEOUT_SEC,
         env={**os.environ, "LC_ALL": "C"},
-        check=True,
+        check=check,
     )
     return result.stdout
 
@@ -99,6 +142,7 @@ def _run(argv: list[str]) -> str:
 __all__ = [
     "boot_id",
     "parse_linux_stat",
-    "parse_ps_line",
+    "parse_ps_table",
     "process_start_mark",
+    "process_start_states",
 ]

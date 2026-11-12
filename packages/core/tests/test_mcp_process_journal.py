@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import signal
 import subprocess
 import sys
@@ -18,6 +19,7 @@ import time
 from pathlib import Path
 
 import pytest
+from gc_core.tools.connect_mcp import spawn_launcher
 from gc_core.tools.connect_mcp.process_journal import (
     ProcessJournal,
     journal_root,
@@ -26,8 +28,9 @@ from gc_core.tools.connect_mcp.process_journal import (
 from gc_core.utils.process_identity import (
     boot_id,
     parse_linux_stat,
-    parse_ps_line,
+    parse_ps_table,
     process_start_mark,
+    process_start_states,
 )
 from gc_testkit.mcp import alive, children, launches, set_behavior, stdio_cfg
 from gc_testkit.mcp import wait_for as _wait_for
@@ -38,6 +41,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 _TIMEOUT = 5.0
+_linux_only = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="читает /proc"
+)
 
 
 async def wait_for(predicate) -> None:
@@ -105,9 +111,38 @@ def _record_of(journal: ProcessJournal, pid: int):
 
 
 def _journal_dir(journal: ProcessJournal) -> Path:
-    """Каталог журнала — третий аргумент пускателя."""
+    """Каталог журнала — аргумент пускателя после его пути."""
     _, argv = journal.launch_argv("true", [], "probe")
-    return Path(argv[2])
+    return Path(argv[3])
+
+
+def _fake_record(directory: Path, name: str, **record) -> None:
+    payload = {"server": "srv", **record}
+    (directory / f"{name}.json").write_text(json.dumps(payload), "utf-8")
+
+
+async def _zombie_leader_with_deaf_child(procs, journal, control):
+    """Лидер вышел сам и не пожат (зомби), глухой к SIGTERM потомок жив."""
+    proc = _spawn(procs, journal, control, child_ignores_term=True)
+    await _started(journal, control, proc)
+    await wait_for(lambda: len(children(control)) == 1)
+    [child] = children(control)
+    proc.stdin.close()
+    await wait_for(lambda: not alive(proc.pid))
+    assert process_start_states([proc.pid])[proc.pid][1] is True
+    assert alive(child)
+    return proc, child
+
+
+class _KillpgSpy:
+    def __init__(self, error: BaseException | None = None) -> None:
+        self.calls: list[tuple[int, int]] = []
+        self._error = error
+
+    def __call__(self, pgid: int, sig: int) -> None:
+        self.calls.append((pgid, sig))
+        if self._error is not None:
+            raise self._error
 
 
 # --- метка личности ---------------------------------------------------------
@@ -117,14 +152,16 @@ def test_parse_linux_stat_and_ps():
     tail = "1 4242 4242 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 987654 1 2"
     assert parse_linux_stat(f"4242 (a b) c) S {tail}\n") == ("S", "987654")
     assert parse_linux_stat(f"4242 (sleep) Z {tail}") == ("Z", "987654")
-    assert parse_ps_line("Ss   Wed Nov 12 10:00:00 2026\n") == (
-        "Ss",
-        "Wed Nov 12 10:00:00 2026",
+    table = (
+        "  101 Ss   Wed Nov 12 10:00:00 2026\n"
+        "99999 Z+   Mon Nov  3 09:05:07 2026\n"
+        "garbage\n"
     )
-    assert parse_ps_line("Z+   Mon Nov  3 09:05:07 2026") == (
-        "Z+",
-        "Mon Nov 3 09:05:07 2026",
-    )
+    assert parse_ps_table(table) == {
+        101: ("Ss", "Wed Nov 12 10:00:00 2026"),
+        99999: ("Z+", "Mon Nov 3 09:05:07 2026"),
+    }
+    assert parse_ps_table("") == {}
 
 
 def test_start_mark_of_live_zombie_and_missing(procs):
@@ -134,15 +171,52 @@ def test_start_mark_of_live_zombie_and_missing(procs):
     assert boot_id() not in ("", "0")
     assert boot_id() == boot_id()
 
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    reader = [sys.executable, "-c", "import sys; sys.stdin.read()"]
+    proc = subprocess.Popen(reader, stdin=subprocess.PIPE)
     procs.append(proc)
+    mark = process_start_mark(proc.pid)
+    assert mark is not None
+    assert process_start_states([proc.pid]) == {proc.pid: (mark, False)}
+    proc.stdin.close()
     deadline = time.monotonic() + _TIMEOUT
     while alive(proc.pid) and time.monotonic() < deadline:
         time.sleep(0.02)
-    # Не пожат: процесс — зомби, метки нет.
+    # Не пожат: зомби хранит время старта, но живой метки у него нет.
     assert process_start_mark(proc.pid) is None
+    assert process_start_states([proc.pid]) == {proc.pid: (mark, True)}
     proc.wait(_TIMEOUT)
     assert process_start_mark(proc.pid) is None
+    assert process_start_states([proc.pid, 0, -5]) == {}
+
+
+def test_tools_are_found_by_absolute_path(monkeypatch, tmp_path):
+    """Ветка macOS не ищет ``ps`` и ``sysctl`` по ``PATH``.
+
+    Ветку проверяет procps ``/bin/ps`` Linux: формат ``-o lstart=`` тот же.
+    """
+    if not Path("/bin/ps").exists():
+        pytest.skip("нет /bin/ps")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    for name, line in (
+        ("ps", f"{os.getpid()} S Fake Jan 1 00:00:00 1999"),
+        ("sysctl", "fake-boot"),
+    ):
+        tool = fake / name
+        tool.write_text(f"#!/bin/sh\necho '{line}'\n", encoding="utf-8")
+        tool.chmod(0o755)
+    real = subprocess.run(
+        ["/bin/ps", "-o", "lstart=", "-p", str(os.getpid())],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    monkeypatch.setenv("PATH", str(fake))
+    monkeypatch.setattr(sys, "platform", "darwin")
+    mark = process_start_mark(os.getpid())
+    assert mark == " ".join(real.split())
+    assert spawn_launcher._start_mark() == mark
+    assert boot_id() != "fake-boot"
 
 
 # --- пускатель и запись ------------------------------------------------------
@@ -151,12 +225,15 @@ def test_start_mark_of_live_zombie_and_missing(procs):
 def test_launch_argv_shape_and_owner(mcp_home):
     journal = ProcessJournal()
     cmd, args = journal.launch_argv("node", ["srv.js", "-x"], "my srv")
-    jdir = Path(args[2])
+    jdir = Path(args[3])
     assert cmd == sys.executable
-    assert args[0] == "-I"
-    assert Path(args[1]).name == "spawn_launcher.py"
-    assert args[3:] == ["my srv", "--", "node", "srv.js", "-x"]
+    assert args[:2] == ["-I", "-S"]
+    assert Path(args[2]).name == "spawn_launcher.py"
+    assert args[4:] == ["my srv", "--", "node", "srv.js", "-x"]
     assert jdir.parent == journal_root() == mcp_home / "mcp" / "processes"
+    assert stat.S_IMODE(journal_root().stat().st_mode) == 0o700
+    assert stat.S_IMODE(jdir.stat().st_mode) == 0o700
+    assert stat.S_IMODE((jdir / "owner.json").stat().st_mode) == 0o600
     owner = json.loads((jdir / "owner.json").read_text(encoding="utf-8"))
     assert owner["pid"] == os.getpid()
     assert owner["mark"] == process_start_mark(os.getpid())
@@ -166,7 +243,7 @@ def test_launch_argv_shape_and_owner(mcp_home):
     assert parts[1] == str(os.getpid())
     assert all(part.isalnum() for part in parts)
     # Тот же каталог на все запуски сервиса.
-    assert journal.launch_argv("x", [], "k")[1][2] == str(jdir)
+    assert journal.launch_argv("x", [], "k")[1][3] == str(jdir)
 
 
 def test_launch_argv_off_posix_is_plain(mcp_home, monkeypatch):
@@ -190,7 +267,37 @@ async def test_launcher_keeps_pid_and_writes_record(
     assert rec.mark is not None
     assert rec.server == "srv"
     assert rec.error is None
+    assert stat.S_IMODE(rec.path.stat().st_mode) == 0o600
     assert launches(control) == [proc.pid]
+
+
+async def test_launcher_is_transparent_on_stdio(mcp_home, procs):
+    journal = ProcessJournal()
+    cmd, args = journal.launch_argv("cat", [], "srv")
+    proc = subprocess.Popen(
+        [cmd, *args],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    procs.append(proc)
+    request = b'{"jsonrpc": "2.0", "id": 1, "method": "ping"}\n'
+    out, err = proc.communicate(request, timeout=_TIMEOUT)
+    assert (out, err, proc.returncode) == (request, b"", 0)
+    assert [r.pid for r in journal.records()] == [proc.pid]
+
+
+@_linux_only
+def test_launcher_restores_default_signals(mcp_home):
+    def ignored(argv: list[str]) -> str:
+        status = subprocess.run(
+            argv, capture_output=True, text=True, timeout=_TIMEOUT, check=True
+        ).stdout
+        return next(x for x in status.splitlines() if x.startswith("SigIgn"))
+
+    cmd, args = ProcessJournal().launch_argv("cat", ["/proc/self/status"], "s")
+    direct = ignored(["cat", "/proc/self/status"])
+    assert ignored([cmd, *args]) == direct
 
 
 async def test_each_launch_gets_own_record(
@@ -217,6 +324,23 @@ async def test_missing_command_recorded(mcp_home, procs):
     assert rec.detail
     assert "spawn_launcher" not in rec.detail
     assert journal.launch_error("other") is None
+
+
+async def test_launch_error_is_only_the_newest_record(
+    mcp_home, mcp_reaper, procs, tmp_path
+):
+    journal = ProcessJournal()
+    cmd, args = journal.launch_argv("no-such-binary-xyz", [], "srv")
+    failed = subprocess.Popen([cmd, *args], stderr=subprocess.DEVNULL)
+    procs.append(failed)
+    assert failed.wait(_TIMEOUT) == 127
+    assert journal.launch_error("srv").pid == failed.pid
+    # Удачный повторный запуск того же ключа гасит прежнюю причину.
+    time.sleep(0.01)
+    control = tmp_path / "s.json"
+    proc = _spawn(procs, journal, control)
+    await _started(journal, control, proc)
+    assert journal.launch_error("srv") is None
 
 
 async def test_exec_failure_recorded(mcp_home, procs, tmp_path):
@@ -289,6 +413,20 @@ def test_records_skip_broken_files(mcp_home):
     assert rec.path == jdir / "4242.json"
 
 
+def test_foreign_owned_files_are_ignored(mcp_home, monkeypatch):
+    journal = ProcessJournal()
+    jdir = _journal_dir(journal)
+    _fake_record(jdir, "4242", pid=4242, pgid=4242, mark="1")
+    orphan_dir = _journal_dir(ProcessJournal())
+    _rewrite(orphan_dir / "owner.json", mark="bogus", boot_id="other-boot")
+    assert len(journal.records()) == 1
+    real_uid = os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+    assert journal.records() == []
+    assert sweep_orphans() == 0
+    assert orphan_dir.exists()
+
+
 # --- аварийное гашение -------------------------------------------------------
 
 
@@ -341,6 +479,72 @@ async def test_kill_all_skips_foreign_mark_and_foreign_group(
     assert alive(grouped.pid)
 
 
+def _forged_records(directory: Path) -> None:
+    """Записи с верными метками: своя группа хоста, init, 0, −5."""
+    own = os.getpgrp()
+    assert process_start_mark(own) is not None
+    assert process_start_mark(1) is not None
+    _fake_record(
+        directory, "1", pid=own, pgid=own, mark=process_start_mark(own)
+    )
+    _fake_record(directory, "2", pid=1, pgid=1, mark=process_start_mark(1))
+    _fake_record(directory, "3", pid=0, pgid=0, mark="0")
+    _fake_record(directory, "4", pid=-5, pgid=-5, mark="0")
+
+
+def test_kill_all_never_signals_own_group_or_low_pgid(mcp_home):
+    journal = ProcessJournal()
+    _forged_records(_journal_dir(journal))
+    spy = _KillpgSpy()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(os, "killpg", spy)
+        journal.kill_all(wait_sec=0.1)
+    assert spy.calls == []
+
+
+def test_sweep_never_signals_own_group_or_low_pgid(mcp_home):
+    jdir = _journal_dir(ProcessJournal())
+    _rewrite(jdir / "owner.json", mark="bogus")
+    _forged_records(jdir)
+    spy = _KillpgSpy()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(os, "killpg", spy)
+        assert sweep_orphans(wait_sec=0.1) == 0
+    assert spy.calls == []
+
+
+async def test_kill_all_does_not_wait_for_refused_signal(
+    mcp_home, mcp_reaper, procs, tmp_path
+):
+    journal = ProcessJournal()
+    control = tmp_path / "s.json"
+    proc = _spawn(procs, journal, control)
+    await _started(journal, control, proc)
+    spy = _KillpgSpy(PermissionError(1, "Operation not permitted"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(os, "killpg", spy)
+        started = time.monotonic()
+        journal.kill_all(wait_sec=3)
+        elapsed = time.monotonic() - started
+    assert elapsed < 1
+    assert spy.calls == [
+        (proc.pid, signal.SIGTERM),
+        (proc.pid, signal.SIGKILL),
+    ]
+    assert alive(proc.pid)
+
+
+async def test_kill_all_kills_deaf_child_of_zombie_leader(
+    mcp_home, mcp_reaper, procs, tmp_path
+):
+    journal = ProcessJournal()
+    proc, child = await _zombie_leader_with_deaf_child(
+        procs, journal, tmp_path / "s.json"
+    )
+    journal.kill_all(wait_sec=1)
+    await wait_for(lambda: not alive(child))
+
+
 async def test_kill_all_returns_early_when_all_exit(
     mcp_home, mcp_reaper, procs, tmp_path
 ):
@@ -367,12 +571,17 @@ async def test_kill_all_rereads_journal_for_late_launch(
     late: list[subprocess.Popen] = []
 
     def launch_late() -> None:
-        late.append(_spawn(procs, journal, tmp_path / "b.json"))
+        late.append(
+            _spawn(procs, journal, tmp_path / "b.json", ignore_term=True)
+        )
 
     # Запуск во время ожидания первого круга: в первом чтении его нет.
     timer = threading.Timer(0.1, launch_late)
     timer.start()
+    started = time.monotonic()
     journal.kill_all(wait_sec=2)
+    # Срок общий на оба круга: второй глухой не продлевает ожидание.
+    assert time.monotonic() - started < 3
     timer.join(_TIMEOUT)
     [proc] = late
     await wait_for(lambda: not alive(proc.pid) and not alive(deaf.pid))
@@ -385,15 +594,23 @@ async def test_prune_drops_dead_records(mcp_home, mcp_reaper, procs, tmp_path):
     live = _spawn(procs, journal, tmp_path / "b.json")
     await _started(journal, tmp_path / "a.json", done)
     await _started(journal, tmp_path / "b.json", live)
+    zombie, _ = await _zombie_leader_with_deaf_child(
+        procs, journal, tmp_path / "z.json"
+    )
+    cmd, args = journal.launch_argv("no-such-binary-xyz", [], "bad")
+    failed = subprocess.Popen([cmd, *args], stderr=subprocess.DEVNULL)
+    procs.append(failed)
+    assert failed.wait(_TIMEOUT) == 127
     done.stdin.close()
     done.wait(_TIMEOUT)
     # Пускатель не узнал метку, процесса нет: запись тоже снимается.
-    unmarked = {"pid": 999999999, "pgid": 999999999, "mark": None}
-    (_record_of(journal, live.pid).path.parent / "999999999.json").write_text(
-        json.dumps({**unmarked, "server": "srv"}), encoding="utf-8"
-    )
+    jdir = _record_of(journal, live.pid).path.parent
+    _fake_record(jdir, "999999999", pid=999999999, pgid=999999999, mark=None)
     journal.prune()
-    assert [r.pid for r in journal.records()] == [live.pid]
+    # Остаются живой, непожатый зомби-лидер и сбой запуска.
+    assert sorted(r.pid for r in journal.records()) == sorted(
+        [live.pid, zombie.pid, failed.pid]
+    )
 
 
 async def test_prune_and_kill_all_run_concurrently(
@@ -441,7 +658,7 @@ async def test_sweep_orphans(mcp_home, mcp_reaper, procs, tmp_path):
     ja, ca, pa = case("a", ignore_eof=True)
     # Б: хозяин — этот процесс.
     jb, cb, pb = case("b")
-    # В: журнал другой загрузки.
+    # В: хозяин мёртв, журнал другой загрузки.
     jc, cc, pc = case("c")
     # Г: хозяин мёртв, лидер мёртв, потомок жив.
     jd, cd, pd = case("d", spawn_child=True)
@@ -467,7 +684,7 @@ async def test_sweep_orphans(mcp_home, mcp_reaper, procs, tmp_path):
         name: _journal_dir(j)
         for name, j in zip("abcdef", (ja, jb, jc, jd, je, jf), strict=True)
     }
-    for name in "ade":
+    for name in "acde":
         _rewrite(dirs[name] / "owner.json", **dead_owner)
     _rewrite(dirs["c"] / "owner.json", boot_id="other-boot")
     _rewrite(_record_of(je, pe.pid).path, mark="bogus")
@@ -484,9 +701,37 @@ async def test_sweep_orphans(mcp_home, mcp_reaper, procs, tmp_path):
     assert dirs["f"].exists() and alive(pf.pid)
 
 
+async def test_sweep_orphans_kills_deaf_child_of_zombie_leader(
+    mcp_home, mcp_reaper, procs, tmp_path
+):
+    journal = ProcessJournal()
+    _, child = await _zombie_leader_with_deaf_child(
+        procs, journal, tmp_path / "s.json"
+    )
+    jdir = _journal_dir(journal)
+    _rewrite(jdir / "owner.json", mark="bogus")
+    assert sweep_orphans(wait_sec=1) == 1
+    await wait_for(lambda: not alive(child))
+    assert not jdir.exists()
+
+
+def test_sweep_orphans_owner_checks(mcp_home):
+    live_other_boot = _journal_dir(ProcessJournal())
+    _rewrite(live_other_boot / "owner.json", boot_id="other-boot")
+    unmarked_live = _journal_dir(ProcessJournal())
+    _rewrite(unmarked_live / "owner.json", mark=None)
+    unmarked_dead = _journal_dir(ProcessJournal())
+    _rewrite(unmarked_dead / "owner.json", pid=999999999, mark=None)
+    assert sweep_orphans(wait_sec=0.1) == 0
+    # Живой хозяин не трогается и при сбое boot_id (другая загрузка).
+    assert live_other_boot.exists()
+    assert unmarked_live.exists()
+    assert not unmarked_dead.exists()
+
+
 def test_sweep_orphans_off_posix_does_nothing(mcp_home, monkeypatch):
     jdir = _journal_dir(ProcessJournal())
-    _rewrite(jdir / "owner.json", boot_id="other-boot")
+    _rewrite(jdir / "owner.json", mark="bogus", boot_id="other-boot")
     monkeypatch.setattr(sys, "platform", "win32")
     assert sweep_orphans() == 0
     assert jdir.exists()
