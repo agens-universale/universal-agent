@@ -18,8 +18,8 @@ from gc_tui.branding import BrandHeader, version_label
 from gc_tui.services.mcp_peephole import McpPeephole
 from gc_tui.services.start_status import status_renderable
 from gc_tui.services.trace_glyphs import BLINK_TICK_S
-from gc_tui.widgets.blink_pulse import miss_frame
 from gc_tui.widgets.column_static import ColumnStatic
+from gc_tui.widgets.missed_frame import miss_frame
 
 
 class StartHeader(ColumnStatic):

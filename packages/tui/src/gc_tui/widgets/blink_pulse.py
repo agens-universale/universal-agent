@@ -2,25 +2,9 @@
 
 from __future__ import annotations
 
-from textual.dom import NoScreen
-from textual.widget import Widget
-
 from gc_tui import textual_compat
 from gc_tui.services.trace_glyphs import BLINK_TICK_S
-
-
-def miss_frame(widget: Widget) -> None:
-    """Перерисовка `widget` пропущена за экраном: отметка
-    `_frame_missed` и запись у экрана с лентой — он освежит виджет, когда
-    тот станет виден (`redraw_if_missed`). Экран без ленты или виджет без
-    экрана — только отметка."""
-    widget._frame_missed = True
-    try:
-        note = getattr(widget.screen, "note_missed_frame", None)
-    except NoScreen:
-        return
-    if note is not None:
-        note(widget)
+from gc_tui.widgets.missed_frame import miss_frame
 
 
 class BlinkPulseMixin:

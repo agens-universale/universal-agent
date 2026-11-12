@@ -28,12 +28,13 @@ from gc_tui import textual_compat
 from gc_tui.palette import DIM
 from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.trace_render import THOUGHT_GLYPH, thought_line
-from gc_tui.widgets.blink_pulse import BlinkPulseMixin, miss_frame
+from gc_tui.widgets.blink_pulse import BlinkPulseMixin
 from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.expandable_text import (
     ExpandableTextBody,
     ExpandableToggle,
 )
+from gc_tui.widgets.missed_frame import miss_frame
 from gc_tui.widgets.static_content import update_if_changed
 
 # Пустая клетка справа у полной строки: таймер не прижат к полосе
@@ -133,7 +134,8 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         строку стрим не трогает. Строка не видна — снимок сохраняется и
         мигание сверяется, но рисование и чтение ширины пропускаются
         (они пересобирают карту экрана), тик отмечает пропуск
-        (`miss_frame`); следующий снимок стрима всё равно свежий."""
+        (`miss_frame`); следующий снимок стрима всё равно свежий. Видно
+        раскрытое тело — оно получает текст сразу."""
         if self._settled:
             return
         if textual_compat.is_visible(self._glyph):
@@ -141,21 +143,30 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
             return
         self._text, self._seconds, self._live = text, seconds, live
         self._sync_pulse()
+        self._sync_shown_body()
         miss_frame(self)
 
     def redraw_if_missed(self) -> bool:
         """Пропустила кадр за экраном и глиф теперь виден — текущие кадр,
         текст и таймер сразу, тело — если раскрыта (П6); `True` —
-        перерисовала."""
-        if not self._frame_missed or not textual_compat.is_visible(
-            self._glyph
-        ):
+        перерисовала. Глиф за краем, а раскрытое тело видно — только
+        тело, отметка остаётся."""
+        if not self._frame_missed:
+            return False
+        if not textual_compat.is_visible(self._glyph):
+            self._sync_shown_body()
             return False
         self._frame_missed = False
         if self.expanded:
             self._sync_body()
         self._update()
         return True
+
+    def _sync_shown_body(self) -> None:
+        """Строка мысли за краем, а раскрытое тело видно — тело по
+        текущему тексту сразу; сама строка ждёт, пока станет виден глиф."""
+        if self.expanded and textual_compat.is_visible(self._body):
+            self._sync_body()
 
     def settle(self) -> None:
         """Попытка кончилась (новая попытка, конец хода): строка

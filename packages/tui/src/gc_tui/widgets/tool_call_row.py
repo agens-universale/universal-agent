@@ -84,7 +84,7 @@ from gc_tui.services.trace_render import (
     fit_lines,
     level_prefix,
 )
-from gc_tui.widgets.blink_pulse import BlinkPulseMixin, miss_frame
+from gc_tui.widgets.blink_pulse import BlinkPulseMixin
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
@@ -96,6 +96,7 @@ from gc_tui.widgets.expandable_text import (
     ExpandableTextBody,
     ExpandableToggle,
 )
+from gc_tui.widgets.missed_frame import miss_frame
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.ran_output import OutputTexts, RanParts, RanPhrase
 from gc_tui.widgets.static_content import update_if_changed

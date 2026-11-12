@@ -236,3 +236,40 @@ async def test_group_header_row_refreshed(tmp_path):
         assert header._prefix_static.content.plain.strip() == ""
         assert header._frame_missed is False
         assert header not in scr._missed_frames
+
+
+@pytest.mark.asyncio
+async def test_expanded_thought_body_follows_with_glyph_above_edge(tmp_path):
+    """Раскрытая живая мысль: глиф выше края, тело видно — тело получает
+    новый текст сразу, без чтения невидимого глифа."""
+    from arrange_counter import count_arranges
+
+    _write_task(tmp_path)
+    text = "\n".join(f"мысль {i}" for i in range(30))
+    thought = ThoughtRow(text=text, live=True, attempt=None, seconds=1.0)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr = await _session(pilot, thought)
+        thought.toggle()
+        await pilot.pause()
+        scr._stick_bottom = False
+        trace = scr.query_one("#trace", VerticalScroll)
+        trace.scroll_to(y=thought.virtual_region.y + 3, animate=False)
+        await pilot.pause()
+        assert textual_compat.is_visible(thought._glyph) is False
+        assert textual_compat.is_visible(thought._body) is True
+        with count_arranges() as counts:
+            thought.update_live(text + "\nновая строка", 5.0, True)
+        assert counts.full_map == 0
+        body = thought._body._text.content
+        assert "новая строка" in str(body)
+
+        # Тело ушло за край вместе с глифом, затем вернулось без глифа:
+        # освежает обработчик сигнала.
+        trace.scroll_end(animate=False)
+        await pilot.pause()
+        thought.update_live(text + "\nещё строка", 6.0, True)
+        assert "ещё строка" not in str(thought._body._text.content)
+        trace.scroll_to(y=thought.virtual_region.y + 3, animate=False)
+        await pilot.pause()
+        assert "ещё строка" in str(thought._body._text.content)
+        assert thought in scr._missed_frames  # строка мысли ещё не видна
