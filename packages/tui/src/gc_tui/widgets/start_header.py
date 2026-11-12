@@ -39,6 +39,8 @@ class StartHeader(ColumnStatic):
         self._update = False
         self._frame = 0
         self._timer: Timer | None = None
+        # Тик пропустил рисование: шапка была не видна.
+        self._frame_missed = False
         self._settled_generation: int | None = None
         self._redraw()
 
@@ -72,7 +74,17 @@ class StartHeader(ColumnStatic):
         self._peephole.tick()
         self._frame += 1
         # Строка загрузки не переносится: высота меняется только с фазой.
-        self._advance(layout=self._peephole.phase != phase)
+        if self._peephole.phase != phase:
+            self._advance(layout=True)
+            return
+        # Кадр анимации невидимой шапки не рисуется (перерисовка невидимого
+        # пересобирает карту экрана); таймер и итог — как всегда.
+        self._sync_timer()
+        if textual_compat.is_visible(self):
+            self._redraw(layout=False)
+        else:
+            self._frame_missed = True
+        self._post_settled()
 
     def _advance(self, *, layout: bool) -> None:
         self._sync_timer()

@@ -9,8 +9,11 @@ from gc_tui.services.trace_glyphs import BLINK_TICK_S
 class BlinkPulseMixin:
     """Таймер мигания есть только у запущенной строки с `_blinking`.
 
-    Хозяин держит `_pulse_frame` / `_pulse_timer`, свойство `_blinking`
-    и `_redraw_pulse()` — перерисовку глифа без layout.
+    Хозяин держит `_pulse_frame` / `_pulse_timer` / `_frame_missed`,
+    свойства `_blinking` и `_pulse_widget` (перерисовываемый глиф; до
+    `compose` — `None`) и `_redraw_pulse()` — перерисовку глифа без
+    layout. Глиф не виден — кадр растёт, но не рисуется (перерисовка
+    невидимого пересобирает карту экрана), тик отмечает `_frame_missed`.
     """
 
     def _sync_pulse(self) -> None:
@@ -34,4 +37,8 @@ class BlinkPulseMixin:
         if not self._blinking:
             return
         self._pulse_frame += 1
+        glyph = self._pulse_widget
+        if glyph is not None and not textual_compat.is_visible(glyph):
+            self._frame_missed = True
+            return
         self._redraw_pulse()

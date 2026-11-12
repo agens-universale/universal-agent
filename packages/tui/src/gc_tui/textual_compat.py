@@ -7,6 +7,11 @@
 Исключение — `mounted` и `paint_after_mount`: только публичный API, к
 версии не привязаны.
 
+Видимость и геометрия Textual 8.2.8: перерисовка виджета за экраном или
+чтение его `size` / `region` после прокрутки пересобирает полную карту
+экрана (`Compositor.full_map`). `is_visible` смотрит готовую карту
+видимых последнего кадра.
+
 Ошибка Textual 8.2.8 (апстрим #6639): `SelectStart.pointer_start_offset`
 прибавляет сдвиг прокрутки контейнера вместо вычитания — при прокрутке во
 время выделения его начало уезжает. Стенды — `test_textual_compat.py`
@@ -31,6 +36,7 @@ from collections.abc import Callable
 import textual
 from textual import selection
 from textual.containers import VerticalScroll
+from textual.dom import NoScreen
 from textual.geometry import Offset, Size
 from textual.screen import Screen
 from textual.widget import AwaitMount, Widget
@@ -142,6 +148,26 @@ def paint_after_mount(widget: Widget) -> None:
     batch.__enter__()
     _PAINT_HOLDS.add(task)
     task.add_done_callback(_PAINT_HOLDS.discard)
+
+
+def is_visible(widget: Widget | None) -> bool:
+    """Был ли виджет в карте видимых последнего кадра — без пересборки
+    карты (публичный `is_on_screen` идёт через поиск в полной карте и
+    пересобирает её, а «видим» не отвечает). `None`, не смонтирован, без
+    экрана — нет. Только для `PATCHED_TEXTUAL`: на иной версии или без
+    поля компоновщика — «видим», как будто проверки нет."""
+    if widget is None or not widget.is_mounted:
+        return False
+    try:
+        screen = widget.screen
+    except NoScreen:
+        return False
+    if not textual_is_patched_version():
+        return True
+    try:
+        return widget in screen._compositor.visible_widgets
+    except AttributeError:
+        return True
 
 
 def is_being_removed(widget: Widget) -> bool:

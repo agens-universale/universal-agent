@@ -503,3 +503,70 @@ async def test_two_blank_rows_between_header_and_first_reply(tmp_path):
         )
         reply = next(i for i, r in enumerate(rows) if "› привет" in r)
         assert rows[status + 1 : reply] == ["", ""]
+
+
+def _scrolled_header_app(header):
+    """Шапка первой в длинной ленте; после `scroll_end` она за экраном."""
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from textual.widgets import Static
+
+    class _A(App):
+        settled = 0
+
+        def compose(self):
+            with VerticalScroll(id="t"):
+                yield header
+                for i in range(200):
+                    yield Static(f"строка {i}")
+
+        def on_start_header_settled(self, _message) -> None:
+            self.settled += 1
+
+    return _A()
+
+
+async def _scroll_away(pilot) -> None:
+    pilot.app.query_one("#t").scroll_end(animate=False)
+    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_start_header_offscreen_loading_no_full_map():
+    from arrange_counter import count_arranges
+    from gc_tui.widgets.start_header import StartHeader
+
+    header = StartHeader(mcp_total=2)
+    async with _scrolled_header_app(header).run_test(size=(80, 20)) as pilot:
+        await _scroll_away(pilot)
+        with count_arranges() as counts:
+            _spin(header, 20)
+        with count_arranges() as control:
+            header.is_on_screen  # карту пересобирает
+        assert (counts.full_map, control.full_map) == (0, 1)
+        assert header._peephole.phase == "loading"
+        assert header._timer is not None
+        assert header._frame_missed is True
+
+
+@pytest.mark.asyncio
+async def test_start_header_settles_offscreen():
+    from gc_tui.widgets.start_header import StartHeader
+
+    header = StartHeader(mcp_total=2)
+    app = _scrolled_header_app(header)
+    async with app.run_test(size=(80, 20)) as pilot:
+        await _scroll_away(pilot)
+        header.feed(object(), _ALL_OK_SERVERS, True)
+        _spin(header)
+        await pilot.pause()
+        assert header._peephole.phase == "settled"
+        assert header._timer is None
+        assert app.settled == 1
+        assert _status(header) == "✓ готов к работе   MCP 2/2 · /mcp"
+
+
+_ALL_OK_SERVERS = {
+    "alpha": {"status": "connected"},
+    "beta": {"status": "connected"},
+}

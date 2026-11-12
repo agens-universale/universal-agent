@@ -309,6 +309,8 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         row = ToolCallRow(call_id="c1", label="tool", target="x=1")
         await pilot.app.mount(row)
+        # Невидимая (ещё не нарисованная) строка тик не рисует.
+        await pilot.pause()
         updated = {"n": 0}
         if row._prefix_static is not None:
             monkeypatch.setattr(

@@ -603,3 +603,78 @@ async def test_other_version_trace_screen_keeps_stock_auto_scroll(
         await pilot.mouse_up("#cmdinput", offset=(4, 0))
         await pilot.pause()
         assert calls
+
+
+class _Scrolled(App):
+    """Строка с отступами наверху длинной прокрутки — после `scroll_end`
+    она за экраном."""
+
+    def compose(self):
+        with VerticalScroll(id="host"):
+            yield Static("первая", id="first", classes="padded")
+            for i in range(200):
+                yield Static(f"строка {i}")
+
+    CSS = ".padded { padding: 0 2 0 3; }"
+
+
+async def _scrolled_away(pilot) -> Static:
+    first = pilot.app.query_one("#first", Static)
+    pilot.app.query_one("#host", VerticalScroll).scroll_end(animate=False)
+    await pilot.pause()
+    return first
+
+
+@pytest.mark.asyncio
+async def test_is_visible_on_screen_and_scrolled_away():
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = pilot.app.query_one("#first", Static)
+        assert textual_compat.is_visible(first) is True
+        await _scrolled_away(pilot)
+        assert textual_compat.is_visible(first) is False
+
+
+@pytest.mark.asyncio
+async def test_is_visible_none_and_unmounted():
+    async with _Scrolled().run_test(size=(60, 20)):
+        assert textual_compat.is_visible(None) is False
+        assert textual_compat.is_visible(Static("не смонтирован")) is False
+
+
+@pytest.mark.asyncio
+async def test_is_visible_does_not_rebuild_full_map():
+    """`is_visible` смотрит готовую карту видимых; публичный
+    `is_on_screen` в том же состоянии карту пересобирает (контроль)."""
+    from arrange_counter import count_arranges
+
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = await _scrolled_away(pilot)
+        with count_arranges() as ours:
+            textual_compat.is_visible(first)
+        with count_arranges() as public:
+            first.is_on_screen  # карту пересобирает
+        assert (ours.full_map, public.full_map) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_other_version_is_visible_answers_visible(monkeypatch):
+    monkeypatch.setattr(
+        textual_compat, "textual_is_patched_version", lambda: False
+    )
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = await _scrolled_away(pilot)
+        assert textual_compat.is_visible(first) is True
+
+
+def test_arrange_counter_refuses_renamed_caller(monkeypatch):
+    """Счётчик раскладок считает по именам вызывающих Textual: пропажа
+    имени — ошибка, а не молчаливые нули."""
+    import arrange_counter
+    from textual._compositor import Compositor
+
+    with arrange_counter.count_arranges() as counts:
+        assert counts.full_map == 0
+    monkeypatch.delattr(Compositor, "reflow_visible")
+    with pytest.raises(RuntimeError, match="reflow_visible"):
+        with arrange_counter.count_arranges():
+            pass

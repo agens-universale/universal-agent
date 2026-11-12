@@ -24,6 +24,7 @@ from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.palette import DIM
 from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.trace_render import THOUGHT_GLYPH, thought_line
@@ -86,11 +87,16 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         self._cut = False
         self._pulse_frame = 0
         self._pulse_timer = None
+        # Тик пропустил рисование: перерисовываемое было не видно.
+        self._frame_missed = False
         self._glyph = Static(self._render_glyph(), classes="trace-prefix")
         self._lead = Static("", classes="thought-word")
         self._tail = _ThoughtText("", classes="thought-text", markup=False)
         self._timer = Static("", classes="thought-timer")
         self._body = ExpandableTextBody(text.strip())
+        # Текст, с которым тело собрано последний раз: скрытое тело
+        # обновляется только перед показом.
+        self._body_text = text
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="thought-line"):
@@ -124,9 +130,18 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
     def update_live(self, text: str, seconds: float, live: bool) -> None:
         """Мысль из стрима: текст дорастает, таймер идёт; ``live=False``
         — размышление кончилось (`Thought`, мигание стоп). Законченную
-        строку стрим не трогает."""
-        if not self._settled:
+        строку стрим не трогает. Строка не видна — снимок сохраняется и
+        мигание сверяется, но рисование и чтение ширины пропускаются
+        (они пересобирают карту экрана), тик отмечает `_frame_missed`;
+        следующий снимок стрима всё равно свежий."""
+        if self._settled:
+            return
+        if textual_compat.is_visible(self._glyph):
             self._set(text, seconds, live)
+            return
+        self._text, self._seconds, self._live = text, seconds, live
+        self._sync_pulse()
+        self._frame_missed = True
 
     def settle(self) -> None:
         """Попытка кончилась (новая попытка, конец хода): строка
@@ -134,17 +149,28 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         if self._settled:
             return
         self._settled = True
+        self._sync_body()
         self._set(self._text, self._seconds, False)
 
     def toggle(self) -> None:
         """Раскрыть / свернуть мысль целиком под строкой."""
+        if not self.expanded:
+            self._sync_body()
         self.toggle_class("-expanded")
         self._update()
 
+    def _sync_body(self) -> None:
+        """Тело — по текущему тексту. Пока строка свёрнута, тело скрыто и
+        не обновляется: перерисовка скрытого ребёнка перекладывает экран
+        и пересобирает его карту."""
+        if self._body_text != self._text:
+            self._body_text = self._text
+            self._body.set_text(self._text.strip())
+
     def _set(self, text: str, seconds: float | None, live: bool) -> None:
-        if text != self._text:
-            self._body.set_text(text.strip())
         self._text = text
+        if self.expanded:
+            self._sync_body()
         self._seconds = seconds
         self._live = live
         self._sync_pulse()
@@ -173,6 +199,10 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
     @property
     def _blinking(self) -> bool:
         return self._live
+
+    @property
+    def _pulse_widget(self) -> Static:
+        return self._glyph
 
     def _redraw_pulse(self) -> None:
         self._glyph.update(self._render_glyph(), layout=False)

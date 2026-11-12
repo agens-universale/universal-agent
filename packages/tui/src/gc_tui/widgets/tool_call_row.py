@@ -56,6 +56,7 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIFF_ADD_INK as _DIFF_ADD
 from gc_tui.palette import DIFF_DEL_INK as _DIFF_DEL
@@ -297,6 +298,8 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._copy_text: str = ""
         self._restore_timer = None  # откат ✓ → ❐ (CopyFeedbackMixin)
         self._pulse_frame: int = 0
+        # Тик пропустил рисование: перерисовываемое было не видно.
+        self._frame_missed = False
         self._pulse_timer = (
             None  # собственный 0.1с-тик мигания ● (_sync_pulse)
         )
@@ -533,6 +536,10 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._edit_tail = tail
         self._update()
 
+    @property
+    def _pulse_widget(self) -> Optional[Static]:
+        return self._prefix_static
+
     def _redraw_pulse(self) -> None:
         if self._prefix_static is not None:
             # Меняется только цвет ● (ширина глифа постоянна) — без layout.
@@ -623,8 +630,13 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._update()
 
     def refresh_running_elapsed(self) -> None:
-        """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op."""
+        """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op.
+        Колонка текста не видна — тик пропускает рисование (и чтения
+        ширины в `_update`) и отмечает `_frame_missed`."""
         if not self._is_live:
+            return
+        if not textual_compat.is_visible(self._content_static):
+            self._frame_missed = True
             return
         self._update()
 
