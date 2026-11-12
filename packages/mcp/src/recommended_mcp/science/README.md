@@ -50,7 +50,7 @@ science-mcp --transport stdio
 
 ## Connect to agent
 
-Copy `agent_config.snippet.yml` into the `mcp-servers:` section of your
+Copy `agent_config.snippet.yml` into the `mcp:` → `servers:` section of your
 `config.yml` agent file.
 
 ## Configuration via env

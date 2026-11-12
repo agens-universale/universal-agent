@@ -35,7 +35,7 @@ gc-ua --no-auto-mcp         # не поднимать HTTP/SSE MCP-daemon'ы п�
 gc-ua --permission-mode plan  # режим разрешений сессии (сохраняется в ней; флаг перебивает сохранённый): edit / manual / plan / auto
 ```
 
-По умолчанию `gc-ua` поднимает HTTP/SSE MCP-daemon'ы для серверов из `mcp-servers`
+По умолчанию `gc-ua` поднимает HTTP/SSE MCP-daemon'ы для серверов из `mcp.servers`
 (пересечение с манифестом `recommended_mcp`); по выходе гасит только процессы этого
 запуска. В `gc-cli` тот же автозапуск — только с явным `-a` / `--auto-mcp`.
 

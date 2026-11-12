@@ -248,7 +248,7 @@ storage:
 
 Агенту вебхука нужны:
 
-- **config.yml** — адрес модели, параметры агента, `mcp-servers`; тот же файл,
+- **config.yml** — адрес модели, параметры агента, `mcp.servers`; тот же файл,
   что у `gc-cli` (`demo_config.yml` — пример).
 - **Роль** — `webhook.agent_md_path` (по умолчанию bundled
   `prompts/server_agent.md` из ассетов `gc-core`). Абсолютный путь — как есть,

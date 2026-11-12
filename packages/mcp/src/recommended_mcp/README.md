@@ -90,7 +90,7 @@ python3 -m recommended_mcp.install --config <gc-config>/recommended_mcp/config.l
 
 При запуске `python3 -m recommended_mcp.install` (скрипт напрямую) авто-wire не выполняется —
 нужно вручную скопировать `<mcp>/agent_config.snippet.yml`
-в секцию `mcp-servers:` своего `config.yml` — см. раздел «4. Подключить MCP к агенту» ниже.
+в секцию `mcp:` → `servers:` своего `config.yml` — см. раздел «4. Подключить MCP к агенту» ниже.
 
 Для каждого `install.type` — свой шаг:
 
@@ -140,7 +140,7 @@ recommended_mcp/my_mcp/
 ### 3. Запустить долгоживущие MCP
 
 **gc-ua** поднимает недостающие HTTP/SSE-daemon'ы **по умолчанию** (для серверов
-из `mcp-servers`, пересечение с манифестом); отключить: `gc-ua --no-auto-mcp`.
+из `mcp.servers`, пересечение с манифестом); отключить: `gc-ua --no-auto-mcp`.
 **gc-cli** — только с флагом **`-a` / `--auto-mcp`**. cwd не важен; гасятся только
 процессы, поднятые этим запуском:
 
@@ -175,7 +175,7 @@ MCP без блока `run:` пропускаются — агент спавн�
 > через `~/.gc/config.local.yml`.
 
 Если ты использовал скрипт напрямую (`python3 -m recommended_mcp.install`):
-скопируй содержимое `<mcp>/agent_config.snippet.yml` в секцию `mcp-servers:`
+скопируй содержимое `<mcp>/agent_config.snippet.yml` в секцию `mcp:` → `servers:`
 своего `config.yml` агента. `install.py` **не редактирует** `config.yml` агента
 автоматически — чтобы не повредить твои кастомные правки.
 (`gc-mcp-install` и `gc-mcp install` авто-wire делают — этот шаг не нужен.)
@@ -209,7 +209,7 @@ gc-cli -a -q "..."
    - для wheel-пакета: `dist/<package>-<version>-py3-none-any.whl`
    - для PyPI-пакета: достаточно snippet + README (wheel в репо не нужен)
    - для docker-сервера: `Dockerfile` + `docker-compose.yml`
-3. Добавь `agent_config.snippet.yml` — блок для `mcp-servers:` в config.yml агента.
+3. Добавь `agent_config.snippet.yml` — блок для секции `mcp:` → `servers:` в config.yml агента.
 4. Добавь `README.md` — требования, ограничения, альтернативы.
 5. Допиши блок в `recommended_mcp/config.yml`:
 
