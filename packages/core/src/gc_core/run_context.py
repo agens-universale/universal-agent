@@ -389,6 +389,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     guard_probe: Optional[GuardProbe] = None,
     tool_effect: Optional[ToolEffectExecutor] = None,
     agent_store: Optional[AgentStore] = None,
+    mcp_consumer: Any = None,
 ) -> RunContext:
     """Собрать RunContext, не блокируя event loop.
 
@@ -436,7 +437,13 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - ``force_legacy`` — легаси-форс (спека §2): CLI `--model`/`--completions_url`
       поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
       запуск (детект — ``config.cli_forces_legacy_model``).
+    - ``mcp_consumer`` — потребитель сервиса MCP (спека §5.2), вместо
+      ``tools_cache``: источник тулов, владелец сессий и уборка хода —
+      его; сессии потребителя сборка не закрывает ни при каком исходе.
     """
+    # Номер сборки — первым действием: набор потребителя меняет только
+    # сверка самой поздней сборки.
+    consumer_build = _take_consumer_build(mcp_consumer, tools_cache)
     # Хранилище встраивающего проверяем ДО всего остального. Проверка стояла в
     # `_finish_run_context`, то есть после MCP-дискавери и создания логгера: на
     # негодном сторе исключение прилетало, когда stdio-сессии уже подняты под
@@ -473,6 +480,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         # Файловое по умолчанию — по настройкам этой сборки (с runtime-слоем
         # фронтенда: ACP, TUI и chat подменяют special_instructions).
         agent_store=agent_store or FileAgentStore(source),
+        mcp_session_owner=_consumer_owner(mcp_consumer),
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -532,6 +540,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             subagent_diagnostics=None,
             agent_store=prep.agent_store,
         )
+        await _aensure_consumer_set(
+            mcp_consumer, consumer_build, build_source, prep.backend
+        )
+        tools_source = _tools_source(mcp_consumer, tools_cache)
         with use_owner(prep.mcp_session_owner):
             tools = await abuild_tools_data(
                 build_source,
@@ -539,7 +551,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
                 os_backend=prep.backend,
                 skills_registry=prep.skills_registry,
                 logger=prep.run_logger,
-                tools_cache=tools_cache,
+                tools_cache=tools_source,
                 registered_names=registered,
             )
         ctx = _finish_run_context(
@@ -552,7 +564,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             on_trace_note=on_trace_note,
             on_messages_evicted=on_messages_evicted,
             is_tui=is_tui,
-            tools_cache=tools_cache,
+            tools_cache=tools_source,
             thread_store=thread_store,
             choice_provider=choice_provider,
             circuit_breaker=circuit_breaker,
@@ -562,6 +574,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             human_request=human_request,
             guard_probe=guard_probe,
             tool_effect=tool_effect,
+            mcp_cleanup=_consumer_cleanup(mcp_consumer),
         )
         # Локально — сами объекты сборки, а не их пересборка из снимка.
         ctx.settings, ctx.runtime = source.settings, source.runtime
@@ -576,11 +589,52 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             # Закрытую корутину (`GeneratorExit`) ждать уже нельзя: `await`
             # здесь кончился бы «coroutine ignored GeneratorExit». Тогда
             # серверы доберёт хук на выход, а логгер отдаём в любом случае.
-            if not isinstance(exc, GeneratorExit):
+            # Сессии потребителя не трогаем: под его владельцем это закрыло
+            # бы сессии всего окна (спека §5.2).
+            if mcp_consumer is None and not isinstance(exc, GeneratorExit):
                 await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
         finally:
             release_run_logger(prep.run_logger)
         raise
+
+
+def _take_consumer_build(mcp_consumer: Any, tools_cache: Any) -> int | None:
+    """Номер сборки у потребителя; без потребителя — ``None``.
+
+    Потребитель и ``tools_cache`` — два источника тулов на одном шве:
+    вместе они не задаются.
+    """
+    if mcp_consumer is None:
+        return None
+    if tools_cache is not None:
+        raise ValueError("mcp_consumer и tools_cache вместе не задаются")
+    return mcp_consumer.next_build()
+
+
+def _consumer_owner(mcp_consumer: Any) -> str | None:
+    """Владелец сессий потребителя; без потребителя — ``None`` (новый
+    токен на контекст)."""
+    return None if mcp_consumer is None else mcp_consumer.owner
+
+
+async def _aensure_consumer_set(
+    mcp_consumer: Any, build: int | None, settings: Any, backend: Any
+) -> None:
+    """Сверить набор серверов потребителя с этой сборкой (спека §5.3)."""
+    if mcp_consumer is not None:
+        await mcp_consumer.aensure(build, settings, os_backend=backend)
+
+
+def _tools_source(mcp_consumer: Any, tools_cache: Any) -> Any:
+    """Источник MCP-тулов сборки и ``ctx.tools_cache``: потребитель либо
+    кэш вызывающего."""
+    return tools_cache if mcp_consumer is None else mcp_consumer
+
+
+def _consumer_cleanup(mcp_consumer: Any) -> Any:
+    """Порт уборки хода: у потребителя — его ``aend_turn``; без него —
+    ``None`` (прежняя уборка исполнителя)."""
+    return None if mcp_consumer is None else mcp_consumer.aend_turn
 
 
 async def _aclose_owned_mcp_sessions(owner: str) -> None:
@@ -650,12 +704,15 @@ def _prepare_run_context(
     os_backend: Optional[FsBackend],
     log_handlers: Any = None,
     agent_store: AgentStore | None = None,
+    mcp_session_owner: str | None = None,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
     Вынесено, чтобы синхронная и асинхронная сборка делили одно тело: между
     ними отличается ровно один шаг — как дождаться дискавери. ``settings`` —
     всё, что принимают ``settings_of``/``runtime_of`` (``LoadedSettings``).
+    ``mcp_session_owner`` — владелец потребителя сервиса MCP; без него —
+    новый токен на контекст.
     """
     effective_run_id = run_id or generate_run_id()
     # Проект рана — каталог хода (``launch_root`` фронтенда: chat и A2A ведут
@@ -705,7 +762,7 @@ def _prepare_run_context(
         run_logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
-        mcp_session_owner=new_owner_token(),
+        mcp_session_owner=mcp_session_owner or new_owner_token(),
         backend_was_overridden=os_backend is not None,
         settings=settings,
         agent_store=agent_store,
@@ -744,8 +801,13 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     human_request: Optional[HumanRequester] = None,
     guard_probe: Optional[GuardProbe] = None,
     tool_effect: Optional[ToolEffectExecutor] = None,
+    mcp_cleanup: Any = None,
 ) -> RunContext:
-    """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
+    """Досборка после тулов: логи старта, trace-binding, сам RunContext.
+
+    ``mcp_cleanup`` — порт уборки MCP в конце хода (у потребителя сервиса
+    — его ``aend_turn``); ``None`` — прежняя уборка исполнителя.
+    """
     # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
     # Раньше негодный объект принимался молча, а падал на 630-й строке
     # thread_store.py с «TypeError: cannot unpack non-iterable coroutine
@@ -861,6 +923,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         human_request=human_request,
         guard_probe=guard_probe,
         tool_effect=tool_effect,
+        mcp_cleanup=mcp_cleanup,
     )
     ctx = assemble_run_context(prepared, bindings)
     # Хранилище тредов SDK/воркера с файлами треда держит картинки у себя;

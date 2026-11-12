@@ -605,6 +605,8 @@ def _assemble_mcp_tools_data(
     settings: Any,
     servers_cfg: Dict[str, Any],
     os_backend: Any = None,
+    *,
+    caller: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Собрать tools_data из результата дискавери. Ни сети, ни ожидания.
 
@@ -612,6 +614,9 @@ def _assemble_mcp_tools_data(
     асинхронную и синхронную. Между ними отличается ровно одна строка — как
     дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
     нормализации схем не за что.
+
+    ``caller`` — исполнитель вызова обёрток; без него — ``acall_mcp_tool``
+    (у источника-потребителя — его исполнитель, спека §5.2).
     """
     app = settings_of(settings)
     timeout = app.mcp.meta.request_timeout_sec or 600
@@ -629,7 +634,7 @@ def _assemble_mcp_tools_data(
                 timeout,
                 default_use_retry=default_use_retry,
                 os_backend=os_backend,
-                caller=acall_mcp_tool,
+                caller=caller or acall_mcp_tool,
             )
 
         return fabric
@@ -680,7 +685,12 @@ async def aget_mcp_tools_data_for_config(
 
     Форма одна. Синхронного имени нет: единственный вызывающий — сборка
     набора тулов, и она корутинная.
+
+    Источник со срезом (``aview`` — потребитель сервиса, спека §5.2) идёт
+    своей веткой ДО подготовки кэша: ``rebind`` и бэкенда кэша у него нет.
     """
+    if getattr(tools_cache, "aview", None) is not None:
+        return await _aview_mcp_tools_data(settings, tools_cache, os_backend)
     prepared = _prepare_mcp_tools_data(
         settings, tools_cache=tools_cache, os_backend=os_backend
     )
@@ -699,6 +709,28 @@ async def aget_mcp_tools_data_for_config(
         settings,
         servers_cfg,
         os_backend=os_backend,
+    )
+
+
+async def _aview_mcp_tools_data(
+    settings: Any, source: Any, os_backend: Any
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """MCP-тулы из среза источника: записи, статусы, определения для
+    обёрток и исполнитель вызова. Прогресса нет — срез не ждёт сети."""
+    try:
+        view = await source.aview(settings, os_backend=os_backend)
+    except Exception:
+        logger.error("Failed to load MCP tools", exc_info=True)
+        return {}, {}
+    if not view.servers_cfg:
+        return {}, {}
+    return _assemble_mcp_tools_data(
+        view.registry,
+        view.status,
+        settings,
+        view.servers_cfg,
+        os_backend=os_backend,
+        caller=view.caller,
     )
 
 

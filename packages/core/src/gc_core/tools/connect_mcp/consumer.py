@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import gc
 from typing import TYPE_CHECKING, Any
 
 from gc_core.config_modules.field_meta import plain_dump
@@ -257,6 +258,17 @@ class McpConsumer:
         finally:
             stopped.cancel()
             settled.cancel()
+
+    async def aend_turn(self) -> None:
+        """Уборка конца хода — порт ``mcp_cleanup`` контекста (спека §5.2).
+
+        Сессии потребителя живут дольше хода и здесь не закрываются; только
+        сборка циклического мусора, как в прежней уборке хода. Закрытый
+        потребитель ничего не делает.
+        """
+        if self.closed:
+            return
+        gc.collect()
 
     async def aclose(self) -> None:
         """Отказать в новой работе, снять попытки, серии и идущие вызовы,
