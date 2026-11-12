@@ -1,10 +1,10 @@
 """ToolCallDetailScreen — CALL + OUTPUT секции, JSON-подсветка / plain fallback."""
 
-from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 def _write_thread_with_tool_call(tmp_path, tid, call_payload, result_payload):
@@ -288,3 +288,69 @@ async def test_detail_screen_payload_is_selectable(tmp_path):
         assert texts and all(t is not None for t in texts)
         extracted = "".join(t[0] for t in texts)
         assert extracted.strip()
+
+
+@pytest.mark.asyncio
+async def test_detail_screen_shows_truncated_arguments_as_stored(tmp_path):
+    """Аргументы вызова — обрывок JSON: CALL показывает их как сохранены, с
+    пометкой, а не молча достроенным объектом. Кто оборвал — модель, бэкенд
+    или наш сборщик — экран не знает и не утверждает."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual import events
+    from textual.widgets import Static
+
+    tid = "detail_truncated_args"
+    _write_thread_with_tool_call(
+        tmp_path,
+        tid,
+        call_payload={
+            "type": "function_call",
+            "name": "fs_file_info",
+            "arguments": '{"path": "a.toml", "include_line_count": ',
+            "call_id": "c1",
+        },
+        result_payload={
+            "type": "function_call_output",
+            "call_id": "c1",
+            "output": "некорректный JSON",
+        },
+    )
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task(tid)
+        await pilot.pause(0.3)
+
+        row = pilot.app.screen.query_one(ToolCallRow)
+        row.on_click(
+            events.Click(
+                widget=row,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=True,
+                chain=1,
+            )
+        )
+        await pilot.pause(0.2)
+
+        assert isinstance(pilot.app.screen, ToolCallDetailScreen)
+        body_text = "\n".join(
+            str(s.render()) for s in pilot.app.screen.query(Static)
+        )
+        assert "аргументы — не JSON, показаны как сохранены" in body_text
+        assert "от модели" not in body_text
+        # Сырой текст, без экранирования кавычек внутренней JSON-строкой.
+        assert '{"path": "a.toml", "include_line_count": ' in body_text
+        assert '\\"' not in body_text

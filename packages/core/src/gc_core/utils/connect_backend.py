@@ -54,6 +54,7 @@ from gc_core.utils.http_auth import (
     server_authorization_attempts,
 )
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.log_text import clip_middle
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.ssl_config import get_backend_client_cert
@@ -67,6 +68,8 @@ _MODEL_REQUEST_STOPPED = "Ход остановлен"
 # Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
 # ResolvedModel.backend_overrides (см. backend_override_value).
 NO_BACKEND_OVERRIDE = object()
+# Последний чанк responses — весь ответ: потолок как у сырого ответа.
+_MAX_LAST_CHUNK_LOG_CHARS = 8000
 
 
 def get_async_client(*args, **kwargs):
@@ -277,6 +280,47 @@ def _log_backend_request(
             "payload": logged,
         },
     )
+
+
+def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
+    """Чанки, не разобранные как JSON: сколько и каких размеров — по ним
+    видно, что потеря у нас, а не обрыв у бэкенда. Текст чанка не пишется
+    ни на каком уровне: это сырой вывод модели строкой (маскировка по имени
+    ключа его не видит), а format text пишет в файл и debug."""
+    if logger is None or not assembler.dropped_count:
+        return
+    logger.warning(
+        "chat/completions stream: %d chunks dropped (not a JSON object), "
+        "sizes of the first %d: %s",
+        assembler.dropped_count,
+        len(assembler.dropped_payloads),
+        [len(p) for p in assembler.dropped_payloads],
+    )
+
+
+def _log_last_chunk(logger, last_chunk: str) -> None:
+    """Последний чанк незавершённого потока responses — на debug. Это сырой
+    вывод модели, но новой утечки нет: на develop он был в тексте исключения,
+    которое политика ретраев пишет на error. В сообщении, а не в поле:
+    format text полей события не выводит."""
+    logger.debug(
+        "backend_responses_last_chunk: %s",
+        clip_middle(last_chunk, _MAX_LAST_CHUNK_LOG_CHARS),
+        extra={"event": "backend_responses_last_chunk"},
+    )
+
+
+def _stream_finish_reason(result: dict) -> Any:
+    """Причина незавершённого потока от провайдера — код, сообщение, причина
+    остановки; вывода модели в ней нет. Ищется в ответе (response.failed,
+    response.incomplete) и в событии error верхнего уровня потока."""
+    response = result.get("response")
+    if isinstance(response, dict):
+        reason = response.get("error") or response.get("incomplete_details")
+        if reason:
+            return reason
+    top = {k: result[k] for k in ("error", "code", "message") if k in result}
+    return top or None
 
 
 def _log_backend_response(logger, api_mode: str, response: Any) -> None:
@@ -590,25 +634,51 @@ async def _arequest_backend_responses_once(
     try:
         result = json.loads(re.sub("^data: +", "", last_chunk))
     except Exception as e:
-        print(f"Error read json from backend. Last chunk: {last_chunk}")
+        print(
+            f"Error read json from backend: last chunk {len(last_chunk)} chars"
+        )
         if logger is not None:
             logger.error(
                 "backend_responses_json_error",
                 extra={
                     "event": "backend_responses_json_error",
-                    "last_chunk": last_chunk,
+                    "last_chunk_chars": len(last_chunk),
                 },
             )
         raise e
 
     if result.get("type") != "response.completed":
-        raise ValueError(f"wrong stream finish: {last_chunk}")
+        if logger is not None:
+            _log_last_chunk(logger, last_chunk)
+        # Последний чанк — весь ответ с аргументами вызовов: в текст
+        # исключения (его пишет и политика ретраев) — тип события и причина
+        # от провайдера. По ней восстановление узнаёт переполнение контекста.
+        raise ValueError(
+            f"wrong stream finish: {result.get('type')!r} "
+            f"{_stream_finish_reason(result)!r}"
+        )
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
         record_usage(response_obj.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "responses", response_obj)
     return response_obj, r_headers
+
+
+async def _afeed_sse(r, assembler: StreamAssembler) -> None:
+    """Скормить сборщику строки SSE до `[DONE]` или конца тела."""
+    async for line in _aiter_utf8_lines(r):
+        _raise_if_model_stopped()
+        assembler.feed_line(line)
+        if assembler.done:
+            # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
+            # нельзя: закрывает его сервер, а корп-прокси вправе держать
+            # соединение сколько угодно. Ход ждал бы read-timeout (600 с
+            # по умолчанию), а тот считается поводом повторить ВЕСЬ
+            # запрос: показанный ответ стирается и генерируется заново.
+            # Синхронный путь до переезда выходил здесь же —
+            # `iter_sse_data_lines` делала на маркере `return`.
+            break
 
 
 async def _astream_chat_completions(
@@ -651,18 +721,12 @@ async def _astream_chat_completions(
         on_delta("reset", "")
 
         assembler = StreamAssembler(on_delta=on_delta)
-        async for line in _aiter_utf8_lines(r):
-            _raise_if_model_stopped()
-            assembler.feed_line(line)
-            if assembler.done:
-                # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
-                # нельзя: закрывает его сервер, а корп-прокси вправе держать
-                # соединение сколько угодно. Ход ждал бы read-timeout (600 с
-                # по умолчанию), а тот считается поводом повторить ВЕСЬ
-                # запрос: показанный ответ стирается и генерируется заново.
-                # Синхронный путь до переезда выходил здесь же —
-                # `iter_sse_data_lines` делала на маркере `return`.
-                break
+        try:
+            await _afeed_sse(r, assembler)
+        finally:
+            # Обрыв, стоп или ошибка в потоке — как раз тогда важно видеть,
+            # что из пришедшего мы не разобрали.
+            _log_dropped_chunks(logger, assembler)
         _raise_if_model_stopped()
         assembler.flush()
         assembled = assembler.result()
