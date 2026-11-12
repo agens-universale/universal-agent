@@ -22,7 +22,7 @@ from gc_core.tools.connect_mcp.consumer_status import (
     STATE_FAILED,
     ServerStatus,
 )
-from gc_testkit.mcp import alive, launches, stdio_cfg, wait_for
+from gc_testkit.mcp import alive, launches, set_behavior, stdio_cfg, wait_for
 from gc_testkit.mcp.fixtures import mcp_home, mcp_owner, mcp_reaper
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.agent_loop import THREAD_NAME, thread_has_running_loop
@@ -32,6 +32,8 @@ pytest.importorskip("textual")
 
 #: Потолок одного ожидания в тесте: зависание не повесит прогон.
 _CEILING_SEC = 30.0
+#: Остановка цикла агента на выходе (``AgentLoop.shutdown``).
+_LOOP_SHUTDOWN_SEC = 5.0
 _SRV = {"mcp.servers": {"srv": {"transport": "stdio", "command": "srv-mcp"}}}
 
 
@@ -264,41 +266,74 @@ _posix_only = pytest.mark.skipif(
 )
 
 
+def _real_app(tmp_path, control):
+    """Настоящее приложение с настоящим сервисом и stdio-сервером."""
+    from gc_core.tools.connect_mcp.service import McpService
+
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "mcp.servers": {"srv": stdio_cfg(control)}}
+        ),
+        mcp_service=McpService(connect_on_start=True),
+    )
+
+
+async def _connected_once(app, pilot) -> None:
+    """Дождаться первого итога подключения серверов окна."""
+
+    async def _settled() -> None:
+        while not (
+            app._mcp_progress is not None
+            and app._mcp_progress.state()[1] is not None
+        ):
+            await pilot.pause(0.05)
+
+    await asyncio.wait_for(_settled(), _CEILING_SEC)
+    assert app._mcp_status["srv"]["status"] == STATE_CONNECTED
+
+
 @_posix_only
 async def test_exit_leaves_no_server_process(
     tmp_path, mcp_home, mcp_reaper, mcp_owner
 ):
     """Настоящее приложение, настоящий сервис и stdio-сервер: после выхода
     процесса сервера нет, поток цикла агента погашен."""
-    from gc_core.tools.connect_mcp.service import McpService
-
-    from gc_tui.app import TuiApp
-
     control = tmp_path / "srv.json"
-    service = McpService(connect_on_start=True)
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings(
-            {"agent.model": "M", "mcp.servers": {"srv": stdio_cfg(control)}}
-        ),
-        mcp_service=service,
-    )
+    app = _real_app(tmp_path, control)
     async with app.run_test(size=(120, 40)) as pilot:
-
-        async def _connected_once() -> None:
-            while not (
-                app._mcp_progress is not None
-                and app._mcp_progress.state()[1] is not None
-            ):
-                await pilot.pause(0.05)
-
-        await asyncio.wait_for(_connected_once(), _CEILING_SEC)
-        assert app._mcp_status["srv"]["status"] == STATE_CONNECTED
+        await _connected_once(app, pilot)
         (pid,) = launches(control)
         assert alive(pid)
 
-    assert service.closed
+    assert app._mcp_service.closed
+    await wait_for(lambda: not alive(pid), _CEILING_SEC)
+    assert not app.agent_loop.thread.is_alive()
+
+
+@_posix_only
+async def test_exit_with_deaf_server_is_bounded_by_ceiling(
+    tmp_path, monkeypatch, mcp_home, mcp_reaper, mcp_owner
+):
+    """Сервер глух к концу stdin и SIGTERM, потолок закрытия окна меньше
+    бюджета сервиса: выход укладывается в потолок и остановку цикла
+    (5 с), процесса сервера после выхода нет."""
+    from gc_tui import app as app_module
+
+    ceiling = 0.5
+    monkeypatch.setattr(app_module, "MCP_CLOSE_TIMEOUT_SEC", ceiling)
+    control = tmp_path / "srv.json"
+    set_behavior(control, ignore_eof=True, ignore_term=True)
+    app = _real_app(tmp_path, control)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _connected_once(app, pilot)
+        (pid,) = launches(control)
+        started = time.monotonic()
+
+    assert time.monotonic() - started < ceiling + _LOOP_SHUTDOWN_SEC
     await wait_for(lambda: not alive(pid), _CEILING_SEC)
     assert not app.agent_loop.thread.is_alive()
 
