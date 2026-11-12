@@ -120,9 +120,10 @@ def _idle_status(entry: ServerEntry, now: float, closed: bool) -> ServerStatus:
     """Своей попытки и своего отказа нет (или попытка прервана при
     известных тулах).
 
-    Тулы известны — ``cached``; иначе отказ записи свежее 30 с — ``failed``
-    с его кодом и текстом; иначе у закрытого потребителя — «подключение
-    прервано» (он больше не подключается), у открытого — ``connecting``.
+    Тулы известны — ``cached``; иначе пока правило 30 с держит запись
+    (``shared_hold_since``) — ``failed`` с кодом и текстом отказа записи;
+    иначе у закрытого потребителя — «подключение прервано» (он больше не
+    подключается), у открытого — ``connecting``.
     """
     if entry.tools_known:
         return ServerStatus(
@@ -131,9 +132,9 @@ def _idle_status(entry: ServerEntry, now: float, closed: bool) -> ServerStatus:
             checked_at=entry.checked_at,
             tools=entry.tools,
         )
-    shared = shared_failure(entry)
-    if shared is not None and now - shared.at < ATTEMPT_INTERVAL_SEC:
-        return _failed(shared, entry)
+    held = shared_hold_since(entry)
+    if held is not None and now - held < ATTEMPT_INTERVAL_SEC:
+        return _failed(shared_failure(entry), entry)
     if closed:
         return _failed(Failure(now, "other", INTERRUPTED_REASON), entry)
     # Первая попытка начнётся в той же сверке.
