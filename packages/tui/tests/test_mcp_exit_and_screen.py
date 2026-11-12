@@ -417,6 +417,38 @@ async def test_refresh_overlay_failure_keeps_copies(
         assert "не наложены на снимок окна" in caplog.text
 
 
+async def test_status_read_failure_logged_once(tmp_path, monkeypatch, caplog):
+    """Сбой чтения статусов на тике — одно предупреждение на сбой, а не
+    на каждый тик; после восстановления новый сбой снова виден."""
+    import logging
+
+    _patch_build(monkeypatch)
+    service = _Service({"srv": _connected("echo")})
+    app = _app(tmp_path, _SRV, service, mounted=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _build_off_loop(app)
+        status_of = service.status
+
+        def _broken_status(_consumer):
+            raise RuntimeError("статус недоступен")
+
+        def _reads() -> int:
+            return caplog.text.count("статусы сервиса не прочитаны")
+
+        with caplog.at_level(logging.WARNING, logger="gc_tui.app"):
+            service.status = _broken_status
+            for _ in range(3):
+                app.refresh_mcp_snapshot()
+            assert _reads() == 1
+            service.status = status_of
+            app.refresh_mcp_snapshot()
+            service.status = _broken_status
+            app.refresh_mcp_snapshot()
+        await pilot.pause()
+
+        assert _reads() == 2
+
+
 def test_settings_save_without_mcp_reuses_consumer(tmp_path, monkeypatch):
     """Сохранение настроек без смены серверов (`reload_config`) и следующая
     сборка — тот же потребитель, второго открытия нет."""

@@ -439,6 +439,9 @@ class TuiApp(App):
         #: Снимок окна и статусы сервиса последнего наложения
         #: (`refresh_mcp_snapshot`): без изменений тик не пересобирает.
         self._mcp_followed: tuple = (None, None)
+        #: Последний сбой чтения статусов там же (тип, текст): повтор на
+        #: тике в лог не пишется.
+        self._mcp_status_failure: tuple | None = None
         # Две сборки окна бывают одновременно (прогрев и `/profile`):
         # потребитель открывается один раз.
         self._mcp_consumer_lock = threading.Lock()
@@ -2123,6 +2126,7 @@ class TuiApp(App):
         текущего поколения; без потребителя или удачной сборки — ничего.
         Снимок и статусы те же, что при прошлом наложении, — ничего: тик
         идёт раз в 250 мс, а новый объект снимка сбрасывает кэш подписей.
+        Тот же сбой чтения статусов подряд — одно предупреждение.
         """
         progress = self._mcp_progress
         built = progress.built() if progress is not None else None
@@ -2131,12 +2135,14 @@ class TuiApp(App):
         try:
             statuses = self._service_statuses()
         except Exception as exc:
-            _log.warning(
-                "MCP: статусы сервиса не прочитаны: %s: %s",
-                type(exc).__name__,
-                exc,
-            )
+            failure = (type(exc).__name__, str(exc))
+            if failure != self._mcp_status_failure:
+                _log.warning(
+                    "MCP: статусы сервиса не прочитаны: %s: %s", *failure
+                )
+            self._mcp_status_failure = failure
             return
+        self._mcp_status_failure = None
         seen = self._mcp_followed
         if seen[0] is self._mcp_snapshot and seen[1] == statuses:
             return
