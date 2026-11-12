@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import threading
@@ -163,6 +164,10 @@ def _entry(consumer, key: str = "a"):
 
 def _status(consumer, key: str = "a"):
     return consumer.status_of(_entry(consumer, key))
+
+
+def _calls_sent(control) -> int:
+    return sum(e.startswith("req tools/call") for e in events(control))
 
 
 def _in_flight(control) -> bool:
@@ -785,6 +790,12 @@ _OUTCOMES = {
         lambda: ExceptionGroup("g", [ValueError("bad")]),
         "pass",
     ),
+    "cancel-group": (
+        lambda: BaseExceptionGroup(
+            "g", [asyncio.CancelledError(), httpx.ConnectError("x")]
+        ),
+        "failure",
+    ),
 }
 
 
@@ -889,7 +900,7 @@ async def test_legacy_http_401_on_call_is_failure_without_secret(
         text = await _refused(view, _ECHO, text="hi")
 
         entry = _entry(consumer)
-        assert "URLSECRET123" not in text
+        assert text == "сервер ответил 401 Unauthorized"
         assert text == entry.last_failure.reason
         assert entry.last_failure.code == "auth"
         assert _status(consumer).state == STATE_FAILED
@@ -921,7 +932,8 @@ async def test_stream_stdio_death_mid_call_is_own_failure(
 
     with pytest.raises(McpToolCallError) as caught:
         nap.result()
-    assert caught.value.error.message == entry.last_failure.reason
+    assert caught.value.error.message == "сервер завершился, не ответив"
+    assert entry.last_failure.reason == caught.value.error.message
     assert _status(consumer).state == STATE_FAILED
     assert not consumer.has_session(entry)
 
@@ -1063,3 +1075,67 @@ async def test_close_while_call_waits_connect(
     assert caught.value.error.message == SERVICE_CLOSED_TEXT
     pids = launches(control)
     await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)
+
+
+async def test_unexpected_type_is_logged_with_frames(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch, caplog
+):
+    # Ошибка нашего кода на пути вызова: для модели и статуса — как отказ,
+    # в логе — ошибка с кадрами трассировки, а не «потерял связь».
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    _raise_on_call(monkeypatch, lambda: TypeError("bad wiring"))
+
+    with caplog.at_level(logging.WARNING, logger=consumer_module.__name__):
+        text = await _refused(view, _ECHO, text="hi")
+
+    assert text == _entry(consumer).last_failure.reason
+    assert _status(consumer).state == STATE_FAILED
+    [record] = [
+        r for r in caplog.records if r.name == consumer_module.__name__
+    ]
+    assert record.levelno == logging.ERROR
+    message = record.getMessage()
+    assert "TypeError" in message
+    assert "in raising" in message
+
+
+async def test_success_after_sibling_drop_keeps_connection_dropped(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Вызов ответил уже после того, как сосед снял соединение: ключ не
+    # возвращается, следующий вызов подключается заново по правилам.
+    real = consumer_module.acall_mcp_tool
+    held, release = asyncio.Event(), asyncio.Event()
+    calls: list[str] = []
+
+    async def late_success(**kwargs):
+        calls.append(kwargs["full_tool_name"])
+        result = await real(**kwargs)
+        if len(calls) == 1:
+            held.set()
+            await release.wait()
+        return result
+
+    monkeypatch.setattr(consumer_module, "acall_mcp_tool", late_success)
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+
+    echo = asyncio.create_task(_wrapper(view, _ECHO).acall(text="hi"))
+    await asyncio.wait_for(held.wait(), _CEILING_SEC)
+    nap = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
+    await wait_for(lambda: _calls_sent(control) == 2, _CEILING_SEC)
+    nap.cancel()
+    await _settled(nap)
+    assert not consumer.has_session(entry)
+    release.set()
+    await _settled(echo)
+
+    assert _payload(echo.result())["text"] == "hi"
+    assert not consumer.has_session(entry)

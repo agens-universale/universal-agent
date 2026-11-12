@@ -14,12 +14,16 @@
 
 import asyncio
 
+import anyio
+import httpx
+from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData
 
 from gc_core.execution.contracts import ToolOutcomeUnknown
 from gc_core.execution.tool_call_context import current_tool_call
 from gc_core.tools.connect_mcp.call_errors import (
     CALL_TIMEOUTS,
+    McpCallOutcomeUnknown,
     McpCallTimedOut,
 )
 from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
@@ -45,6 +49,21 @@ UNAVAILABLE_TEXT = "сервер недоступен"
 # (``ToolOutcomeUnknown`` и ``McpSessionLostError``). Ошибка тула сервера —
 # тоже, если это не разрыв соединения (``passes_through``).
 _PASS_THROUGH = (ValueError, UserStopInterrupt, ToolOutcomeUnknown)
+# Не исход вызова, а конец процесса: уходят как есть и листом группы.
+_FATAL = (KeyboardInterrupt, SystemExit)
+# Семейства, которыми транспорты сообщают об отказе связи. Лист вне них —
+# скорее ошибка нашего кода: в лог он идёт ошибкой с кадрами трассировки.
+# ``RuntimeError`` — семейство транспорта: им отвечают постоянный stdio
+# («process is not running») и легаси-http («Failed to initialize …»).
+_TRANSPORT_FAMILIES = (
+    OSError,
+    RuntimeError,
+    httpx.HTTPError,
+    McpError,
+    McpCallOutcomeUnknown,
+    anyio.ClosedResourceError,
+    anyio.BrokenResourceError,
+)
 
 
 def tool_error(message: str) -> McpToolCallError:
@@ -94,10 +113,21 @@ def timeout_error(leaf: BaseException, timeout: float) -> McpToolCallError:
 
 def passes_through(leaf: BaseException) -> bool:
     """Исход уходит к вызывающему как есть: ответ сервера ошибкой тула
-    (кроме разрыва соединения), ошибка аргументов, стоп, durable."""
+    (кроме разрыва соединения), ошибка аргументов, стоп, durable, конец
+    процесса (``KeyboardInterrupt``, ``SystemExit``)."""
     if isinstance(leaf, McpToolCallError):
         return not is_connection_closed(leaf)
-    return isinstance(leaf, _PASS_THROUGH)
+    return isinstance(leaf, (*_PASS_THROUGH, *_FATAL))
+
+
+def is_transport_family(leaf: BaseException) -> bool:
+    """Лист из семейств, которыми транспорты сообщают об отказе связи."""
+    return isinstance(leaf, _TRANSPORT_FAMILIES)
+
+
+def lost_session() -> ConnectionError:
+    """Вызов снят транспортом (отмена не закрытием потребителя)."""
+    return ConnectionError(SESSION_LOST_TEXT)
 
 
 async def await_attempt(
@@ -158,6 +188,8 @@ __all__ = [
     "await_attempt",
     "call_target",
     "is_timeout",
+    "is_transport_family",
+    "lost_session",
     "passes_through",
     "refusal_text",
     "timeout_error",

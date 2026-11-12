@@ -26,6 +26,7 @@ import contextvars
 import dataclasses
 import logging
 import threading
+import traceback
 from functools import partial
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, NoReturn
 
@@ -47,6 +48,8 @@ from gc_core.tools.connect_mcp.consumer_call import (
     await_attempt,
     call_target,
     is_timeout,
+    is_transport_family,
+    lost_session,
     passes_through,
     refusal_text,
     timeout_error,
@@ -889,21 +892,33 @@ class McpConsumer:
                 task.exception()
             raise tool_error(SERVICE_CLOSED_TEXT)
         if task.cancelled():
-            lost = ConnectionError(SESSION_LOST_TEXT)
-            raise await self._atransport_failure(entry, cfg, lost, generation)
+            raise await self._atransport_failure(
+                entry, cfg, lost_session(), generation
+            )
         exc = task.exception()
         if exc is not None:
             await self._araise_call_failure(
                 entry, cfg, exc, timeout, generation
             )
+        self._confirm_call(entry, cfg, generation)
+        return task.result()
+
+    def _confirm_call(
+        self, entry: ServerEntry, cfg: dict, generation: int
+    ) -> None:
+        """Шаг 5: удачный вызов подтверждает соединение — только если его
+        за время вызова никто не снял (поколение то же): иначе ключ вернул
+        бы снятую сессию, и следующий вызов открыл бы её мимо ожидания
+        закрытий."""
         key = _session_key_of(entry)
         with self._lock:
+            if self._generations.get(key, 0) != generation:
+                return
             self._failures.pop(key, None)
             target = (
                 self._sessions if cfg.get("persistent_session") else self._ok
             )
             target.add(key)
-        return task.result()
 
     async def _araise_call_failure(
         self,
@@ -919,10 +934,15 @@ class McpConsumer:
         leaf = first_leaf(exc)
         if is_timeout(leaf):
             raise timeout_error(leaf, timeout) from exc
-        if passes_through(leaf) or not isinstance(leaf, Exception):
+        if passes_through(leaf):
             raise leaf
+        # Отмена листом группы — снятие вызова транспортом, как отменённая
+        # задача: ход вызывающего она не отменяет.
+        cause = (
+            lost_session() if isinstance(leaf, asyncio.CancelledError) else exc
+        )
         raise await self._atransport_failure(
-            entry, cfg, exc, generation
+            entry, cfg, cause, generation
         ) from exc
 
     async def _atransport_failure(
@@ -958,18 +978,38 @@ class McpConsumer:
         if self._is_closed():
             return tool_error(SERVICE_CLOSED_TEXT)
         failure = self._service.record_failure(entry, exc)
-        logger.warning(
-            "MCP %s: вызов потребителя %s потерял связь (%s): %s",
-            entry.key,
-            self.label,
-            type(first_leaf(exc)).__name__,
-            failure.reason,
-        )
+        self._log_call_failure(entry, exc, failure.reason)
         with self._lock:
             self._failures[key] = failure
         if self._retries(entry):
             self._start_attempt(entry)
         return tool_error(failure.reason)
+
+    def _log_call_failure(
+        self, entry: ServerEntry, exc: BaseException, reason: str
+    ) -> None:
+        """Отказ связи — предупреждение; лист вне семейств транспорта
+        (скорее ошибка нашего кода) — ошибка с кадрами трассировки. Тексты
+        исключений в лог не идут: в них бывает адрес со строкой запроса."""
+        leaf = first_leaf(exc)
+        name = type(leaf).__name__
+        if is_transport_family(leaf):
+            logger.warning(
+                "MCP %s: вызов потребителя %s потерял связь (%s): %s",
+                entry.key,
+                self.label,
+                name,
+                reason,
+            )
+            return
+        logger.error(
+            "MCP %s: вызов потребителя %s упал (%s): %s\n%s",
+            entry.key,
+            self.label,
+            name,
+            reason,
+            "".join(traceback.format_tb(leaf.__traceback__)),
+        )
 
     def _leave_if_gone(self, entry: ServerEntry) -> None:
         """Шаг 8: сервер ушёл из набора, пока шёл вызов, — закрыть сессию,
