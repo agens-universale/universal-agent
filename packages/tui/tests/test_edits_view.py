@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from gc_core.agent_edits import deltas, git_ops
 from gc_core.agent_edits.git_ops import show_index_bytes
+from gc_core.agent_edits.delete_records import delete_record
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
 from gc_core.agent_edits.revert import REASON_NOT_REVERTABLE
@@ -41,6 +42,7 @@ from gc_tui.services.edits_view import (
     diff_limits,
 )
 from gc_testkit.git_support import rev_parse_head
+from gc_tui.screens.diff import build_rows
 
 
 def _rec(
@@ -265,6 +267,33 @@ def test_turn_source_counts_shell_edit_via_counting_base(tmp_path):
     assert (entry.exact, entry.add, entry.del_) == (True, 1, 1)
     assert entry.by_shell is True
     assert entry.revertable is False  # счётная база откату не годится
+
+
+def test_deleted_file_row_and_viewer_show_removed_lines(tmp_path):
+    ws = _Workspace(tmp_path)
+    ws.turn_base("gone.py", "one\ntwo\n", "t1")
+    ws.session_base("gone.py", "one\ntwo\n")
+    ws.journal.append(
+        delete_record(
+            "gone.py",
+            "t1",
+            b"one\ntwo\n",
+            mode=None,
+            budget=None,
+            context_lines=3,
+            max_chars=100000,
+        )
+    )
+
+    [row] = ws.view.session_view(SOURCE_TURN).active
+    entry = row.entry
+    delta = ws.view.revert_deltas(SOURCE_TURN, ["gone.py"])[0]
+
+    assert entry.kind == "deleted"
+    assert (entry.add, entry.del_) == (0, 2)
+    assert entry.exact is True
+    assert entry.revertable is True
+    assert (delta.add, delta.del_) == (0, 2)
 
 
 # --- тело диффа -------------------------------------------------------------
@@ -2425,16 +2454,6 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
 
     ws = _Workspace(tmp_path, git=True)
 
-    def commit_at(msg: str, when: str) -> None:
-        env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
-        subprocess.run(
-            ["git", "commit", "-m", msg],
-            cwd=str(ws.root),
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-
     # a.py: коммит, задевающий путь, случится ПОСЛЕ первой записи хода — предупреждение есть.
     ws.write("a.py", "orig\n")
     subprocess.run(
@@ -2443,7 +2462,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("seed a", before_turn)
+    _commit_at(ws.root, "seed a", before_turn)
     ws.session_base("a.py", "orig\n")
     ws.turn_base("a.py", "orig\n", "t1")
 
@@ -2456,7 +2475,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("seed c", before_turn)
+    _commit_at(ws.root, "seed c", before_turn)
     ws.session_base("c.py", "c0\n")
     ws.write("c.py", "c1\n")
     subprocess.run(
@@ -2465,7 +2484,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("commit before turn", before_turn)
+    _commit_at(ws.root, "commit before turn", before_turn)
     ws.turn_base("c.py", "c1\n", "t1")
 
     # b.py: принятие случится ПОСЛЕ первой записи хода.
@@ -2485,7 +2504,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("commit inside turn", after_turn)
+    _commit_at(ws.root, "commit inside turn", after_turn)
     ws.write("b.py", "b2\n")
     ws.view.accept(["b.py"])
 
@@ -3222,6 +3241,122 @@ def test_resetting_many_accepted_committed_paths_costs_a_constant_number_of_git_
     assert len(calls) <= 8, [c[:4] for c in calls]
 
 
+def test_turn_warns_when_created_file_was_committed_after_start(tmp_path):
+    """Созданный в ходе файл, закоммиченный позже в том же ходе: откат
+    «Хода» по-прежнему удаляет его, но предупреждает о коммите — как у
+    правленого. Пустой файл тоже (ступени HEAD у него нет: HEAD = пустота).
+    Незакоммиченный созданный — удаление без предупреждений."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("seed.txt", "s\n")
+    _git_run(ws.root, "add", "--", "seed.txt")
+    _commit_at(ws.root, "seed", "2020-01-01T00:00:00")
+    turn_start_ts = datetime.fromisoformat("2020-06-01T00:00:00").timestamp()
+    texts = {"notes.txt": "n\n", "empty.txt": "", "draft.txt": "d\n"}
+    for rel, text in texts.items():
+        ws.created_mark(rel)
+        ws.journal.append(
+            _rec(rel, ts=turn_start_ts, op="create", add=1, del_=0)
+        )
+        ws.write(rel, text)
+    _git_run(ws.root, "add", "--", "notes.txt", "empty.txt")
+    _commit_at(ws.root, "commit inside turn", "2021-01-01T00:00:00")
+
+    targets = ws.view.revert_targets(SOURCE_TURN, list(texts))
+
+    assert [t.kind for t in targets] == ["delete"] * 3
+    notes, empty, draft = targets
+    for target in (notes, empty):
+        assert any(
+            "заденет коммит" in w and "начала хода" in w for w in target.warns
+        )
+    assert draft.warns == ()
+
+
+def _created_in_turn(ws, rel: str, *, commit_when: str | None) -> None:
+    """Путь с отметкой создания и записью создания в ходе (начало хода —
+    2020-06-01); ``commit_when`` — дата коммита пути, ``None`` — без него.
+    Отметка ставится при seed-коммите, как у пути, созданного раньше."""
+    ws.write("seed.txt", "s\n")
+    _git_run(ws.root, "add", "--", "seed.txt")
+    _commit_at(ws.root, "seed", "2020-01-01T00:00:00")
+    ws.created_mark(rel)
+    ws.write(rel, "n\n")
+    if commit_when is not None:
+        _git_run(ws.root, "add", "--", rel)
+        _commit_at(ws.root, "commit", commit_when)
+    turn_start_ts = datetime.fromisoformat("2020-06-01T00:00:00").timestamp()
+    ws.journal.append(_rec(rel, ts=turn_start_ts, op="create", add=1, del_=0))
+
+
+def test_turn_does_not_warn_on_commit_of_created_path_before_turn(tmp_path):
+    """Отметка создания — самая ранняя в сессии: путь создан в прошлом ходе
+    и закоммичен между ходами, в этом ходе создан заново. Коммит был ДО
+    начала хода — предупреждать не о чем."""
+    ws = _Workspace(tmp_path, git=True)
+    _created_in_turn(ws, "notes.txt", commit_when="2020-03-01T00:00:00")
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+
+    assert (target.kind, target.warns) == ("delete", ())
+
+
+def test_turn_warns_on_commit_of_created_path_when_batch_failed(
+    tmp_path, monkeypatch
+):
+    """Пакет закоммиченных не посчитан (занятый индекс снимков) — созданный
+    путь проверяется поштучно и предупреждение не теряется, даже если факты
+    git прогреты под прежним HEAD."""
+    ws = _Workspace(tmp_path, git=True)
+    _created_in_turn(ws, "notes.txt", commit_when="2020-03-01T00:00:00")
+    [before] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+    assert before.warns == ()  # коммит до хода; время в кэше под этим HEAD
+    ws.write("notes.txt", "n2\n")
+    _git_run(ws.root, "add", "--", "notes.txt")
+    _commit_at(ws.root, "commit inside turn", "2021-01-01T00:00:00")
+    ws.view.invalidate()
+    monkeypatch.setattr(ws.view, "_prepare_head_steps", lambda *_a: None)
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+
+    assert target.kind == "delete"
+    assert any("заденет коммит" in w for w in target.warns)
+
+
+def test_turn_warns_when_commit_time_is_unknown(tmp_path, monkeypatch):
+    """Коммит пути после начала хода известен, а время не прочиталось —
+    предупреждение есть: лишнее дешевле пропущенного."""
+    ws = _Workspace(tmp_path, git=True)
+    _created_in_turn(ws, "notes.txt", commit_when="2021-01-01T00:00:00")
+    monkeypatch.setattr(
+        ws.view._ladder_facts, "head_commit_ts", lambda _rel: None
+    )
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+
+    assert any("заденет коммит" in w for w in target.warns)
+
+
+def test_turn_warns_on_commit_in_the_same_second_as_turn_start(tmp_path):
+    """``%ct`` — целые секунды, время записи хода — дробное: коммит той же
+    секунды, что первая правка хода, — тоже после начала хода."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("a.py", "orig\n")
+    _git_run(ws.root, "add", "--", "a.py")
+    _commit_at(ws.root, "seed", "2020-01-01T00:00:00")
+    ws.session_base("a.py", "orig\n")
+    ws.turn_base("a.py", "orig\n", "t1")
+    commit_dt = "2020-06-01T00:00:00"
+    commit_ts = datetime.fromisoformat(commit_dt).timestamp()
+    ws.journal.append(_rec("a.py", turn="t1", ts=commit_ts + 0.5))
+    ws.write("a.py", "orig\nagent\n")
+    _git_run(ws.root, "add", "--", "a.py")
+    _commit_at(ws.root, "commit inside turn", commit_dt)
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["a.py"])
+
+    assert any("заденет коммит" in w for w in target.warns)
+
+
 def test_turn_revert_targets_survive_a_busy_snapshot_index(
     tmp_path, monkeypatch
 ):
@@ -3604,3 +3739,155 @@ def test_view_after_a_commit_asks_git_status_only_about_journal_paths(
         assert tail and all(
             "p" in spec and "unrelated" not in spec for spec in tail
         ), args
+
+
+def _git_run(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True
+    )
+
+
+def _commit_at(root: Path, msg: str, when: str) -> None:
+    """Коммит с явными датами автора и коммиттера: развести коммиты по
+    секундам ``%ct`` без сна в тесте."""
+    env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+    subprocess.run(
+        ["git", "commit", "-m", msg],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def _committed_by_command(tmp_path) -> _Workspace:
+    """Команда правит, создаёт и удаляет пути и сама их коммитит: записи без
+    базы и без отметки создания, только отметка коммита (ревизия HEAD до
+    команды) — так пишет их шелл-канал."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("edit.py", "v1\n")
+    ws.write("gone.py", "a\nb\n")
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "seed")
+    head_before = rev_parse_head(ws.root)
+    ws.write("edit.py", "v2\n")
+    ws.write("new.py", "n\n")
+    (ws.root / "gone.py").unlink()
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "by command")
+    ws.journal.append(_rec("edit.py", op="shell", ts=1.0))
+    ws.journal.append(_rec("new.py", op="shell", ts=2.0, add=1, del_=0))
+    ws.journal.append(_rec("gone.py", op="delete", ts=3.0, add=0, del_=2))
+    for rel in ("edit.py", "new.py", "gone.py"):
+        ws.store.mark_committed(rel, head_rev=head_before)
+    return ws
+
+
+def test_paths_committed_by_command_settle_as_committed(tmp_path):
+    """Отметка коммита возвращает такие пути в «закоммичено» — как до того,
+    как они лишились базы (откат их коммита мог затереть чужую работу)."""
+    ws = _committed_by_command(tmp_path)
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert [row.entry.path for row in view.active] == []
+    assert sorted((row.path, row.reason) for row in view.settled) == [
+        ("edit.py", SETTLED_COMMIT),
+        ("gone.py", SETTLED_COMMIT),
+        ("new.py", SETTLED_COMMIT),
+    ]
+    targets = ws.view.revert_targets(
+        SOURCE_SESSION, ["edit.py", "new.py", "gone.py"]
+    )
+    assert {target.kind for target in targets} == {"skip"}
+
+
+def test_paths_committed_by_command_stay_unrevertable_in_turn(tmp_path):
+    """«Ход» отметку коммита не читает: строки видны, отката нет."""
+    ws = _committed_by_command(tmp_path)
+
+    view = ws.view.session_view(SOURCE_TURN)
+
+    assert {row.entry.path: row.entry.revertable for row in view.active} == {
+        "edit.py": False,
+        "new.py": False,
+        "gone.py": False,
+    }
+
+
+def test_accepted_copy_of_a_path_deleted_again_stays_revertable(tmp_path):
+    """Правило закоммиченного удаления верит ступени, если она есть.
+
+    Удаление закоммичено, агент пересоздал файл, пользователь принял копию,
+    затем агент снова удалил файл: путь отсутствует и в HEAD, и на диске, но
+    ступень — принятая копия, и строка с откатом к ней остаётся видна."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("x.py", "orig\n")
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "seed")
+    ws.session_base("x.py", "orig\n")
+    ws.write("x.py", "agent\n")
+    ws.journal.append(_rec("x.py", op="edit", ts=1.0))
+    _git_run(ws.root, "rm", "-qf", "x.py")
+    _git_run(ws.root, "commit", "-qm", "rm")
+    ws.write("x.py", "recreated\n")
+    ws.journal.append(_rec("x.py", op="edit", ts=2.0))
+    ws.view.session_view(SOURCE_SESSION)
+    ws.view.accept(["x.py"])
+    (ws.root / "x.py").unlink()
+    _git_run(ws.root, "reset", "-q", "--", "x.py")
+    ws.journal.append(_rec("x.py", op="delete", ts=3.0, add=0, del_=1))
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert [row.entry.path for row in view.active] == ["x.py"]
+    assert view.settled == []
+
+
+def test_filtered_path_with_snapshot_keeps_the_old_rule_after_commit(
+    tmp_path,
+):
+    """Запасное правило удаления — только для пути с одной отметкой коммита.
+
+    У пути есть снимок сессии, но ступени нет: кастомный фильтр запрещает
+    читать HEAD. Пользователь закоммитил удаление — путь остаётся активным
+    с откатом к снимку, как до отметки коммита."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write(".gitattributes", "x.bin filter=lfs\n")
+    ws.write("x.bin", "orig\n")
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "seed")
+    ws.session_base("x.bin", "orig\n")
+    ws.write("x.bin", "agent\n")
+    ws.journal.append(_rec("x.bin", op="edit", ts=1.0))
+    _git_run(ws.root, "rm", "-qf", "x.bin")
+    _git_run(ws.root, "commit", "-qm", "rm")
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert [row.entry.path for row in view.active] == ["x.bin"]
+    assert view.settled == []
+    assert view.active[0].entry.revertable is True
+
+
+def test_created_and_committed_by_command_is_labeled_created(tmp_path):
+    """Файл создан и закоммичен командой: на /diff подпись «создан», а
+    ``kind``/``revertable`` прежние — откат удалением ему не положен."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("new.py", "one\n")
+    for args in (["add", "--", "new.py"], ["commit", "-m", "add new.py"]):
+        subprocess.run(
+            ["git", *args], cwd=str(ws.root), check=True, capture_output=True
+        )
+    ws.journal.append(
+        _rec("new.py", ts=1.0, op="shell", add=1, del_=0, flags=["created"])
+    )
+
+    [row] = ws.view.session_view(SOURCE_TURN).active
+
+    assert (row.entry.kind, row.entry.revertable) == ("modified", False)
+    assert row.entry.created is False
+    assert row.entry.shown_created is True
+    [text] = build_rows([row.entry], selected=0, width=80)
+    assert "создан" in str(text)
+    assert "изменён" not in str(text)

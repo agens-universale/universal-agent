@@ -5,17 +5,28 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+)
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
     AgentStore,
+    FileAgentStore,
     check_agent_store,
+    project_key_for,
 )
+from gc_core.agent_store.roles import with_role
 from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.auto_routing.levels import (
     auto_available,
-    effective_level,
+    effective_target,
     resolve_routing_params,
 )
 from gc_core.auto_routing.policy import RoutingParams
@@ -33,6 +44,10 @@ from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     intent_scope_from_config_dict,
 )
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
+)
 from gc_core.context_preparation import PreparedRunContext, RunContextBindings
 from gc_core.execution.contracts import ToolEffectExecutor
 from gc_core.execution.guard_contracts import GuardProbe
@@ -43,9 +58,14 @@ from gc_core.execution_workspace import (
     aprime_backend_cwd,
     areconcile_remote_root,
     build_execution_workspace,
+    launch_root_from_config,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
-from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.model_router import (
+    CircuitBreaker,
+    ModelRouter,
+    main_model_identity,
+)
 from gc_core.run_preparation import PromptLoader
 from gc_core.startup_notices import auto_routing_unavailable_notice
 from gc_core.state_preparation import StatePreparer
@@ -54,6 +74,11 @@ from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
 from gc_core.utils.prod_auth import AuthConnector
+
+if TYPE_CHECKING:
+    from gc_core.model_choice import ModelChoiceApplied
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+    from gc_core.vision.notes import TraceNote
 
 
 @dataclass
@@ -117,13 +142,28 @@ class RunContext:
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
     # Пометка в ленте о судьбе изображения («не просмотрено», спека изображений
-    # §10): текст готов к показу. Не задан — `vision.notes.emit_trace_note`
+    # §10): `TraceNote` — текст готов к показу и владелец (вызов тула или
+    # ответ). Не задан — `vision.notes.emit_trace_note`
     # пишет предупреждение в `logger` (CLI, сервер, SDK).
-    on_trace_note: Optional[Callable[[str], None]] = None
+    on_trace_note: Optional[Callable[[TraceNote], None]] = None
+    # Живое событие «выбор модели применён» (`gc_core.model_choice`).
+    # Дочернему контексту не передаётся: субагент событий не даёт.
+    on_model_choice_applied: Optional[Callable[[ModelChoiceApplied], None]] = (
+        None
+    )
+    # Запись той же смены в тред: ставит исполнитель на время рана (пишет
+    # через тред-сессию). Фронтенду не принадлежит, дочернему контексту не
+    # передаётся.
+    record_model_choice: Optional[
+        Callable[[ModelChoiceRecord], Awaitable[None]]
+    ] = None
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
     ask_human: Optional[Callable[[str], Any]] = None
+    # Приостановка на вопросе (канал без живого человека, A2A): вопрос модели
+    # завершает ход, а ответ приходит следующим ходом (``arun(answer=…)``).
+    ask_human_suspends: bool = False
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = (
         None
@@ -260,6 +300,7 @@ def assemble_run_context(
         model_router=bindings.model_router,
         on_stream_delta=bindings.on_stream_delta,
         on_trace_note=bindings.on_trace_note,
+        on_model_choice_applied=bindings.on_model_choice_applied,
         on_messages_evicted=bindings.on_messages_evicted,
         mcp_session_owner=prepared.mcp_session_owner,
         tools_cache=bindings.tools_cache,
@@ -306,15 +347,15 @@ def assemble_run_context(
     ctx.routing_params = resolve_routing_params(
         ctx, legacy_call_kits=not ctx.routing_contract_v2
     )
-    live = bindings.model_router.live_level
+    live = bindings.model_router.live_choice
 
     def effective_provider():
         state = ctx.active_state
-        return effective_level(
+        return effective_target(
             live(), getattr(state, "current_level", None), ctx.auto_available
         )
 
-    ctx.model_router = bindings.model_router.with_level_providers(
+    ctx.model_router = bindings.model_router.with_choice_providers(
         effective_provider, live
     )
     return ctx
@@ -331,7 +372,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
-    on_trace_note: Optional[Callable[[str], None]] = None,
+    on_trace_note: Optional[Callable[[TraceNote], None]] = None,
     on_messages_evicted: Optional[
         Callable[[List[Dict[str, Any]]], None]
     ] = None,
@@ -339,7 +380,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     tools_cache: Any = None,
     log_handlers: Any = None,
     thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
+    choice_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
     prompt_loader: Optional[PromptLoader] = None,
@@ -387,8 +428,8 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - Свой LocalFsBackend → ``TrackingFsBackend`` (журнал правок) там, где
       запись включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
       по конфигу); библиотечный вызов без режима запуска не оборачивается.
-    - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
-      CLI/server не передают его → константный провайдер из ``settings.level``.
+    - ``choice_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
+      CLI/server не передают его → константный провайдер из ``settings.model``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
       инверсия зависимости через этот параметр.
     - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
@@ -402,15 +443,26 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # токеном владельца, а `AsyncAgent.create` на ошибке закрывает только пул
     # httpx — persistent stdio (браузер) и логгер с открытым файлом доживали до
     # конца процесса.
-    if thread_store is not None:
-        from gc_core.thread_store_async import athread_store
+    # Нефайловый storage: без открытого хранилища — отказ до всего.
+    from gc_core.stores import require_opened_storage
 
-        athread_store(thread_store)
+    require_opened_storage(
+        _coerce_settings(settings, runtime),
+        thread_store=thread_store,
+        agent_store=agent_store,
+    )
+    if thread_store is not None:
+        from gc_core.threads.store import require_thread_store
+
+        require_thread_store(thread_store)
     # Хранилище агента — там же и по той же причине: до дискавери.
     if agent_store is not None:
         check_agent_store(agent_store)
 
     source = _coerce_settings(settings, runtime)
+    if agent_store is not None:
+        # Роль поверхности (agent.role): свои L0 и специнструкции агента.
+        agent_store = with_role(agent_store, source)
     prep = _prepare_run_context(
         source,
         run_id=run_id,
@@ -418,7 +470,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         loop=loop,
         os_backend=os_backend,
         log_handlers=log_handlers,
-        agent_store=agent_store or DEFAULT_AGENT_STORE,
+        # Файловое по умолчанию — по настройкам этой сборки (с runtime-слоем
+        # фронтенда: ACP, TUI и chat подменяют special_instructions).
+        agent_store=agent_store or FileAgentStore(source),
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -455,7 +509,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         # Скиллы, которые надо доставить в среду исполнения (файловое
         # хранилище и remote-бэкенд), — реестр по доставленной копии.
         provisioned = await prep.agent_store.aprovision_skills(
-            prep.backend, source, run_logger=prep.run_logger
+            prep.backend,
+            source,
+            run_logger=prep.run_logger,
+            project=prep.project,
         )
         if provisioned is not None:
             prep.skills_registry = provisioned
@@ -497,7 +554,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             is_tui=is_tui,
             tools_cache=tools_cache,
             thread_store=thread_store,
-            level_provider=level_provider,
+            choice_provider=choice_provider,
             circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
             prompt_loader=prompt_loader,
@@ -578,7 +635,10 @@ class _RunContextPrep:
     backend_was_overridden: bool
     #: Настройки сборки (``LoadedSettings``): из них читает и досборка.
     settings: Any = None
-    agent_store: Any = DEFAULT_AGENT_STORE
+    agent_store: Any = None
+    #: Проект рана (``ProjectKey``): слой скиллов ``project`` и ресурсы
+    #: проекта своего хранилища агента.
+    project: Any = None
 
 
 def _prepare_run_context(
@@ -589,7 +649,7 @@ def _prepare_run_context(
     loop: Optional[Any],
     os_backend: Optional[FsBackend],
     log_handlers: Any = None,
-    agent_store: AgentStore = DEFAULT_AGENT_STORE,
+    agent_store: AgentStore | None = None,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
@@ -598,6 +658,10 @@ def _prepare_run_context(
     всё, что принимают ``settings_of``/``runtime_of`` (``LoadedSettings``).
     """
     effective_run_id = run_id or generate_run_id()
+    # Проект рана — каталог хода (``launch_root`` фронтенда: chat и A2A ведут
+    # ход в своём каталоге), а не каталог процесса; без корня — текущий.
+    # До подмены корня песочницей (workdir=auto): её каталог — не проект.
+    project_root = launch_root_from_config(settings)
     backend = resolve_os_backend(
         settings,
         environment=environment,
@@ -613,7 +677,13 @@ def _prepare_run_context(
         settings = settings.with_runtime(
             launch_root=auto_workdir, project_root=auto_workdir
         )
-    skills_registry = agent_store.skills_registry(settings, backend=backend)
+    if agent_store is None:
+        agent_store = FileAgentStore(settings)
+    # Проект рана строится до контекста: реестр скиллов нужен раньше.
+    project = project_key_for(project_root, settings)
+    skills_registry = agent_store.skills_registry(
+        settings, backend=backend, project=project
+    )
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
@@ -639,7 +709,18 @@ def _prepare_run_context(
         backend_was_overridden=os_backend is not None,
         settings=settings,
         agent_store=agent_store,
+        project=project,
     )
+
+
+def _sanitized_provider(
+    provider: Optional[Callable[[], str]], configured: str, settings: Any
+) -> Callable[[], str]:
+    """Один источник правды: любой выбор — от фронтенда или из конфига —
+    проходит `effective_choice` (неизвестный алиас → default)."""
+    if provider is None:
+        return lambda: configured
+    return lambda: effective_choice(provider(), settings)
 
 
 def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
@@ -650,12 +731,12 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     auth_connector: Optional[AuthConnector],
     environment: Optional[Any],
     on_stream_delta,
-    on_trace_note: Optional[Callable[[str], None]] = None,
+    on_trace_note: Optional[Callable[[TraceNote], None]] = None,
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]],
     is_tui: bool,
     tools_cache: Any,
     thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
+    choice_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
     prompt_loader: Optional[PromptLoader] = None,
@@ -671,9 +752,9 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     # object»: сообщение верное, но указывает не туда, и половина обращений
     # при этом вообще не падала, а теряла запись без ошибки и без лога.
     if thread_store is not None:
-        from gc_core.thread_store_async import athread_store
+        from gc_core.threads.store import require_thread_store
 
-        athread_store(thread_store)
+        require_thread_store(thread_store)
 
     tools_data, tools_spec, tools_description, mcp_status = tools
     effective_run_id = prep.run_id
@@ -687,15 +768,27 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 
     settings = settings_of(prep.settings)
 
+    configured = effective_choice(configured_choice(settings), settings)
+    effective_choice_provider = _sanitized_provider(
+        choice_provider, configured, settings
+    )
+    model_router = ModelRouter(
+        settings,
+        choice_provider=effective_choice_provider,
+        breaker=circuit_breaker,
+        force_legacy=force_legacy,
+    )
+    # Модель, в которую резолвится main (реестр models), а не легаси-поля.
+    start_model, start_url = main_model_identity(settings, model_router)
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
-        settings.agent.model,
-        settings.backend.completions_url,
+        start_model,
+        start_url,
         settings.backend.api_mode,
         extra={
             "event": "agent_start",
-            "model": settings.agent.model,
-            "url": settings.backend.completions_url or None,
+            "model": start_model,
+            "url": start_url or None,
             "backend_api_mode": settings.backend.api_mode,
         },
     )
@@ -730,15 +823,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 
     workspace = build_execution_workspace(backend, prep.settings)
 
-    configured_level = settings.level or "default"
-    effective_level_provider = level_provider or (lambda: configured_level)
-    model_router = ModelRouter(
-        settings,
-        level_provider=effective_level_provider,
-        breaker=circuit_breaker,
-        force_legacy=force_legacy,
-    )
-
     prepared = PreparedRunContext(
         settings=settings,
         runtime=runtime_of(prep.settings),
@@ -750,7 +834,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         tools_description=tools_description,
         mcp_status=mcp_status,
         registered_tool_names=list(registered_names or []),
-        project_gc_dir=str(_resolve_project_gc_dir()),
+        project_gc_dir=str(_resolve_project_gc_dir(prep.project.root)),
         workspace_root=workspace.root,
         workspace_shell=workspace.shell,
         workspace_os_name=workspace.os_name,

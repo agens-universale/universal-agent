@@ -1,9 +1,20 @@
+import asyncio
 from pathlib import Path
 
+from gc_core.agent_store import FileAgentStore
 from gc_core.instructions.loader import (
     AGENTSMD_OVERRIDE_IGNORED_WARNING,
-    build_instructions,
+    abuild_instructions,
 )
+from gc_testkit.settings import make_settings
+
+
+def build_instructions(*, agent_md_path, **kwargs):
+    """Роль запуска (L0) задаёт настройка ``paths.agent_md_path`` хранилища."""
+    settings = make_settings({"paths.agent_md_path": agent_md_path or ""})
+    return asyncio.run(
+        abuild_instructions(store=FileAgentStore(settings), **kwargs)
+    )
 
 
 def _write(p: Path, text: str):

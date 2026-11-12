@@ -28,6 +28,7 @@ import time
 import pytest
 from gc_core.aio import AsyncAgent
 from gc_testkit import LoopPulse
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from parity_harness import (
     ScriptedBackend,
     assistant_text,
@@ -85,7 +86,10 @@ TURNS = [
 
 #: Компакция — это ДОПОЛНИТЕЛЬНЫЕ обращения к модели (сводка, memory-patch).
 #: Без запаса сценарий исчерпывается, и прогон падает не по той причине.
-TAIL = [assistant_text("сводка предыдущего диалога") for _ in range(8)]
+TAIL = [
+    assistant_text(valid_summary_xml_for_tests(seed="previous dialogue"))
+    for _ in range(8)
+]
 
 
 def script() -> ScriptedBackend:
@@ -540,10 +544,9 @@ async def test_cancelled_compaction_leaves_the_thread_readable(
     assert isinstance(session.history_messages, list)
 
     # Протухший флаг снимается на старте следующего прогона.
-    from gc_core.run_summary_coordinator import areset_stale_summarizing_flag
+    from gc_core.run_summary_coordinator import areset_run_flags
 
-    await areset_stale_summarizing_flag(session)
-    runtime = session.meta.get("runtime") or {}
-    assert not runtime.get("summarizing"), (
+    await areset_run_flags(session)
+    assert "summarizing" not in session.runtime.flags, (
         "флаг summarizing остался взведённым после отменённой компакции — TUI будет вечно показывать «сжимаю контекст»"
     )

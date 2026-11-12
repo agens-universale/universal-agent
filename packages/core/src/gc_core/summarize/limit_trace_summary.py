@@ -8,15 +8,14 @@ Spec: docs_md/actual/2026-08-01-limit-trace-summary-spec.md
 
 import json
 import logging
-import os
 from typing import Any
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
     AgentStore,
     FileAgentStore,
+    Prompt,
     agent_store_of,
+    decode_text,
 )
 from gc_core.execution.contracts import ExecutionFailure, PayloadTooLarge
 from gc_core.execution.resources import (
@@ -37,25 +36,20 @@ logger = logging.getLogger(__name__)
 _prompt_cache: str | None = None
 
 
-def _load_limit_summary_prompt(
-    store: AgentStore = DEFAULT_AGENT_STORE,
-) -> str:
-    from gc_core.bundled_assets import bundled_root
-
-    _PROMPT_PATH = os.path.join(
-        str(bundled_root()), "prompts", "limit_trace_summary.md"
-    )
+async def aload_limit_summary_prompt(store: AgentStore) -> str:
     global _prompt_cache
     # Кэш — только у пакетного файла: своё хранилище отвечает само.
     cacheable = type(store) is FileAgentStore
     if cacheable and _prompt_cache is not None:
         return _prompt_cache
-    text = store.read_text(
-        AgentResource("prompt", "limit_summary", _PROMPT_PATH)
-    ).strip()
+    data = await store.read("prompt", Prompt.LIMIT_SUMMARY)
+    if data is None:
+        raise FileNotFoundError(store.label("prompt", "limit_summary"))
+    text = decode_text(data).strip()
     if not text:
         raise ValueError(
-            f"Limit trace summary prompt is empty: {_PROMPT_PATH}"
+            "Limit trace summary prompt is empty: "
+            f"{store.label('prompt', 'limit_summary')}"
         )
     if cacheable:
         _prompt_cache = text
@@ -163,7 +157,7 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             prompt_template = await aload_prompt_resource(
                 ctx,
                 PromptResourceRequest("limit_summary"),
-                local=lambda: _load_limit_summary_prompt(agent_store_of(ctx)),
+                local=lambda: aload_limit_summary_prompt(agent_store_of(ctx)),
             )
             trace_text = _serialize_trace(state.messages)
             user_content = (

@@ -7,15 +7,14 @@
 
 import json
 
-from gc_core import thread_store as ts
 from gc_core.thread_store import ThreadSession
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads import file_layout
+from gc_core.threads.file_store import FileThreadStore
 
 
 async def test_legacy_records_without_id_are_not_duplicated(tmp_path):
-    store = FileThreadStore(str(tmp_path))
-    store.ensure_ready()
-    data_path, _ = ts._thread_paths(str(tmp_path), "sys", "t1")
+    store = FileThreadStore(tmp_path)
+    data_path, _ = file_layout.thread_paths(str(tmp_path), "sys", "t1")
     with open(data_path, "w", encoding="utf-8") as f:
         for seq, message in enumerate(
             [

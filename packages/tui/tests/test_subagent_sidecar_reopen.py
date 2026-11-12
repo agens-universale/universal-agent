@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_subagent_trace_record
+from gc_testkit.thread_writes import subagent_record
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
@@ -64,7 +64,7 @@ def _write_parent_thread(tmp_path: Path, tid: str) -> None:
 
 def _write_sidecar(tmp_path: Path, tid: str) -> None:
     d = str(tmp_path)
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -78,7 +78,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
             "call_id": "call_child_9",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -91,7 +91,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
             "output": "ok",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -100,7 +100,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
         kind="child_summary",
         payload={"synthesis": "сжато"},
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -109,7 +109,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
         kind="intermediate_reply",
         payload={"prose": "проверю дальше", "call_id": "ir1"},
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -199,7 +199,7 @@ def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
         "\n".join(json.dumps(x, ensure_ascii=False) for x in live) + "\n",
         encoding="utf-8",
     )
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         tid,
@@ -213,7 +213,7 @@ def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
             "call_id": "child_arch_1",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         tid,
@@ -250,8 +250,8 @@ async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
         assert "call_sub_arch" in scr._subagent_parent_rows
         nested = scr._nested_tool_rows.get("child_arch_1")
         assert nested is not None
-        assert nested._nested is True
-        assert "fs_list_files" in str(nested._render_content())
+        assert nested._level == 1
+        assert str(nested._render_content()).startswith("Find  ")
 
 
 @pytest.mark.asyncio
@@ -279,8 +279,8 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
 
         nested = scr._nested_tool_rows.get("call_child_9")
         assert nested is not None
-        assert nested._nested is True
-        assert "fs_read_file" in str(nested._render_content())
+        assert nested._level == 1
+        assert str(nested._render_content()).startswith("Read  a.py")
         assert nested._result is not None
 
         widgets = scr._nested_widgets_by_parent.get("call_sub_1", [])
@@ -291,4 +291,62 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
         ]
         assert CHILD_SUMMARY_LABEL in prose_texts
         assert "проверю дальше" in prose_texts
-        assert any(isinstance(w, ToolCallRow) and w._nested for w in widgets)
+        assert any(isinstance(w, ToolCallRow) and w._level for w in widgets)
+
+
+@pytest.mark.asyncio
+async def test_reopen_shows_rejected_reply_and_stopped_call(tmp_path):
+    """Возврат в сессию: не принятый ответ субагента — `└ · не принят — …`,
+    вложенный вызов на лимите — член блока `Explored` без глифа (P4 §3.3)
+    и `└ лимит шагов`."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import ConsequenceTraceRow
+
+    tid = "reopen_b1"
+    _write_parent_thread(tmp_path, tid)
+    d = str(tmp_path)
+    for kind, payload in (
+        (
+            "intermediate_reply",
+            {"prose": "проверю", "ok": False, "error_brief": "нет плана"},
+        ),
+        ("intermediate_reply", {"prose": "", "ok": False}),
+        (
+            "call",
+            {"name": "fs_read_file", "arguments": "{}", "call_id": "n1"},
+        ),
+        (
+            "error",
+            {
+                "call_id": "n1",
+                "output": json.dumps({"ok": False, "status": "step_limit"}),
+            },
+        ),
+    ):
+        subagent_record(
+            d,
+            "cli",
+            tid,
+            parent_call_id="call_sub_1",
+            child_run_id="run_c1",
+            kind=kind,
+            payload=payload,
+        )
+    app = TuiApp(
+        threads_dir=d,
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(tid, is_resume=True) is True
+        await pilot.pause(0.3)
+
+        prose, call, header = scr._nested_widgets_by_parent["call_sub_1"]
+        assert isinstance(prose, ConsequenceTraceRow)
+        assert [b.plain for b in prose._consequences] == [
+            "· не принят — нет плана"
+        ]
+        assert header.mode == "header" and call.mode == "member"
+        assert [b.plain for b in call._consequence_bodies()] == ["лимит шагов"]

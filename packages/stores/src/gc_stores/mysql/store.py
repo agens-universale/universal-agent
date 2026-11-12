@@ -1,0 +1,97 @@
+"""``MySQLThreadStore`` — хранилище тредов v2 на MySQL 8 (asyncmy).
+
+Алгоритм операций — общий SQL-движок (``gc_stores.sql.thread_store``);
+здесь подключение, диалект и схема (миграции ``mysql/migrations``: их
+применяет ``ensure_schema()`` или ``gc-stores migrate``). Время — часы базы
+(``UTC_TIMESTAMP(6)`` после блокировки строки).
+
+Подключение::
+
+    store = MySQLThreadStore("mysql://user:password@host:3306/agent")
+    await store.ensure_schema()
+    agent = await AsyncAgent.create(settings, thread_store=store)
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
+
+from gc_core.stores import Stores
+
+from gc_stores import migrations
+from gc_stores.mysql.database import MySQLDatabase
+from gc_stores.mysql.dialect import MySQLDialect
+from gc_stores.sql.agent_store import SqlAgentStore
+from gc_stores.sql.thread_store import SqlThreadStore
+
+#: Миграции схемы MySQL (``mysql/migrations``).
+MIGRATIONS = migrations.load("gc_stores.mysql")
+
+
+class MySQLThreadStore(SqlThreadStore):
+    """Хранилище тредов в MySQL: ровно одно из ``dsn``, ``pool`` (пул
+    asyncmy встраивающего) и ``database`` (общее подключение)."""
+
+    def __init__(
+        self,
+        dsn: str | None = None,
+        *,
+        pool: Any = None,
+        database: MySQLDatabase | None = None,
+        clock: Callable[[], datetime] | None = None,
+        pool_options: dict[str, Any] | None = None,
+    ) -> None:
+        if database is None:
+            database = MySQLDatabase(dsn, pool=pool, pool_options=pool_options)
+        elif dsn is not None or pool is not None:
+            raise ValueError("нужен ровно один из dsn, pool и database")
+        super().__init__(
+            database, MySQLDialect(), migrations=MIGRATIONS, clock=clock
+        )
+
+
+class MySQLAgentStore(SqlAgentStore):
+    """Хранилище агента ``agent_id`` в MySQL; подключение — как у
+    ``MySQLThreadStore``, схема — те же миграции."""
+
+    def __init__(
+        self,
+        dsn: str | None = None,
+        *,
+        agent_id: str,
+        pool: Any = None,
+        database: MySQLDatabase | None = None,
+        pool_options: dict[str, Any] | None = None,
+    ) -> None:
+        if database is None:
+            database = MySQLDatabase(dsn, pool=pool, pool_options=pool_options)
+        elif dsn is not None or pool is not None:
+            raise ValueError("нужен ровно один из dsn, pool и database")
+        super().__init__(
+            database,
+            MySQLDialect(),
+            agent_id=agent_id,
+            backend="mysql",
+            migrations=MIGRATIONS,
+        )
+
+
+def open_stores(
+    dsn: str,
+    *,
+    agent_id: str,
+    clock: Callable[[], datetime] | None = None,
+    pool_options: dict[str, Any] | None = None,
+) -> Stores:
+    """Треды и хранилище агента ``agent_id`` на одном пуле MySQL;
+    ``await stores.aclose()`` закрывает пул."""
+    database = MySQLDatabase(dsn, pool_options=pool_options)
+    return Stores(
+        threads=MySQLThreadStore(database=database, clock=clock),
+        agent=MySQLAgentStore(database=database, agent_id=agent_id),
+    )
+
+
+__all__ = ["MySQLAgentStore", "MySQLThreadStore", "open_stores"]

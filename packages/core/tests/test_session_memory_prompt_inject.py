@@ -3,9 +3,8 @@
 from pathlib import Path
 
 from gc_core.summarize.prompt_loading import (
-    default_prompt_path,
-    load_memory_patch_replace_prompt,
-    load_prompt_template,
+    render_memory_patch_prompt,
+    render_summary_prompt,
 )
 from gc_core.summarize.working_memory_gateway import (
     MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER,
@@ -14,6 +13,20 @@ from gc_core.summarize.working_memory_gateway import (
     SESSION_MEMORY_REGISTER_NAMES_PLACEHOLDER,
 )
 from gc_testkit.paths import ASSETS
+
+
+def default_prompt_path() -> str:
+    return str(ASSETS / "prompts" / "chat_completions_summary_prompt.md")
+
+
+def load_prompt_template(path: str) -> str:
+    raw = Path(path).read_text(encoding="utf-8")
+    return render_summary_prompt(raw, label=path)
+
+
+def load_memory_patch_replace_prompt(path: str) -> str:
+    raw = Path(path).read_text(encoding="utf-8")
+    return render_memory_patch_prompt(raw, label=path)
 
 
 def test_summary_prompt_injects_register_names():

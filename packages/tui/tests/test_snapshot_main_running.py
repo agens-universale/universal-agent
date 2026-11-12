@@ -7,8 +7,14 @@ pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 
-def test_main_running_snapshot(snap_compare, tmp_path):
+def test_main_running_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
+
+    # Папку в шапке фиксируем — иначе снапшот стал бы машинно-зависимым.
+    monkeypatch.setattr(
+        TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
+    )
 
     # подготовка: один user message в data, meta — status running
     (tmp_path / "meta_cli_7f3a9b1c.json").write_text(

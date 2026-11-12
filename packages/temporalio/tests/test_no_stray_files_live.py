@@ -1,8 +1,8 @@
 """Ход под Temporal не оставляет файлов вне хранилища тредов и рабочей папки.
 
 HOME, TMPDIR и каталог состояния gc подменены на временные. Хранилище —
-SQLite (умеет файлы треда): картинка ``fs_view_image`` ложится в него, а не
-на диск воркера; лог прогона по умолчанию — не файлом (``save_logs: false``
+SQLite: картинка ``fs_view_image`` ложится в него вложением треда
+(``put_blob``), а не на диск воркера; лог прогона по умолчанию — не файлом (``save_logs: false``
 под Temporal). Любой новый файл вне белого списка роняет тест — так новая
 запись мимо хранилища видна сразу.
 """
@@ -17,8 +17,8 @@ from gc_core.config_modules import env_vars
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core_temporalio import AgentPlugin, AgentSession
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
-from live_support import call, temporal_cli
+from gc_stores.sqlite import SQLiteThreadStore
+from live_support import call, temporal_cli, thread_messages
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_workflow_controls import finish, scripted_http  # noqa: F401
@@ -127,7 +127,7 @@ async def test_turn_leaves_no_files_outside_store_and_workspace(
     assert stray == [], stray
     outputs = [
         m.get("output", "")
-        for m in store.load_messages("sdk", "t1")
+        for m in await thread_messages(store, "sdk", "t1")
         if m.get("type") == "function_call_output"
     ]
     assert not any("state_id" in str(o) for o in outputs), outputs
@@ -135,9 +135,10 @@ async def test_turn_leaves_no_files_outside_store_and_workspace(
         names = [
             row[0]
             for row in db.execute(
-                "SELECT name FROM thread_files WHERE system='sdk' AND thread='t1'"
+                "SELECT name FROM gc_blobs "
+                "WHERE system='sdk' AND thread_id='t1'"
             )
         ]
-    assert any(name.startswith("images/") for name in names), (names, outputs)
+    assert any(name.endswith(".png") for name in names), (names, outputs)
     assert (ws / "out.txt").read_text() == "x"
     assert not os.path.exists(ws / "images")

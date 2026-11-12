@@ -226,10 +226,12 @@ _SECRET_NAME_PARTS = (
     "cookie",
     "access_key",
     "private_key",
+    # Строка подключения к базе несёт пароль (хранилища ``storage``).
+    "dsn",
 )
 
 #: Логин и пароль в URL (``https://user:pass@host``): пароль скрывается.
-_URL_USERINFO = re.compile(r"(?P<head>[A-Za-z][\w+.-]*://[^/@\s:]+):[^/@\s]+@")
+_URL_USERINFO = re.compile(r"(?P<head>[A-Za-z][\w+.-]*://[^/@\s:]*):[^/@\s]+@")
 
 
 def _mask_url(value: str) -> str:

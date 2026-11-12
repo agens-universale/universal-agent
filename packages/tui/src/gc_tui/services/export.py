@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Optional
 
 from gc_core.attachments.model import attachments_of, chip_of, wh_text
+from gc_core.auto_routing.levels import AUTO
 from gc_core.message_policy.user_message_policy import (
     is_technical_user_message_text,
     resolve_technical_user_content_type,
     user_content_to_text,
 )
+from gc_core.persistence.model_choice_record import parse_model_choice
+
+from gc_tui.services.answer_flow import AnswerFlow
+from gc_tui.services.trace_mapper import collect_render_context, map_message
+from gc_tui.services.trace_render import finish_close_of
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _TECH_INNER_RE = re.compile(
@@ -28,14 +35,21 @@ def _env_ts(rec: dict) -> str:
 
 
 def _build_header(
-    segments: list[dict], *, meta: dict, thread_id: str, system: str
+    segments: list[dict], *, api_mode: str, thread_id: str, system: str
 ) -> dict:
-    all_recs = [r for seg in segments for r in seg["messages"]]
+    # Экспорт — сообщения треда (строки с `payload`): записи итога хода и
+    # смены модели в счёт не идут.
+    all_recs = [
+        r
+        for seg in segments
+        for r in seg["messages"]
+        if isinstance(r.get("payload"), dict)
+    ]
     n_sum = sum(1 for seg in segments if seg.get("compacted_by"))
     return {
         "thread_id": thread_id,
         "system": system,
-        "backend_api_mode": meta.get("backend_api_mode", ""),
+        "backend_api_mode": api_mode,
         "messages_count": len(all_recs),
         "ts_first": _env_ts(all_recs[0]) if all_recs else "",
         "ts_last": _env_ts(all_recs[-1]) if all_recs else "",
@@ -206,6 +220,15 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
     ]
 
 
+def _model_choice_lines(rec: dict) -> list[str]:
+    """Смена модели — одна строка: имя модели, у `auto` — сам выбор."""
+    record = parse_model_choice(rec)
+    if record is None:
+        return []
+    name = record.alias if record.choice != AUTO else None
+    return [f"────────── модель: {name or record.choice} ──────────", ""]
+
+
 def _render_txt(segments: list[dict], header: dict) -> str:
     out: list[str] = [_header_line(header), ""]
     all_recs = [r for seg in segments for r in seg["messages"]]
@@ -215,6 +238,7 @@ def _render_txt(segments: list[dict], header: dict) -> str:
         for r in seg["messages"]:
             payload = r.get("payload")
             if not isinstance(payload, dict):
+                out += _model_choice_lines(r)
                 continue
             n += 1
             out += _render_record(n, payload, name_by_call)
@@ -233,14 +257,97 @@ def _render_txt(segments: list[dict], header: dict) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+# --- ответы агента --------------------------------------------------------
+
+
+def agent_answers(segments: list[dict]) -> list[str]:
+    """Ответы агента треда по порядку (по сегментам сжатия): проза, отчёт
+    финала и план ровно так, как их показывает лента (`AnswerFlow`):
+    повторы внутри хода и отклонённые попытки turn_finish не считаются.
+    Реплики, вывод тулов и промежуточные ответы не входят. Как в ленте:
+    контекст рендера — по всем сегментам, сохранённая при сжатии копия
+    записи (тот же `id` в следующем файле) не считается второй раз."""
+    payloads = [
+        r["payload"]
+        for seg in segments
+        for r in seg["messages"]
+        if isinstance(r.get("payload"), dict)
+    ]
+    context = collect_render_context(payloads)
+    flow = AnswerFlow()
+    answers: list[str] = []
+    attempt: Optional[int] = None  # индекс отчёта попытки в answers
+    for no, payload in enumerate(_first_by_id(payloads)):
+        ev = map_message(payload, no=no, ts="", context=context)
+        if ev is None:
+            continue
+        if ev.kind == "user":
+            flow.new_turn()
+            attempt = None
+        elif ev.kind == "agent":
+            attempt = _take_agent(flow, ev, answers, attempt)
+    return answers
+
+
+def _first_by_id(payloads: list[dict]) -> list[dict]:
+    """Записи без повторов `id`: первое вхождение (правило ленты)."""
+    seen: set = set()
+    out = []
+    for payload in payloads:
+        mid = payload.get("id")
+        if mid is not None:
+            if mid in seen:
+                continue
+            seen.add(mid)
+        out.append(payload)
+    return out
+
+
+def _take_agent(flow, ev, answers: list[str], attempt: Optional[int]):
+    """Учесть agent-событие; вернуть индекс отчёта текущей попытки."""
+    if ev.tool_name == "submit_solution":
+        close = flow.finish(finish_close_of(ev), tracked=bool(ev.call_id))
+        text = (close.body or close.note).strip()
+        if flow.report_of_intermediate:
+            text = ev.summary.strip()
+        if ev.call_id:
+            _forget(answers, attempt)
+            attempt = None
+        if text:
+            answers.append(text)
+            if ev.call_id:
+                attempt = len(answers) - 1
+        return attempt
+    if not (ev.summary or "").strip():
+        return attempt
+    intermediate = ev.tool_name == "intermediate_reply"
+    verdict = flow.agent((ev.summary or "").strip(), intermediate=intermediate)
+    if verdict.drop_attempt:
+        _forget(answers, attempt)
+        attempt = None
+    if verdict.final_of_intermediate or (verdict.show and not intermediate):
+        answers.append(ev.summary)
+    return attempt
+
+
+def _forget(answers: list[str], index: Optional[int]) -> None:
+    if index is not None:
+        del answers[index]
+
+
 # --- public API -----------------------------------------------------------
 
 
 def export_thread(
-    segments: list[dict], *, fmt: str, meta: dict, thread_id: str, system: str
+    segments: list[dict],
+    *,
+    fmt: str,
+    api_mode: str,
+    thread_id: str,
+    system: str,
 ) -> str:
     header = _build_header(
-        segments, meta=meta, thread_id=thread_id, system=system
+        segments, api_mode=api_mode, thread_id=thread_id, system=system
     )
     if fmt == "json":
         return _render_json(segments, header)

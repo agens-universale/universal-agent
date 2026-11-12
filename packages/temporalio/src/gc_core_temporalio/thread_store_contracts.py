@@ -1,89 +1,126 @@
-"""Values passed to the configured native agent ThreadStore."""
+"""Провод хранилища тредов v2 между workflow и воркером.
 
-from dataclasses import dataclass
+Workflow говорит с хранилищем воркера контрактом ``ThreadStore`` v2
+(``gc_core.threads.store``): каждая операция — activity
+``universal_agent.thread.<операция>``. Вход и выход activity — запись истории
+Temporal (лимит 2 МБ на запись, 50 МБ на историю), поэтому:
+
+* большой ответ (запись треда, поток, архив) идёт кусками текста JSON по
+  ``PAGE_BYTES``; следующие куски — той же версии ответа, иначе
+  ``ThreadChanged`` и чтение заново;
+* запись треда, которую workflow уже видел, приходит разницей к ней
+  (воркер держит её по отпечатку), не изменившаяся — признаком;
+* состояние сессии в ``commit`` уходит разницей к состоянию на
+  ``expected_revision``; воркер собирает его из записи хранилища, а не
+  собрав — ``BaseMismatch``, и workflow шлёт состояние целиком.
+
+Модуль общий для workflow и воркера: dataclass, исключения и чистые функции.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import Any
 
-from gc_core.execution.contracts import ExecutionFailure
-from gc_core.thread_store_durable import (
-    ThreadStoreOperation,
-    ThreadStoreReceipt,
-    ThreadStoreSnapshot,
-)
+from gc_core.threads.errors import ThreadStoreError
 
-#: Потолок одной страницы чтения треда/трассы (байты JSON). Результат
-#: activity — запись истории Temporal (лимит 2 МБ, предупреждение сервера с
-#: 512 КБ): длинный тред читается несколькими activities, каждая ниже порога
-#: предупреждения.
+from gc_core_temporalio.meta_delta import normalize
+
+#: Потолок куска ответа (байты JSON). Результат activity — запись истории
+#: Temporal (лимит 2 МБ, предупреждение сервера с 512 КБ): длинный тред
+#: читается несколькими activities, каждая ниже порога предупреждения.
 PAGE_BYTES = 400 * 1024
 
 
-class MetaBaseMismatch(ExecutionFailure):
-    """Воркер не собрал из разницы ту meta, что записал workflow (база в
-    хранилище другая: чужая правка meta, повтор после записи). Workflow
-    повторяет запись с полной meta."""
+class BaseMismatch(ThreadStoreError):
+    """Воркер не собрал из разницы то состояние, что записал workflow (в
+    хранилище другая ревизия: повтор после записи, чужая запись). Workflow
+    повторяет запись с состоянием целиком."""
+
+
+class ThreadChanged(ThreadStoreError):
+    """Ответ изменился между кусками (тред записали) — читать заново."""
+
+
+def strip_fetch_cache(state: Any) -> Any:
+    """Состояние сессии (JSON) для провода: непустой кэш страниц
+    ``fetch_url`` — пустым. Кэш под Temporal живёт в памяти воркера, а поле
+    остаётся заданным — форма meta не меняется."""
+    if isinstance(state, dict) and state.get("fetch_url_cache"):
+        return {**state, "fetch_url_cache": {}}
+    return state
+
+
+#: Части записи (``ThreadChange``/``SideChange``), заменяющие поле записи
+#: треда целиком: в проводе они идут разницей к известной записи.
+RECORD_PARTS = {
+    "set_state": "state",
+    "set_usage": "usage",
+    "set_info": "info",
+    "set_runtime": "runtime",
+    "set_extra": "extra",
+}
+
+
+def expected_record(base: dict, change: dict) -> dict:
+    """Запись треда, какой её ждёт workflow после своей записи: известная
+    ``base`` с частями ``change`` (JSON провода) и правкой состояния
+    фронтенда. Поля хранилища (ревизия, штампы, счётчики, отметки потоков)
+    придут разницей."""
+    expected = dict(base)
+    for part, field_name in RECORD_PARTS.items():
+        if change.get(part) is not None:
+            value = normalize(change[part])
+            if field_name == "state":
+                value = strip_fetch_cache(value)
+            expected[field_name] = value
+    frontend = dict(expected.get("frontend") or {})
+    if change.get("set_frontend") is not None:
+        name, state = change["set_frontend"]
+        frontend[name] = normalize(state)
+    if change.get("patch_frontend") is not None:
+        name, patch = change["patch_frontend"]
+        frontend[name] = {**(frontend.get(name) or {}), **normalize(patch)}
+    if frontend or "frontend" in expected:
+        expected["frontend"] = frontend
+    return expected
+
+
+def lease_owner(workflow_id: str, chain: str) -> str:
+    """Владелец аренды треда — цепочка run сессии (``first_execution_run_id``):
+    Continue-As-New его не меняет, новый запуск с тем же workflow ID —
+    другой владелец (новая эпоха, запись брошенной цепочки отсекается)."""
+    return f"{workflow_id}#{chain}"
+
+
+def parse_lease_owner(owner: str) -> tuple[str, str | None]:
+    """``(workflow ID, цепочка run | None)``; без ``#`` — не workflow
+    (локальный процесс) или цепочка неизвестна."""
+    workflow_id, sep, chain = owner.rpartition("#")
+    return (workflow_id, chain) if sep else (owner, None)
 
 
 @dataclass
-class ThreadStoreCall:
+class ThreadCall:
+    """Вызов операции хранилища ``store_id`` над тредом ``(system,
+    thread)``; ``args`` — аргументы операции (JSON)."""
+
     store_id: str
-    system_id: str
-    thread_id: str
-    operation: ThreadStoreOperation | None = None
-    include_state: bool = True
-    #: Страничное чтение: ``page_bytes`` > 0 — отдать кусок не больше
-    #: стольких байт (не меньше одной записи) с позиции ``cursor``.
-    page_bytes: int = 0
-    cursor: list[int] | None = None
-    #: Следующие страницы: ``[revision, generation]`` снимка первой — если
-    #: тред изменился между страницами, отказ ``ThreadStoreConflict``.
-    expect: list[int] | None = None
-    #: Чтение meta частями: позиция в JSON-тексте meta (см. ``meta_chunk``).
-    meta_cursor: int | None = None
-    #: Чтение: ``[revision, generation]`` meta, которую workflow уже знает —
-    #: совпала с хранилищем, meta не передаётся (``meta_unchanged``).
-    meta_known: list[Any] | None = None
-    #: Запись: ``[revision, generation]`` meta, от которой посчитана разница;
-    #: ``None`` — workflow meta треда не знает (разница от пустой).
-    meta_base: list[Any] | None = None
-    #: Запись с meta: ``{"d": разница, "h": хэш итоговой meta}``
-    #: (``meta_delta.diff_meta``/``meta_hash``), а в
-    #: ``operation.payload["meta"]`` — ``None``; воркер собирает полную meta
-    #: до вызова хранилища и сверяет хэш (не сошлось — ``MetaBaseMismatch``).
-    meta_delta: dict[str, Any] | None = None
-    #: ``False`` — meta квитанции не нужна (трасса, владение без базы):
-    #: воркер не считает разницу и не просит перечитать meta.
-    need_meta: bool = True
+    system: str
+    thread: str
+    args: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class ThreadStatePage:
-    """Кусок состояния треда: сообщения, затем ключи идемпотентности."""
+class ThreadReply:
+    """Ответ: маленький — ``value``; большой — кусок ``chunk`` текста JSON,
+    ``next`` — позиция следующего (``None`` — последний), ``version`` —
+    версия ответа целиком. ``unchanged`` — запись совпала с известной
+    workflow; ``delta`` — разница к ней."""
 
-    messages: list[dict[str, Any]]
-    keys: list[Any]
-    #: Позиция следующей страницы ``[сообщение, ключ]``; ``None`` — конец.
-    next_cursor: list[int] | None = None
-    #: ``ThreadState.max_seq`` (номер последнего seq) — в первой странице.
-    max_seq: int = 0
-
-
-@dataclass
-class ThreadStoreReply:
-    snapshot: ThreadStoreSnapshot | None = None
-    receipt: ThreadStoreReceipt | None = None
-    trace: list[dict[str, Any]] | None = None
-    page: ThreadStatePage | None = None
-    #: Страничное чтение трассы: позиция следующей записи; ``None`` — конец.
-    trace_next: int | None = None
-    #: Meta больше половины страницы: в ``snapshot.meta`` пусто, здесь кусок
-    #: её JSON-текста, ``meta_next`` — позиция следующего (``None`` — конец).
-    meta_chunk: str | None = None
-    meta_next: int | None = None
-    #: Квитанция приходит с пустой ``meta``: ``{"d": разница}`` от meta,
-    #: которую workflow ожидает после операции (записанной им или базы).
-    meta_delta: dict[str, Any] | None = None
-    #: Воркер не знает, какую meta ожидает workflow (повтор после записи,
-    #: другая база) или разница велика: meta перечитать.
-    meta_reload: bool = False
-    #: Чтение: meta та же, что у workflow (``meta_known``) — не передана.
-    meta_unchanged: bool = False
+    value: Any = None
+    chunk: str | None = None
+    next: int | None = None
+    version: str | None = None
+    unchanged: bool = False
+    delta: Any = None

@@ -706,3 +706,36 @@ def test_registry_pair_violation_is_reported_without_traceback(
     assert cli.main() == 2
     err = capsys.readouterr().err
     assert "models.ds" in err and "Traceback" not in err
+
+
+def test_unwritable_log_dir_is_one_line_not_a_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    """``save_logs: true``, а каталог логов недоступен на запись (корень
+    контейнера только на чтение, чужие права): код 1 и строка — какой каталог
+    и что сделать; агент не стартует, трейсбека нет."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("", encoding="utf-8")
+    logs = blocker / "logs"
+    base = tmp_path / "base.yml"
+    base.write_text(
+        "agent: {model: m}\n"
+        "backend: {completions_url: 'http://127.0.0.1:9/v1/chat/completions'}\n"
+        f"paths: {{logs_dump_dir: '{logs.as_posix()}'}}\n"
+        "logging: {save_logs: true}\n",
+        encoding="utf-8",
+    )
+    ap = _reload_arg_parser_with_argv(
+        ["gc-cli", "--config", str(base), "-q", "x"], monkeypatch
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "[gc] каталог логов прогона" in err
+    assert "logging.save_logs" in err
+    assert "Traceback" not in err

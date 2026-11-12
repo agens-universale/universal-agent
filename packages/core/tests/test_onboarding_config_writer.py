@@ -547,7 +547,7 @@ def test_ensure_pointer_anchor_level_lands_after_profile(tmp_path):
 
 # ── край: файл без завершающего перевода строки (частый итог ручной правки) ───
 #
-# Фикстуры топ-уровневых случаев — на РЕАЛЬНОМ config.default.yml: блок `level:`
+# Фикстуры топ-уровневых случаев — на РЕАЛЬНОМ config.default.yml: блок `model:`
 # в нём идёт без прикреплённого комментария, и склейка строк выходит наружу
 # как есть. Синтетический шаблон с комментарием над ключом маскирует дефект:
 # `profile: "corp"# коммент` PyYAML ещё прощает (кавычка закрыла скаляр).
@@ -586,10 +586,10 @@ def _real_template() -> str:
 
 def test_insert_missing_top_key_after_last_key_without_trailing_newline():
     """Сосед — ПОСЛЕДНИЙ ключ файла, файл без финального `\\n`: вставка обязана
-    начаться с новой строки, иначе выходит `profile: "corp"level: default`."""
-    out = w.insert_missing(_HAND_EDITED, "level", _default_template_text())
+    начаться с новой строки, иначе выходит `profile: "corp"model:`."""
+    out = w.insert_missing(_HAND_EDITED, "model", _default_template_text())
     raw = yaml.safe_load(out)
-    assert raw["level"] == "default"
+    assert "model" in raw and raw["model"] is None
     assert raw["profile"] == "corp"
 
 
@@ -613,10 +613,10 @@ def test_ensure_pointer_anchor_keeps_file_loadable_without_trailing_newline(
     cfg = tmp_path / "config.yml"
     cfg.write_text(_HAND_EDITED, encoding="utf-8")
 
-    w.ensure_pointer_anchor(cfg, _default_config_path(), key="level")
+    w.ensure_pointer_anchor(cfg, _default_config_path(), key="model")
 
     raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
-    assert raw["profile"] == "corp" and raw["level"] == "default"
+    assert raw["profile"] == "corp" and "model" in raw
 
 
 def test_upsert_mapping_entry_into_section_without_trailing_newline():
@@ -663,13 +663,13 @@ def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour():
     from gc_core.config import _default_config_path
 
     template_text = Path(_default_config_path()).read_text(encoding="utf-8")
-    out = 'profile: ""\nlevel: default\nbackend:\n  completions_url: "http://real"\n'
+    out = 'profile: ""\nmodel:\nbackend:\n  completions_url: "http://real"\n'
 
     out = w.ensure_section_anchor_text(out, "models", template_text)
     out = w.ensure_section_anchor_text(out, "slots", template_text)
 
     assert (
-        out.index("level:")
+        out.index("model:")
         < out.index("models:")
         < out.index("slots:")
         < out.index("backend:")

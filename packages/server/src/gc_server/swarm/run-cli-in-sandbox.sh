@@ -15,6 +15,13 @@
 #     SWARM_AGENT_DEP_DIR — путь к Node.js + npm-кэш для npx MCP (read-only).
 #     SWARM_EXTRA_MOUNTS  — multi-line (newline-separated) список путей для
 #                           дополнительных read-only bind-mount'ов.
+#     SWARM_INBOX_TURN=1  — продолжение задачи: ход из входящего потока треда
+#                           (--inbox вместо -q).
+#     SWARM_THREAD_IN_STORE=1 и SWARM_THREAD_SOCKET_DIR — тред задачи в
+#                           хранилище сервера: каталог сокета прокси треда
+#                           монтируется в /run/gc-thread только на чтение, путь сокета — в
+#                           GC_THREAD_SOCKET (токен GC_THREAD_TOKEN — из
+#                           окружения сервера).
 #
 # По завершении пишет ${SWARM_THREADS_DIR}/${SWARM_ID}/completion.json
 # с полями exit_code, finished_at, error_type (см. swarm_spec.md шаг 1.1).
@@ -35,6 +42,9 @@ SWARM_LIMIT_TIMEOUT_SECONDS="${SWARM_LIMIT_TIMEOUT_SECONDS:-1800}"
 SWARM_CLI_VENV_ROOT="${SWARM_CLI_VENV_ROOT:-}"
 SWARM_AGENT_DEP_DIR="${SWARM_AGENT_DEP_DIR:-}"
 SWARM_EXTRA_MOUNTS="${SWARM_EXTRA_MOUNTS:-}"
+SWARM_THREAD_SOCKET_DIR="${SWARM_THREAD_SOCKET_DIR:-}"
+# Каталог сокета прокси треда внутри песочницы.
+THREAD_SOCKET_MOUNT="/run/gc-thread"
 
 # --- Подготовка лог-директории (канал B в spec §6.1) ---
 
@@ -141,6 +151,7 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
 
   BWRAP_CMD=(
     bwrap
+    --die-with-parent
     --unshare-all
     --share-net
     --dev /dev
@@ -165,9 +176,20 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
     --bind "${SWARM_SANDBOX_PATH}" /work
     --chdir /work
   )
+  if [[ "${SWARM_THREAD_IN_STORE:-}" == "1" && -n "${SWARM_THREAD_SOCKET_DIR}" ]]; then
+    # Только на чтение: подключиться к сокету можно, писать в каталог хоста
+    # (мимо disk_mb, в память хоста при /tmp на tmpfs) — нет.
+    BWRAP_CMD+=(
+      --ro-bind "${SWARM_THREAD_SOCKET_DIR}" "${THREAD_SOCKET_MOUNT}"
+      --setenv GC_THREAD_SOCKET "${THREAD_SOCKET_MOUNT}/thread.sock"
+    )
+  fi
 else
   # Fallback: запуск без песочницы (только для dev/debug).
   BWRAP_CMD=(bash -lc "cd \"${SWARM_SANDBOX_PATH}\" && exec \"${SWARM_CLI_COMMAND}\"")
+  if [[ -n "${SWARM_THREAD_SOCKET_DIR}" ]]; then
+    export GC_THREAD_SOCKET="${SWARM_THREAD_SOCKET_DIR}/thread.sock"
+  fi
 fi
 
 # --- Сборка CLI-команды (AR-1, AR-5) ---
@@ -211,8 +233,14 @@ CLI_CMD=(
   "${CLI_BIN}"
   --config "/work/.gc/config.yml"
   --external-request
-  -q "${SWARM_PAYLOAD_JSON:-}"
 )
+# Продолжение задачи (SWARM_INBOX_TURN=1): песочница вышла, а в треде
+# остались недоставленные сообщения — ход из входящего потока, без -q.
+if [[ "${SWARM_INBOX_TURN:-}" == "1" ]]; then
+  CLI_CMD+=(--inbox)
+else
+  CLI_CMD+=(-q "${SWARM_PAYLOAD_JSON:-}")
+fi
 
 # Внешний trace_id (SWARM_TRACE_ID). Флаг добавляем ТОЛЬКО при непустом
 # значении: пустой --trace-id "" ничего бы не дал, а лишний аргумент в командной
@@ -222,32 +250,64 @@ if [[ -n "${SWARM_TRACE_ID:-}" ]]; then
   CLI_CMD+=(--trace-id "${SWARM_TRACE_ID}")
 fi
 
+# Тред задачи в хранилище сервера (через прокси треда): CLI ведёт тред
+# (system, task_id) — тот, что читает /logs сервера и куда ложатся сообщения
+# в идущую задачу. На файлах — без треда, как раньше.
+if [[ "${SWARM_THREAD_IN_STORE:-}" == "1" ]]; then
+  CLI_CMD+=(-t "${SWARM_TASK_ID}" --system "${SWARM_SYSTEM}")
+fi
+
 # --- Таймаут через GNU timeout (если есть) ---
 
 if command -v timeout >/dev/null 2>&1; then
   # SIGTERM (15) c grace-period 30s, потом SIGKILL (9).
   # Grace нужен чтобы CLI успел сделать summary compaction если она в процессе
   # (см. swarm_spec.md §6, «Суммаризация в swarm-режиме»).
-  TIMEOUT_PREFIX=(timeout --kill-after=30 --signal=TERM "${SWARM_LIMIT_TIMEOUT_SECONDS}")
+  TIMEOUT_PREFIX=(timeout --foreground --kill-after=30 --signal=TERM "${SWARM_LIMIT_TIMEOUT_SECONDS}")
 else
   TIMEOUT_PREFIX=()
 fi
 
 # --- Запуск CLI и захват exit code ---
 
+# Сервер снимает песочницу сигналом группе обёртки (os.killpg: отмена,
+# дедлайн, лимиты, остановка). --foreground сохраняет timeout и CLI в
+# группе обёртки: SIGKILL сервера достигает их за тот же grace-период.
+# bwrap также завершает свою PID namespace при смерти родителя.
+# Прямой TERM обёртке пересылается дочернему процессу; сигнал всей группе
+# уже получает каждый её участник.
+CHILD_PID=""
+forward_signal() {
+  [[ -n "${CHILD_PID}" ]] || return 0
+  kill -TERM "${CHILD_PID}" 2>/dev/null
+}
+
+run_forwarding_signals() {
+  # stdin фонового запуска — как у обёртки, а не /dev/null.
+  exec 3<&0
+  "$@" <&3 3<&- >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}" &
+  CHILD_PID=$!
+  exec 3<&-
+  trap forward_signal TERM INT
+  wait "${CHILD_PID}"
+  EXIT_CODE=$?
+  # wait прерван пересланным сигналом — дождаться настоящего выхода.
+  while kill -0 "${CHILD_PID}" 2>/dev/null; do
+    wait "${CHILD_PID}"
+    EXIT_CODE=$?
+  done
+  trap - TERM INT
+}
+
 # Защита под set -u: пустой массив через ${arr[@]+"${arr[@]}"} (bash 3.2-safe).
 # set +e локально, чтобы поймать exit code даже при ошибке.
 set +e
 if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
-  ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
-    "${BWRAP_CMD[@]}" -- "${CLI_CMD[@]}" \
-    >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}"
-  EXIT_CODE=$?
+  run_forwarding_signals ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
+    "${BWRAP_CMD[@]}" -- "${CLI_CMD[@]}"
 else
-  ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
-    "${CLI_CMD[@]}" \
-    >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}"
-  EXIT_CODE=$?
+  run_forwarding_signals ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
+    "${CLI_CMD[@]}"
 fi
 set -e
 

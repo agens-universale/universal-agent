@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.a2a import A2aConfig
 from gc_core.config_modules.acp import AcpConfig
 from gc_core.config_modules.agent import (
     DEFAULT_FINISH_GATE_MAX_ITERATIONS,
@@ -16,7 +15,6 @@ from gc_core.config_modules.agent import (
 )
 from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.backend import BackendConfig
-from gc_core.config_modules.chat_api import ChatApiConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
 from gc_core.config_modules.editing import editable
 from gc_core.config_modules.endpoint_presets import (
@@ -44,7 +42,6 @@ from gc_core.config_modules.model_registry import (
     AssignConfig,
     ModelEntry,
     SlotsConfig,
-    validate_level_value,
     validate_model_alias,
 )
 from gc_core.config_modules.os_backend import OsBackendConfig
@@ -59,6 +56,7 @@ from gc_core.config_modules.quality_gate import (
     normalize_quality_gate_config,
 )
 from gc_core.config_modules.security import SecurityConfig
+from gc_core.config_modules.storage import StorageConfig
 from gc_core.config_modules.stored_outputs import normalize_tool_output_limits
 from gc_core.config_modules.strip_tags_projection import (
     StripTagsProjectionConfig,
@@ -138,16 +136,13 @@ class AppConfig(BaseModel):
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     acp: AcpConfig = Field(default_factory=AcpConfig)
-    chat_api: ChatApiConfig = Field(
-        default_factory=ChatApiConfig,
-        json_schema_extra=gc_meta(expert=True, worker_only=True),
-    )
-    a2a: A2aConfig = Field(
-        default_factory=A2aConfig,
-        json_schema_extra=gc_meta(expert=True, worker_only=True),
-    )
     voice: VoiceConfig = Field(
         default_factory=VoiceConfig,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
+    #: Где живут треды и ресурсы агента; открывает фронтенд (gc-serve, gc-cli).
+    storage: StorageConfig = Field(
+        default_factory=StorageConfig,
         json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
     endpoint_presets: list[EndpointPreset] = Field(
@@ -188,7 +183,8 @@ class AppConfig(BaseModel):
     # Профили v2 (волна A, фаза 1): реестр моделей + уровни + привязки + указатели.
     # Ссылочная целостность (слоты/привязки против merged-реестра) — фаза 2.
     profile: str = ""
-    level: str = "default"
+    # auto | алиас реестра | слово уровня; пусто — модель уровня default.
+    model: str | None = None
     models: dict[str, ModelEntry] = Field(
         default_factory=dict, json_schema_extra=gc_meta(expert=True)
     )
@@ -212,10 +208,12 @@ class AppConfig(BaseModel):
                 str(exc).removeprefix("config_version: ")
             ) from None
 
-    @field_validator("level")
+    @field_validator("model", mode="before")
     @classmethod
-    def _validate_level(cls, value: str) -> str:
-        return validate_level_value(value)
+    def _blank_model_is_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("models")
     @classmethod

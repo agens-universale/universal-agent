@@ -58,13 +58,13 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         source="clipboard",
     )
     reads = []
-    read_for_send = store.read_for_send
+    aread_for_send = store.aread_for_send
 
-    def counting_read(attachment):
+    async def counting_read(attachment):
         reads.append(attachment.id)
-        return read_for_send(attachment)
+        return await aread_for_send(attachment)
 
-    monkeypatch.setattr(store, "read_for_send", counting_read)
+    monkeypatch.setattr(store, "aread_for_send", counting_read)
     loaded = make_settings(cfg)
     ctx = fake_ctx(
         loaded=loaded,
@@ -72,7 +72,7 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         logger=logging.getLogger("test_image_request_reads"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default"),
         image_store=store,
         on_trace_note=lambda _note: None,
     )

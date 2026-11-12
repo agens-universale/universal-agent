@@ -14,9 +14,10 @@ from gc_core.intent_log import IntentRecord
 from gc_core.state_preparation import (
     PreparedState,
     StatePreparationRequest,
-    load_state_metadata,
+    aload_state_metadata,
     prepare_state,
 )
+from gc_core.threads.facade import run_sync
 from gc_core.tools.skills.skills_policy import render_skills_catalog
 from gc_core.usage.account import UsageAccount
 
@@ -126,6 +127,11 @@ class State(ExecutionState):
         self.turn_messages_start: Optional[int] = None
         # Поле прежних снимков; уровень текущего запроса хранится в _call_level.
         self.turn_level: Optional[str] = None
+        # Выбор модели, которым идёт ран (`gc_core.model_choice`): ставит
+        # старт рана, меняет подготовка основного вызова главного трейса.
+        self.applied_choice: Optional[str] = None
+        # Запись смены выбора, ждущая запроса (`gc_core.model_choice`).
+        self.pending_choice_record: Optional[Any] = None
         # Optional sink for messages dropped by context compaction.
         # Core does not retain them; harbor/other hosts may archive for trajectory.
         self.on_messages_evicted: Optional[Any] = None
@@ -148,16 +154,26 @@ class State(ExecutionState):
         self.user_intent_log: list[IntentRecord] = []
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
+        #: Последний ``seq`` входящего потока треда, доставленный в историю:
+        #: пишется той же записью, что и сообщения, — доставка ровно один раз.
+        self.inbox_seq: int = 0
         self.finish_gate_rejection_count: int = 0
         self.turn_tool_calls: int = (
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         )
+        # Прогон что-то выдал или сделал: дельта стрима, запись агента в
+        # тред, старт тула. До этого фронтенд вправе отменить отправку без
+        # следов. Служебные записи (реплика, техзаметки) не в счёт.
+        self.produced_output: bool = False
         self.terminal_outcome: Optional[str] = (
             None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )
         # Успешный turn_propose_plan в текущем батче: по этому флагу цикл
         # агента закрывает ход. Транзиентный, в мету не пишется.
         self.plan_proposed: bool = False
+        # Вопрос модели, на котором ход приостановлен (ask_human_suspends):
+        # {call_id, question}. Пишется в SessionState.pending_question.
+        self.pending_question: Optional[dict] = None
         # Текст ответа модели, закрывшего ход: пишется на каждом батче с
         # вызовами тулов, после хода остаётся от закрывшего. Транзиентный.
         self.closing_reply: str = ""
@@ -256,7 +272,6 @@ class State(ExecutionState):
             workspace_config=workspace_config,
             workspace=workspace,
             os_backend=os_backend,
-            agent_md_path=kwargs.get("agent_md_path"),
             is_tui=kwargs.get("is_tui", False),
             agentsmd_override=kwargs.get("agentsmd_override", False),
             verbose=kwargs.get("verbose", False),
@@ -277,17 +292,22 @@ class State(ExecutionState):
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
         if not getattr(self, "prepared_metadata", False):
-            status, loaded = load_state_metadata(
-                StatePreparationRequest(
-                    agent_md_path=getattr(self, "agent_md_path", None),
-                    is_tui=bool(getattr(self, "is_tui", False)),
-                    agentsmd_override=bool(
-                        getattr(self, "agentsmd_override", False)
+            # Запасной путь: State собран без подготовленных метаданных (в
+            # работе State.acreate готовит их заранее). Чтение — тем же
+            # асинхронным путём, синхронно: хранилище по умолчанию — файлы.
+            status, loaded = run_sync(
+                aload_state_metadata(
+                    StatePreparationRequest(
+                        is_tui=bool(getattr(self, "is_tui", False)),
+                        agentsmd_override=bool(
+                            getattr(self, "agentsmd_override", False)
+                        ),
+                        verbose=self.verbose,
                     ),
-                    verbose=self.verbose,
-                ),
-                logger=self.logger,
-                metadata_config=getattr(self, "workspace_config", None),
+                    logger=self.logger,
+                    metadata_config=getattr(self, "workspace_config", None),
+                    store=_state_agent_store(self),
+                )
             )
             self._apply_prepared_metadata(status, loaded.text, loaded.warnings)
         if self.skills_list:
@@ -319,3 +339,16 @@ class State(ExecutionState):
                 "</user_defined_instructions>"
             )
             self.initial_project_data["userInstructions"] = user_instructions
+
+
+def _state_agent_store(state: Any) -> Any:
+    """Хранилище для State, собранного без подготовленных метаданных: роль
+    запуска (L0) — его ``agent_md_path``, как у прямого конструктора всегда."""
+    from gc_core.agent_store import FileAgentStore
+    from gc_core.settings import override_settings, settings_of
+
+    settings = settings_of(getattr(state, "workspace_config", None))
+    role = getattr(state, "agent_md_path", None) or ""
+    if role != (settings.paths.agent_md_path or ""):
+        settings = override_settings(settings, {"paths.agent_md_path": role})
+    return FileAgentStore(settings)

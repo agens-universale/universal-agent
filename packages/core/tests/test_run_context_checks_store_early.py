@@ -14,7 +14,7 @@ from gc_core import run_context
 
 
 class _BadStore:
-    """Объект, который не является ни синхронным, ни асинхронным хранилищем."""
+    """Объект, который не реализует контракт хранилища тредов v2."""
 
 
 async def test_bad_store_fails_before_mcp_discovery(monkeypatch, tmp_path):
@@ -63,7 +63,7 @@ def test_check_precedes_the_build_in_source():
         n.lineno
         for n in ast.walk(fn)
         if isinstance(n, ast.Call)
-        and getattr(n.func, "id", None) == "athread_store"
+        and getattr(n.func, "id", None) == "require_thread_store"
     ]
     build_at = [
         n.lineno

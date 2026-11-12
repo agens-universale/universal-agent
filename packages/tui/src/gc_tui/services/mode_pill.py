@@ -12,7 +12,7 @@ from __future__ import annotations
 from gc_core.security.permission_mode import DEFAULT_MODE, mode_label
 from rich.text import Text
 
-from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, RUN_COLOR
+from gc_tui.palette import ACCENT, AUTO_MODE, DEEP_DIM, DIM, INK
 
 GLYPH_PAUSE = "⏸"
 GLYPH_PLAY = "▸▸"
@@ -25,7 +25,7 @@ _STYLES = {
     "edit": (GLYPH_PLAY, INK),
     "manual": (GLYPH_PAUSE, DEEP_DIM),
     "plan": (GLYPH_PLAN, ACCENT),
-    "auto": (GLYPH_AUTO, RUN_COLOR),
+    "auto": (GLYPH_AUTO, AUTO_MODE),
 }
 
 #: Подсказка хоткея — постоянная подпись к режиму, а не одноразовый совет: она
@@ -73,3 +73,21 @@ def render_mode_pill(
     if hint:
         out.append(_HINT, style=DIM)
     return out
+
+
+def mode_hint_rows(mode: str, width: int) -> tuple[Text, Text]:
+    """Пояснение режима («пилюля — пояснение») двумя строками футера.
+
+    Перенос по словам на ширину `width`; всё, что не встало в первую строку,
+    уходит во вторую одной строкой — лишнее обрежет многоточием сам виджет.
+    width <= 0 (layout ещё не прошёл) — всё в первой строке."""
+    from rich.console import Console
+
+    text = render_mode_pill(mode, hint=False)
+    text.append(f" — {MODE_HINTS[mode]}")
+    if width <= 0:
+        return text, Text()
+    first, *rest = text.wrap(Console(width=width), width)
+    for line in (first, *rest):
+        line.rstrip()
+    return first, Text(" ").join(rest)

@@ -343,7 +343,7 @@ async def test_meter_uses_prepared_call_thresholds_and_next_call_level(
     loaded = tui_settings(
         {
             "agent.model": "m",
-            "level": mode,
+            "model": mode,
             "backend.api_mode": "chat_completions",
             "models": {
                 "fast": {"summary_trigger_chars": 1000},
@@ -360,7 +360,7 @@ async def test_meter_uses_prepared_call_thresholds_and_next_call_level(
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
     app = TuiApp(settings=loaded, threads_dir=str(tmp_path))
     ctx = await acreate_run_context(
-        loaded, is_tui=True, level_provider=app._level_provider
+        loaded, is_tui=True, choice_provider=app._choice_provider
     )
     state = State(
         verbose=False,
@@ -384,7 +384,7 @@ async def test_meter_uses_prepared_call_thresholds_and_next_call_level(
         app.active_runner = runner
         if mode == "light":
             assert _meter_percent(scr._context_meter()) == 50
-            app.set_session_override("level", "max")
+            app.set_session_override("model", "max")
             assert _meter_percent(scr._context_meter()) == 50
             assert state.turn_level is None
             close_tick(state, state._call_level)

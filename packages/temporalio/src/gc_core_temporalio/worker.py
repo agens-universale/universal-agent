@@ -10,10 +10,10 @@ import dataclasses
 import logging
 import os
 from contextlib import AsyncExitStack
-from pathlib import Path
 
 from gc_core.execution.resource_host import WorkerResourceHost
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 from temporalio.client import Client
 from temporalio.common import VersioningBehavior, WorkerDeploymentVersion
 from temporalio.worker import Worker, WorkerDeploymentConfig
@@ -26,25 +26,21 @@ from gc_core_temporalio.provider import (
     WorkerConfig,
 )
 from gc_core_temporalio.public_config import public_config_snapshot
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 
 
 def build_stores(config):
     """Хранилища тредов из конфига воркера (их же открывает клиент unlock).
 
-    Файловые треды, чей коммит прервало падение процесса, доводятся до конца
-    сразу: иначе их видел бы незавершёнными список тредов до первого
-    обращения к каждому.
+    Файловое — ``FileThreadStore`` v2 с ``fsync``: запись треда переживает
+    падение машины, а не только процесса (Temporal повторит ход по истории,
+    и тред должен совпасть с ней). Прерванную запись хранилище доигрывает
+    при первом обращении к треду.
     """
-    from gc_core.thread_store_journal import recover_pending_threads
-
     stores = {}
     for name, spec in config.thread_stores.items():
         if spec.kind == "file":
-            if Path(spec.path).is_dir():
-                recover_pending_threads(spec.path)
-            stores[name] = DurableFileThreadStore(spec.path)
+            stores[name] = FileThreadStore(spec.path, durability="fsync")
         else:
             stores[name] = SQLiteThreadStore(spec.path)
     return stores
@@ -54,24 +50,13 @@ def store_paths(store):
     """Пути хранилища тредов для ``protected_paths``: агент не читает и не
     правит чужие треды.
 
-    Известные хранилища (файлы, SQLite) — по их пути. Своё обязано объявить
-    пути методом ``protected_paths()`` (хранилище вне диска воркера, например
-    S3, возвращает ``[]``). Без объявления — отказ: молча не защитить
-    данные на диске воркера нельзя.
+    Хранилище объявляет пути методом ``protected_paths()`` (хранилище вне
+    диска воркера, например Postgres или S3, возвращает ``[]``). Без
+    объявления — отказ: молча не защитить данные на диске воркера нельзя.
     """
     declared = getattr(store, "protected_paths", None)
     if callable(declared):
         return list(declared())
-    if isinstance(store, SQLiteThreadStore):
-        return [
-            store.path,
-            *(
-                f"{store.path}{suffix}"
-                for suffix in ("-wal", "-shm", "-journal")
-            ),
-        ]
-    if isinstance(store, DurableFileThreadStore):
-        return [str(store._dir)]
     raise ValueError(
         f"Хранилище тредов {type(store).__name__} не объявило protected_paths(): "
         "верните пути его данных на диске воркера (или [] — если данных на "
@@ -200,9 +185,7 @@ def agent_activities(native, threads):
         native.summary_trace,
         native.close,
         native.release,
-        threads.load,
-        threads.commit,
-        threads.read_trace,
+        *threads.registered,
     ]
 
 

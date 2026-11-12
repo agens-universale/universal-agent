@@ -50,7 +50,7 @@ async def adescribe_image(
     task_context: str,
 ) -> str:
     """Описание картинки текстом; пустая строка — модель ничего не ответила."""
-    data = ctx.image_store.read_for_send(attachment)
+    data = await ctx.image_store.aread_for_send(attachment)
     if data is None:
         raise FileNotFoundError(attachment.path)
     parts: list[dict[str, Any]] = []

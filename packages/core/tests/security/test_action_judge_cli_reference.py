@@ -15,12 +15,15 @@ from gc_testkit.settings import fake_ctx
 
 from gc_core.execution.guard_contracts import GuardProbeRequest
 from gc_core.intent_log.record import IntentRecord
+from gc_core.agent_store import FileAgentStore
 from gc_core.security.action_judge import (
+    aload_action_judge_prompts,
     build_action_judge_messages,
     build_action_judge_payload,
 )
 from gc_core.security.action_judge_input import build_judge_request
-from gc_core.security.guard_probe import evaluate_guard_probe
+from gc_core.security.guard_probe import aevaluate_guard_probes
+from gc_testkit import run_coro
 
 REFERENCE = Path(__file__).parent / "data" / "action_judge_cli_reference.json"
 
@@ -109,12 +112,13 @@ def reference_messages() -> dict:
         runtime={"project_dir": "/p", "os": "linux"},
     )
     payload = build_action_judge_payload(request)
-    facts = evaluate_guard_probe(
-        GuardProbeRequest("action_prompts", "exec_command", "", "/p"),
-        settings=fake_ctx(),
+    request = GuardProbeRequest("action_prompts", "exec_command", "", "/p")
+    (facts,) = run_coro(aevaluate_guard_probes([request], settings=fake_ctx()))
+    local = run_coro(
+        aload_action_judge_prompts(FileAgentStore(), external=False)
     )
     return {
-        "local": build_action_judge_messages(payload),
+        "local": build_action_judge_messages(payload, prompts=local),
         "probe": build_action_judge_messages(payload, prompts=facts.data),
     }
 

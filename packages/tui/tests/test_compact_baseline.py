@@ -1,6 +1,8 @@
 """Poller записывает meta.tui.last_compact_msg_count на завершении сжатия
 (спадающий фронт runtime.summarizing True→False) — baseline для антиспама /compact."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import json
 
@@ -59,7 +61,7 @@ async def test_summarizing_falling_edge_records_baseline(tmp_path):
         # runtime.summarizing отсутствует → summarizing=False → спадающий фронт
         scr._poll_active()
         await pilot.pause()
-        meta = scr._store.get_task_meta(tid)
+        meta = meta_of(scr._store.get_record(tid))
         assert (meta.get("tui") or {}).get("last_compact_msg_count") == 2
 
 
@@ -81,5 +83,5 @@ async def test_no_record_without_falling_edge(tmp_path):
         scr._was_summarizing = False  # сжатия не было → нет фронта
         scr._poll_active()
         await pilot.pause()
-        meta = scr._store.get_task_meta(tid)
+        meta = meta_of(scr._store.get_record(tid))
         assert (meta.get("tui") or {}).get("last_compact_msg_count") is None

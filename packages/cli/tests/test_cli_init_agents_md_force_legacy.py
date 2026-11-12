@@ -14,6 +14,10 @@ from gc_testkit import run_coro
 from gc_testkit.settings import make_settings
 
 
+async def _init_prompt(**_kw):
+    return "prompt"
+
+
 def test_init_agents_md_threads_force_legacy_into_run_context(monkeypatch):
     captured = {}
 
@@ -43,8 +47,8 @@ def test_init_agents_md_threads_force_legacy_into_run_context(monkeypatch):
     monkeypatch.setattr(cli, "acreate_run_context", _fake_create_run_context)
     monkeypatch.setattr(cli, "AgentExecutor", _FakeExecutor)
     monkeypatch.setattr(
-        "gc_core.instructions.init_agents_md.build_init_prompt",
-        lambda **kw: "prompt",
+        "gc_core.instructions.init_agents_md.abuild_init_prompt",
+        _init_prompt,
     )
     monkeypatch.setattr(
         "gc_core.security.confirm_port.confirm_available", lambda ctx: True

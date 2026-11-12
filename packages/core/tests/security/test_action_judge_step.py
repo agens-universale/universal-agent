@@ -386,14 +386,15 @@ async def test_strict_flag_blocks_even_when_the_model_calls_it_harmless(env):
 async def test_durable_run_takes_the_instruction_from_the_worker_probe(env):
     """Под durable-исполнением ядру нельзя читать файлы: текст инструкции
     судьи приходит пробой с воркера, как у судьи команд."""
-    from gc_core.security.guard_probe import evaluate_guard_probe
+    from gc_core.security.guard_probe import aevaluate_guard_probes
 
     e = env(ALLOW)
     probed = []
 
     async def guard_probe(request):
         probed.append(request.kind)
-        return evaluate_guard_probe(request, settings=e.ctx)
+        (facts,) = await aevaluate_guard_probes([request], settings=e.ctx)
+        return facts
 
     e.ctx.guard_probe = guard_probe
     assert await _call(e) == (True, None)
@@ -643,23 +644,25 @@ async def test_external_channel_reaches_the_judge_as_external_requests(env):
     assert '"user": "почини тесты"' not in user["content"]
 
 
-async def test_cli_and_tui_judge_gets_the_base_instruction(env):
-    from gc_core.security.action_judge import load_action_judge_prompt
+async def _bundled_prompt(kind):
+    from gc_core.agent_store import FileAgentStore
+    from gc_core.security.action_judge import aload_action_judge_prompt
 
+    return await aload_action_judge_prompt(kind, store=FileAgentStore())
+
+
+async def test_cli_and_tui_judge_gets_the_base_instruction(env):
     e = env(ALLOW)
     assert await _call(e) == (True, None)
     system, _user = e.judge.requests[0]
-    assert system["content"] == load_action_judge_prompt("system")
+    assert system["content"] == await _bundled_prompt("system")
 
 
 async def test_external_words_bring_their_rule_through_the_worker_probe(env):
     """Под durable правило приносит та же проба, что инструкцию; просит его
     шаг, только когда в запросе есть внешние записи."""
-    from gc_core.security.action_judge import (
-        EXTERNAL_PROMPT,
-        load_action_judge_prompt,
-    )
-    from gc_core.security.guard_probe import evaluate_guard_probe
+    from gc_core.security.action_judge import EXTERNAL_PROMPT
+    from gc_core.security.guard_probe import aevaluate_guard_probes
 
     e = env(ALLOW)
     e.ctx.runtime = RuntimeEnv(external_user_words=True)
@@ -667,14 +670,15 @@ async def test_external_words_bring_their_rule_through_the_worker_probe(env):
 
     async def guard_probe(request):
         probed.append((request.kind, request.value))
-        return evaluate_guard_probe(request, settings=e.ctx)
+        (facts,) = await aevaluate_guard_probes([request], settings=e.ctx)
+        return facts
 
     e.ctx.guard_probe = guard_probe
     assert await _call(e) == (True, None)
     assert probed == [("action_prompts", EXTERNAL_PROMPT)]
     system, _user = e.judge.requests[0]
     assert system["content"] == (
-        load_action_judge_prompt("system")
+        await _bundled_prompt("system")
         + "\n\n"
-        + load_action_judge_prompt("external")
+        + await _bundled_prompt("external")
     )

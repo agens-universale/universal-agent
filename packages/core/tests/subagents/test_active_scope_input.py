@@ -12,7 +12,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.states import SharedStateData, State
-from gc_core.thread_store import read_subagent_trace
+from gc_testkit.develop_files import read_subagent_trace
 from gc_core.tools.subagents.active_scope import (
     activate_child_input,
     active_parent_call_id,
@@ -165,13 +165,13 @@ class TestRunnerWiresPending:
         barrier = threading.Event()
         release = threading.Event()
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["get_pending"] = kwargs.get("get_pending_messages")
             captured["active_during"] = is_child_input_active(ctx)
             captured["parent_call_id"] = active_parent_call_id(ctx)
             barrier.set()
             release.wait(timeout=2)
-            pending = kwargs["get_pending_messages"]()
+            pending = await kwargs["get_pending_messages"]()
             captured["drained"] = pending
             return "done"
 
@@ -243,10 +243,10 @@ class TestRunnerWiresPending:
         barrier = threading.Event()
         release = threading.Event()
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             barrier.set()
             release.wait(timeout=2)
-            captured["drained"] = kwargs["get_pending_messages"]()
+            captured["drained"] = await kwargs["get_pending_messages"]()
             return "done"
 
         runner = SubagentRunner(ctx, orch, cfg)

@@ -42,25 +42,25 @@ async def _runner(tmp_path, **extra):
     return SubagentRunner(ctx, SimpleNamespace(default_model="m"))
 
 
-def _prompt_for(runner, tool_name):
+async def _prompt_for(runner, tool_name):
     runner._active_tool_name = tool_name
-    return runner._resolve_subagent_system_prompt()
+    return await runner._aresolve_subagent_system_prompt()
 
 
 class TestPromptSelection:
     async def test_custom_gets_custom_prompt(self, tmp_path):
-        prompt = _prompt_for(await _runner(tmp_path), "subagent_alpha")
+        prompt = await _prompt_for(await _runner(tmp_path), "subagent_alpha")
         assert CUSTOM_MARKER in prompt
         # Общая часть контракта никуда не девается.
         assert BASE_MARKER in prompt
 
     async def test_builtin_gets_base_prompt(self, tmp_path):
-        prompt = _prompt_for(await _runner(tmp_path), "subagent_worker")
+        prompt = await _prompt_for(await _runner(tmp_path), "subagent_worker")
         assert CUSTOM_MARKER not in prompt
         assert BASE_MARKER in prompt
 
     async def test_custom_prompt_carries_the_warnings(self, tmp_path):
-        prompt = _prompt_for(await _runner(tmp_path), "subagent_alpha")
+        prompt = await _prompt_for(await _runner(tmp_path), "subagent_alpha")
         # Три вещи, ради которых промпт и заведён.
         assert "grants no permissions" in prompt
         assert "does not describe your tools" in prompt
@@ -68,7 +68,7 @@ class TestPromptSelection:
 
     async def test_specific_role_placeholder_survives(self, tmp_path):
         # Без него роль из файла молча никуда не подставится.
-        assert "<specific_role>" in _prompt_for(
+        assert "<specific_role>" in await _prompt_for(
             await _runner(tmp_path), "subagent_alpha"
         )
 
@@ -85,7 +85,9 @@ class TestOverride:
                 )
             },
         )
-        assert _prompt_for(runner, "subagent_alpha").startswith("МОЙ ПРОМПТ")
+        assert (await _prompt_for(runner, "subagent_alpha")).startswith(
+            "МОЙ ПРОМПТ"
+        )
 
     async def test_override_does_not_affect_builtin(self, tmp_path):
         override = tmp_path / "my_prompt.md"
@@ -98,7 +100,7 @@ class TestOverride:
                 )
             },
         )
-        assert BASE_MARKER in _prompt_for(runner, "subagent_worker")
+        assert BASE_MARKER in await _prompt_for(runner, "subagent_worker")
 
     async def test_missing_override_falls_back_to_bundled(self, tmp_path):
         runner = await _runner(
@@ -109,4 +111,4 @@ class TestOverride:
                 )
             },
         )
-        assert CUSTOM_MARKER in _prompt_for(runner, "subagent_alpha")
+        assert CUSTOM_MARKER in await _prompt_for(runner, "subagent_alpha")

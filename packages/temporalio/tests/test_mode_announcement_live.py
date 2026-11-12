@@ -14,11 +14,11 @@ from gc_core.message_policy.plan_messages import (
     PLAN_ENTER_MESSAGE,
     PLAN_RESEARCH_ENTER_MESSAGE,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_shared_into_meta
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core_temporalio import AgentPlugin, AgentSession
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
-from live_support import call, temporal_cli
+from gc_stores.sqlite import SQLiteThreadStore
+from live_support import call, seed_meta, temporal_cli
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_workflow_controls import finish, scripted_http  # noqa: F401
@@ -86,12 +86,11 @@ async def test_child_is_told_the_mode_of_the_session(
     )
     store = SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
     # Режим сессии — в мете треда, не в конфиге.
-    store.save_meta(
+    await seed_meta(
+        store,
         "sdk",
         "t1",
-        ThreadMetaMapper.merge_shared_into_meta(
-            {}, SharedStateData(permission_mode="plan")
-        ),
+        merge_shared_into_meta({}, SharedStateData(permission_mode="plan")),
     )
     plugin = AgentPlugin(
         {"a": _settings(url, ws)}, thread_store=store, workspace=ws

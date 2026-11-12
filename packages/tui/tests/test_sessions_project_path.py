@@ -5,11 +5,13 @@
 длинный путь → обрезан слева; запись project_path при создании новой сессии.
 """
 
+from gc_testkit.develop_files import meta_of
+
 import json
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
@@ -144,9 +146,11 @@ async def test_project_path_captured_on_new_session(tmp_path, monkeypatch):
         await pilot.pause()
         tid = pilot.app.tui_state.active_task_id
         assert tid is not None
-        meta = FileTaskStore(
-            threads_dir=str(tmp_path), system="cli"
-        ).get_task_meta(tid)
+        meta = meta_of(
+            FileTaskStore(threads_dir=str(tmp_path), system="cli").get_record(
+                tid
+            )
+        )
         ppath = meta.get("tui", {}).get("project_path")
         assert ppath is not None
         assert str(tmp_path) in ppath or ppath.endswith(

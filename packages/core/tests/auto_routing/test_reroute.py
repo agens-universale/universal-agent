@@ -40,7 +40,7 @@ def _registry(**agent):
     raw = {**RAW, "agent": {"use_local_subagents": True, **agent}}
     cfg = AppConfig.model_validate(raw)
     ctx = run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: "default")
+        rc.acreate_run_context(cfg, choice_provider=lambda: "default")
     )
     return ctx.tools_data, cfg
 
@@ -266,9 +266,8 @@ def test_an_invalid_call_fires_under_two_level(registry, kind):
 
 
 def test_a_valid_read_does_not_fire_under_two_level(registry):
-    assert (
-        _verdict(registry, [_fc("fs_read_file", '{"path": "a.py"}')]) is None
-    )
+    call = _fc("fs_read_file", '{"path": "a.py", "add_line_numbers": false}')
+    assert _verdict(registry, [call]) is None
 
 
 # --- ответ без вызовов: только two_level ---------------------------------------
@@ -299,7 +298,7 @@ def test_an_answer_without_calls_fires_under_two_level(registry, kind):
 def test_prose_next_to_a_valid_call_is_not_an_answer_without_calls(registry):
     response = [
         _message("Сейчас прочитаю файл."),
-        _fc("fs_read_file", '{"path": "a.py"}'),
+        _fc("fs_read_file", '{"path": "a.py", "add_line_numbers": false}'),
     ]
     assert _verdict(registry, response) is None
 

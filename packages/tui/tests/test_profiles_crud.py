@@ -12,6 +12,8 @@ Enter открывает редактор профиля (Task 6, `test_profile_
 профиль, выбранный в этой сессии» впервые достижим из UI.
 """
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import as_settings, tui_settings
 from pathlib import Path
 
@@ -585,7 +587,7 @@ def _app_for_session(tmp_path, base_cfg):
 async def test_delete_sanitizes_the_session_choice_with_a_notice(
     tmp_path, monkeypatch
 ):
-    """Профиль выбран ТЕКУЩЕЙ сессией (`/profiles`), а не конфигом. Удаление из
+    """Профиль выбран ТЕКУЩЕЙ сессией (`/profile`), а не конфигом. Удаление из
     UI впервые делает этот путь достижимым: оверрайд обязан сняться с notice
     (§9.2), иначе сессия осталась бы с висячей ссылкой на удалённый файл."""
     clear_runtime_notices()
@@ -1539,12 +1541,13 @@ async def test_delete_snaps_a_pointer_written_as_an_env_ref(
 async def test_rename_moves_the_session_choice_instead_of_dropping_it(
     tmp_path, monkeypatch
 ):
-    """Переименование — не исчезновение: сессионный выбор `/profiles` едет за новым
+    """Переименование — не исчезновение: сессионный выбор `/profile` едет за новым
     именем (ruling координатора), а не снимается санацией §9.2. Переезд доходит и
     до meta треда — иначе возврат в тред воскресил бы старое имя."""
     clear_runtime_notices()
     from gc_tui.services.stores.file_store import FileTaskStore
-    from gc_tui.session_settings import read_from_meta
+    from gc_tui.services.stores.record_view import tui_section
+    from gc_tui.session_settings import read_from_tui
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1578,10 +1581,12 @@ async def test_rename_moves_the_session_choice_instead_of_dropping_it(
         assert "session_profile_stale" not in [
             n.code for n in collect_runtime_notices()
         ]
-        meta = FileTaskStore(
-            threads_dir=str(tmp_path / "threads"), system="cli"
-        ).get_task_meta("t-rename")
-        assert read_from_meta(meta).get("profile") == "house"
+        meta = meta_of(
+            FileTaskStore(
+                threads_dir=str(tmp_path / "threads"), system="cli"
+            ).get_record("t-rename")
+        )
+        assert read_from_tui(meta.get("tui")).get("profile") == "house"
 
 
 # --- ревью Task 5 #3/#4: эффект для сессии и обнажившийся тёзка — на экране -------
@@ -1610,7 +1615,7 @@ async def test_delete_banner_and_flash_name_the_session_effect(
         await pilot.press("delete")
         await pilot.pause()
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
-        assert "Сессионный выбор /profiles" in banner
+        assert "Сессионный выбор /profile" in banner
         await pilot.press("enter")
         await pilot.pause()
         flash = _flash(scr)

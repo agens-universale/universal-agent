@@ -21,14 +21,9 @@ def test_summarize_empty_returns_empty():
 
 
 def test_final_answer_prompt_file_exists_and_nonempty():
-    from gc_core.intent_scope.summarizer import (
-        _resolve_final_answer_prompt_path,
-    )
+    from gc_core.agent_store import FileAgentStore
 
-    class _Ctx:
-        intent_scope = None
-
-    path = _resolve_final_answer_prompt_path(_Ctx())
+    path = FileAgentStore().label("prompt", "intent_final")
     assert os.path.exists(path)
     with open(path, encoding="utf-8") as fd:
         assert fd.read().strip()

@@ -5,32 +5,36 @@ from unittest.mock import Mock
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
+from gc_core.agent_store import FileAgentStore
 from gc_core.run_context import acreate_run_context
 from gc_core.run_preparation import (
     PreparedPrompts,
     PromptPreparationRequest,
-    load_run_prompts,
+    aload_run_prompts,
 )
 from gc_testkit.settings import fake_ctx, make_settings
 
 
-def test_local_prompt_files_and_steering_keep_existing_order(tmp_path):
+def _store(**dotted) -> FileAgentStore:
+    """Файловое хранилище: пути промптов — из настроек."""
+    return FileAgentStore(make_settings(dotted))
+
+
+async def test_local_prompt_files_and_steering_keep_existing_order(tmp_path):
     system = tmp_path / "system.md"
     special = tmp_path / "special.md"
     system.write_text("  system rules\n", encoding="utf-8")
     special.write_text("  client rules\n", encoding="utf-8")
-    request = PromptPreparationRequest.from_config(
-        make_settings(
-            {
-                "paths.chat_completions_system_prompt_path": str(system),
-                "paths.chat_completions_special_instructions_path": f" {special} ",
-                "agent.model_steering": "  be concise  ",
-            }
-        ),
-        verbose=False,
+    settings = make_settings(
+        {
+            "paths.chat_completions_system_prompt_path": str(system),
+            "paths.chat_completions_special_instructions_path": f" {special} ",
+            "agent.model_steering": "  be concise  ",
+        }
     )
+    request = PromptPreparationRequest.from_config(settings, verbose=False)
 
-    result = load_run_prompts(request)
+    result = await aload_run_prompts(request, store=FileAgentStore(settings))
 
     assert result.system_prompt == "system rules"
     assert result.special_instructions == (
@@ -39,7 +43,7 @@ def test_local_prompt_files_and_steering_keep_existing_order(tmp_path):
 
 
 @pytest.mark.parametrize("unreadable", ["missing", "invalid_utf8"])
-def test_required_prompt_failure_keeps_diagnostic_and_exception(
+async def test_required_prompt_failure_keeps_diagnostic_and_exception(
     tmp_path, unreadable, capsys
 ):
     path = tmp_path / "system.md"
@@ -50,11 +54,12 @@ def test_required_prompt_failure_keeps_diagnostic_and_exception(
     logger = Mock()
 
     with pytest.raises(error):
-        load_run_prompts(
-            PromptPreparationRequest(
-                system_prompt_path=str(path), verbose=True
-            ),
+        await aload_run_prompts(
+            PromptPreparationRequest(verbose=True),
             logger=logger,
+            store=_store(
+                **{"paths.chat_completions_system_prompt_path": str(path)}
+            ),
         )
 
     assert str(path) in capsys.readouterr().out
@@ -65,15 +70,18 @@ def test_required_prompt_failure_keeps_diagnostic_and_exception(
 
 
 @pytest.mark.parametrize("unreadable", ["missing", "invalid_utf8"])
-def test_optional_prompt_failure_retains_model_steering(tmp_path, unreadable):
+async def test_optional_prompt_failure_retains_model_steering(
+    tmp_path, unreadable
+):
     path = tmp_path / "special.md"
     if unreadable == "invalid_utf8":
         path.write_bytes(b"\xff")
 
-    result = load_run_prompts(
-        PromptPreparationRequest(
-            special_instructions_path=str(path), model_steering="be concise"
-        )
+    result = await aload_run_prompts(
+        PromptPreparationRequest(model_steering="be concise"),
+        store=_store(
+            **{"paths.chat_completions_special_instructions_path": str(path)}
+        ),
     )
 
     assert result == PreparedPrompts(
@@ -108,14 +116,8 @@ async def test_executor_uses_prepared_prompts_without_local_io(monkeypatch):
     )
 
     assert result == ("remote system", "remote special")
-    assert requests == [
-        {
-            "system_prompt_path": "/worker/system.md",
-            "special_instructions_path": None,
-            "model_steering": "concise",
-            "verbose": False,
-        }
-    ]
+    # Пути промптов в запросе не едут: их знает хранилище исполнителя.
+    assert requests == [{"model_steering": "concise", "verbose": False}]
 
 
 async def test_injected_loader_error_never_falls_back_to_local_files():
@@ -166,7 +168,9 @@ async def test_model_steering_reader_matches_local_and_prepared_port(steering):
     config = {"agent.model_steering": steering}
 
     async def loader(request):
-        return load_run_prompts(request)
+        return await aload_run_prompts(
+            request, store=FileAgentStore(make_settings(config))
+        )
 
     local = AgentExecutor(fake_ctx(config, prompt_loader=None))
     prepared = AgentExecutor(fake_ctx(config, prompt_loader=loader))

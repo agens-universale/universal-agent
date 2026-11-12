@@ -1,7 +1,7 @@
 """kind=summary рендерит маркер-разделитель + блок с очищенной сводкой."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 from gc_tui.models import TraceEvent
 
 
@@ -110,7 +110,7 @@ async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
         marker = next(
             w for w in screen.query(TraceRow) if w.has_class("summary-marker")
         )
-        prefix = lambda: str(marker.query_one(".trace-prefix").render())
+        prefix = lambda: marker._content.plain
         assert "▸" in prefix() and "▾" not in prefix()  # свёрнут → вправо
         screen.on_summary_toggle_request(SummaryToggleRequest(3))
         await pilot.pause()

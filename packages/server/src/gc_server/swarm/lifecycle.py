@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 FINAL_STATUSES = frozenset(
-    {"completed", "failed", "timeout", "unknown_failed"}
+    {"completed", "failed", "timeout", "unknown_failed", "cancelled"}
 )
 
 # Grace-период между SIGTERM и SIGKILL для CLI-процесса (см. swarm_spec.md §6
@@ -72,13 +72,26 @@ def _is_pid_alive(pid: int) -> bool:
         return True
 
 
+def _is_group_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.killpg(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def _kill_process_tree(
     pid: int, grace_period: float = _KILL_GRACE_SECONDS
 ) -> None:
     """Послать SIGTERM всей process group → подождать → SIGKILL если жив.
 
     Полагается на `start_new_session=True` в runner.py (шаг 1.6): PID == PGID,
-    `os.killpg` убивает всё дерево (wrapper.sh + bwrap + CLI + дочерние CLI).
+    GNU timeout запускается с --foreground и не отделяет CLI от группы.
+    bwrap завершает изолированные процессы при смерти родителя.
 
     Безопасно — если процесс уже мёртв или мы не владелец, выходим
     без ошибок (best effort).
@@ -94,7 +107,7 @@ def _kill_process_tree(
     # Wait для graceful exit (CLI может ещё дописывать summary).
     end_t = time.monotonic() + grace_period
     while time.monotonic() < end_t:
-        if not _is_pid_alive(pid):
+        if not _is_group_alive(pid):
             return
         time.sleep(0.1)
 

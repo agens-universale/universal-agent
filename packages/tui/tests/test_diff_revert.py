@@ -36,7 +36,7 @@ from gc_testkit.tui_support import (
     tui_settings,
     wait_until,
 )
-from gc_tui.palette import ERR, OK
+from gc_tui.palette import DIFF_ADD_INK, DIFF_DEL_INK
 from gc_tui.screens.diff import (
     APPROX,
     BUSY_REVERT,
@@ -601,8 +601,8 @@ async def test_r_shows_fullscreen_confirm_not_modal(tmp_path):
         assert "будет отменено" in header
         # счётчики отменяемого — того же цвета, что в списке и вьюере
         painted = confirm.query_one("#header-left").content
-        assert span_style(painted, "+1") == OK
-        assert span_style(painted, "−1") == ERR
+        assert span_style(painted, "+1") == DIFF_ADD_INK
+        assert span_style(painted, "−1") == DIFF_DEL_INK
         # Р16: тело в рамке на всю высоту между шапкой и футером
         lines = [
             "".join(seg.text for seg in strip).rstrip()
@@ -997,8 +997,8 @@ async def test_every_file_of_the_set_is_shown_with_its_own_counters(tmp_path):
         assert f"будет отменено +{sum(range(1, 13))} −12" in header
 
         # Счётчики строки имени красятся тем же смыслом, что и всюду на экране.
-        assert span_style(heads[0].content, "+1") == OK
-        assert span_style(heads[0].content, "−1") == ERR
+        assert span_style(heads[0].content, "+1") == DIFF_ADD_INK
+        assert span_style(heads[0].content, "−1") == DIFF_DEL_INK
 
 
 @pytest.mark.asyncio
@@ -2380,10 +2380,8 @@ async def test_undo_feedback_reaches_the_thread_as_technical_message(tmp_path):
     from gc_core.message_policy.user_message_policy import (
         is_technical_user_message_text,
     )
-    from gc_core.thread_store import (
-        append_new_thread_messages,
-        load_thread_messages,
-    )
+    from gc_testkit.develop_files import load_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)

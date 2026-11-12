@@ -92,6 +92,22 @@ def _merge_counter(before: int, after: int, current: int) -> int:
     return current + (after - before)
 
 
+def _merge_breaker(before: dict, after: dict, current: dict) -> dict:
+    """Предохранитель: изменение ребёнка побеждает, причины не конфликтуют.
+
+    Ключ, исчезнувший у ребёнка, удаляется, только если родитель не успел
+    поменять его причину."""
+    result = dict(current)
+    for alias in dict.fromkeys([*before, *after]):
+        if before.get(alias) == after.get(alias):
+            continue
+        if alias in after:
+            result[alias] = after[alias]
+        elif result.get(alias) == before[alias]:
+            del result[alias]
+    return result
+
+
 def apply_subagent_transfer(state, ctx, before, after) -> None:
     """Apply only new child effects, preserving concurrent parent changes.
 
@@ -109,11 +125,10 @@ def apply_subagent_transfer(state, ctx, before, after) -> None:
         current.run_permissions,
         "run_permissions",
     )
-    breaker = _merge_changes(
+    breaker = _merge_breaker(
         before.circuit_breaker,
         after.circuit_breaker,
         current.circuit_breaker,
-        "circuit_breaker",
     )
     calls = after.tool_calls - before.tool_calls
     if calls < 0:

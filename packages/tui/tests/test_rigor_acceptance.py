@@ -1,6 +1,8 @@
 """Гвозди приёмки /rigor (спека §8): резолвер-матрица, custom-правило, эфемерная
 позиция, smart-гейт, сессионность пары. Живые UI-гейты — в смоуке (см. план §смоук)."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_testkit import run_coro
@@ -25,8 +27,8 @@ def _app(tmp_path, yaml_text):
     [
         ("off", "allow", "low"),
         ("smart", "judge", "medium"),
-        ("on", "deny", "high"),
-        ("on", "allow", "custom"),
+        ("always", "deny", "high"),
+        ("always", "allow", "custom"),
         ("off", "deny", "custom"),
     ],
 )
@@ -53,7 +55,7 @@ def test_custom_unreachable_by_stepping(tmp_path):
 
     b = _app(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )  # custom с самого начала
 
     for direction in (1, -1):
@@ -70,17 +72,18 @@ def test_session_pair_not_preset_survives(tmp_path):
     """Сессионность работает для ПАРЫ значений, не для пресета (пресет не хранится)."""
     pytest.importorskip("textual")
     from gc_tui.services.stores.file_store import FileTaskStore
-    from gc_tui.session_settings import read_from_meta
+    from gc_tui.services.stores.record_view import tui_section
+    from gc_tui.session_settings import read_from_tui
 
     a = _app(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "deny"\n',
     )
     from gc_tui.toggles import apply_toggle
 
     apply_toggle(a, "rigor", "low")
     store = FileTaskStore(threads_dir=a._threads_dir, system=a._system)
-    saved = read_from_meta(store.get_task_meta("t1"))
+    saved = read_from_tui(tui_section(store.get_record("t1")))
     assert saved == {
         "tui.finish_gate_mode": "off",
         "tui.text_answer_mode": "allow",
@@ -104,7 +107,7 @@ def test_apply_rigor_preset_never_clears_session_overrides(tmp_path):
         'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
     )
     app.apply_session_overrides(
-        {"tui.finish_gate_mode": "on"}
+        {"tui.finish_gate_mode": "always"}
     )  # частичный оверрайд
 
     apply_toggle(app, "rigor", "low")
@@ -189,7 +192,7 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
 
     app = _app(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "deny"\n',
     )
     async with app.run_test() as pilot:
         scr = SettingsScreen(
@@ -227,9 +230,9 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
             "gate · самопроверка выполнения задачи"
         )
 
-        # Подпись значения ребёнка ("on") — тоже DIM (трек между head и
+        # Подпись значения ребёнка ("always") — тоже DIM (трек между head и
         # подписью — семантические цвета, не задет).
-        value_start = gate_plain.rindex("on")
+        value_start = gate_plain.rindex("always")
         assert any(
             p.SUB_INK.lower() in str(s.style).lower()
             and s.start <= value_start < s.end

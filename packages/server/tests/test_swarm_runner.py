@@ -509,6 +509,25 @@ def test_materialize_overrides_use_server_subagents_false(tmp_path):
     assert written["agent"]["use_server_subagents"] is False
 
 
+def test_materialize_drops_host_storage(tmp_path):
+    """Песочница хранит тред в своих файлах (/work/.gc/threads): секция
+    storage хоста с подключением к базе внутрь не попадает."""
+    import yaml as _yaml
+
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text(
+        "storage:\n  threads:\n    type: postgres\n"
+        "    dsn: postgresql://u:secret@db/agent\n"
+    )
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+
+    runner._materialize_runtime_config(str(host_cfg), str(sandbox), {})
+    text = (sandbox / ".gc" / "config.yml").read_text()
+    assert "storage" not in _yaml.safe_load(text)
+    assert "secret" not in text
+
+
 def test_materialize_preserves_host_backend(tmp_path):
     """Хостовые поля backend.* должны сохраниться — sandbox юзает тот же LLM."""
     import yaml as _yaml
@@ -1060,3 +1079,149 @@ def test_materialize_migrates_legacy_kwargs_before_overlay(
     runner._materialize_runtime_config(str(host), str(sandbox), {})
     written = yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
     assert written["models"]["sample"]["main"] == {"top_p": 0.2}
+
+
+def _host_with_storage(tmp_path):
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text(
+        "agent:\n  max_steps: 3\n"
+        "storage:\n  threads:\n    type: postgres\n"
+        "    dsn: postgresql://srv:pw@db/a\n"
+    )
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    return host_cfg, sandbox
+
+
+def test_thread_in_store_config_points_at_the_proxy(tmp_path):
+    """Тред задачи в хранилище сервера — через прокси одного треда: в
+    файле песочницы только подстановки, хранилища хоста там нет."""
+    import yaml as _yaml
+
+    host_cfg, sandbox = _host_with_storage(tmp_path)
+    runner._materialize_runtime_config(
+        str(host_cfg), str(sandbox), {}, in_store=True
+    )
+    text = (sandbox / ".gc" / "config.yml").read_text()
+    assert _yaml.safe_load(text)["storage"] == {
+        "threads": {
+            "type": "gc_stores.remote:open",
+            "socket": "${ENV:GC_THREAD_SOCKET}",
+            "token": "${ENV:GC_THREAD_TOKEN}",
+        }
+    }
+    assert "pw@" not in text
+
+
+def test_files_mode_config_carries_no_storage(tmp_path):
+    import yaml as _yaml
+
+    host_cfg, sandbox = _host_with_storage(tmp_path)
+    runner._materialize_runtime_config(str(host_cfg), str(sandbox), {})
+    text = (sandbox / ".gc" / "config.yml").read_text()
+    assert "storage" not in _yaml.safe_load(text)
+
+
+def test_start_swarm_passes_the_proxy_by_environment(
+    base_swarm_cfg, mock_popen
+):
+    access = runner.ThreadAccess(socket_dir="/tmp/gct-x", token="t" * 64)
+    runner.start_swarm_process(
+        base_swarm_cfg, system="g", task_id="t", payload={}, thread=access
+    )
+    env = mock_popen.call_args.kwargs["env"]
+    assert env["SWARM_THREAD_IN_STORE"] == "1"
+    assert env["SWARM_THREAD_SOCKET_DIR"] == "/tmp/gct-x"
+    assert env["GC_THREAD_TOKEN"] == "t" * 64
+
+
+def test_files_mode_passes_no_thread(base_swarm_cfg, mock_popen):
+    runner.start_swarm_process(
+        base_swarm_cfg, system="g", task_id="t", payload={}
+    )
+    env = mock_popen.call_args.kwargs["env"]
+    assert "SWARM_THREAD_IN_STORE" not in env
+    assert "GC_THREAD_TOKEN" not in env
+
+
+def test_start_swarm_hides_the_server_storage_environment(
+    base_swarm_cfg, mock_popen, monkeypatch
+):
+    monkeypatch.setenv("SRV_PG_DSN", "postgresql://srv:s3cret@db/gc")
+    runner.start_swarm_process(
+        {**base_swarm_cfg, "hidden_env": ["SRV_PG_DSN"]},
+        system="g",
+        task_id="t",
+        payload={},
+    )
+    assert "SRV_PG_DSN" not in mock_popen.call_args.kwargs["env"]
+
+
+def _finished_task(cfg, *, sandbox_exists=True):
+    """Задача, песочница которой вышла: meta ``completed`` и completion.json."""
+    sid = "swarm_g_t"
+    sandbox = os.path.join(cfg["sandbox_root_dir"], sid)
+    if sandbox_exists:
+        os.makedirs(sandbox)
+    storage.save_swarm_meta(
+        cfg["threads_dir"],
+        sid,
+        base_meta={"system": "g", "task_id": "t"},
+        swarm_meta_patch={
+            "id": sid,
+            "status": "completed",
+            "exit_code": 0,
+            "finished_at": "2026-10-22T00:00:00+00:00",
+            "error_type": "",
+            "sandbox_path": sandbox,
+            "pid": 1,
+        },
+    )
+    completion = os.path.join(cfg["threads_dir"], sid, "completion.json")
+    with open(completion, "w", encoding="utf-8") as f:
+        json.dump({"exit_code": 0}, f)
+    return sid, sandbox, completion
+
+
+def test_continue_swarm_runs_an_inbox_turn_in_the_same_sandbox(
+    base_swarm_cfg, mock_popen
+):
+    sid, sandbox, completion = _finished_task(base_swarm_cfg)
+    access = runner.ThreadAccess(socket_dir="/tmp/gct-x", token="t" * 64)
+    pid = runner.continue_swarm_process(
+        base_swarm_cfg, system="g", task_id="t", thread=access
+    )
+    assert pid == 12345
+    env = mock_popen.call_args.kwargs["env"]
+    assert env["SWARM_INBOX_TURN"] == "1"
+    assert env["GC_THREAD_TOKEN"] == "t" * 64
+    assert env["SWARM_SANDBOX_PATH"] == sandbox
+    # Прошлый отчёт обёртки финализировал бы продолжение сразу.
+    assert not os.path.exists(completion)
+    sm = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], sid)[
+        "swarm_meta"
+    ]
+    assert (sm["status"], sm["pid"], sm["continuations"]) == (
+        "running",
+        12345,
+        1,
+    )
+    assert sm["finished_at"] is None
+    assert sm["exit_code"] is None
+
+
+def test_failed_continuation_fails_the_task_and_keeps_its_record(
+    base_swarm_cfg, mock_popen
+):
+    sid, _sandbox, _completion = _finished_task(base_swarm_cfg)
+    mock_popen.side_effect = OSError("нет обёртки")
+    access = runner.ThreadAccess(socket_dir="/tmp/gct-x", token="t" * 64)
+    with pytest.raises(OSError):
+        runner.continue_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", thread=access
+        )
+    sm = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], sid)[
+        "swarm_meta"
+    ]
+    assert sm["status"] == "failed"
+    assert "нет обёртки" in sm["error_message"]

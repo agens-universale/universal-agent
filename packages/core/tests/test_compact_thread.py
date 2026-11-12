@@ -1,24 +1,57 @@
 """compact_thread: грузит тред + форс-сжатие через координатор."""
 
-import types
-
 from gc_core import agent_executor as ae
 from gc_core import manual_compaction as mc
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey, Usage
+from gc_core.threads.session_writer import SessionWriter
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
+
+KEY = ThreadKey(system="cli", thread="t1")
+
+
+def _seed(tmp_path, content: str, usage: dict | None = None) -> None:
+    """Тред на диске: одно сообщение пользователя и кумулятив расхода."""
+
+    async def seed():
+        writer = SessionWriter(
+            FileThreadStore(str(tmp_path)), KEY, owner="seed"
+        )
+        await writer.acommit(
+            append_messages=[{"role": "user", "content": content, "id": "u1"}],
+            set_usage=Usage.model_validate(usage or {}),
+        )
+        await writer.arelease()
+
+    run_coro(seed())
+
+
+def _executor(tmp_path):
+    import threading
+
+    ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
+    ex._ctx = fake_ctx(
+        {
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "chat_completions",
+            "paths.threads_data_path": str(tmp_path),
+        },
+        tools_spec=[],
+        tools_description=[],
+    )
+    ex._lock = threading.Lock()
+    ex._state = None
+    ex._stop_pending = False
+    return ex
 
 
 def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     captured = {}
 
-    class _TS:
-        history_messages = [{"role": "user", "content": "привет", "id": "u1"}]
-        meta = {}
-        thread_id = "t1"
-        system_id = "cli"
-        threads_dir = str(tmp_path)
+    _seed(tmp_path, "привет")
 
     class _Coord:
         def __init__(self, **kw):
@@ -58,32 +91,11 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
         def infer_user_turn_seq_if_missing(self):
             pass
 
-    async def _afrom(**kw):
-        return _TS()
-
-    monkeypatch.setattr(
-        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom)
-    )
-    monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
     monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
     monkeypatch.setattr(mc, "State", _FakeState)
 
-    ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
-    ex._ctx = fake_ctx(
-        {
-            "agent.model": "M",
-            "agent.max_steps": 30,
-            "agent.system_prompt_id": "x",
-            "backend.api_mode": "chat_completions",
-        },
-        tools_spec=[],
-        tools_description=[],
-    )
-    ex._lock = __import__("threading").Lock()
-    ex._state = None
-    ex._stop_pending = False
-
+    ex = _executor(tmp_path)
     ok = run_coro(ex.acompact_thread("t1", system="cli"))
     assert ok is True
     assert captured.get("forced") is True
@@ -94,55 +106,15 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
 
 
 def _make_compact_executor(
-    monkeypatch, tmp_path, *, baseline_meta, coord_cls, state_cls
+    monkeypatch, tmp_path, *, baseline_usage, coord_cls, state_cls
 ):
-    import threading
-
     # Логика compact_thread живёт в manual_compaction (mc) — патчим ЕГО namespace,
     # а не agent_executor (тот лишь делегирует).
-    _store = FileThreadStore(str(tmp_path))
-
-    async def _afrom_config(**kw):
-        return types.SimpleNamespace(
-            history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
-            meta=baseline_meta,
-            thread_id="t1",
-            system_id="cli",
-            threads_dir=str(tmp_path),
-            # Хранилище: ручная компакция пишет token_usage через него, а не
-            # через модульные функции — иначе у встраивающего с базой эта
-            # запись уходила бы на диск мимо остального треда.
-            store=_store,
-            # ...и ходит она туда через асинхронный порт: тред может лежать в
-            # базе, и ждать её надо нативно.
-            port=athread_store(_store),
-        )
-
-    monkeypatch.setattr(
-        mc,
-        "ThreadSession",
-        types.SimpleNamespace(afrom_config=_afrom_config),
-    )
-    monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
+    _seed(tmp_path, "hi", baseline_usage)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", coord_cls)
     monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
     monkeypatch.setattr(mc, "State", state_cls)
-
-    ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
-    ex._ctx = fake_ctx(
-        {
-            "agent.model": "M",
-            "agent.max_steps": 30,
-            "agent.system_prompt_id": "x",
-            "backend.api_mode": "chat_completions",
-        },
-        tools_spec=[],
-        tools_description=[],
-    )
-    ex._lock = threading.Lock()
-    ex._state = None
-    ex._stop_pending = False
-    return ex
+    return _executor(tmp_path)
 
 
 class _UsageState:
@@ -198,18 +170,16 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
     ex = _make_compact_executor(
         monkeypatch,
         tmp_path,
-        baseline_meta={"token_usage": baseline.to_meta()},
+        baseline_usage=baseline.to_meta(),
         coord_cls=_Coord,
         state_cls=_UsageState,
     )
     assert run_coro(ex.acompact_thread("t1", system="cli")) is True
 
-    # Читаем РЕАЛЬНО сохранённую meta и проверяем TOP-LEVEL token_usage — именно
-    # его гидрирует run() (регресс: писали в meta["tui"], run() его не видит).
-    from gc_core.thread_store import load_thread_meta
-
-    saved = load_thread_meta(str(tmp_path), "cli", "t1") or {}
-    persisted = UsageAccount.from_meta(saved.get("token_usage"))
+    # Читаем РЕАЛЬНО сохранённый расход треда — именно его гидрирует run()
+    # (регресс: писали в секцию TUI, run() её не видит).
+    record = run_coro(FileThreadStore(str(tmp_path)).get_thread(KEY))
+    persisted = UsageAccount.from_meta(record.usage.model_dump())
     assert (
         persisted.by_category["main"]["input"] == 600000
     )  # кумулятив сохранён
@@ -235,7 +205,7 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
     ex = _make_compact_executor(
         monkeypatch,
         tmp_path,
-        baseline_meta={"token_usage": {}},
+        baseline_usage={},
         coord_cls=_Coord,
         state_cls=_UsageState,
     )

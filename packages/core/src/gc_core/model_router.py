@@ -3,10 +3,12 @@
 Router читает секции `models`/`slots`/`assign` из снимка настроек (``settings_of``:
 ``AppConfig``, ``LoadedSettings`` или контекст), зафиксированного
 при сборке executor, и активный уровень — через
-инжектируемый `level_provider`: сессионный слой живёт вне Router (`/level` меняет его
-без пересборки executor).
+инжектируемый `choice_provider`: сессионный слой живёт вне Router (выбор
+меняется без пересборки executor). Цель вызова — слово уровня или алиас реестра.
 
-Предохранитель — сессионный набор алиасов, признанных недоступными. Трипает его любой
+Предохранитель — набор алиасов, признанных недоступными, в памяти сессии
+(в мету треда не пишется; снимок нужен только для передачи субагентам и в
+Temporal). Трипает его любой
 потребитель, у которого подтверждённая недоступность пережила все существующие ретраи
 (`processing_responses`, `utils/llm_chat_client`, `SubagentRunner`); Router держит на
 нём единую точку отказа — открытый алиас роняет `resolve()` мгновенно
@@ -17,16 +19,23 @@ Router читает секции `models`/`slots`/`assign` из снимка н�
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
     LEVELS,
     ModelEntry,
+    configured_choice,
+    effective_choice,
 )
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.settings import settings_of
+from gc_core.user_stop import UserStopInterrupt
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
 # префиксный consumer id, не перечислимый статически здесь (канонический реестр имён
@@ -44,6 +53,9 @@ CONSUMERS = (
     "routing_judge",
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
+
+# Обрыв вызова до ответа модели: право пробы при них возвращается.
+_CALL_STOPS = (asyncio.CancelledError, ModelRequestStopped, UserStopInterrupt)
 
 
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
@@ -140,24 +152,94 @@ class AliasCircuitOpenError(RuntimeError):
         )
 
 
-class CircuitBreaker:
-    """Сессионный per-alias предохранитель (спека §8). Ключ — алиас модели, не привязка.
+def failure_text(exc: BaseException) -> str:
+    """Текст сбоя вызова: само сообщение (обрезанное) или имя класса."""
+    return str(exc).strip()[:300] or exc.__class__.__name__
 
-    Владелец состояния — сессия-тред: `snapshot()`/`restore()` персистят набор открытых
-    алиасов в meta треда, чтобы предохранитель пережил пересборку executor внутри сессии.
+
+def breaker_reason(exc: BaseException) -> str:
+    """Причина для предохранителя из сбоя вызова. Отказ уже открытого алиаса
+    несёт исходную причину — её и берём, иначе каждый повтор оборачивал бы
+    причину ещё одним «алиас … в предохранителе»."""
+    if isinstance(exc, AliasCircuitOpenError):
+        return exc.reason
+    return failure_text(exc)
+
+
+class CircuitBreaker:
+    """Сессионный per-alias предохранитель. Ключ — алиас модели, не привязка.
+
+    Два состояния алиаса: открыт (`_tripped`, резолв отказывает мгновенно) и
+    ждёт пробы (`_probe`, резолв пропускает, первое обращение — проба).
+    Взятая проба до ответа — в `_running`: копия переносит её как ждущую.
+    Все методы идут под одним замком: петля детей живёт в другом потоке.
+    `snapshot()`/`restore()` работают только с открытыми алиасами.
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._tripped: dict[str, str] = {}
+        self._probe: dict[str, str] = {}
+        self._running: dict[str, str] = {}
 
     def is_open(self, alias: str) -> bool:
-        return alias in self._tripped
+        with self._lock:
+            return alias in self._tripped
+
+    def open_reason(self, alias: str) -> str | None:
+        """Причина, если алиас открыт, иначе None — одно чтение под замком."""
+        with self._lock:
+            return self._tripped.get(alias)
 
     def trip(self, alias: str, reason: str) -> None:
-        self._tripped[alias] = reason
+        with self._lock:
+            self._probe.pop(alias, None)
+            self._running.pop(alias, None)
+            self._tripped[alias] = reason
+
+    def allow_probe(self) -> None:
+        """Все открытые алиасы получают право на одну пробу."""
+        with self._lock:
+            self._probe.update(self._tripped)
+            self._tripped.clear()
+
+    def clear_open(self) -> None:
+        """Снять отметки открытых алиасов без права на пробу."""
+        with self._lock:
+            self._tripped.clear()
+
+    def take_probe(self, alias: str) -> bool:
+        """Атомарно: True, если этот вызов и есть проба алиаса."""
+        with self._lock:
+            reason = self._probe.pop(alias, None)
+            if reason is None:
+                return False
+            self._running[alias] = reason
+            return True
+
+    def return_probe(self, alias: str) -> None:
+        """Вернуть право, взятое вызовом, который не дождался ответа.
+        Открытый за это время алиас не трогаем: `trip` свежее."""
+        with self._lock:
+            reason = self._running.pop(alias, None)
+            if reason is not None:
+                self._probe[alias] = reason
+
+    def finish_probe(self, alias: str) -> None:
+        """Проба получила ответ: право израсходовано."""
+        with self._lock:
+            self._running.pop(alias, None)
+
+    def known_unavailable(self, alias: str) -> str | None:
+        """Причина, если алиас открыт или ждёт пробы, иначе None."""
+        with self._lock:
+            if alias in self._tripped:
+                return self._tripped[alias]
+            return self._probe.get(alias)
 
     def snapshot(self) -> dict[str, str]:
-        return dict(self._tripped)
+        with self._lock:
+            return dict(self._tripped)
 
     @classmethod
     def restore(cls, snapshot: dict) -> CircuitBreaker:
@@ -165,16 +247,27 @@ class CircuitBreaker:
         breaker._tripped = dict(snapshot or {})
         return breaker
 
+    def copy(self) -> CircuitBreaker:
+        with self._lock:
+            clone = CircuitBreaker()
+            clone._tripped = dict(self._tripped)
+            clone._probe = {**self._running, **self._probe}
+            return clone
+
     def replace_from(self, snapshot: dict) -> None:
-        """Restore-in-place: заменить содержимое предохранителя набором из снапшота
-        БЕЗ подмены объекта. Прогретый executor и витрины держат ссылку на ЭТОТ
-        объект (передан в `ctx.model_router` при сборке executor); подмена ссылки
-        осиротила бы их — трипы рана уходили бы в старый breaker, а persist писал бы
-        новый пустой (спека §8). См. `TuiApp.load_circuit_breaker`."""
-        self._tripped = dict(snapshot or {})
+        """Restore-in-place: состояние целиком из снапшота БЕЗ подмены
+        объекта: прогретый executor и витрины держат ссылку на ЭТОТ объект.
+        Снапшот прав на пробу не несёт — после замены их нет."""
+        with self._lock:
+            self._tripped = dict(snapshot or {})
+            self._probe.clear()
+            self._running.clear()
 
     def reset(self) -> None:
-        self._tripped.clear()
+        with self._lock:
+            self._tripped.clear()
+            self._probe.clear()
+            self._running.clear()
 
 
 def _level_phrase(requested_level: str, resolved_level: str) -> str:
@@ -235,21 +328,21 @@ class ModelRouter:
     def __init__(
         self,
         settings: Any,
-        level_provider: Callable[[], str],
+        choice_provider: Callable[[], str],
         breaker: CircuitBreaker | None = None,
         force_legacy: bool = False,
         unbound_override: ResolvedModel | None = None,
         is_subagent_child: bool = False,
-        live_level_provider: Callable[[], str] | None = None,
+        live_choice_provider: Callable[[], str] | None = None,
     ) -> None:
         """``unbound_override`` — явный канал «во что резолвится этот Router, если
         потребитель НЕ имеет assign-привязки» (дочерний Router привязанного
         субагента, спека §7 п.4). Консультируется ТОЛЬКО когда `_lookup_binding`
         вернул None — явные привязки (и уровнем, и алиасом, §5.2: индирекция
         через слоты/реестр) резолвятся как обычно, override их не перекрывает.
-        `None` (по умолчанию) — прежнее поведение (level_provider → слот).
+        `None` (по умолчанию) — прежнее поведение (choice_provider → слот).
 
-        ``is_subagent_child`` отмечает дочерний Router; ``live_level_provider``
+        ``is_subagent_child`` отмечает дочерний Router; ``live_choice_provider``
         возвращает исходный режим, до решения AUTO.
 
         ``settings`` — снимок настроек: всё, что принимает ``settings_of``
@@ -257,8 +350,8 @@ class ModelRouter:
 
         # Снимок фиксируется типизированным: клон (`with_override`) берёт его же.
         self._settings = settings_of(settings)
-        self._level_provider = level_provider
-        self._live_level_provider = live_level_provider or level_provider
+        self._choice_provider = choice_provider
+        self._live_choice_provider = live_choice_provider or choice_provider
         self.breaker = breaker if breaker is not None else CircuitBreaker()
         self._force_legacy = force_legacy
         self._unbound_override = unbound_override
@@ -276,16 +369,16 @@ class ModelRouter:
     def registry_empty(self) -> bool:
         return not self._models
 
-    def active_level(self) -> str:
-        """Эффективный уровень (через `level_provider`; при `auto` — уровень
-        решения точки автороутинга, спека §5.1)."""
-        return self._level_provider()
+    def active_target(self) -> str:
+        """Эффективная цель — уровень или алиас (через `choice_provider`; при
+        `auto` — уровень решения точки автороутинга, спека §5.1)."""
+        return self._choice_provider()
 
-    def live_level(self) -> str:
-        """Сырой режим (`auto` или уровень) — БЕЗ перевода `auto` в решение
+    def live_choice(self) -> str:
+        """Сырой выбор (`auto`, уровень или алиас) — БЕЗ перевода `auto` в решение
         (спека автороутинга §5.1); читают точка решения (`aroute_before_call`) и
         витрины сырого режима."""
-        return self._live_level_provider()
+        return self._live_choice_provider()
 
     @property
     def auto_allowed(self) -> bool:
@@ -318,13 +411,13 @@ class ModelRouter:
         ребёнка-субагента — её ведёт `SubagentRunner._maybe_pin_fallback`."""
         return self._is_subagent_child
 
-    def with_level_providers(
+    def with_choice_providers(
         self, effective: Callable[[], str], live: Callable[[], str]
     ) -> ModelRouter:
         return ModelRouter(
             self._settings,
-            level_provider=effective,
-            live_level_provider=live,
+            choice_provider=effective,
+            live_choice_provider=live,
             breaker=self.breaker,
             force_legacy=self._force_legacy,
             unbound_override=self._unbound_override,
@@ -333,17 +426,17 @@ class ModelRouter:
 
     def with_override(self, override: ResolvedModel | None) -> ModelRouter:
         """Клон Router'а с другим ``unbound_override`` — тот же снимок конфига,
-        level_provider/live_level_provider и breaker (спека §8: деградация
+        choice_provider/live_choice_provider и breaker (спека §8: деградация
         субагента на активную модель без пересборки снимка/уровня, см.
         ``SubagentRunner``)."""
         return ModelRouter(
             self._settings,
-            level_provider=self._level_provider,
+            choice_provider=self._choice_provider,
             breaker=self.breaker,
             force_legacy=self._force_legacy,
             unbound_override=override,
             is_subagent_child=self._is_subagent_child,
-            live_level_provider=self._live_level_provider,
+            live_choice_provider=self._live_choice_provider,
         )
 
     def resolve(
@@ -351,16 +444,16 @@ class ModelRouter:
         consumer: str,
         *,
         check_breaker: bool = True,
-        level_override: str | None = None,
+        target_override: str | None = None,
     ) -> ResolvedModel:
         """``check_breaker=False`` — витринный резолв (футер, `/status`, спека §12.2):
         открытый алиас не роняет резолв, модель отдаётся честно. Рантайм-потребители
         оставляют дефолт ``True`` — открытый алиас отказывает мгновенно (§8).
 
-        ``level_override`` — зафиксированный уровень ЭТОГО резолва вместо повторного
-        чтения `level_provider()`: без него точка
+        ``target_override`` — зафиксированная цель (уровень или алиас) ЭТОГО резолва вместо повторного
+        чтения `choice_provider()`: без него точка
         решения (`aroute_before_call`) и резолв читали бы живой провайдер независимо —
-        `/level` между ними развёл бы решение (что записано в state/лог) и комплект
+        `/model` между ними развёл бы решение (что записано в state/лог) и комплект
         вызова (что реально резолвится). Действует ТОЛЬКО на ветку «нет привязки, нет
         override» — привязки и `unbound_override` резолвятся как обычно, поэтому
         зафиксированный уровень не может обойти более точную привязку.
@@ -409,49 +502,53 @@ class ModelRouter:
         if self._unbound_override is not None:
             return self._unbound_override
 
-        level = (
-            level_override
-            if level_override is not None
-            else self._level_provider()
+        target = (
+            target_override
+            if target_override is not None
+            else self._choice_provider()
         )
-        return self._resolve_level(
-            level, source_prefix="активный ", check_breaker=check_breaker
+        return self._resolve_target(
+            target, "активный ", check_breaker=check_breaker
         )
 
-    def resolve_main_at_level(
-        self, level: str | None, *, check_breaker: bool = True
+    def resolve_main_at(
+        self, target: str | None, *, check_breaker: bool = True
     ) -> ResolvedModel:
-        """Модель main-трейса для УРОВНЯ ВЫЗОВА — единый ответ для запроса и для
-        всего, что обязано принадлежать той же модели (пороги сжатия истории).
+        """Модель main-трейса для ЦЕЛИ ВЫЗОВА (уровень или алиас) — единый ответ
+        для запроса и для всего, что обязано принадлежать той же модели (пороги
+        сжатия истории).
 
-        Уровень задаёт вызывающий из решения текущего запроса (`state._call_level`):
+        Цель задаёт вызывающий из решения текущего запроса (`state._call_level`):
         новый выбор применяется перед следующим запросом, а подготовленный запрос
-        сохраняет модель и её пороги. Уровня ещё нет — обычный резолв `main`.
-        Дочерний Router сохраняет свои явные привязки."""
-        if not level or self.is_subagent_child or not self.auto_allowed:
+        сохраняет модель и её пороги. Цели ещё нет — обычный резолв `main`.
+        Алиас-цель резолвится и при разрешённом `auto`. Дочерний Router
+        сохраняет свои явные привязки."""
+        if not target or self.is_subagent_child or not self.auto_allowed:
             return self.resolve(
-                "main", check_breaker=check_breaker, level_override=level
+                "main", check_breaker=check_breaker, target_override=target
             )
-        return self.resolve_level(level, check_breaker=check_breaker)
+        legacy = self._legacy_if_forced_or_empty()
+        if legacy is not None:
+            return legacy
+        return self._resolve_target(target, "", check_breaker=check_breaker)
 
     def resolve_level(
         self, level: str, *, check_breaker: bool = True
     ) -> ResolvedModel:
         """Резолв ПРОИЗВОЛЬНОГО уровня, не только активного (спека §12.1) — витринам
-        (палитра `/level`) нужно честно показать, во что резолвится КАЖДАЯ из трёх
-        позиций трека, а не только та, что сейчас активна через `level_provider`.
+        (пикер `/model`) нужно честно показать, во что резолвится КАЖДАЯ из трёх
+        позиций трека, а не только та, что сейчас активна через `choice_provider`.
         Та же ветка легаси/легаси-форс, что у `resolve()`; фоллбэк-цепочка уровня —
         как обычно (§4 «Матрица фоллбэков»).
 
         Не только витринный: этим же путём резолвится main-трейс по уровню,
-        зафиксированному на вызов (`resolve_main_at_level`, спека §6.4) — поэтому
+        зафиксированному на вызов (`resolve_main_at`, спека §6.4) — поэтому
         предохранитель здесь проверяется как в рантайме (`check_breaker` по
         умолчанию), а не отключается «раз это витрина». ``check_breaker=False`` —
         чтение свойств записи (пороги сжатия): открытый алиас его не роняет."""
-        if self._force_legacy:
-            return self._resolve_legacy(source="легаси-форс --model")
-        if self.registry_empty():
-            return self._resolve_legacy(source="легаси")
+        legacy = self._legacy_if_forced_or_empty()
+        if legacy is not None:
+            return legacy
         return self._resolve_level(
             level, source_prefix="", check_breaker=check_breaker
         )
@@ -472,13 +569,36 @@ class ModelRouter:
             return consumer, value
         return None
 
+    def _legacy_if_forced_or_empty(self) -> ResolvedModel | None:
+        if self._force_legacy:
+            return self._resolve_legacy(source="легаси-форс --model")
+        if self.registry_empty():
+            return self._resolve_legacy(source="легаси")
+        return None
+
+    def _resolve_target(
+        self, target: str, source_prefix: str, *, check_breaker: bool = True
+    ) -> ResolvedModel:
+        """Слово уровня идёт в слот, иначе цель — алиас реестра."""
+        if target in LEVELS:
+            return self._resolve_level(
+                target,
+                source_prefix=source_prefix,
+                check_breaker=check_breaker,
+            )
+        return self._resolve_alias(
+            target,
+            source=f"{source_prefix}модель {target}",
+            check_breaker=check_breaker,
+        )
+
     def _resolve_level(
         self, level: str, source_prefix: str, *, check_breaker: bool = True
     ) -> ResolvedModel:
         if level not in LEVELS:
             raise ValueError(
                 f"уровень '{level}' сюда не приходит: переводите через "
-                "auto_routing.levels.effective_level"
+                "auto_routing.levels.effective_target"
             )
         for candidate_level in LEVEL_FALLBACK[level]:
             alias = self._slots.get(candidate_level)
@@ -549,11 +669,32 @@ class ModelRouter:
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).
         # ``check_breaker=False`` — витринный резолв (футер/`/status`): показать
         # модель честно, не роняя резолв (§12.2).
-        if check_breaker and self.breaker.is_open(alias):
-            raise AliasCircuitOpenError(
-                resolved, self.breaker.snapshot().get(alias, "")
-            )
+        if check_breaker:
+            reason = self.breaker.open_reason(alias)
+            if reason is not None:
+                raise AliasCircuitOpenError(resolved, reason)
         return resolved
+
+    @contextmanager
+    def probing(self, resolved: ResolvedModel | None) -> Iterator[bool]:
+        """Право пробы алиаса ``resolved`` на время вызова; ``True`` — вызов
+        и есть проба. Отмена или стоп хода до ответа возвращают право с
+        прежней причиной; иначе оно израсходовано (недоступность взводит
+        `trip` штатно)."""
+        alias = None if resolved is None else resolved.alias
+        if alias is None:
+            yield False
+            return
+        probe = self.breaker.take_probe(alias)
+        try:
+            yield probe
+        except _CALL_STOPS:
+            if probe:
+                self.breaker.return_probe(alias)
+            raise
+        finally:
+            if probe:
+                self.breaker.finish_probe(alias)
 
     def _resolve_legacy(self, source: str) -> ResolvedModel:
         return ResolvedModel(
@@ -565,3 +706,66 @@ class ModelRouter:
             tariff=None,
             source=source,
         )
+
+
+def consumer_has_transport(
+    settings: Any, consumer: str, router: ModelRouter | None = None
+) -> bool:
+    """Есть ли у потребителя адрес модели: легаси ``backend.completions_url``
+    или запись реестра ``models``, в которую он резолвится.
+
+    Конфиг только с реестром (``models``/``slots``) оставляет
+    ``backend.completions_url`` пустым — по одному этому полю потребитель
+    выглядел бы ненастроенным. Открытый предохранитель транспорт не отменяет:
+    алиас настроен, просто временно отказывает.
+    """
+    source = settings_of(settings)
+    if source.backend.completions_url:
+        return True
+    if router is None:
+        router = ModelRouter(
+            source,
+            choice_provider=lambda: effective_choice(
+                configured_choice(source), source
+            ),
+        )
+    try:
+        return bool(router.resolve(consumer, check_breaker=False).url)
+    except (ValueError, LookupError):
+        return False
+
+
+def main_model_identity(
+    settings: Any, router: ModelRouter | None
+) -> tuple[str, str]:
+    """Модель и адрес основного потребителя (``main``) — для лога старта и
+    отчёта расхода (тариф ищется по имени модели, валюта — по адресу).
+
+    С реестром ``models`` это запись, в которую резолвится ``main``: легаси
+    ``agent.model``/``backend.completions_url`` у такого конфига пусты или
+    чужие. Без реестра (и без ``router``) — легаси-пара, как раньше.
+    Витринный резолв: открытый предохранитель не мешает. Режим ``auto`` до
+    выбора пары — модель стартового уровня AUTO.
+    """
+    source = settings_of(settings)
+    resolved = None if router is None else _main_for_display(router)
+    if resolved is not None:
+        return resolved.model, resolved.url
+    return source.agent.model, source.backend.completions_url
+
+
+def _main_for_display(router: ModelRouter) -> ResolvedModel | None:
+    from gc_core.auto_routing.levels import AUTO
+    from gc_core.auto_routing.policy import START_LEVEL
+
+    try:
+        return router.resolve("main", check_breaker=False)
+    except (ValueError, LookupError):
+        if router.live_choice() != AUTO:
+            return None
+    try:
+        return router.resolve(
+            "main", check_breaker=False, target_override=START_LEVEL
+        )
+    except (ValueError, LookupError):
+        return None

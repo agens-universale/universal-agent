@@ -1,23 +1,21 @@
 import asyncio
 import json
 import logging
-import os
 import threading
 from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from gc_core.agent_store import AgentResource, agent_store_of
-from gc_core.attachments.store import with_committed_attachments
+from gc_core.agent_store import Prompt, agent_store_of, aread_or_none
+from gc_core.attachments.store import awith_committed_attachments
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import (
     auto_available,
-    effective_level,
+    effective_target,
     resolve_routing_params,
 )
 from gc_core.auto_routing.policy import turn_params
-from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.agent import (
     merge_special_instructions_with_model_steering,
 )
@@ -28,9 +26,19 @@ from gc_core.config_modules.intent_scope import intent_scope_from_config_dict
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
+from gc_core.constants.tool_display import subagent_role
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from gc_core.execution.constants import (
+    NO_TOOL_RESPONSE,
+    NO_TOOL_RESPONSE_MESSAGE,
+)
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.progress import emit_progress
+from gc_core.execution.turn_clock import (
+    bind_turn_clock,
+    clear_turn_clock,
+    current_turn_clock,
+)
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.intent_log.user_turn import (
     append_user_asks_from_messages,
@@ -57,6 +65,7 @@ from gc_core.model_router import (
     SUBAGENT_CONSUMER_PREFIX,
     AliasCircuitOpenError,
     ModelRouter,
+    breaker_reason,
 )
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
@@ -127,6 +136,14 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
+
+
+async def _adrain_with_attachments(scope: Any, child_ctx: Any) -> list:
+    """Реплики очереди субагента — как у родителя: картинки из кармана
+    процесса переезжают в тред."""
+    return [
+        await awith_committed_attachments(m, child_ctx) for m in scope.drain()
+    ]
 
 
 async def _drain_trace_writes(
@@ -511,7 +528,7 @@ class SubagentRunner:
             # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
             # our own JSON or call LLM here — spec §6.2.
             return result
-        if outcome == "judge_unavailable":
+        if outcome in ("judge_unavailable", NO_TOOL_RESPONSE):
             # Проверка действий судьёй недоступна: субагент остановлен,
             # родитель и соседи продолжают — о недоступности родитель
             # узнает на своём первом спорном действии.
@@ -521,7 +538,9 @@ class SubagentRunner:
             return self._error_response(
                 tool_name=tool_name,
                 code=outcome,
-                message=str(result or ""),
+                message=NO_TOOL_RESPONSE_MESSAGE
+                if outcome == NO_TOOL_RESPONSE
+                else str(result or ""),
                 retryable=False,
                 steps=child_state.steps,
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
@@ -620,7 +639,7 @@ class SubagentRunner:
                     code="subagent_ctx_build_failed",
                     message=(
                         f"субагент {tool_name}: {exc.alias} недоступна: "
-                        f"{exc.reason}. Переключите уровень /level или профиль /profiles."
+                        f"{exc.reason}. Выберите другую модель /model или профиль /profile."
                     ),
                     retryable=True,
                 ),
@@ -752,22 +771,21 @@ class SubagentRunner:
                 # Снять уровень решения auto по концу дочернего прогона (симметрично
                 # AgentExecutor.arun) — child_ctx
                 # обычно выбрасывается вместе с этим вызовом, но если что-то ещё
-                # читает child_ctx.model_router.active_level() после возврата
+                # читает child_ctx.model_router.active_target() после возврата
                 # (лог/диагностика), не должно видеть уровень последнего решения.
                 state_ops.leave(child_state)
             if error_response is not None:
                 return error_response
-
-            if result is None:
-                return await self._acancelled_by_user(
-                    tool_name, child_state, child_ctx
-                )
 
             stopped = await self._astopped_response(
                 tool_name, child_state, child_ctx, result
             )
             if stopped is not None:
                 return stopped
+            if result is None:
+                return await self._acancelled_by_user(
+                    tool_name, child_state, child_ctx
+                )
 
             result_payload: Any = (
                 result or "Subagent finished without explicit result."
@@ -857,8 +875,8 @@ class SubagentRunner:
                 message: Dict[str, Any], prose: str
             ) -> None:
                 payload: Dict[str, Any] = {"role": "user", "content": prose}
-                attachments = with_committed_attachments(
-                    message, child_ctx
+                attachments = (
+                    await awith_committed_attachments(message, child_ctx)
                 ).get("attachments")
                 if attachments:
                     payload["attachments"] = attachments
@@ -910,10 +928,9 @@ class SubagentRunner:
                     session_meta=child_meta,
                     # Приём реплик из очереди — как у родителя: картинки
                     # из кармана процесса переезжают в тред.
-                    get_pending_messages=lambda: [
-                        with_committed_attachments(m, child_ctx)
-                        for m in scope.drain()
-                    ],
+                    get_pending_messages=partial(
+                        _adrain_with_attachments, scope, child_ctx
+                    ),
                 )
             finally:
                 # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
@@ -976,10 +993,7 @@ class SubagentRunner:
 
         # Фейл подтверждён — предохранитель встаёт независимо от того, есть ли
         # куда деградировать (см. докстроку выше).
-        router.breaker.trip(
-            failed_resolved.alias,
-            str(exc).strip()[:300] or exc.__class__.__name__,
-        )
+        router.breaker.trip(failed_resolved.alias, breaker_reason(exc))
 
         if (
             active_already_open
@@ -993,7 +1007,7 @@ class SubagentRunner:
             return None
 
         kind = "рестарт" if child_state.steps == 0 else "деградация"
-        who = f"субагент {tool_name}"
+        who = f"субагент {subagent_role(tool_name, {})}"
         logger = getattr(self._ctx, "logger", None)
         message = f"{who} ({kind}): {failed_resolved.alias} недоступна — выполнено активной {active_resolved.model}"
         if logger is not None:
@@ -1178,12 +1192,12 @@ class SubagentRunner:
           `mode: manual`).
         - непривязанный: override не ставится, ребёнок ведёт СВОЙ роутинг со
           `START_LEVEL` (`aroute_before_call` внутри его собственного цикла);
-          `level_provider` привязывается к дочернему State в `_bind_child_context`
+          `choice_provider` привязывается к дочернему State в `_bind_child_context`
           тем же механизмом, что и провайдер `acreate_run_context`, с
           сырым режимом родителя, замороженным на момент сборки
-          (`parent_router.live_level()`), — живой `/level` родителя посреди
+          (`parent_router.live_choice()`), — живой `/model` родителя посреди
           работы ребёнка не уводит его модель (см.
-          `test_child_router_level_provider_is_frozen_not_live`).
+          `test_child_router_choice_provider_is_frozen_not_live`).
 
         None, если у родителя нет Router (легаси тестовые двойники ctx) — вызывающий
         код и так устойчив к `model_router=None` (turn_boundary/воронки не падают).
@@ -1203,19 +1217,25 @@ class SubagentRunner:
             return None
         consumer = f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
         if not parent_router.has_binding(consumer):
-            frozen_live = parent_router.live_level()
+            # Применённый выбор родителя, не ожидающий: тихая отметка у
+            # родителя и модель ребёнка не расходятся (спека §4.3).
+            parent_state = getattr(self._ctx, "active_state", None)
+            frozen_live = (
+                getattr(parent_state, "applied_choice", None)
+                or parent_router.live_choice()
+            )
 
             available = auto_available(
                 child_config, force_legacy=parent_router.force_legacy
             )
 
-            def _child_level_provider() -> str:
-                return effective_level(frozen_live, None, available)
+            def _child_choice_provider() -> str:
+                return effective_target(frozen_live, None, available)
 
             return ModelRouter(
                 child_config,
-                level_provider=_child_level_provider,
-                live_level_provider=lambda: frozen_live,
+                choice_provider=_child_choice_provider,
+                live_choice_provider=lambda: frozen_live,
                 breaker=parent_router.breaker,
                 force_legacy=parent_router.force_legacy,
                 is_subagent_child=True,
@@ -1234,9 +1254,9 @@ class SubagentRunner:
                 raise RuntimeError(
                     f"субагент {tool_name}: пин {exc.alias} и активная модель "
                     f"{active_exc.resolved.model} (алиас {active_exc.alias}) недоступны "
-                    f"(предохранитель). Переключите уровень /level или профиль /profiles."
+                    f"(предохранитель). Выберите другую модель /model или профиль /profile."
                 ) from active_exc
-            who = f"субагент {tool_name}"
+            who = f"субагент {subagent_role(tool_name, {})}"
             logger = getattr(self._ctx, "logger", None)
             message = f"{who}: {exc.alias} недоступна — выполнено активной {resolved.model}"
             if logger is not None:
@@ -1247,11 +1267,11 @@ class SubagentRunner:
                 active_model=resolved.model,
                 enabled=bool(getattr(self._ctx, "is_tui", False)),
             )
-        frozen_level = parent_router.active_level()
+        frozen_level = parent_router.active_target()
         return ModelRouter(
             child_config,
-            level_provider=lambda: frozen_level,
-            live_level_provider=lambda: frozen_level,
+            choice_provider=lambda: frozen_level,
+            live_choice_provider=lambda: frozen_level,
             breaker=parent_router.breaker,
             force_legacy=parent_router.force_legacy,
             unbound_override=resolved,
@@ -1276,13 +1296,12 @@ class SubagentRunner:
             # ключ кэша совпадает, попадание гарантировано.
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
-        child_system_prompt = self._resolve_subagent_system_prompt()
+        child_system_prompt = await self._aresolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
         prepared = await prepare_state(
             workspace_config=child_config,
             workspace=getattr(parent, "workspace", None),
-            agent_md_path=parent.agent_md_path,
             verbose=parent.verbose,
             logger=parent.logger,
             agent_store=agent_store_of(self._ctx),
@@ -1344,58 +1363,22 @@ class SubagentRunner:
             self._parent_source()
         )
 
-    def _resolve_subagent_system_prompt(self) -> Optional[str]:
+    async def _aresolve_subagent_system_prompt(self) -> Optional[str]:
         """Вернуть системный промпт для субагента с fallback на промпт родителя.
 
         У кастомных (файловых) сабагентов промпт свой: он предупреждает модель,
         что роль написана оператором в локальном файле, прав не выдаёт и может
-        расходиться с фактическим набором инструментов.
+        расходиться с фактическим набором инструментов. Цепочку «свой путь из
+        конфига → пакетный» держит хранилище агента.
         """
-        # Путь из настроек есть только у кастомных; встроенные берут пакетный.
-        if self._is_custom_subagent():
-            paths = self._parent_settings().paths
-            prompt_path_raw = (
-                paths.chat_completions_custom_subagent_system_prompt_path
-            )
-            name = "custom_subagent"
-            default_name = "chat_completions_custom_subagent_system_prompt.md"
-        else:
-            prompt_path_raw = None
-            name = "subagent"
-            default_name = "chat_completions_subagent_system_prompt.md"
-
-        candidates: List[AgentResource] = []
-        if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
-            candidates.append(
-                AgentResource(
-                    "prompt", name, os.path.abspath(prompt_path_raw.strip())
-                )
-            )
-        # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-        candidates.append(
-            AgentResource(
-                "prompt", name, str(bundled_root() / "prompts" / default_name)
-            )
+        name = (
+            Prompt.CUSTOM_SUBAGENT
+            if self._is_custom_subagent()
+            else Prompt.SUBAGENT
         )
-
-        store = agent_store_of(self._ctx)
-        for resource in candidates:
-            try:
-                loaded = store.read_text(resource).strip()
-                if loaded:
-                    return loaded
-            except FileNotFoundError:
-                continue
-            # Первый кандидат — путь ИЗ КОНФИГА: файл человека, кодировка его.
-            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и уходил
-            # мимо этого фолбэка, роняя запуск сабагента вместо отката на пакетный.
-            except (OSError, UnicodeDecodeError):
-                _log.warning(
-                    "Failed to read subagent system prompt from %s",
-                    resource.label,
-                    exc_info=True,
-                )
-
+        loaded = await aread_or_none(agent_store_of(self._ctx), "prompt", name)
+        if loaded is not None and loaded.strip():
+            return loaded.strip()
         return self._orchestrator_state.chat_completions_system_prompt
 
     def _build_initial_messages(
@@ -1570,17 +1553,17 @@ class SubagentRunner:
             )
         child_ctx.routing_params = params
         if router is not None:
-            live = router.live_level
+            live = router.live_choice
 
             def effective_provider() -> str:
                 state = getattr(child_ctx, "active_state", None)
-                return effective_level(
+                return effective_target(
                     live(),
                     getattr(state, "current_level", None),
                     child_ctx.auto_available,
                 )
 
-            child_ctx.model_router = router.with_level_providers(
+            child_ctx.model_router = router.with_choice_providers(
                 effective_provider, live
             )
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
@@ -1631,6 +1614,13 @@ class SubagentRunner:
             bind_turn_identity(child_ctx, parent_turn_id)
         else:
             clear_turn_identity(child_ctx)
+        # Часы хода — тем же путём: ожидания человека у ребёнка вычитаются
+        # из хода родителя; ребёнок часов не открывает и не закрывает.
+        parent_clock = current_turn_clock(self._ctx)
+        if parent_clock is not None:
+            bind_turn_clock(child_ctx, parent_clock)
+        else:
+            clear_turn_clock(child_ctx)
         # HITL: баннер TUI и порт confirm родителя (ACP: session/request_permission).
         # Без порта ребёнок при is_tui=False молча отвечает deny_once.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
@@ -1643,6 +1633,11 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Приостановка на вопросе — канал родителя: ребёнок её не делает
+        # (ход родителя посреди батча не приостановить), а отказывает.
+        child_ctx.ask_human_suspends = getattr(
+            self._ctx, "ask_human_suspends", False
+        )
         # Порт подтверждения — туда же. Без него write/command guard ребёнка
         # при tty читает `input()` процесса. Канал без человека (A2A, сервер)
         # объявлен в рантайме, ребёнок его наследует.

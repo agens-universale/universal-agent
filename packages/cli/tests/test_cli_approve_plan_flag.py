@@ -8,9 +8,14 @@ import pytest
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import arg_parser, cli  # noqa: E402
-from gc_cli.plan_approval import thread_has_proposed_plan  # noqa: E402
+from gc_cli.plan_approval import athread_has_proposed_plan  # noqa: E402
+from gc_core.execution.state import SharedStateData  # noqa: E402
+from gc_core.persistence.session_state import session_with_shared  # noqa: E402
 from gc_core.plan_store import new_plan_block  # noqa: E402
-from gc_core.thread_store import save_thread_meta  # noqa: E402
+from gc_core.threads.facade import Threads  # noqa: E402
+from gc_core.threads.file_store import FileThreadStore  # noqa: E402
+from gc_core.threads.models import ThreadKey  # noqa: E402
+from gc_core.threads.session_writer import SessionWriter  # noqa: E402
 from gc_testkit import run_coro  # noqa: E402
 from gc_testkit.settings import make_settings  # noqa: E402
 
@@ -46,27 +51,37 @@ def test_flag_refuses_options_it_would_ignore(extra):
         _parse("-t", "s1", "--approve-plan", "edit", *extra)
 
 
-def _save_plan(threads, status):
+async def _save_plan(threads_dir, status, system="cli"):
     plan = {**new_plan_block("1. шаг"), "status": status}
-    save_thread_meta(threads, "cli", "s1", {"shared": {"plan": plan}})
+    writer = SessionWriter(
+        FileThreadStore(threads_dir),
+        ThreadKey(system=system, thread="s1"),
+        owner="seed",
+    )
+    record = await writer.aclaim()
+    shared = SharedStateData(plan=plan)
+    await writer.acommit(set_state=session_with_shared(record.state, shared))
+    await writer.arelease()
 
 
-def test_only_a_proposed_plan_of_the_saved_session_counts(tmp_path):
-    threads = str(tmp_path)
-    assert thread_has_proposed_plan(threads, "s1") is False  # сессии нет
-    _save_plan(threads, "proposed")
-    assert thread_has_proposed_plan(threads, "s1") is True
-    _save_plan(threads, "approved")
-    assert thread_has_proposed_plan(threads, "s1") is False
+async def test_only_a_proposed_plan_of_the_saved_session_counts(tmp_path):
+    threads = Threads(FileThreadStore(str(tmp_path)))
+    assert await athread_has_proposed_plan(threads, "s1") is False  # нет
+    await _save_plan(str(tmp_path), "proposed")
+    assert await athread_has_proposed_plan(threads, "s1") is True
+    await _save_plan(str(tmp_path), "approved")
+    assert await athread_has_proposed_plan(threads, "s1") is False
 
 
-def test_without_a_proposed_plan_the_run_ends_with_code_1(tmp_path, capsys):
+async def test_without_a_proposed_plan_the_run_ends_with_code_1(
+    tmp_path, capsys
+):
     settings = make_settings({"paths.threads_data_path": str(tmp_path)})
-    assert cli._approve_plan_exit(settings, None, "s1") is None
-    assert cli._approve_plan_exit(settings, "edit", "s1") == 1
+    assert await cli._aapprove_plan_exit(settings, None, "s1") is None
+    assert await cli._aapprove_plan_exit(settings, "edit", "s1") == 1
     assert "нет предложенного плана" in capsys.readouterr().err
-    _save_plan(str(tmp_path), "proposed")
-    assert cli._approve_plan_exit(settings, "edit", "s1") is None
+    await _save_plan(str(tmp_path), "proposed")
+    assert await cli._aapprove_plan_exit(settings, "edit", "s1") is None
 
 
 class _Executor:
@@ -105,3 +120,16 @@ def test_flag_runs_the_approval_sequence_instead_of_the_query(mode):
             {"extra_text": "кратко", "verbose": False, "account_run": True},
         )
     ]
+
+
+async def test_plan_is_read_from_the_thread_of_the_given_system(tmp_path):
+    """``--approve-plan --system g`` одобряет план треда ``(g, -t)``."""
+    threads = Threads(FileThreadStore(str(tmp_path)))
+    await _save_plan(str(tmp_path), "proposed", system="g")
+    assert await athread_has_proposed_plan(threads, "s1", system="g") is True
+    assert await athread_has_proposed_plan(threads, "s1") is False
+    settings = make_settings({"paths.threads_data_path": str(tmp_path)})
+    assert (
+        await cli._aapprove_plan_exit(settings, "edit", "s1", system="g")
+        is None
+    )

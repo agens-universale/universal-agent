@@ -41,6 +41,10 @@ FRONTENDS = {
     "gc_server",
     "gc_core_temporalio",
     "temporalio",
+    # Хранилища на базах — над ядром: ядро их не знает, встраивающий
+    # передаёт объект (``thread_store=``).
+    "gc_stores",
+    "asyncpg",
 }
 
 

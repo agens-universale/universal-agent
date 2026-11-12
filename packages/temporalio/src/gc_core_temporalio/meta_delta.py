@@ -124,16 +124,6 @@ class TextIndex:
         #: операции).
         self.parents: list[TextIndex] = []
 
-    def add_meta(self, meta: Any, *, nodes: bool = False) -> None:
-        """Строки meta-базы; ``nodes`` — и целые поддеревья (запасной путь
-        полной meta: короткие строки и записи журнала — тоже ссылками)."""
-        if nodes:
-            self._meta_min = META_TEXT_MIN_CHARS
-            self._nodes.update(node_id for node_id, _node in _nodes(meta))
-        for _path, text in _strings(meta):
-            if len(text) >= self._meta_min:
-                self._meta.add(text)
-
     def has_nodes(self) -> bool:
         return bool(self._nodes) or any(p.has_nodes() for p in self.parents)
 

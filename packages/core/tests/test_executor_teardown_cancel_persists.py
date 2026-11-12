@@ -11,7 +11,7 @@ import importlib
 import types
 
 import pytest
-from gc_core.thread_store import load_thread_meta
+from gc_testkit.develop_files import load_thread_meta
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_STRUCTURED_OUTPUT
 from gc_testkit.settings import make_settings
 

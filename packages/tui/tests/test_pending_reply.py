@@ -1,5 +1,7 @@
 """Pending user-reply tracking + reconciliation."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import json
 import threading
@@ -16,6 +18,15 @@ def _read_pending(tmp_path, tid):
     return (meta.get("tui") or {}).get("pending_user_messages", [])
 
 
+def _core_meta(tmp_path, tid, **fields):
+    """Запись меты исполнителем: секция `tui` принадлежит TUI и остаётся
+    (владение ключами меты), как у настоящего ядра."""
+    p = Path(tmp_path) / f"meta_cli_{tid}.json"
+    meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    meta.update({"thread_id": tid, **fields})
+    p.write_text(json.dumps(meta), encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_send_records_pending_in_meta(tmp_path):
     pytest.importorskip("textual")
@@ -23,10 +34,7 @@ async def test_send_records_pending_in_meta(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -66,10 +74,7 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -196,10 +201,7 @@ async def test_pending_cap_drops_oldest(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=30.0)
 
@@ -266,10 +268,7 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             raise RuntimeError("model unavailable")
 
         def stop_run(self):
@@ -302,19 +301,23 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
 @pytest.mark.asyncio
 async def test_error_shown_resets_between_runs(tmp_path):
-    """Две ошибки подряд → две error-line в trace (флаг сбрасывается)."""
+    """Две ошибки подряд → у каждой своя причина хвостом у «✕ Ошибка»
+    свежей строки итога (флаг сбрасывается): ` · <класс>: <текст>`."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
+    from gc_tui.widgets.turn_line import TurnLine
+
+    def fresh_text(scr):
+        lines = [w for w in scr.query(TurnLine) if w.is_fresh]
+        return lines[0].render().plain if len(lines) == 1 else ""
 
     call = {"n": 0}
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             call["n"] += 1
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             raise RuntimeError(f"fail #{call['n']}")
 
         def stop_run(self):
@@ -331,20 +334,16 @@ async def test_error_shown_resets_between_runs(tmp_path):
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
+        scr = pilot.app.screen
         inp.text = "первая"
         await pilot.press("enter")
-        await pilot.pause(0.5)
+        await wait_until(pilot, lambda: "fail #1" in fresh_text(scr), "#1")
+        assert fresh_text(scr).endswith(" · RuntimeError: fail #1")
 
         inp.text = "вторая"
         await pilot.press("enter")
-        await pilot.pause(0.5)
-
-        trace_texts = [
-            str(s.render()) for s in pilot.app.screen.query("#trace Static")
-        ]
-        flat = "\n".join(trace_texts)
-        assert "fail #1" in flat
-        assert "fail #2" in flat
+        await wait_until(pilot, lambda: "fail #2" in fresh_text(scr), "#2")
+        assert fresh_text(scr).endswith(" · RuntimeError: fail #2")
 
 
 @pytest.mark.asyncio
@@ -516,7 +515,7 @@ async def test_mount_failed_skips_delivered_via_attach(tmp_path):
             f"должен быть state=normal, got {replies[0]._state}"
         )
         # meta очищена.
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"pending_user_messages должен быть пуст после cross-check, got {pum}"
@@ -573,7 +572,7 @@ async def test_mount_failed_renders_truly_orphaned(tmp_path):
         assert len(replies) == 1
         assert replies[0]._state == "failed"
         # meta нормализована: pending → failed.
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert len(pum) == 1
         assert pum[0]["status"] == "failed"
@@ -674,7 +673,7 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
             f"delivered-old-msg должно быть отсечено через user_messages_log, got: {texts}"
         )
         # meta: pending очищен.
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"pending должен быть очищен через user_messages_log, got: {pum}"
@@ -777,7 +776,7 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
         assert "delivered-old-msg" not in texts, (
             f"delivered-old-msg должно быть отсечено через user_intent_log, got: {texts}"
         )
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"pending должен быть очищен через user_intent_log, got: {pum}"
@@ -865,7 +864,7 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
         assert "опиши проект" not in texts, (
             f"устаревшее failed не должно висеть, got: {texts}"
         )
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"устаревшее failed должно быть вычищено из meta, got: {pum}"
@@ -943,7 +942,7 @@ async def test_mount_failed_keeps_latest_failed_after_delivered(tmp_path):
         assert "последнее упало" in texts, (
             f"последнее failed должно остаться для retry, got: {texts}"
         )
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert any(r.get("content") == "последнее упало" for r in pum), (
             f"последнее failed должно сохраниться в meta, got: {pum}"

@@ -118,8 +118,11 @@ def test_determine_status_non_int_exit_code_failed():
 
 
 def test_final_statuses_contains_expected():
+    # cancelled — отмена задачи через API /v1 (POST …/cancel).
     assert (
-        frozenset({"completed", "failed", "timeout", "unknown_failed"})
+        frozenset(
+            {"completed", "failed", "timeout", "unknown_failed", "cancelled"}
+        )
         == lc.FINAL_STATUSES
     )
 
@@ -355,8 +358,8 @@ def test_kill_process_tree_no_sigkill_if_died_during_grace(monkeypatch):
         sent_signals.append(sigval)
 
     monkeypatch.setattr("os.killpg", fake_killpg)
-    # PID мёртв сразу после SIGTERM.
-    monkeypatch.setattr(lc, "_is_pid_alive", lambda pid: False)
+    # Вся группа мертва сразу после SIGTERM.
+    monkeypatch.setattr(lc, "_is_group_alive", lambda pid: False)
     lc._kill_process_tree(12345, grace_period=0.05)
 
     assert sent_signals == [sig_mod.SIGTERM]  # без SIGKILL

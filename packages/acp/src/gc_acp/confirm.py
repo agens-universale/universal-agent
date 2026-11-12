@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 from gc_core.execution.human import HumanRequest
@@ -53,6 +54,13 @@ _DEFAULT_TIMEOUT_SEC = 600.0
 # Quick pick VS Code рисует title и молчит про content. Команда должна
 # помещаться в заголовок, длинный payload режется.
 _TITLE_COMMAND_LIMIT = 200
+# Конец длинной команды в заголовке остаётся виден: туда дописывают
+# «; curl … | sh» за безобидным началом.
+_TITLE_TAIL = 60
+_ELLIPSIS = " … "
+# Обрезанную команду человек целиком не видел: «навсегда» её не одобрить
+# (решение запомнилось бы и ушло судье примером разрешённой команды).
+_ALLOW_ALWAYS = "allow_always"
 
 
 def bind_confirm(agent: Any, session_id: str, facade: Any) -> None:
@@ -88,6 +96,12 @@ def permission_message(
     request: HumanRequest,
     tool_call_id: str | None,
 ) -> dict:
+    title, clipped = _permission_title(request)
+    options = [
+        dict(item)
+        for item in _OPTIONS
+        if not (clipped and item["optionId"] == _ALLOW_ALWAYS)
+    ]
     return {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -97,7 +111,7 @@ def permission_message(
             "toolCall": {
                 "toolCallId": tool_call_id
                 or _synthetic_id(request.decision_key),
-                "title": _permission_title(request),
+                "title": title,
                 "kind": _tool_kind(request.decision_key),
                 "status": "pending",
                 "content": [
@@ -107,7 +121,7 @@ def permission_message(
                     }
                 ],
             },
-            "options": [dict(item) for item in _OPTIONS],
+            "options": options,
         },
     }
 
@@ -161,24 +175,30 @@ def _synthetic_id(decision_key: str | None) -> str:
     return f"confirm:{key}"
 
 
-def _permission_title(request: HumanRequest) -> str:
-    """Заголовок диалога. Для команды — ещё и сам payload.
+def _permission_title(request: HumanRequest) -> tuple[str, bool]:
+    """Заголовок диалога и признак «команда в нём обрезана».
 
-    Клиент, который не рисует карточку и не читает ``content``, показывает
-    только эту строку. Без payload в ней не видно, что именно одобряешь.
+    Для команды заголовок несёт и сам payload: клиент, который не рисует
+    карточку и не читает ``content``, показывает только эту строку. Длинная
+    команда — начало и конец с пометкой ``⚠ … [обрезано, N симв.]``: без
+    конца в заголовке не видно приписанного за безобидным началом.
     """
     base = request.title if isinstance(request.title, str) else ""
     if _tool_kind(request.decision_key) != "execute":
-        return base
+        return base, False
     payload = _command_payload(request)
     if payload is None:
-        return base
-    shown = _one_line(payload, _TITLE_COMMAND_LIMIT)
-    if shown == "":
-        return base
-    if base == "":
-        return shown
-    return f"{base}: {shown}"
+        return base, False
+    flat = _one_line(payload)
+    if flat == "":
+        return base, False
+    if len(flat) <= _TITLE_COMMAND_LIMIT:
+        return (f"{base}: {flat}" if base else flat), False
+    head = _TITLE_COMMAND_LIMIT - _TITLE_TAIL - len(_ELLIPSIS)
+    shown = f"{flat[:head]}{_ELLIPSIS}{flat[-_TITLE_TAIL:]}"
+    marker = f"[обрезано, {len(flat)} симв.]"
+    label = f"⚠ {base} {marker}" if base else f"⚠ {marker}"
+    return f"{label}: {shown}", True
 
 
 def _command_payload(request: HumanRequest) -> str | None:
@@ -194,20 +214,27 @@ def _command_payload(request: HumanRequest) -> str | None:
     return None
 
 
-def _one_line(text: str, limit: int) -> str:
-    flat = " ".join(text.split())
-    if len(flat) <= limit:
-        return flat
-    if limit <= 1:
-        return flat[:limit]
-    return flat[: limit - 1] + "…"
+def _one_line(text: str) -> str:
+    """Одна строка без невидимого: пробелы и переводы строк — один пробел,
+    управляющие и форматирующие символы (U+202E разворачивает текст, нулевой
+    ширины прячет) — видимой escape-записью."""
+    return " ".join(_visible(text).split())
+
+
+def _visible(text: str) -> str:
+    return "".join(
+        ch
+        if ch in "\n\r\t" or unicodedata.category(ch) not in ("Cc", "Cf")
+        else f"\\u{ord(ch):04x}"
+        for ch in text
+    )
 
 
 def _body(request: HumanRequest) -> str:
-    lines = [request.question]
+    lines = [_visible(str(request.question))]
     for row in request.fields:
         if isinstance(row, (list, tuple)) and len(row) >= 2:
-            lines.append(f"{row[0]}: {row[1]}")
+            lines.append(f"{_visible(str(row[0]))}: {_visible(str(row[1]))}")
         else:
-            lines.append(str(row))
+            lines.append(_visible(str(row)))
     return "\n".join(lines)

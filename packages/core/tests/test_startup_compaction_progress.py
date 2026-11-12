@@ -87,7 +87,7 @@ async def test_full_executor_long_new_request(monkeypatch, tmp_path, legacy):
     monkeypatch.chdir(tmp_path)
     config = AppConfig.model_validate(
         {
-            "level": "default",
+            "model": "default",
             "backend": {"api_mode": "chat_completions", "vision": False},
             "logging": {"save_logs": False, "console_trace": False},
             "agent": {

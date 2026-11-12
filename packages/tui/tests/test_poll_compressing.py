@@ -1,5 +1,7 @@
 """При meta.runtime.summarizing=True индикатор переходит в compressing."""
 
+from gc_testkit.develop_files import record_from_meta
+
 from gc_testkit.tui_support import tui_settings
 import pytest
 
@@ -16,8 +18,8 @@ class _RunningRunner:
 
 
 class _FakeStore:
-    def get_task_meta(self, task_id, system=None):
-        return {"runtime": {"summarizing": True}}
+    def get_record(self, task_id, system=None):
+        return record_from_meta({"runtime": {"summarizing": True}})
 
     def update_tui_meta(self, task_id, patch):
         pass

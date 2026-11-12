@@ -1,7 +1,15 @@
 """Tests for long-memory backup/restore via gc_state."""
 
+from gc_core.agent_store import ProjectKey
+from gc_core.agent_store.file_store import memory_backup_path
 from gc_core.project_memory import storage
-from gc_core.tools.project.project_memory import backup_path
+
+
+def backup_path(*, cwd: str):
+    """Бэкап памяти проекта ``cwd`` — так его кладёт файловое хранилище."""
+    from gc_core.config_modules.env_vars import project_slug
+
+    return memory_backup_path(ProjectKey(id=project_slug(cwd), root=cwd))
 
 
 def test_write_mirrors_to_backup(tmp_path, monkeypatch):

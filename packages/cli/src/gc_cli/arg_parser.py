@@ -3,11 +3,11 @@ import sys
 from typing import Any, Dict
 
 from gc_core.config_modules.cli_args import (
+    add_removed_level_flag,
     coerce_cli_value,
     parse_override_args,
     setting_flag_overrides,
 )
-from gc_core.config_modules.model_registry import LEVEL_VALUES
 from gc_core.security.permission_mode import (
     AVAILABLE_MODES,
     PLAN_EXECUTION_MODES,
@@ -244,6 +244,24 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--system",
+    default="cli",
+    help=(
+        "Служебный (swarm): system треда -t — песочница ведёт тред задачи "
+        "вебхука (system, task_id) в общем хранилище; по умолчанию cli"
+    ),
+)
+
+parser.add_argument(
+    "--inbox",
+    action="store_true",
+    help=(
+        "Служебный (swarm): ход из входящего потока треда -t без своего "
+        "запроса — доставить сообщения, оставшиеся после выхода песочницы"
+    ),
+)
+
+parser.add_argument(
     "--external-request",
     action="store_true",
     dest="external_request",
@@ -272,8 +290,10 @@ parser.add_argument(
     default=None,
     dest="model",
     help=(
-        "Модель на этот запуск (agent.model). При непустом реестре моделей — "
-        "легаси-форс: уровни и алиасы отключаются на этот запуск"
+        "Модель на этот запуск: auto (модель выбирается автоматически "
+        "по ходу работы), слово уровня или алиас из реестра. "
+        "Сырой идентификатор вне реестра (agent.model) при непустом реестре "
+        "моделей — легаси-форс: уровни и алиасы отключаются на этот запуск"
     ),
 )
 
@@ -299,15 +319,7 @@ parser.add_argument(
     ),
 )
 
-parser.add_argument(
-    "--level",
-    choices=list(LEVEL_VALUES),
-    default=None,
-    help=(
-        "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
-        "auto — уровень меняется автоматически по ходу работы"
-    ),
-)
+add_removed_level_flag(parser)
 
 parser.add_argument(
     "--agentsmd-override",
@@ -370,11 +382,20 @@ _STANDALONE_ACTIONS = (
     "check_update",
     "update",
     "approve_plan",
+    "inbox",
     "query",
 )
 
 #: Несовместимые пары флагов и текст ошибки; порядок — порядок проверки.
+_INBOX_INPUT = "--inbox и {} нельзя вместе: вход хода — входящий поток треда."
+
 _CONFLICTS = (
+    ("inbox", "query", _INBOX_INPUT.format("-q/--query")),
+    ("inbox", "new", _INBOX_INPUT.format("-n/--new")),
+    ("inbox", "approve_plan", _INBOX_INPUT.format("--approve-plan")),
+    ("inbox", "images", _INBOX_INPUT.format("--image")),
+    ("inbox", "skill", _INBOX_INPUT.format("-s/--skill")),
+    ("inbox", "wrap_technical", _INBOX_INPUT.format("-T/--technical")),
     (
         "init_config",
         "query",
@@ -457,6 +478,7 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
             "(или --init-config для конфига, --sync-config для обновления конфига, "
             "--reset-config для сброса конфига, --init для AGENTS.md, "
             "--approve-plan для исполнения предложенного плана, "
+            "--inbox для хода из входящего потока треда, "
             "--check-update/--update для обновления агента)."
         )
     for first, second, message in _CONFLICTS:
@@ -469,6 +491,10 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
     if parsed_args.approve_plan and not parsed_args.thread_id:
         parser.error(
             "--approve-plan можно использовать только вместе с -t/--thread-id."
+        )
+    if parsed_args.inbox and not parsed_args.thread_id:
+        parser.error(
+            "--inbox можно использовать только вместе с -t/--thread-id."
         )
 
 

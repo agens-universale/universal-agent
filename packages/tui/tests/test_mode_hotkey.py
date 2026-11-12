@@ -2,6 +2,7 @@
 
 import pytest
 from gc_testkit.tui_support import tui_settings
+from footer_text import footer_rows
 
 pytestmark = pytest.mark.asyncio
 
@@ -18,7 +19,8 @@ def _app(tmp_path, **config):
 
 
 def _footer(pilot) -> str:
-    return str(pilot.app.query_one("#footer-left").render())
+    """Строка 1 футера — там живёт пилюля режима."""
+    return footer_rows(pilot.app)[0]
 
 
 async def test_shift_tab_cycles_modes_and_the_pill_follows(tmp_path):
@@ -45,13 +47,26 @@ async def test_shift_tab_cycles_modes_and_the_pill_follows(tmp_path):
 
 
 async def test_mode_hint_sits_right_after_the_pill(tmp_path):
-    """Смена режима на пару секунд дописывает пояснение — одной фразой с пилюлей."""
-    async with _app(tmp_path).run_test() as pilot:
+    """Смена режима на 2,5 с дописывает пояснение одной фразой с пилюлей —
+    с переносом из строки 1 в строку 2; хвост и бейдж на это время скрыты,
+    потом возвращаются."""
+    async with _app(tmp_path).run_test(size=(64, 24)) as pilot:
+        pilot.app._update_available = True  # непустой бейдж
+        scr = pilot.app.screen
         await pilot.press("shift+tab")
         await pilot.pause()
-        assert (
-            _footer(pilot)
-            == "⏸ manual mode — подтверждение всех действий, кроме чтения"
+        mode, slot = footer_rows(pilot.app)
+        assert mode.startswith("⏸ manual mode — ")
+        assert slot, "пояснение не перенеслось во вторую строку"
+        assert f"{mode} {slot}" == (
+            "⏸ manual mode — подтверждение всех действий, кроме чтения"
+        )
+        assert scr._footer_hint_timer is not None
+        scr._clear_footer_hint()  # таймер 2,5 с истёк
+        await pilot.pause()
+        assert footer_rows(pilot.app) == (
+            "⏸ manual mode (Shift+Tab)",
+            "ℹ 1 · F4/notices",
         )
 
 
@@ -96,9 +111,7 @@ async def test_config_default_mode_used_when_no_session_choice(tmp_path):
 
 async def test_thread_meta_mode_adopted(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "manual"}}
-        )
+        pilot.app.adopt_thread_permission_mode("manual")
         assert pilot.app.effective_permission_mode() == "manual"
 
 
@@ -108,13 +121,9 @@ async def test_unknown_mode_in_thread_meta_is_ignored(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         sent = []
         pilot.app.set_permission_mode = sent.append
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "bypass"}}
-        )
+        pilot.app.adopt_thread_permission_mode("bypass")
         assert sent == []
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": " Manual "}}
-        )
+        pilot.app.adopt_thread_permission_mode(" Manual ")
         assert sent == ["manual"]
 
 
@@ -122,9 +131,7 @@ async def test_startup_flag_wins_over_thread_meta(tmp_path):
     app = _app(tmp_path)
     app.lock_permission_mode("manual")  # эквивалент --permission-mode
     async with app.run_test() as pilot:
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "edit"}}
-        )
+        pilot.app.adopt_thread_permission_mode("edit")
         assert pilot.app.effective_permission_mode() == "manual"
 
 
@@ -179,16 +186,14 @@ async def test_startup_flag_and_thread_meta_reach_engine(tmp_path):
     app = _app(tmp_path)
     app._executor_factory = _FakeExecutor
     async with app.run_test() as pilot:
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "manual"}}
-        )
+        pilot.app.adopt_thread_permission_mode("manual")
         assert _engine_mode(pilot.app) == "manual"
 
 
 def _save_session(tmp_path, mode=None):
     from gc_core.execution.state import SharedStateData
     from gc_core.persistence.schema import serialize_shared_block
-    from gc_core.thread_store import save_thread_meta
+    from gc_testkit.develop_files import save_thread_meta
 
     shared = SharedStateData(permission_mode=mode)
     save_thread_meta(
@@ -205,7 +210,7 @@ async def test_session_without_a_mode_takes_the_config_default(tmp_path):
     async with app.run_test() as pilot:
         pilot.app.set_permission_mode("auto")
         assert _engine_mode(pilot.app) == "auto"
-        pilot.app.adopt_thread_permission_mode({"shared": {}}, resumed=True)
+        pilot.app.adopt_thread_permission_mode(None, resumed=True)
         assert pilot.app.effective_permission_mode() == "manual"
         assert pilot.app.permission_mode_source() == "config"
         assert _engine_mode(pilot.app) is None
@@ -214,9 +219,7 @@ async def test_session_without_a_mode_takes_the_config_default(tmp_path):
 async def test_unknown_saved_mode_is_treated_as_none(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         pilot.app.set_permission_mode("auto")
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "bypass"}}, resumed=True
-        )
+        pilot.app.adopt_thread_permission_mode("bypass", resumed=True)
         assert pilot.app.effective_permission_mode() == "edit"
         assert pilot.app.permission_mode_source() == "default"
 

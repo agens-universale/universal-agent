@@ -235,7 +235,8 @@ async def test_main_screen_footer_height_stays_fixed(tmp_path):
     """Исключение записано явно: футер главного экрана верстается кодом.
 
     Он стоит над полем ввода, и рост полосы двигал бы ввод под рукой; усечение
-    там делают `_footer_left_text` и адаптивный usage, а не перенос строки.
+    там делают строки левой части (многоточие) и адаптивный usage, а не
+    перенос строки.
     """
     from gc_tui.app import TuiApp
 
@@ -246,12 +247,12 @@ async def test_main_screen_footer_height_stays_fixed(tmp_path):
     )
     async with app.run_test(size=(30, 20)) as pilot:
         screen = pilot.app.screen
-        label = screen.query_one("#footer-left", Static)
+        label = screen.query_one("#footer-slot", Static)
         # Текст задаём сами: естественное содержимое футера у develop адаптивное
         # (значок уведомлений уходит на свою строку), и его длина — не предмет
         # этого теста. Предмет — что высота полосы приколочена версткой и не
         # едет за содержимым.
-        label.update("команда · " * 12)
+        label.update("команда\n" * 4)
         await pilot.pause()
         needed = label.get_content_height(
             label.container_size, label.container_size, label.size.width
@@ -509,6 +510,7 @@ def _bottom_of_card(screen):
         "MCP-серверы",
         "Голосовой ввод",
         "Режимы работы",
+        "Внешний вид",
         "Обновление",
     ],
 )

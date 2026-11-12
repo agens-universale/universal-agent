@@ -12,6 +12,7 @@ from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
+from gc_testkit import as_coro
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -131,7 +132,7 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
             _make_state(),
             _make_ctx(),
             turn_end_compaction_hook=_hook,
-            get_pending_messages=_pending_once(compacted),
+            get_pending_messages=as_coro(_pending_once(compacted)),
         )
     )
 
@@ -167,7 +168,7 @@ def test_no_pending_finishes_normally(monkeypatch):
             _make_state(),
             _make_ctx(),
             turn_end_compaction_hook=_hook,
-            get_pending_messages=list,
+            get_pending_messages=as_coro(list),
         )
     )
 
@@ -204,7 +205,7 @@ def test_stop_after_compaction_does_not_continue(monkeypatch):
             _make_state(),
             _make_ctx(),
             turn_end_compaction_hook=_hook,
-            get_pending_messages=_pending_once(compacted),
+            get_pending_messages=as_coro(_pending_once(compacted)),
             check_stop=lambda: stopped["flag"],
         )
     )
@@ -242,7 +243,7 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
             _make_state(),
             _make_ctx(**{"agent.strict_turn_finish_validation": True}),
             turn_end_compaction_hook=_hook,
-            get_pending_messages=_pending_once(compacted),
+            get_pending_messages=as_coro(_pending_once(compacted)),
         )
     )
 
@@ -270,8 +271,10 @@ def test_pending_survives_failed_turn_begin(monkeypatch, caplog):
         return out
 
     with caplog.at_level(logging.WARNING):
-        picked = pr._pickup_pending_as_new_turn(
-            _drain, _make_state(), _make_ctx()
+        picked = run_coro(
+            pr._apickup_pending_as_new_turn(
+                as_coro(_drain), _make_state(), _make_ctx()
+            )
         )
 
     assert picked == [
@@ -289,7 +292,11 @@ def test_pending_empty_queue_does_not_begin_turn(monkeypatch):
     )
 
     assert (
-        pr._pickup_pending_as_new_turn(list, _make_state(), _make_ctx())
+        run_coro(
+            pr._apickup_pending_as_new_turn(
+                as_coro(list), _make_state(), _make_ctx()
+            )
+        )
         is None
     )
     assert calls == []

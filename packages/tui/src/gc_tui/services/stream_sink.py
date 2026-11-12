@@ -3,7 +3,8 @@
 Fed by RunContext.on_stream_delta from the agent worker thread; drained by the
 TUI poll tick. `format_stream_block` renders the answer text only (inline <think>
 stripped); reasoning is surfaced via the ThinkingIndicator. The sink also tracks
-a self-counted progress counter and reasoning start/end timing for that indicator.
+a self-counted progress counter, reasoning start/end timing for that indicator
+and per-attempt thought snapshots (text and duration) for the ribbon.
 Presentation layer — no business logic, not a substitute for the thread store.
 """
 
@@ -12,28 +13,58 @@ from __future__ import annotations
 import re
 import threading
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from gc_core.message_policy.chat_completions import is_bridge_echo
 
 _THINK_RE = re.compile(r"<think>(.*?)(?:</think>|$)", re.DOTALL)
 
 
+@dataclass(frozen=True)
+class ThoughtSnapshot:
+    """Мысль одной попытки стрима: метка, весь текст, время фазы мысли,
+    идёт ли она ещё и когда началась попытка (часы записей треда — по
+    ним мысль встаёт перед записями своего шага)."""
+
+    attempt: str
+    text: str
+    seconds: float
+    live: bool
+    started_at: datetime
+
+
 class StreamSink:
-    def __init__(self, *, clock=time.monotonic) -> None:
+    def __init__(
+        self, *, clock=time.monotonic, wall=lambda: datetime.now(UTC)
+    ) -> None:
         self._lock = threading.Lock()
         self._clock = clock
+        self._wall = wall
+        self._attempt_started_at = None  # datetime | None
+        # Мысли законченных попыток, ещё не забранные лентой: сброс между
+        # тиками не должен их терять.
+        self._finished: list[ThoughtSnapshot] = []
         self._think = ""
         self._answer = ""
         self._chars = 0
         self._reasoning_started_at = None  # float | None
         self._reasoning_ended_at = None  # float | None
+        self._attempt = None  # str | None
+        self._resets = 0
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
             if kind == "reset":
+                self._stash_thought()
                 self._think = ""
                 self._answer = ""
                 self._chars = 0
                 self._reasoning_started_at = None
                 self._reasoning_ended_at = None
+                self._resets += 1
+                self._attempt = f"a{self._resets}"
+                self._attempt_started_at = self._wall()
                 return
             if kind == "think":
                 self._think += text
@@ -67,6 +98,12 @@ class StreamSink:
         with self._lock:
             return self._think, self._answer
 
+    def attempt(self) -> str | None:
+        """Метка попытки стрима: новая на каждом `reset` ядра (новый
+        запрос к модели); None — `reset` ещё не было."""
+        with self._lock:
+            return self._attempt
+
     def has_content(self) -> bool:
         with self._lock:
             return bool(self._think or self._answer)
@@ -89,13 +126,60 @@ class StreamSink:
                 self._reasoning_ended_at - self._reasoning_started_at,
             )
 
-    def reset(self) -> None:
+    def clear_answer(self) -> None:
+        """Снять только канал ответа: он стал строкой ленты. Мысль, метка
+        попытки и фаза мысли остаются — их сбрасывает `reset` ядра."""
         with self._lock:
+            self._answer = ""
+
+    def reset(self) -> None:
+        """Сброс экраном (конец хода, смена треда): мысль попытки уходит в
+        законченные — лента её ещё заберёт; выбросить — `discard_thoughts`."""
+        with self._lock:
+            self._stash_thought()
             self._think = ""
             self._answer = ""
             self._chars = 0
             self._reasoning_started_at = None
             self._reasoning_ended_at = None
+            self._attempt = None
+            self._attempt_started_at = None
+
+    def take_thoughts(self) -> list[ThoughtSnapshot]:
+        """Мысли для ленты: законченные с прошлого раза (забираются) и мысль
+        идущей попытки (остаётся в стриме)."""
+        with self._lock:
+            taken, self._finished = self._finished, []
+            current = self._thought_snapshot(live=True)
+            return taken if current is None else [*taken, current]
+
+    def discard_thoughts(self) -> None:
+        """Лента начата заново (смена треда): незабранные мысли не нужны."""
+        with self._lock:
+            self._finished = []
+
+    def _stash_thought(self) -> None:
+        snapshot = self._thought_snapshot(live=False)
+        if snapshot is not None:
+            self._finished.append(snapshot)
+
+    def _thought_snapshot(self, *, live: bool) -> ThoughtSnapshot | None:
+        """Снимок мысли текущей попытки; без метки или мысли — None.
+        ``live=False`` — попытка кончилась: мысль законченная."""
+        if self._attempt is None or not self._think:
+            return None
+        started = self._reasoning_started_at
+        ended = self._reasoning_ended_at
+        seconds = 0.0
+        if started is not None:
+            seconds = (self._clock() if ended is None else ended) - started
+        return ThoughtSnapshot(
+            attempt=self._attempt,
+            text=self._think,
+            seconds=seconds,
+            live=live and ended is None,
+            started_at=self._attempt_started_at or self._wall(),
+        )
 
 
 def format_stream_block(*, answer: str) -> str:
@@ -103,10 +187,11 @@ def format_stream_block(*, answer: str) -> str:
     surfaced separately — `format_reasoning_line` (the StreamBlock's thinking-phase
     line) and the ThinkingIndicator counter — not here. Inline <think>...</think>
     spans (incl. an unclosed one mid-stream) are stripped."""
-    return _THINK_RE.sub("", answer).strip()
+    text = _THINK_RE.sub("", answer).strip()
+    return "" if is_bridge_echo(text) else text
 
 
-def _reasoning_tail(think: str, maxlen: int) -> str:
+def reasoning_tail(think: str, maxlen: int) -> str:
     """Reasoning as a single line: collapse whitespace; if longer than `maxlen`,
     keep the last `maxlen` chars trimmed to a word boundary (no mid-word cut),
     '…'-prefixed."""
@@ -125,19 +210,24 @@ def _reasoning_tail(think: str, maxlen: int) -> str:
 def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
     """Compact one-line reasoning glimpse for the StreamBlock during the
     thinking phase: `⠇ <tail>` (empty string if no reasoning)."""
-    tail = _reasoning_tail(think, tail_len)
+    tail = reasoning_tail(think, tail_len)
     return f"⠇ {tail}" if tail else ""
 
 
 def select_stream_render(
-    mode: str, clean_answer: str, reasoning_line: str
+    mode: str,
+    clean_answer: str,
+    reasoning_line: str,
+    *,
+    show_reasoning: bool = False,
 ) -> tuple[str, bool]:
     """Что показать в StreamBlock по режиму tui_stream_display.
-    Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}."""
+    Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}.
+    При show_reasoning мысли идут в ленту, глазок скрыт."""
     if mode == "minimal":
         return ("none", False)
     if clean_answer.strip():
         return ("answer", False)
-    if mode == "answer_reasoning" and reasoning_line:
+    if mode == "answer_reasoning" and reasoning_line and not show_reasoning:
         return ("reasoning", True)
     return ("none", False)

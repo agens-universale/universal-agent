@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 
 
 def _seed(threads_dir, tid, prompt):

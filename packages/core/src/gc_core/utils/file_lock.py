@@ -18,12 +18,12 @@ _POLL_INTERVAL = 0.05
 
 
 @contextlib.contextmanager
-def file_lock(path, timeout: float = 5.0):
+def file_lock(path, timeout: float = 5.0, *, shared: bool = False):
     lock_path = Path(str(path) + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+b") as fh:
         deadline = time.monotonic() + timeout
-        while not _try_lock(fh):
+        while not _try_lock(fh, shared=shared):
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Не удалось захватить лок за {timeout}с: {lock_path}"
@@ -35,7 +35,7 @@ def file_lock(path, timeout: float = 5.0):
             _unlock(fh)
 
 
-def _try_lock(fh) -> bool:
+def _try_lock(fh, *, shared: bool = False) -> bool:
     fh.seek(0)
     if sys.platform == "win32":
         try:
@@ -44,7 +44,8 @@ def _try_lock(fh) -> bool:
             return False
         return True
     try:
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+        fcntl.flock(fh, mode | fcntl.LOCK_NB)
     except OSError:
         return False
     return True

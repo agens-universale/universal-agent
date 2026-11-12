@@ -1,43 +1,27 @@
 """Файлы треда в хранилище тредов: картинки и медиа инструментов.
 
-Необязательная возможность хранилища (как ``replace_messages``): два
-синхронных метода
-
-    write_thread_file(system_id, thread_id, name, data: bytes) -> None
-    read_thread_file(system_id, thread_id, name) -> bytes | None
-
-Удаляет файлы треда само хранилище — в ``reset`` и ``delete_thread``, вместе с
-историей. Хранилище, которое этого не умеет, работает как раньше: картинки и
-медиа ложатся файлами на диск процесса. Файловое хранилище (локальный режим)
-возможность не объявляет — у него картинки и так рядом с тредом.
-
-Файл треда агент видит ссылкой ``thread-file://<система>/<тред>/<имя>``:
-по ней ``fs_view_image`` и запрос к модели читают байты через хранилище.
+Хранилище тредов без файлов (база, S3, память SDK) держит их вложениями
+треда v2 (``put_blob``/``get_blob``) и удаляет вместе с тредом. Файл треда
+агент видит ссылкой ``thread-file://<система>/<тред>/<имя>``: по ней
+``fs_view_image`` и запрос к модели читают байты через хранилище
+(``blob_ref_of``). Файловое хранилище держит картинки рядом с тредами —
+ссылка у него путь на диске.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, NamedTuple
+from typing import Any
 from urllib.parse import quote, unquote
 
+from gc_core.threads.models import BlobRef, ThreadKey
+
 THREAD_FILE_SCHEME = "thread-file://"
+#: Тип вложения, когда по ссылке его не узнать: хранилищу для чтения
+#: хватает треда и имени.
+_OCTET = "application/octet-stream"
 #: Имя файла треда: подкаталоги и имя из безопасных символов, без ``..``.
 _NAME = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*")
-
-
-class ThreadFiles(NamedTuple):
-    write: Callable[[str, str, str, bytes], None]
-    read: Callable[[str, str, str], bytes | None]
-
-
-def thread_files_capability(store: Any) -> ThreadFiles | None:
-    """Методы файлов треда у хранилища или ``None`` (возможности нет)."""
-    write = getattr(store, "write_thread_file", None)
-    read = getattr(store, "read_thread_file", None)
-    if callable(write) and callable(read):
-        return ThreadFiles(write, read)
-    return None
 
 
 def check_name(name: str) -> str:
@@ -94,13 +78,27 @@ def is_thread_file_uri(value: Any) -> bool:
     return parse_thread_file_uri(value) is not None
 
 
+def blob_ref_of(value: Any) -> BlobRef | None:
+    """Вложение треда по ссылке ``thread-file://`` (для ``get_blob``) или
+    ``None``."""
+    parsed = parse_thread_file_uri(value)
+    if parsed is None:
+        return None
+    system_id, thread_id, name = parsed
+    return BlobRef(
+        key=ThreadKey(system=system_id, thread=thread_id),
+        name=name,
+        mime=_OCTET,
+        location=value,
+    )
+
+
 __all__ = [
     "THREAD_FILE_SCHEME",
-    "ThreadFiles",
+    "blob_ref_of",
     "check_name",
     "is_thread_file_uri",
     "parse_thread_file_uri",
     "safe_name",
     "thread_file_uri",
-    "thread_files_capability",
 ]

@@ -4,12 +4,6 @@
 import pytest
 
 from gc_core.agent_edits.feedback import build_undo_feedback_message
-from gc_core.message_policy.project_memory_notice.policy import (
-    wrap_project_memory_hint_user_message,
-)
-from gc_core.message_policy.tool_usage_notice.policy import (
-    wrap_tool_usage_notice_user_message,
-)
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
     TECHNICAL_TYPE_DIALOG_SUMMARY,
@@ -58,8 +52,6 @@ def test_a_quoted_technical_tag_in_the_middle_is_the_users_words():
         build_invalid_tool_call_feedback_message(
             {"name": "fs_write_file", "arguments": "{"}
         )["content"],
-        wrap_project_memory_hint_user_message("hint")["content"],
-        wrap_tool_usage_notice_user_message("notice")["content"],
         build_undo_feedback_message(["a.py"])["content"],
         # формы из старых тредов
         "<current_context>client has non-empty thread notes; call "

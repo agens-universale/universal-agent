@@ -66,6 +66,11 @@ class AutoRoutingTwoLevelConfig(BaseModel):
         return value
 
 
+#: Имя для ключей хранилищ (проект, роль): только [A-Za-z0-9._-], не с
+#: точки — разделители и «..» вывели бы запись за каталог или ключ.
+NAME_PATTERN = r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"
+
+
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     model: str = "MiniMax-M2.7"
@@ -79,6 +84,31 @@ class AgentConfig(BaseModel):
     # читается вовсе и доступны только встроенные классы.
     subagents_dir: str | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    # Устойчивое имя проекта для хранилищ агента в базе: без него — slug пути,
+    # а у того же репозитория в контейнере или на другом хосте путь другой.
+    # Только [A-Za-z0-9._-], не с точки: id попадает в путь бэкапа памяти и в
+    # ключи базы — разделители и «..» вывели бы запись за каталог состояния.
+    project_id: str | None = Field(
+        default=None,
+        pattern=NAME_PATTERN,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    # Роль запуска в хранилище агента в базе: вариант L0 и специнструкций
+    # внутри агента (L0@<роль>, special_instructions@<роль>); ставит сервер
+    # по поверхности. Файловое хранилище роль не использует — у него роль
+    # задаёт paths.agent_md_path. Имя роли — как project_id.
+    role: str | None = Field(
+        default=None,
+        pattern=NAME_PATTERN,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    # Своя роль специнструкций (фасад Chat Completions — <роль>.completions);
+    # не задана — agent.role.
+    special_instructions_role: str | None = Field(
+        default=None,
+        pattern=NAME_PATTERN,
+        json_schema_extra=gc_meta(expert=True),
     )
     # Предел числа подхватываемых кастомных сабагентов. ge=1: ноль означал бы
     # «папка задана, но агентов нет» — тихая и необъяснимая для оператора ситуация.
@@ -129,6 +159,12 @@ class AgentConfig(BaseModel):
     # См. docs_md/actual/2026-08-01-limit-trace-summary-spec.md
     limit_trace_summary: bool = True
     no_tool_call_max_count: int = 5
+    text_answer_mode: Literal["deny", "judge", "allow"] | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    stop_on_no_tool_response: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True)
+    )
     max_unknown_tool_repeats: int = Field(
         default=5, json_schema_extra=gc_meta(expert=True)
     )
@@ -191,11 +227,11 @@ class AgentConfig(BaseModel):
     model_steering: str = Field(
         default="", json_schema_extra=gc_meta(expert=True)
     )
-    # Автовыбор уровня модели (спека docs/specs/auto-routing.md):
+    # Автороутинг моделей (спека docs/specs/auto-routing.md):
     # рубильник фичи для деплоя/пресетов. False — автовыбор выключен целиком:
-    # `level: auto` работает как default (нотис при старте), позиция auto в /level
-    # не показывается. Сам по себе режим не включает —
-    # режим выбирают через `level: auto`, `--level auto` или меню `/level`.
+    # `model: auto` работает как слот default (нотис при старте), строка auto
+    # в /model не выбирается. Сам по себе режим не включает —
+    # режим выбирают через `model: auto`, `--model auto` или пикер `/model`.
     auto_routing: bool = True
     # Сильная модель пары: default — light+default, max — default+max.
     # auto — пару выбирает судья в начале хода, когда обе пары различаются;

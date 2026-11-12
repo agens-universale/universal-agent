@@ -1,15 +1,15 @@
 """Шаг сжатия дописывается в трейс, а не перерисовывает его (спека 3.2, 3.3).
 
-Тред пишется настоящими функциями gc_core.thread_store; сжатие — шагами ядра
-по одному (1 — data в архив, 2 — meta в архив, 3 — новый data со сводкой,
-4 — новая meta с эпохой, 5 — дописка сохранённых сообщений) с прямым тиком
-опроса между ними. Эталон «с нуля» — повторный attach в том же приложении.
+Тред пишет отдельный экземпляр v2-хранилища, как агент рядом с TUI; сжатие —
+шагами ядра (одна запись: история в архив, вместо неё сводка; затем дописка
+сохранённых сообщений) с прямым тиком опроса между ними. Промежуточных
+состояний сжатия хранилище читателю не показывает. Эталон «с нуля» —
+повторный attach в том же приложении.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,15 +25,11 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_subagent_trace_record,
-    archive_and_replace_thread_files,
-    delete_thread,
-    load_thread_meta,
-    reset_thread_files,
-    save_thread_meta,
-)
+from gc_core.thread_store import append_subagent_record
+from gc_core.threads.facade import Threads, run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+from gc_testkit.thread_writes import acompact
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.screens.main import TraceScreen
@@ -44,6 +40,7 @@ from gc_tui.widgets.user_reply import UserReplyContainer
 
 _SYS = "cli"
 _TID = "cmp1"
+_KEY = ThreadKey(system=_SYS, thread=_TID)
 _MARK = "контекст сжат"
 
 
@@ -122,58 +119,35 @@ class _Thread:
 
     def __init__(self, tmp_path: Path) -> None:
         self.dir = str(tmp_path)
-        self.seq = 0
-        self.meta: dict = {}
-        save_thread_meta(self.dir, _SYS, _TID, {})
-
-    def _paths(self) -> tuple[str, str]:
-        return (
-            os.path.join(self.dir, f"data_{_SYS}_{_TID}.jsonl"),
-            os.path.join(self.dir, f"meta_{_SYS}_{_TID}.json"),
-        )
+        self.store = FileThreadStore(tmp_path)
+        self.threads = Threads(self.store)
 
     def append(self, *msgs: dict) -> None:
-        append_new_thread_messages(
-            self.dir, _SYS, _TID, list(msgs), set(), start_seq=self.seq
-        )
-        self.seq += len(msgs)
+        run_sync(self.threads.append_messages(_KEY, list(msgs)))
 
     def steps(self, suffix: str, *preserved: dict) -> list:
-        """Шаги ядра 1–5 как вызовы (5 — дописка сохранённых сообщений)."""
+        """Шаги ядра как вызовы: сжатие одной записью, затем дописка
+        сохранённых сообщений."""
+        summary = _summary(f"sum_{suffix}", f"сводка {suffix}")
 
-        def step1() -> None:
-            self.meta = load_thread_meta(self.dir, _SYS, _TID)
-            data, _ = self._paths()
-            os.replace(
-                data,
-                data.replace(".jsonl", f"__pre_summary__{suffix}.jsonl"),
-            )
+        def compact() -> None:
+            run_sync(acompact(self.store, _KEY, [summary]))
 
-        def step2() -> None:
-            _, meta = self._paths()
-            os.replace(
-                meta, meta.replace(".json", f"__pre_summary__{suffix}.json")
-            )
-
-        def step3() -> None:
-            archive_and_replace_thread_files(
-                self.dir,
-                _SYS,
-                _TID,
-                [_summary(f"sum_{suffix}", f"сводка {suffix}")],
-                archive_suffix=suffix,
-            )
-            self.seq = 1
-
-        def step4() -> None:
-            meta = {**self.meta, "last_summary_archive_suffix": suffix}
-            save_thread_meta(self.dir, _SYS, _TID, meta)
-
-        def step5() -> None:
+        def keep() -> None:
             if preserved:
                 self.append(*preserved)
 
-        return [step1, step2, step3, step4, step5]
+        return [compact, keep]
+
+    def reset(self) -> None:
+        """История заменена без архива."""
+        run_sync(acompact(self.store, _KEY, [], archive=False))
+
+    def delete(self) -> None:
+        run_sync(self.threads.delete(_KEY))
+
+    def subagent_record(self, **record) -> None:
+        run_sync(append_subagent_record(self.store, _KEY, **record))
 
 
 def _compact_ticking(thread: _Thread, scr, suffix: str, *preserved) -> None:
@@ -493,42 +467,19 @@ async def test_apply_failure_falls_back_to_rebuild(tmp_path, monkeypatch):
     assert live_text == fresh_text
 
 
-@pytest.mark.parametrize("drop", [reset_thread_files, delete_thread])
+@pytest.mark.parametrize("drop", ["reset", "delete"])
 @pytest.mark.asyncio
 async def test_thread_reset_or_deleted_rebuilds(tmp_path, monkeypatch, drop):
     thread = _base_thread(tmp_path)
     _compact_silently(thread, "S1")
     async with _session(tmp_path) as (app, pilot, scr):
         rebuilds = _count(monkeypatch, scr, "_rebuild_from_store")
-        drop(thread.dir, _SYS, _TID)
+        getattr(thread, drop)()
         for _ in range(3):
             scr._poll_active()
         await pilot.pause(0.05)
 
     assert len(rebuilds) == 1
-
-
-@pytest.mark.asyncio
-async def test_bounded_wait_rebuilds_once_then_plain_ticks(
-    tmp_path, monkeypatch
-):
-    thread = _base_thread(tmp_path)
-    async with _session(tmp_path) as (app, pilot, scr):
-        rebuilds = _count(monkeypatch, scr, "_rebuild_from_store")
-        for step in thread.steps("S1")[:3]:
-            step()
-            scr._poll_active()
-        for _ in range(7):
-            scr._poll_active()
-        assert rebuilds == []
-        scr._poll_active()
-        assert len(rebuilds) == 1
-        for _ in range(10):
-            scr._poll_active()
-        await pilot.pause(0.05)
-
-        assert len(rebuilds) == 1
-        assert scr._cursor.wait_ticks == 0
 
 
 @pytest.mark.asyncio
@@ -671,7 +622,9 @@ class _BlockingExecutor:
         pass
 
 
-async def _send(pilot, tmp_path: Path, text: str) -> UserReplyContainer:
+async def _send(
+    pilot, tmp_path: Path, text: str, state: str = "pending"
+) -> UserReplyContainer:
     inp = pilot.app.query_one("#cmdinput")
     inp.text = text
     await pilot.press("enter")
@@ -683,7 +636,7 @@ async def _send(pilot, tmp_path: Path, text: str) -> UserReplyContainer:
     widgets = [
         w for w in pilot.app.query(UserReplyContainer) if w._text == text
     ]
-    assert len(widgets) == 1 and widgets[0].state == "pending"
+    assert len(widgets) == 1 and widgets[0].state == state
     return widgets[0]
 
 
@@ -715,7 +668,7 @@ async def test_pending_delivered_during_compaction_becomes_normal(
 
 @pytest.mark.parametrize("when", ["mid_turn", "turn_end"])
 @pytest.mark.asyncio
-async def test_queued_pending_stays_pending_after_compaction(tmp_path, when):
+async def test_queued_reply_stays_queued_after_compaction(tmp_path, when):
     thread = _base_thread(tmp_path)
     fake = _BlockingExecutor()
     async with _session(tmp_path, executor=fake) as (app, pilot, scr):
@@ -725,7 +678,7 @@ async def test_queued_pending_stays_pending_after_compaction(tmp_path, when):
         await _wait_until(
             pilot, lambda: first.state == "normal", "первое доставлено"
         )
-        widget = await _send(pilot, tmp_path, "в очереди")
+        widget = await _send(pilot, tmp_path, "в очереди", "queued")
         if when == "mid_turn":
             thread.append(_call("fc2", "c2"), _out("fo2", "c2", "вывод"))
         else:
@@ -742,7 +695,7 @@ async def test_queued_pending_stays_pending_after_compaction(tmp_path, when):
         fake.stop_run()
 
     assert queued == [widget]
-    assert widget.state == "pending"
+    assert widget.state == "queued"
     assert [r["status"] for r in pending] == ["pending"]
     assert failed == []
 
@@ -833,10 +786,7 @@ def _subagent_thread(tmp_path: Path) -> _Thread:
             },
         ),
     ):
-        append_subagent_trace_record(
-            thread.dir,
-            _SYS,
-            _TID,
+        thread.subagent_record(
             parent_call_id="call_sub_1",
             child_run_id="run_c1",
             kind=kind,

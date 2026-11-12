@@ -13,6 +13,7 @@
 import base64
 import posixpath
 import shlex
+import stat as stat_module
 import uuid
 from abc import abstractmethod
 from typing import Any, Iterable, Optional, Sequence
@@ -203,24 +204,25 @@ class PosixShellFsMixin:
 
     async def stat(self, path: str) -> dict:
         res = await self._afs_exec(
-            f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}"
+            f"stat -c '%s|%Y|%a|%f' {shlex.quote(path)}"
         )
         if res.return_code != 0:
             raise self._fs_failure(path, res, what="stat")
-        size, mtime, mode, kind = res.stdout.strip().split("|", 3)
+        size, mtime, mode, mode_hex = res.stdout.strip().split("|", 3)
+        raw_mode = int(mode_hex, 16)
         return {
             "size": int(size),
             "mtime": int(mtime),
             "mode": mode,
-            "is_file": kind == "regular file",
-            "is_dir": kind == "directory",
-            "is_symlink": "symbolic link" in kind,
+            "is_file": stat_module.S_ISREG(raw_mode),
+            "is_dir": stat_module.S_ISDIR(raw_mode),
+            "is_symlink": stat_module.S_ISLNK(raw_mode),
         }
 
     async def stat_info(
         self, path: str, follow_symlinks: bool = False
     ) -> dict:
-        st = await self.stat(path)  # stat -c '%s|%Y|%a|%F' wrapper
+        st = await self.stat(path)
         return {
             "size": st["size"],
             "mtime": st["mtime"],
@@ -272,6 +274,8 @@ class PosixShellFsMixin:
             return FileNotFoundError(path)
         if "permission denied" in low:
             return PermissionError(err)
+        if "is a directory" in low:
+            return IsADirectoryError(err)
         return OSError(
             err or f"{what} failed (exit {res.return_code}): {path}"
         )

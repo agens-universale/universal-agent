@@ -316,3 +316,55 @@ async def test_text_change_resets_navigation_state(tmp_path):
         await pilot.pause()
         assert scr._history_index is None
         assert scr._history_draft is None
+
+
+@pytest.mark.asyncio
+async def test_history_skips_entry_equal_to_field_text(tmp_path):
+    """Запись, равная тексту поля, пропускается в обе стороны; ↓ — назад к
+    исходному тексту за один шаг."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("task-1")
+        await pilot.pause()
+        for text in ("a", "b", "c"):
+            scr._history.append(text)
+        inp = scr.query_one("#cmdinput")
+        inp.text = "c"
+        scr._history_prev()
+        assert inp.text == "b"
+        scr._history_next()
+        assert inp.text == "c"
+        assert scr._history_index is None
+
+
+@pytest.mark.asyncio
+async def test_history_without_duplicates_unchanged(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("task-1")
+        await pilot.pause()
+        for text in ("a", "b", "c"):
+            scr._history.append(text)
+        inp = scr.query_one("#cmdinput")
+        inp.text = ""
+        seen = []
+        for _ in range(3):
+            scr._history_prev()
+            seen.append(inp.text)
+        assert seen == ["c", "b", "a"]
+        for _ in range(2):
+            scr._history_next()
+            seen.append(inp.text)
+        scr._history_next()
+        assert seen[3:] == ["b", "c"]
+        assert inp.text == ""

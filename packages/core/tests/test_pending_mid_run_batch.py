@@ -142,7 +142,7 @@ def test_human_after_tool_batch_keeps_outputs_and_tail(monkeypatch):
             [_read_call("c1"), _read_call("c2")],
             state,
             _ctx(),
-            get_pending_messages=queue.drain,
+            get_pending_messages=as_coro(queue.drain),
             pre_backend_compaction_hook=lambda _msgs, mode: modes.append(mode),
         )
     )
@@ -153,17 +153,22 @@ def test_human_after_tool_batch_keeps_outputs_and_tail(monkeypatch):
         "function_call_output",
         "function_call_output",
         "user",
-        "user",
     ]
-    assert "Loop detector:" in batches[0][2]["content"]
-    assert batches[0][3] == _HUMAN
+    body = json.loads(batches[0][1]["output"])
+    assert "Loop detector:" in body["technical_system_messages"][0]
+    assert batches[0][2] == _HUMAN
     assert _kinds(state.messages)[:2] == ["fc_c1", "fc_c2"]
     assert [m.get("type") for m in state.messages[2:4]] == [
         "function_call_output",
         "function_call_output",
     ]
-    assert "Loop detector:" in state.messages[4]["content"]
-    assert state.messages[5] == _HUMAN
+    assert (
+        "Loop detector:"
+        in json.loads(state.messages[3]["output"])[
+            "technical_system_messages"
+        ][0]
+    )
+    assert state.messages[4] == _HUMAN
 
 
 def test_human_during_model_response_with_calls_waits_for_execution(
@@ -190,7 +195,7 @@ def test_human_during_model_response_with_calls_waits_for_execution(
             [{"role": "user", "content": "прочитай a.py", "id": "m_start"}],
             state,
             _ctx(),
-            get_pending_messages=queue.drain,
+            get_pending_messages=as_coro(queue.drain),
         )
     )
 
@@ -236,7 +241,7 @@ def test_human_after_assistant_text_replaces_the_text(monkeypatch):
             [{"role": "user", "content": "прочитай a.py", "id": "m_start"}],
             state,
             _ctx(),
-            get_pending_messages=queue.drain,
+            get_pending_messages=as_coro(queue.drain),
         )
     )
 

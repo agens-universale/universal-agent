@@ -31,6 +31,8 @@ def _rec(
     call_id="c1",
     before_sha256=None,
     after_sha256=None,
+    hunks="",
+    mode=None,
 ):
     return EditRecord(
         path=path,
@@ -38,12 +40,13 @@ def _rec(
         ts=ts,
         call_id=call_id,
         op=op,
-        hunks="",
+        hunks=hunks,
         add=add,
         del_=del_,
         before_sha256=before_sha256,
         after_sha256=after_sha256,
         flags=list(flags or []),
+        mode=mode,
     )
 
 
@@ -55,6 +58,29 @@ def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
     return path
+
+
+def test_restore_mode_comes_from_last_delete_record(tmp_path):
+    [entry] = file_entries(
+        [_rec("a.sh", op="delete", del_=1, mode=0o755)],
+        lambda key: b"x\n",
+        str(tmp_path),
+    )
+
+    assert entry.restore_mode == 0o755
+
+
+def test_restore_mode_is_none_when_last_record_is_not_delete(tmp_path):
+    [entry] = file_entries(
+        [
+            _rec("a.sh", op="delete", del_=1, mode=0o755, ts=1.0),
+            _rec("a.sh", op="create", add=1, del_=0, ts=2.0),
+        ],
+        lambda key: None,
+        str(tmp_path),
+    )
+
+    assert entry.restore_mode is None
 
 
 # --- delta_vs_disk ----------------------------------------------------------

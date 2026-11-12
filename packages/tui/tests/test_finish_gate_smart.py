@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def _async_noop(fn):
@@ -29,7 +30,7 @@ def test_schema_accepts_smart():
     from gc_core.config_modules.tui import TuiConfig
 
     assert TuiConfig(finish_gate_mode="smart").finish_gate_mode == "smart"
-    assert TuiConfig(finish_gate_mode="on").finish_gate_mode == "on"
+    assert TuiConfig(finish_gate_mode="always").finish_gate_mode == "always"
     assert TuiConfig(finish_gate_mode="off").finish_gate_mode == "off"
 
 
@@ -72,7 +73,7 @@ def test_apply_finish_gate_mode_on_off_unchanged():
     from gc_testkit.settings import make_settings
     from gc_tui.toggles import tui_agent_settings
 
-    on = tui_agent_settings(make_settings({"tui.finish_gate_mode": "on"}))
+    on = tui_agent_settings(make_settings({"tui.finish_gate_mode": "always"}))
     assert (
         on.settings.agent.strict_turn_finish_validation is True
         and on.runtime.finish_gate_smart is False
@@ -317,7 +318,7 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(
             [{"role": "user", "content": "сделай X", "id": "m0"}],
             state,
             ctx,
-            get_pending_messages=get_pending,
+            get_pending_messages=as_coro(get_pending),
         )
     )
 

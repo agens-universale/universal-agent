@@ -31,6 +31,10 @@ _THREE_MODELS = (
 )
 
 
+async def _init_prompt(**_kw):
+    return "prompt"
+
+
 @pytest.fixture(autouse=True)
 def _restore_arg_parser():
     """Вернуть модулю разбора аргументов пин-argv файла: перезагрузка с чужим
@@ -66,12 +70,12 @@ class _Executor:
     [
         (
             _BACKEND + _ONE_MODEL,
-            ["--level", "auto"],
+            ["--model", "auto"],
             "во всех уровнях одна модель",
-            "уровень default",
+            "модель слота default",
         ),
         (
-            _BACKEND + _THREE_MODELS + "level: auto\n",
+            _BACKEND + _THREE_MODELS + "model: auto\n",
             ["--agent.model", "other"],
             "уровни отключены флагом --model",
             "модель из --model",
@@ -112,7 +116,7 @@ def test_main_names_the_reason_runs_default_and_exits_0(
     assert rc == 0
     assert seen["available"] is False  # RunContext соберётся на default
     assert (
-        f"автовыбор моделей недоступен: {reason} — работает {tail}"
+        f"автовыбор недоступен: {reason} — работает {tail}"
         in capsys.readouterr().err
     )
 
@@ -125,7 +129,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
         "load_settings",
         lambda path, **kw: make_settings(
             {
-                "level": "auto",
+                "model": "auto",
                 "backend.api_mode": "chat_completions",
                 "models": {"only": {}},
                 "slots": {"default": "only"},
@@ -144,8 +148,8 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli, "AgentExecutor", _Executor)
     monkeypatch.setattr(
-        "gc_core.instructions.init_agents_md.build_init_prompt",
-        lambda **kw: "prompt",
+        "gc_core.instructions.init_agents_md.abuild_init_prompt",
+        _init_prompt,
     )
     monkeypatch.setattr(
         "gc_core.security.confirm_port.confirm_available", lambda ctx: True
@@ -156,7 +160,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
 
     assert rc == 0
     assert (
-        "автовыбор моделей недоступен: во всех уровнях одна модель — работает уровень default"
+        "автовыбор недоступен: во всех уровнях одна модель — работает модель слота default"
         in capsys.readouterr().err
     )
 
@@ -164,7 +168,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
 @pytest.mark.parametrize(
     "profile_level, flags",
     [
-        ("max", ["--level", "auto"]),
+        ("max", ["--model", "auto"]),
         ("auto", []),
     ],
     ids=["explicit_auto_over_profile_level", "auto_from_profile"],
@@ -177,13 +181,13 @@ def test_init_flags_reach_typed_settings_and_actual_router(
     base.write_text(
         _BACKEND
         + _THREE_MODELS
-        + "level: default\nlogging:\n  save_logs: false\n",
+        + "model: default\nlogging:\n  save_logs: false\n",
         encoding="utf-8",
     )
     profiles = tmp_path / "profiles"
     profiles.mkdir()
     (profiles / "review.yml").write_text(
-        f"level: {profile_level}\nmodels:\n  mid:\n    model: profile-mid\n",
+        f"model: {profile_level}\nmodels:\n  mid:\n    model: profile-mid\n",
         encoding="utf-8",
     )
     _reload_arg_parser_with_argv(
@@ -207,18 +211,18 @@ def test_init_flags_reach_typed_settings_and_actual_router(
     monkeypatch.setattr(cli, "build_auth_connector", lambda loaded: None)
     monkeypatch.setattr(cli, "AgentExecutor", _InitExecutor)
     monkeypatch.setattr(
-        "gc_core.instructions.init_agents_md.build_init_prompt",
-        lambda **kw: "prompt",
+        "gc_core.instructions.init_agents_md.abuild_init_prompt",
+        _init_prompt,
     )
 
     assert run_coro(cli._run_init_agents_md()) == 0
 
     ctx = seen["ctx"]
-    assert ctx.settings.level == "auto"
+    assert ctx.settings.model == "auto"
     assert ctx.runtime.active_profile == "review"
     assert ctx.runtime.run_mode == "cli"
     assert ctx.auto_available is True
-    assert ctx.model_router.live_level() == "auto"
+    assert ctx.model_router.live_choice() == "auto"
     assert ctx.model_router.resolve("main").model == "profile-mid"
 
 

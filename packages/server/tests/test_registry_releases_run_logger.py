@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.utils.logging_module import create_run_logger
-from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
+from gc_server.webhook.registry import AgentRunRegistry
 from gc_testkit.settings import make_settings
 
 
@@ -21,6 +21,9 @@ class _Executor:
 
     async def arun(self, *args, **kwargs):
         return "ok"
+
+    async def ainbox_left(self):
+        return False
 
 
 class _FailingExecutor(_Executor):
@@ -38,14 +41,19 @@ async def test_finished_run_releases_its_logger(tmp_path, executor_cls):
         run_id=f"srv-{executor_cls.__name__}",
     )
     registry = AgentRunRegistry()
-    run = await registry.astart_if_absent(
+    ctx = SimpleNamespace(logger=logger)
+
+    async def _noop(_run):
+        return None
+
+    run = await registry.astart(
         system="s",
         task_id="t",
-        executor_factory=executor_cls,
-        ctx=SimpleNamespace(logger=logger),
-        initial_user_message="hi",
+        executor=executor_cls(ctx),
+        ctx=ctx,
+        on_finish=_noop,
     )
-    await run.thread
+    await run.task
 
     assert logger.name not in logging.Logger.manager.loggerDict
     assert logger.handlers == []

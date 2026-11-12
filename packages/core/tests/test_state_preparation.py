@@ -59,7 +59,7 @@ def _forbid_io(monkeypatch):
         (time, "monotonic"),
         (states, "uuid4"),
         (state_preparation, "uuid4"),
-        (states, "load_state_metadata"),
+        (states, "aload_state_metadata"),
         (states, "build_execution_workspace"),
     ):
         monkeypatch.setattr(module, name, forbidden)
@@ -155,10 +155,15 @@ async def test_preparation_preserves_native_instruction_precedence_and_status(
         agent_md_path=str(role) if use_l0 else None,
     )
     direct = State(initial_project_data=project_values, **kwargs)
+    from gc_testkit.settings import make_settings
+
+    # Роль запуска (L0) читает хранилище агента по настройкам прогона.
     prepared = await prepare_state(
+        workspace_config=make_settings(
+            {"paths.agent_md_path": kwargs["agent_md_path"] or ""}
+        ),
         is_tui=is_tui,
         agentsmd_override=override,
-        agent_md_path=kwargs["agent_md_path"],
     )
     assembled = State.from_prepared(prepared, **kwargs)
     assert assembled.call_metadata == direct.call_metadata

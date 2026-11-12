@@ -8,10 +8,7 @@ import time
 import pytest
 from gc_core.backends.local import LocalFsBackend
 from gc_core.user_stop import UserStop, bind_user_stop
-from gc_server.rest_api.agent_execution_registry import (
-    ActiveRun,
-    AgentRunRegistry,
-)
+from gc_server.webhook.registry import ActiveRun, AgentRunRegistry
 
 
 class _Log:
@@ -49,11 +46,7 @@ async def test_server_stop_returns_when_the_command_is_dead():
         system="sys",
         task_id="task",
         executor=_Executor(),
-        thread=None,
         started_at=time.time(),
-        finished_at=None,
-        thread_id=None,
-        last_activity_at=time.time(),
     )
 
     async def _work():
@@ -98,11 +91,7 @@ async def test_registry_stop_timeout_is_not_success(monkeypatch):
         system="sys",
         task_id="task",
         executor=_Executor(),
-        thread=None,
         started_at=time.time(),
-        finished_at=None,
-        thread_id=None,
-        last_activity_at=time.time(),
     )
     with pytest.raises(TimeoutError):
         await registry.stop(system="sys", task_id="task")

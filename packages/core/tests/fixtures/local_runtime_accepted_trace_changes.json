@@ -1,0 +1,161 @@
+{
+  "develop_commit": "320ed0b191a7010de59e34ca3290df02c5025440",
+  "changes": [
+    "requests во всех сценариях: в запрос к модели входят служебные наджи и живой блок режима разрешений.",
+    "In memory_two_turns, nudges in tool output change thread, meta, and state. Step and call counts are unchanged.",
+    "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, поэтому requests тоже другой.",
+    "Optional fs_read_file line numbering changes request schemas in all scenarios. In file_roundtrip both reads succeed without the flag, restoring the reference thread, meta, and state without changing step or call counts."
+  ],
+  "scenarios": {
+    "deferred_accounting_outcome:json": {
+      "requests": "0769ba03cdeaa176b9f9c4587e288489f7edd8500f9578274ada3a366dc374e3"
+    },
+    "deferred_accounting_outcome:sse": {
+      "requests": "d07c5eca0e3c51de080e926deff21edca0bd67f141ee1a8436a049ff080b67c0"
+    },
+    "deferred_accounting_length:json": {
+      "requests": "0769ba03cdeaa176b9f9c4587e288489f7edd8500f9578274ada3a366dc374e3"
+    },
+    "deferred_accounting_length:sse": {
+      "requests": "d07c5eca0e3c51de080e926deff21edca0bd67f141ee1a8436a049ff080b67c0"
+    },
+    "deferred_accounting_refusal:json": {
+      "requests": "0769ba03cdeaa176b9f9c4587e288489f7edd8500f9578274ada3a366dc374e3"
+    },
+    "deferred_accounting_refusal:sse": {
+      "requests": "d07c5eca0e3c51de080e926deff21edca0bd67f141ee1a8436a049ff080b67c0"
+    },
+    "calculator:json": {
+      "requests": "2f661556c0d8fadc4b7ae6cb6bdd27636477f33abe8826668f88c3e64b422434"
+    },
+    "calculator:sse": {
+      "requests": "0bc2c09fd09d8d6d613abd0ce5f2db3deca07443f375f5c859e39daf2f60cfa2"
+    },
+    "finish_after_work:json": {
+      "requests": "c02388f9821e2583abb206ecfcb30448938fb9de11e85fa6595a156b69349b92"
+    },
+    "finish_after_work:sse": {
+      "requests": "33792dbb5d89bc3c16646e9ed282a45cf82e9805ccf09860370a201a2dcb2953"
+    },
+    "duplicate_finish:json": {
+      "requests": "c02388f9821e2583abb206ecfcb30448938fb9de11e85fa6595a156b69349b92"
+    },
+    "duplicate_finish:sse": {
+      "requests": "33792dbb5d89bc3c16646e9ed282a45cf82e9805ccf09860370a201a2dcb2953"
+    },
+    "memory_two_turns:json": {
+      "requests": "2934e507a818229b0828418d0fee92835a46fe3a2cc81e3cf2dc21615b22b401",
+      "thread": "dcfc5feb77d4fcaf080cbb97efe898c5ef19d9d29d05a52d342258353c75115b",
+      "meta": "1bd07141989f36a859201bfaeb4aa4b2a93df3bb81f440ebbcb72e089834e372",
+      "state": "d17cd8055638acb9a56bcfc3807172fed6711f803afa586269551dfe511bc7b7"
+    },
+    "memory_two_turns:sse": {
+      "requests": "8618cd9447d3f2394473663e8a024ec9ceaa6c399f23542ac3a4554462cb5791",
+      "thread": "dcfc5feb77d4fcaf080cbb97efe898c5ef19d9d29d05a52d342258353c75115b",
+      "meta": "1bd07141989f36a859201bfaeb4aa4b2a93df3bb81f440ebbcb72e089834e372",
+      "state": "d17cd8055638acb9a56bcfc3807172fed6711f803afa586269551dfe511bc7b7"
+    },
+    "invalid_json:json": {
+      "requests": "a4b8668d4aa06b116d662cc22db88f5266ec2b094267a28c2a358a31971123bd",
+      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
+      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
+      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "tool_calls": 3,
+      "recorded_tool_calls": 3,
+      "steps": 3
+    },
+    "invalid_json:sse": {
+      "requests": "9dadf20d4d63ce2c4b02e5e03c851a938edd102a0ce73445f7d59ef122660fe2",
+      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
+      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
+      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "tool_calls": 3,
+      "recorded_tool_calls": 3,
+      "steps": 3
+    },
+    "invalid_type:json": {
+      "requests": "915575bf71193ea645c34f811e52f8140fdf5048ebcfc18bf2e3d3e7e7e00e04"
+    },
+    "invalid_type:sse": {
+      "requests": "9ddc72ff0207e5546bc055f9d0fb44341a0a133754fa94b59edab9b0d71973c1"
+    },
+    "dropped_argument:json": {
+      "requests": "2ba6a5bf9bb20cc7b34580e400f079e5802838c2f0ded483f504b8fbafe38288"
+    },
+    "dropped_argument:sse": {
+      "requests": "6e90adc576991a1e1c3a4f23e4529e0087ce292e69c2f05fd08dd12cb5a44ec1"
+    },
+    "unknown_tool:json": {
+      "requests": "524ab9f9ff448053ad824fc7b79685f4cd6998940351161c2792089f5c5b72cf"
+    },
+    "unknown_tool:sse": {
+      "requests": "a3ed550fc15c3c9433f6c7d8d39e4b8025048db6b22046729d58170ae4916db6"
+    },
+    "tool_error:json": {
+      "requests": "035f9e15417e66ee3253b8ff6f7cb15131e333e147a92150b7f3e75eabe4e21d"
+    },
+    "tool_error:sse": {
+      "requests": "47ce8bff32557b8e1c8c10e6991ff335d99ac44401bb3437dcf596ea2e2cc302"
+    },
+    "text_allow:json": {
+      "requests": "c02388f9821e2583abb206ecfcb30448938fb9de11e85fa6595a156b69349b92"
+    },
+    "text_allow:sse": {
+      "requests": "33792dbb5d89bc3c16646e9ed282a45cf82e9805ccf09860370a201a2dcb2953"
+    },
+    "text_deny:json": {
+      "requests": "e9447a22faf68cad29ec369f527d7d0773bafa9c70a362c5205e9f97b8855fb5"
+    },
+    "text_deny:sse": {
+      "requests": "202d6b5696af340110078df98a9e1e8db2b7106782ee2d0233b58d47fef79512"
+    },
+    "text_length:json": {
+      "requests": "67844aad874064508e9601b706b4bad32eb0f0349ffefb029289958d95fdd8b7"
+    },
+    "text_length:sse": {
+      "requests": "52b662f722305515934332f84f2c02966c56ac1039c02d7fcb00c6f105c8cc61"
+    },
+    "finish_judge_accept:json": {
+      "requests": "6aba05a1a053d1d60644c6d7c1f0dad470cdb33ac5073bda2998d7d48e2b8be9"
+    },
+    "finish_judge_accept:sse": {
+      "requests": "559457e286e968ef3940596b05a2fa3dc3de2dbb37fe6477624240336c8ce416"
+    },
+    "finish_judge_reject:json": {
+      "requests": "55bb3af41f85c6d47929bf5701d0f65c3f6059260b4d52f86e53f9bc85545b5b"
+    },
+    "finish_judge_reject:sse": {
+      "requests": "d3a25a23f3185d5c4d71501f4c340776687e054b2a60a268ed53cdb4ea735903"
+    },
+    "human_boundary:json": {
+      "requests": "15dcdcafbe908acf8540ca3c2f61e2f7759a075cbcdc4650fdb38542654cd12d"
+    },
+    "human_boundary:sse": {
+      "requests": "0c0e9f203ef99e7fbdbc35cdd2c54067d166fc5e34639700cdb4b06fd3d96727"
+    },
+    "queued_before:json": {
+      "requests": "e1c14c5fbc2dd02dc503180ab3824e5507e63b9951503dc419d1d11bc9ecb5d2"
+    },
+    "queued_before:sse": {
+      "requests": "70575b08901a42aac5ab90f7fc2a8347ee8d64e690cbe5b70b25c8e2b5f0057a"
+    },
+    "queued_during:json": {
+      "requests": "a7628b0d80ba47a204da9095be7808738bc13ca2ad759f276998c490c98332a9"
+    },
+    "queued_during:sse": {
+      "requests": "595af446420e6ed1182eac8ba8500631280f45bba46fe94b007b72cccc3bd9f1"
+    },
+    "stop_mid_batch:json": {
+      "requests": "c02388f9821e2583abb206ecfcb30448938fb9de11e85fa6595a156b69349b92"
+    },
+    "stop_mid_batch:sse": {
+      "requests": "33792dbb5d89bc3c16646e9ed282a45cf82e9805ccf09860370a201a2dcb2953"
+    },
+    "file_roundtrip:json": {
+      "requests": "c1b504ee449721e70a09d5fe85db2d0ad0a1ad13fb910b1380e653b94c8648a9"
+    },
+    "file_roundtrip:sse": {
+      "requests": "540345d23233e06c71e037ca640a7ae5629023d401009a8609fe15575f085cc5"
+    }
+  }
+}

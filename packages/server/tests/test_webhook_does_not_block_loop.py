@@ -100,9 +100,9 @@ def test_webhook_awaits_the_async_builder():
     """
     import inspect
 
-    from gc_server import server
+    from gc_server.webhook.surface import WebhookSurface
 
-    src = inspect.getsource(server.events_webhook)
+    src = inspect.getsource(WebhookSurface._start_run)
     assert "await acreate_run_context(" in src, (
         "вебхук снова собирает контекст синхронно"
     )

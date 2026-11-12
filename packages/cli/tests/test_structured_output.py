@@ -462,13 +462,22 @@ class _RunLogger:
 
 
 class _Session:
+    """Сессия треда: шаг пишет сообщения, состояние и расход токенов."""
+
     def __init__(self):
-        self.meta = {}
+        from gc_core.threads.models import SessionState
+
+        self.state = SessionState()
+        self.notice = {}
         self.backend_api_mode = "chat_completions"
         self.batches = []
+        self.usage = None
 
-    async def apersist_batch(self, messages, *, previous_response_id):
+    async def apersist_batch(
+        self, messages, *, previous_response_id, session=None, usage=None
+    ):
         self.batches.append((list(messages), previous_response_id))
+        self.usage = usage
 
 
 def _executor_with_open_accounting():
@@ -547,7 +556,7 @@ async def test_rephrase_tokens_are_in_the_snapshot_taken_after_it(
     assert code == 0
     await executor.aclose_run_accounting(console=False)
 
-    stored = executor._thread_session.meta["token_usage"]["by_category"]
+    stored = executor._thread_session.usage.by_category
     assert stored[REQUEST_LABEL]["input"] == 17
     assert stored[REQUEST_LABEL]["output"] == 9
     assert stored[CATEGORY_MAIN]["input"] == 100

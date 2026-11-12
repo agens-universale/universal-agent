@@ -25,14 +25,19 @@ from gc_testkit.helpers.tool_ctx import local_ctx
 @pytest.fixture
 def memory_tool(tmp_path, monkeypatch):
     """Тул с крошечным лимитом — любая вторая запись уходит в компакцию."""
-    path = tmp_path / "project_memory.md"
+    from gc_core.agent_store import FileAgentStore, ProjectKey
+
+    path = tmp_path / ".gc" / "project_memory.md"
+    path.parent.mkdir()
     path.write_text("уже записанное содержимое\n", encoding="utf-8")
 
     tool = ProjectMemory(ctx=local_ctx(), state=None)
-    monkeypatch.setattr(tool, "_path", path, raising=False)
+    monkeypatch.setattr(
+        tool, "_project", ProjectKey(id="acall", root=str(tmp_path))
+    )
+    monkeypatch.setattr(tool, "_store", FileAgentStore())
     monkeypatch.setattr(tool, "_max_chars", 40, raising=False)
     monkeypatch.setattr(tool, "_max_append_chars", 10_000, raising=False)
-    monkeypatch.setattr(tool, "_backup", None, raising=False)
     return tool
 
 

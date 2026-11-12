@@ -14,12 +14,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from live_support import temporal_cli, worker_kwargs
+from live_support import (
+    temporal_cli,
+    thread_messages,
+    thread_meta,
+    worker_kwargs,
+)
 from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.contracts import ToolResult
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 from gc_core_temporalio.contracts import ActivityCall, RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
@@ -410,9 +415,11 @@ def normalize(trace, workspace):
     return visit(trace)
 
 
-def snapshot(answer, requests, store, workspace):
-    messages = store.load_messages("test", "parity")
-    meta = store.load_meta("test", "parity")
+async def snapshot(answer, requests, store, workspace):
+    """Тред и ответы прогона: локальная сторона и Temporal читаются одним
+    путём — хранилище тредов v2."""
+    messages = await thread_messages(store, "test", "parity")
+    meta = await thread_meta(store, "test", "parity")
     return normalize(
         {
             "answer": answer,
@@ -599,7 +606,9 @@ async def test_actual_http_local_native_parity(
                 )
             )
         assert not script and not errors
-        local = snapshot(local_answers[-1], requests, local_store, tmp_path)
+        local = await snapshot(
+            local_answers[-1], requests, local_store, tmp_path
+        )
     finally:
         release_run_logger(local_ctx.logger)
         if scenario.get("stop_after_tool"):
@@ -683,7 +692,7 @@ async def test_actual_http_local_native_parity(
             assert not script and not errors
             assert native_answers == local_answers
             assert len(native_questions) == len(local_questions)
-            actual = snapshot(
+            actual = await snapshot(
                 result["answer"], requests, contexts.stores["files"], tmp_path
             )
             (tmp_path / "local-trace.json").write_text(

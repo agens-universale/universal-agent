@@ -12,13 +12,20 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from gc_core.agent_store import FileAgentStore
 from gc_core.intent_guard.final_report_consistency import (
-    _load_guard_prompt,
+    aload_guard_prompt,
     avalidate_final_report_vs_user_intent,
 )
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit import run_coro
+
+
+def _load_guard_prompt() -> str:
+    return run_coro(aload_guard_prompt(FileAgentStore()))
+
+
 from gc_testkit.settings import fake_ctx
 
 _DIGEST_HANDOFF = {"artifacts": ["report.md"]}

@@ -12,10 +12,10 @@
 # Версия формата этого файла (не трогайте: её ведёт приложение; нет ключа = 1).
 config_version: 1
 
-# Профили и уровни моделей: указатели на активный профиль/уровень. "" = профиль не выбран.
+# Профили и модель: указатели на активный профиль и выбор модели. "" = профиль не выбран.
 # Секции models/slots/assign (реестр моделей, уровни, привязки) — опциональны.
 profile: ""
-level: default               # light | default | max | auto (уровень меняется автоматически по ходу работы)
+model:                       # auto | имя модели из реестра; пусто — модель уровня default
 
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
@@ -81,7 +81,7 @@ backend:
     # Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
 
 agent:
-  model: "<ВПИШИТЕ_МОДЕЛЬ>"
+  model: "<ВПИШИТЕ_МОДЕЛЬ>"       # легаси: одна модель без реестра
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true
@@ -98,7 +98,7 @@ agent:
   # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
   # Возвращает envelope с raw_trace_summary; false — пустой summary.
   limit_trace_summary: true
-  # Автовыбор уровня модели включается через level: auto.
+  # Автороутинг моделей включается через model: auto.
   auto_routing: true
   # Сильная модель пары: default — light+default, max — default+max.
   # auto — начальную пару выбирает судья (assign.routing_judge), если в обеих
@@ -118,6 +118,11 @@ agent:
     enabled: true
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
+  # Для gc-cli и вебхука. allow принимает пригодную прозу как итог хода.
+  # text_answer_mode: allow
+  # Для автономных запусков. Если пригодного вызова инструмента или финала нет,
+  # остановить ход с причиной no_tool_response вместо служебного сообщения user.
+  # stop_on_no_tool_response: true
   # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
   # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
   exec_output_capture_max_chars: 40000
@@ -133,6 +138,10 @@ agent:
   # Не задана — доступны только встроенные. См. docs/subagents.md.
   # subagents_dir: ./agents
   # subagents_max_count: 20
+  # Имя проекта для хранилища агента в базе (память, AGENTS.md и скиллы
+  # проекта). Не задано — по пути каталога; задайте, если один репозиторий
+  # открывают с разных хостов или из контейнера.
+  # project_id: billing
 
 # TUI: что рендерить во время стриминга (действует только при backend.stream: true;
 # на счётчик токенов и индикатор не влияет — только контент).
@@ -144,12 +153,17 @@ tui:
   # minimal (default) — только индикатор + счётчик; answer — прогрессивный ответ;
   # answer_reasoning — + строка-мысль «⠇ …».
   stream_display: minimal
+  # Тема TUI: auto — фон терминала берётся, если на нём читается текст
+  # палитры (основной и серый); иначе — gigacode; gigacode — собственная
+  # тёмная палитра.
+  theme: auto
   # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
   #   deny  — всегда требовать tool-call (как CLI/server/swarm);
   #   judge — судья решает, полный ли это ответ (привет/объяснение → принять);
   #   allow — всегда принимать текст (ни bounce, ни судьи).
   text_answer_mode: judge
-  finish_gate_mode: "smart"        # /gate: on — судья всегда; smart — судья только при вызовах инструментов; off — отключить (только TUI)
+  finish_gate_mode: "smart"        # /gate: always — судья всегда; smart — судья только при вызовах инструментов; off — отключить (только TUI)
+  show_reasoning: "off"            # рассуждения модели в живой ленте (reasoning): off | on; не хранятся; только в chat_completions
   # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
   agentsmd_override: false
@@ -171,7 +185,7 @@ tui:
 acp:
   # deny | judge | allow — в IDE по умолчанию allow (обсуждение без tool-call нормально)
   text_answer_mode: allow
-  # on | off | smart — в IDE обычно off (человек сам сверяет ответ). "off" в кавычках!
+  # off | smart | always — в IDE обычно off (человек сам сверяет ответ). "off" в кавычках!
   finish_gate_mode: "off"
   # Каждые N шагов без session_todo — technical reminder. 0 = выкл (дефолт IDE).
   todo_reminder_steps: 0
@@ -185,7 +199,7 @@ agent_edits:
   hunk_context_lines: 3        # строк контекста в хэнках журнальных диффов
   max_diff_source_bytes: 2000000  # порог размера файла: свыше — дифф не считается, снапшот не снимается
   shell_tracking: true         # трекинг правок, сделанных shell-командами
-  trace_inline_max_lines: 30   # ЭКРАННЫХ рядов диффа в ленте до свёртки
+  trace_diff_preview_lines: 10 # строк на файл в свёрнутом превью диффа в ленте: сначала изменения, потом контекст (раскрытие — дифф целиком)
   replay_expanded_turns: 20    # сколько последних ходов разворачивать при открытии треда (0 — все)
   turn_summary_in_status: true # сводка правок в статусной строке хода
   # Где вести журнал правок (дифф в ленте, сводка хода, экран /diff) — по режиму запуска.
@@ -216,7 +230,7 @@ paths:
   # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
   # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
   agent_md_path: ""
-  # Инструкция судьи начальной пары автовыбора (level: auto). Нет файла или пуст — ход на верхней паре.
+  # Инструкция судьи начальной пары автовыбора (model: auto). Нет файла или пуст — ход на верхней паре.
   # chat_completions_routing_pair_judge_prompt_path: "prompts/chat_completions_routing_pair_judge_prompt.md"
 
 summary:

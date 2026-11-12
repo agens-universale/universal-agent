@@ -10,12 +10,11 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
     AgentStore,
+    Prompt,
     agent_store_of,
+    decode_text,
 )
-from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.project_memory import (
     DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
 )
@@ -49,11 +48,13 @@ _FAILURE_BACKEND_UNSUPPORTED = CompactionResult(
 )
 
 
-def _load_prompt(store: AgentStore = DEFAULT_AGENT_STORE) -> str:
-    path = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
-    return store.read_text(
-        AgentResource("prompt", "project_memory_compaction", str(path))
-    )
+async def aload_compaction_prompt(store: AgentStore) -> str:
+    data = await store.read("prompt", Prompt.PROJECT_MEMORY_COMPACTION)
+    if data is None:
+        raise FileNotFoundError(
+            store.label("prompt", "project_memory_compaction")
+        )
+    return decode_text(data)
 
 
 async def acompact_text(
@@ -84,7 +85,7 @@ async def acompact_text(
     system = await aload_prompt_resource(
         ctx,
         PromptResourceRequest("project_memory"),
-        local=lambda: _load_prompt(agent_store_of(ctx)),
+        local=lambda: aload_compaction_prompt(agent_store_of(ctx)),
     )
     messages = [
         {"role": "system", "content": system},

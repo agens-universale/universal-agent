@@ -62,12 +62,7 @@ def stat(path: Path, *, backup: Path | None = None) -> ProjectMemoryStat:
     (auto-restore) before stat.
     """
     with _lock:
-        if not path.is_file() and backup is not None and backup.is_file():
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(backup, path)
-            except OSError:
-                pass
+        restore_from_backup(path, backup)
         if not path.is_file():
             return ProjectMemoryStat(exists=False, chars=0, lines=0)
         text = read_user_text_or_none(path)
@@ -99,16 +94,33 @@ def read(path: Path, *, backup: Path | None = None) -> str:
     (auto-restore) before reading.
     """
     with _lock:
-        if not path.is_file() and backup is not None and backup.is_file():
-            # Auto-restore: primary missing but backup exists — copy backup → primary.
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(backup, path)
-            except OSError:
-                pass
+        restore_from_backup(path, backup)
         if not path.is_file():
             return ""
         return read_user_text_or_none(path) or ""
+
+
+def restore_from_backup(path: Path, backup: Path | None) -> None:
+    """Основного файла нет, а бэкап есть — вернуть бэкап на место
+    (auto-restore). Вызывающий держит ``_lock``; отказ копирования — молча."""
+    if path.is_file() or backup is None or not backup.is_file():
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup, path)
+    except OSError:
+        pass
+
+
+def mirror_backup(backup: Path | None, text: str) -> None:
+    """Зеркало памяти вне дерева проекта; отказ бэкапа — молча."""
+    if backup is None:
+        return
+    try:
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_text(text, encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -173,12 +185,7 @@ def append(
                 f"resulting length {len(new_text)} exceeds limit {max_chars}.",
             )
         _atomic_write(path, new_text)
-        if backup is not None:
-            try:
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                backup.write_text(new_text, encoding="utf-8")
-            except OSError:
-                pass
+        mirror_backup(backup, new_text)
     return ProjectMemoryStat(
         exists=True,
         chars=len(new_text),
@@ -214,12 +221,7 @@ def write(
         )
     with _lock:
         _atomic_write(path, new_text)
-        if backup is not None:
-            try:
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                backup.write_text(new_text, encoding="utf-8")
-            except OSError:
-                pass
+        mirror_backup(backup, new_text)
     return ProjectMemoryStat(
         exists=True,
         chars=len(new_text),

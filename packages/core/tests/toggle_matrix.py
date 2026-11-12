@@ -35,6 +35,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from parity_harness import (
@@ -45,6 +47,7 @@ from parity_harness import (
     judge_accept,
     parity_config,
     run_thread_dump,
+    strip_intended_meta_keys,
     strip_volatile,
     with_path_overrides,
 )
@@ -720,10 +723,24 @@ UNREPRESENTABLE = {
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # --- хранилище (storage) ---------------------------------------------------
+    #
+    # Ядро хранилище по конфигу не открывает: открывают фронтенды (gc-serve,
+    # gc-cli) через gc-stores и передают его прогону. Случай матрицы с базой
+    # сравнил бы файлы с файлами. Покрытие: test_storage_config.py (схема,
+    # отказ без открытого хранилища), stores/tests/test_open_configured.py,
+    # server/tests/test_server_storage_sqlite.py, cli/tests/test_cli_storage.py.
+    "storage.threads": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
+    "storage.agent": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
+    "storage.ensure_schema": "накат схемы при открытии в gc-stores; покрытие в stores/tests/test_open_configured",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
     "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
+    "thread_store.inbox_poll_seconds": "частота опроса входящего потока треда, не путь исполнения; покрытие в test_inbox",
+    "thread_store.retry.max_attempts": "политика повтора записи при недоступности хранилища, не путь исполнения; покрытие в threads/test_session_writer",
+    "thread_store.retry.initial_delay_sec": "пауза повтора записи в хранилище; покрытие в threads/test_session_writer",
+    "thread_store.retry.backoff_factor": "рост пауз повтора записи в хранилище; покрытие в threads/test_session_writer",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
     # --- режим разрешений ----------------------------------------------------
     #
@@ -758,6 +775,11 @@ NOT_IN_MATRIX = {
     "os_backend.sandbox.extra_ro": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.fetch_url_execute_on": "где качает exec_fetch_url; покрытие в tools/exec/test_remote_fetch.py и test_fetch_url.py",
     "os_backend.provision_skills": "копия скиллов в среду исполнения; покрытие в skills/test_remote_skills_provision.py",
+    # Имя проекта для хранилищ агента в базе: файловое хранилище им не
+    # пользуется (память — в .gc проекта), поведение рана не меняется.
+    "agent.project_id": "имя проекта для хранилищ в базе; покрытие в test_agent_store_project",
+    "agent.role": "роль запуска в хранилище агента в базе (ставит сервер); покрытие в test_agent_store_roles",
+    "agent.special_instructions_role": "вариант специнструкций роли (фасад Chat Completions); покрытие в test_agent_store_roles",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
     # эталон на этой же ветке. Паритет async/sync того же координатора уже
@@ -807,7 +829,7 @@ NOT_IN_MATRIX = {
     "assign.summary": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.text_answer_judge": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.vision": "выбор модели: харнесс маршрутизирует по agent.model",
-    "level": "выбор модели: харнесс маршрутизирует по agent.model",
+    "model": "выбор модели: харнесс маршрутизирует по agent.model",
     "profile": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.default": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.light": "выбор модели: харнесс маршрутизирует по agent.model",
@@ -892,24 +914,6 @@ NOT_IN_MATRIX = {
     "acp.todo_reminder_steps": "только ACP",
     "acp.confirm_timeout_sec": "только ACP: ожидание session/request_permission",
     "tui.finish_gate_mode": "только TUI",
-    "chat_api.host": "только процесс gc-chat",
-    "chat_api.port": "только процесс gc-chat",
-    "chat_api.auth_token": "только процесс gc-chat",
-    "chat_api.cors_origins": "только процесс gc-chat",
-    "chat_api.launch_root": "только процесс gc-chat",
-    "chat_api.text_answer_mode": "только процесс gc-chat",
-    "chat_api.finish_gate_mode": "только процесс gc-chat",
-    "chat_api.todo_reminder_steps": "только процесс gc-chat",
-    "a2a.host": "только процесс gc-a2a",
-    "a2a.port": "только процесс gc-a2a",
-    "a2a.public_url": "только процесс gc-a2a",
-    "a2a.auth_token": "только процесс gc-a2a",
-    "a2a.launch_root": "только процесс gc-a2a",
-    "a2a.name": "только процесс gc-a2a",
-    "a2a.description": "только процесс gc-a2a",
-    "a2a.text_answer_mode": "только процесс gc-a2a",
-    "a2a.finish_gate_mode": "только процесс gc-a2a",
-    "a2a.todo_reminder_steps": "только процесс gc-a2a",
     "todo.reminder_steps": (
         "напоминание чеклиста; матрица гоняет CLI и этот лист не "
         "переключает. Канал Responses пишет его в runtime"
@@ -954,7 +958,7 @@ NOT_IN_MATRIX = {
     # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
     # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,
     # `test_turn_summary_segment.py`.
-    "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
+    "agent_edits.trace_diff_preview_lines": "только TUI: свёртка инлайн-диффа в ленте",
     "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
     "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
     # Запись журнала правок по режиму запуска: пишет отдельный канал (журнал и
@@ -994,6 +998,8 @@ NOT_IN_MATRIX = {
     "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
     "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
+    "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
+    "tui.show_reasoning": "не ход агента: только показ рассуждений в живой ленте TUI; покрытие — tui/test_trace_thoughts",
 }
 
 
@@ -1273,7 +1279,19 @@ async def run_case(
             value = value.format(work=work)
         overrides[path] = value
 
-    backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
+    tail = SUMMARY_TAIL
+    if (
+        case.overrides.get("summary.chat_completions_summary_trigger_chars", 0)
+        > 0
+    ):
+        # Successful compaction cases need structured auxiliary responses.
+        tail = [
+            assistant_text(
+                valid_summary_xml_for_tests(seed="previous dialogue")
+            )
+            for _ in range(40)
+        ]
+    backend = install(monkeypatch, ScriptedBackend([*TURNS, *tail]))
     result: Dict[str, Any] = {
         "id": case.id,
         "area": case.area,
@@ -1318,9 +1336,13 @@ async def run_case(
     result["backend_calls"] = len(getattr(backend, "calls", []))
 
     try:
-        from gc_core.thread_store import load_thread_meta, resolve_threads_dir
+        from gc_core.thread_store import resolve_threads_dir
+        from gc_testkit.develop_files import load_thread_meta
 
         meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
+        # Намеренно новые ключи (итог хода в runtime и т. п.) эталон develop
+        # не знает — правило одно с паритетом локального рантайма.
+        meta = strip_intended_meta_keys(meta)
         result["meta"] = strip_volatile(
             {
                 k: v

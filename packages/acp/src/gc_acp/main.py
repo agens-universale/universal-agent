@@ -33,6 +33,7 @@ from gc_core.constants.tool_names import (
 )
 from gc_core.onboarding import explain_broken_config
 from gc_core.settings import LoadedSettings
+from gc_core.stores import files_only_rejection
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
 from gc_acp.facade import AcpFacade
@@ -157,7 +158,11 @@ apply_acp_turn_contract = apply_acp_runtime_defaults
 
 
 def backend_rejection(loaded: Any) -> str | None:
-    """Harbor и неизвестный os_backend — до цикла протокола."""
+    """Harbor, неизвестный os_backend и хранилище в базе — до цикла
+    протокола."""
+    storage = files_only_rejection(loaded, program="gc-acp")
+    if storage is not None:
+        return storage
     try:
         kind = parse_os_backend_kind(loaded)
     except ValueError as exc:
@@ -199,7 +204,7 @@ async def _create_agent(
     auth_connector: Any,
     tools_cache: Any,
     os_backend: Any,
-    level_provider: Any = None,
+    choice_provider: Any = None,
 ) -> AsyncAgent:
     return await AsyncAgent.create(
         loaded,
@@ -207,7 +212,7 @@ async def _create_agent(
         tools_cache=tools_cache,
         os_backend=os_backend,
         force_legacy=cli_forces_legacy_model(loaded),
-        level_provider=level_provider,
+        choice_provider=choice_provider,
     )
 
 
@@ -216,7 +221,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
     Свои флаги — ``--config``, ``--profile`` (пустой args у VS Code и
     ``--profile acp`` в его настройках) и флаги-настройки gc-cli
-    (``--model``, ``--completions_url``, ``--level``). ``--путь.настройки``
+    (``--model``, ``--completions_url``). ``--путь.настройки``
     — правка конфига, как у gc-cli; незнакомый путь — ошибка. Остальное
     клиенты дописывают сами (JetBrains — позиционный ``acp``,
     ``--experimental``): такие токены пропускаются (``foreign_flags``).

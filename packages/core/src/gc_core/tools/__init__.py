@@ -14,6 +14,7 @@ from gc_core.execution.contracts import (
     ToolResult,
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
+from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.execution.tool_schema import apply_openai_strict_parameters
 from gc_core.security.call_scope import call_scope, current_call
 from gc_core.security.permission_mode import OFFERED_IN_MODE_KEY
@@ -37,7 +38,6 @@ from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.user_stop import (
     UserStopInterrupt,
     await_cancelled,
-    bind_tool_call,
     current_user_stop,
 )
 
@@ -241,6 +241,16 @@ async def abuild_tools_data(
         tools_cache=tools_cache,
         os_backend=os_backend,
     )
+    app = settings_of(settings)
+    if subagents_enabled(app.agent.use_local_subagents):
+        from gc_core.tools.subagents.registry import (
+            aprepare_subagent_definitions,
+        )
+
+        # Определения из хранилища агента — асинхронно и заранее: досборка
+        # ниже и диспетчер тулов (``is_subagent_tool`` на каждом вызове, в
+        # любом api_mode) синхронные, свой реестр они берут готовым.
+        await aprepare_subagent_definitions(settings, logger=logger)
     return _finish_tools_data(
         tools_data,
         mcp_tools_data,

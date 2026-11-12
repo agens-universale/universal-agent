@@ -1,12 +1,67 @@
 """Нативный grep-рецепт: имена файлов в выводе, старт-симлинк, фильтр до обрезки."""
 
+import pytest
+
+from gc_core.backends.runtime_probe import RuntimeUnavailable
+from gc_core.user_stop import UserStopInterrupt
 from gc_core.utils.native_fs_search import (
     _build_find_prune_argv,
+    alocate_native_grep_matches,
     arun_native_grep,
 )
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
 
 PLAN = NativeGrepPlan(fixed=True, pattern="KEY", case_insensitive=False)
+
+
+async def test_native_match_locator_converts_utf8_byte_offsets():
+    backend = _Backend(stdout="6:KEY\n\n2:KEY\n")
+
+    spans = await alocate_native_grep_matches(
+        backend, ["éééKEY", "x", "zzKEY"], PLAN
+    )
+
+    assert spans == [(3, 6), None, (2, 5)]
+
+
+async def test_native_match_locator_skips_oversized_input_rows():
+    backend = _Backend(stdout="0:KEY\n")
+
+    spans = await alocate_native_grep_matches(
+        backend, ["é" * 33000, "KEY"], PLAN
+    )
+
+    assert spans == [None, (0, 3)]
+
+
+async def test_native_match_locator_rejects_spliced_capture():
+    backend = _Backend(stdout="0:" + "N" * 600 + "\n")
+    backend._res.stdout_hit_capture_cap = True
+
+    spans = await alocate_native_grep_matches(
+        backend,
+        ["N" * 1000],
+        NativeGrepPlan(fixed=True, pattern="N" * 1000, case_insensitive=False),
+    )
+
+    assert spans == [None]
+
+
+@pytest.mark.parametrize(
+    "error", [UserStopInterrupt(kind="exec"), RuntimeUnavailable()]
+)
+async def test_native_match_locator_propagates_control_failures(
+    monkeypatch, error
+):
+    backend = _Backend()
+
+    def stopped(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(backend, "exec_argv", stopped)
+
+    with pytest.raises(type(error)):
+        await alocate_native_grep_matches(backend, ["KEY"], PLAN)
 
 
 class _Res:
@@ -55,6 +110,35 @@ async def _run(backend, *, max_matches=10, allow_path=None):
         is_dir_target=True,
         allow_path=allow_path,
     )
+
+
+@pytest.mark.parametrize(
+    "error", [UserStopInterrupt(kind="exec"), RuntimeUnavailable()]
+)
+@pytest.mark.parametrize("search", ["main", "prefilter"])
+async def test_native_search_propagates_control_failures(
+    monkeypatch, error, search
+):
+    backend = _Backend()
+
+    def fail(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(backend, "exec", fail)
+    with pytest.raises(type(error)) as caught:
+        if search == "main":
+            await _run(backend)
+        else:
+            await _prefilter(backend)
+    assert caught.value is error
+
+
+async def test_prefilter_propagates_stop_result():
+    backend = _Backend()
+    backend._res.stopped_by_user = True
+
+    with pytest.raises(UserStopInterrupt):
+        await _prefilter(backend)
 
 
 def test_find_follows_symlinked_start_path():

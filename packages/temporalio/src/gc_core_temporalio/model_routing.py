@@ -6,7 +6,8 @@ from gc_core.model_router import ModelRouter
 def public_router_identity(router):
     override = router._unbound_override
     return {
-        "level": router.active_level(),
+        # цель: уровень или алиас
+        "level": router.active_target(),
         "force_legacy": router.force_legacy,
         "unbound_override": None
         if override is None
@@ -35,7 +36,7 @@ def materialize_router_identity(identity, ctx):
         raise ValueError("Router identity differs from pinned policy")
     router = ModelRouter(
         ctx,
-        level_provider=lambda: identity["level"],
+        choice_provider=lambda: identity["level"],
         breaker=ctx.model_router.breaker,
         force_legacy=identity["force_legacy"],
         is_subagent_child=ctx.model_router.is_subagent_child,

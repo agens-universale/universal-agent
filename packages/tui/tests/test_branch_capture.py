@@ -1,5 +1,7 @@
 """При создании новой сессии в git-проекте ветка пишется в tui_meta.branch."""
 
+from gc_testkit.develop_files import meta_of
+
 import pytest
 from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -24,9 +26,11 @@ async def test_branch_captured_on_new_session(tmp_path, monkeypatch):
         await pilot.pause()
         tid = pilot.app.tui_state.active_task_id
         assert tid is not None
-        meta = FileTaskStore(
-            threads_dir=str(tmp_path), system="cli"
-        ).get_task_meta(tid)
+        meta = meta_of(
+            FileTaskStore(threads_dir=str(tmp_path), system="cli").get_record(
+                tid
+            )
+        )
         assert meta.get("tui", {}).get("branch") == "feat/captured"
 
 

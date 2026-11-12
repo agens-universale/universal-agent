@@ -5,36 +5,83 @@
 они отвечают по ресурсам ``skills`` хранилища агента: корни слоёв — ``system``,
 ``user``, ``project``, пути — ``<слой>/<скилл>/…`` с разделителем ``/``.
 
-Скрипты скиллов отсюда не запускаются: скрипту нужен файл в среде исполнения,
-а хранилище отдаёт только текст. ``resolve_script`` отвечает понятным отказом.
+Скрипту нужен файл в среде исполнения, а хранилище отдаёт байты: перед
+запуском файлы скилла выкладываются через ``os_backend`` в
+``<launch_root>/.gc/skills_runtime/<слой>/<скилл>/<версия>`` с манифестом
+``.manifest.sha256`` — как выкладка скиллов в docker/ssh (``provision.py``).
+
+* Версия — отпечаток набора файлов: файл, удалённый из хранилища, в новой
+  версии не появится (удалять в среде исполнения бэкенд не умеет).
+* Копию модель может править (каталог открыт на запись), поэтому перед каждым
+  запуском файлы сверяются с хранилищем по sha256, правленые выкладываются
+  заново; неизменённый скилл не копируется.
+* Имена файлов приходят из своего хранилища (база, S3 с загрузкой
+  пользователями): путь вне каталога скилла — отказ, а не запись мимо него.
 """
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import posixpath
 from typing import Any, AsyncIterator, Dict
 
-from gc_core.agent_store import AgentResource, AgentStore, DirEntry
+from gc_core.agent_store import (
+    AgentStore,
+    ProjectKey,
+    ResourceInfo,
+    decode_text,
+    needs_project,
+)
 from gc_core.tools.skills.registry import (
     SkillsRegistry,
     disabled_skills_from_config,
 )
 
 LAYERS = ("system", "user", "project")
+_VERSION_CHARS = 16
+
+logger = logging.getLogger(__name__)
+
+
+def relative_inside(path: str) -> str:
+    """Путь из хранилища — относительный и не выходит наверх; иначе
+    ``ValueError``: имя записи не выводит выкладку за каталог скилла."""
+    normalized = posixpath.normpath(path.replace("\\", "/"))
+    head = normalized.split("/", 1)[0]
+    if normalized.startswith("/") or head in ("..", ".") or ":" in head:
+        raise ValueError(f"файл скилла вне каталога скилла: {path!r}")
+    return normalized
+
+
+#: Слой ``project`` без проекта рана: такого слоя нет.
+_NO_LAYER = object()
 
 
 class StoreSkillFiles:
-    """Дерево ``skills`` хранилища агента как бэкенд для реестра скиллов."""
+    """Дерево ``skills`` хранилища агента как бэкенд для реестра скиллов;
+    слой ``project`` — скиллы проекта ``project`` (без него слоя нет)."""
 
-    def __init__(self, store: AgentStore) -> None:
+    def __init__(
+        self, store: AgentStore, project: ProjectKey | None = None
+    ) -> None:
         self._store = store
+        self._project = project
 
-    def _resource(self, path: str) -> AgentResource:
-        return AgentResource("skills", path.strip("/"))
+    def scope(self, path: str) -> ProjectKey | object | None:
+        """Проект для пути дерева; ``_NO_LAYER`` — слой проекта без
+        проекта."""
+        if not needs_project("skill", path):
+            return None
+        return self._project if self._project is not None else _NO_LAYER
 
-    def _entries(self, path: str) -> list[DirEntry] | None:
+    async def _entries(self, path: str) -> list[ResourceInfo] | None:
+        name = path.strip("/")
+        project = self.scope(name)
+        if project is _NO_LAYER:
+            return None
         try:
-            return self._store.list_dir(self._resource(path))
+            return await self._store.list("skill", name, project=project)
         except (FileNotFoundError, NotADirectoryError):
             return None
 
@@ -43,15 +90,19 @@ class StoreSkillFiles:
         return posixpath.join(*parts)
 
     async def is_dir(self, path: str) -> bool:
-        return self._entries(path) is not None
+        return await self._entries(path) is not None
 
     async def is_file(self, path: str) -> bool:
         parent, name = posixpath.split(path.strip("/"))
-        return (name, "file") in (self._entries(parent) or [])
+        return any(
+            entry.name == name and entry.type == "file"
+            for entry in await self._entries(parent) or []
+        )
 
     async def listdir(self, path: str) -> list:
         return [
-            (name, kind == "dir") for name, kind in self._entries(path) or []
+            (entry.name, entry.type == "dir")
+            for entry in await self._entries(path) or []
         ]
 
     async def iter_files(
@@ -60,34 +111,160 @@ class StoreSkillFiles:
         stack = [""]
         while stack:
             rel = stack.pop(0)
-            for name, kind in self._entries(posixpath.join(path, rel)) or []:
-                child = posixpath.join(rel, name) if rel else name
-                if kind == "dir":
+            entries = await self._entries(posixpath.join(path, rel))
+            for entry in entries or []:
+                child = posixpath.join(rel, entry.name) if rel else entry.name
+                if entry.type == "dir":
                     stack.append(child)
                 else:
                     yield child
 
+    async def read_bytes(self, path: str) -> bytes:
+        """Байты файла; нет — ``FileNotFoundError``, как у файлового
+        бэкенда."""
+        name = path.strip("/")
+        project = self.scope(name)
+        data = None
+        if project is not _NO_LAYER:
+            data = await self._store.read("skill", name, project=project)
+        if data is None:
+            label = self._store.label(
+                "skill",
+                name,
+                project=None if project is _NO_LAYER else project,
+            )
+            raise FileNotFoundError(label)
+        return data
+
     async def read(self, path: str) -> str:
-        return self._store.read_text(self._resource(path))
+        """Текст файла; нет — ``FileNotFoundError``, как у файлового бэкенда."""
+        return decode_text(await self.read_bytes(path))
 
 
 class StoreSkillsRegistry(SkillsRegistry):
-    """Реестр скиллов своего хранилища агента: всё, кроме запуска скриптов."""
+    """Реестр скиллов своего хранилища агента; скрипты — после выкладки
+    скилла в среду исполнения."""
+
+    def __init__(
+        self,
+        *,
+        store: AgentStore,
+        settings: Any = None,
+        runtime_backend: Any = None,
+        project: ProjectKey | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self._files = StoreSkillFiles(store, project)
+        super().__init__(backend=self._files, **kwargs)
+        self._store = store
+        self._settings = settings
+        self._runtime = runtime_backend
 
     async def resolve_script(
         self, skill_id: str, script_name: str
     ) -> Dict[str, Any]:
         skill = await self._get_skill(skill_id)
-        raise FileNotFoundError(
-            f"Скрипты скилла '{skill.id}' лежат в хранилище агента и в среде "
-            "исполнения не запускаются: используйте инструкции, references и "
-            "assets скилла."
+        normalized = (script_name or "").strip().replace("\\", "/")
+        if normalized.startswith("scripts/"):
+            normalized = normalized[len("scripts/") :]
+        if not normalized or normalized not in skill.scripts:
+            raise FileNotFoundError(
+                f"Script '{script_name}' not found for skill '{skill_id}'. "
+                f"Available scripts: {skill.scripts}"
+            )
+        root = await self._aprovision(skill)
+        return {
+            "path": posixpath.join(root, "scripts", normalized),
+            "script_name": normalized,
+            "available_scripts": skill.scripts,
+        }
+
+    async def _aprovision(self, skill: Any) -> str:
+        """Выложить файлы скилла в среду исполнения; вернуть его корень там."""
+        from gc_core.tools.skills import provision
+
+        launch_root = (
+            provision._remote_root(self._settings, self._runtime)
+            if self._runtime is not None
+            else None
         )
+        if not launch_root:
+            raise FileNotFoundError(
+                f"Скрипты скилла '{skill.id}' лежат в хранилище агента, а "
+                "среды исполнения, куда их выложить, у этого реестра нет: "
+                "используйте инструкции, references и assets скилла."
+            )
+        files = [
+            (
+                relative_inside(rel),
+                await self._abytes(posixpath.join(skill.root_path, rel)),
+            )
+            async for rel in self._backend.iter_files(skill.root_path)
+        ]
+        files.sort(key=lambda item: item[0])
+        digest = provision._digest(files)
+        target = posixpath.join(
+            launch_root,
+            provision.RUNTIME_SUBDIR,
+            relative_inside(skill.root_path),
+            digest[:_VERSION_CHARS],
+        )
+        manifest = posixpath.join(target, provision.MANIFEST_NAME)
+        stale = files
+        if await provision._remote_manifest(self._runtime, manifest) == digest:
+            stale = await self._changed_in_copy(target, files)
+            if not stale:
+                return target
+            logger.warning(
+                "skills_runtime: %s изменён после выкладки (%s) — "
+                "выкладываю заново",
+                target,
+                ", ".join(rel for rel, _data in stale),
+            )
+        for rel, data in stale:
+            path = posixpath.join(target, rel)
+            await self._runtime.makedirs(posixpath.dirname(path))
+            await self._runtime.write_bytes(path, data)
+        # Манифест — последним: незаконченная выкладка повторится.
+        await self._runtime.makedirs(target)
+        await self._runtime.write(manifest, digest + "\n")
+        return target
+
+    async def _changed_in_copy(
+        self, target: str, files: list[tuple[str, bytes]]
+    ) -> list[tuple[str, bytes]]:
+        """Файлы выложенной копии, которые разошлись с хранилищем."""
+        changed = []
+        for rel, data in files:
+            try:
+                same = (
+                    await self._runtime.sha256_bytes(
+                        posixpath.join(target, rel)
+                    )
+                    == hashlib.sha256(data).hexdigest()
+                )
+            except OSError:
+                same = False
+            if not same:
+                changed.append((rel, data))
+        return changed
+
+    async def _abytes(self, name: str) -> bytes:
+        return await self._files.read_bytes(name)
 
 
-def store_skills_registry(store: AgentStore, settings: Any) -> SkillsRegistry:
+def store_skills_registry(
+    store: AgentStore,
+    settings: Any,
+    *,
+    runtime_backend: Any = None,
+    project: ProjectKey | None = None,
+) -> SkillsRegistry:
     return StoreSkillsRegistry(
-        backend=StoreSkillFiles(store),
+        store=store,
+        settings=settings,
+        runtime_backend=runtime_backend,
+        project=project,
         system_root="system",
         user_root="user",
         project_root="project",
@@ -99,5 +276,6 @@ __all__ = [
     "LAYERS",
     "StoreSkillFiles",
     "StoreSkillsRegistry",
+    "relative_inside",
     "store_skills_registry",
 ]

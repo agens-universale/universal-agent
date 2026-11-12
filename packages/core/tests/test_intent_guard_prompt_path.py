@@ -3,13 +3,24 @@
 fallback — mirrors system/summary prompt loading so non-editable installs (Harbor
 image) can point at the bundled prompt instead of fail-opening the gate."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
+from gc_core.agent_store import FileAgentStore
 from gc_core.intent_guard.final_report_consistency import (
     DEFAULT_INTENT_GUARD_PROMPT_PATH,
-    _load_guard_prompt,
+    aload_guard_prompt,
 )
+from gc_testkit.settings import make_settings
+
+
+def _load_guard_prompt(path: str | None = None) -> str:
+    """Промпт finish gate по пути из конфига (``None`` — пакетный)."""
+    settings = make_settings(
+        {"paths.chat_completions_intent_guard_prompt_path": path or ""}
+    )
+    return asyncio.run(aload_guard_prompt(FileAgentStore(settings)))
 
 
 def test_uses_config_provided_path(tmp_path):

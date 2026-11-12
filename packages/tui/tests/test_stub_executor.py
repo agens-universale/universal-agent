@@ -7,7 +7,7 @@ from gc_testkit.tui_fixtures.stub_executor import StubExecutor
 
 def test_stub_executor_writes_full_dialog(tmp_path):
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli")
-    fake.run(["расскажи об этом проекте"], thread_id="t1")
+    fake.record(["расскажи об этом проекте"], thread_id="t1")
 
     data = (tmp_path / "data_cli_t1.jsonl").read_text(encoding="utf-8")
     lines = [json.loads(l) for l in data.strip().split("\n")]

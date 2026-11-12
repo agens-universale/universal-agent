@@ -13,7 +13,7 @@ from gc_core.persistence.schema import (
     meta_has_persisted_agent_state,
     validate_thread_meta_for_load,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_state_into_meta, shared_from_meta
 from gc_core.states import State
 
 
@@ -51,7 +51,7 @@ def test_thread_meta_mapper_shared_from_meta_v2():
             "notes_md": "n",
         },
     }
-    shared = ThreadMetaMapper.shared_from_meta(meta)
+    shared = shared_from_meta(meta)
     assert shared is not None
     assert shared.working_memory["state"] == "in progress"
     assert shared.notes_md == "n"
@@ -63,7 +63,7 @@ def test_thread_meta_mapper_rejects_legacy_top_level_memory_files():
         "memory_files": {"journal": "x"},
     }
     with pytest.raises(StateSchemaError, match="memory_files"):
-        ThreadMetaMapper.shared_from_meta(meta)
+        shared_from_meta(meta)
 
 
 def test_thread_meta_mapper_rejects_legacy_shared_memory_files():
@@ -72,19 +72,24 @@ def test_thread_meta_mapper_rejects_legacy_shared_memory_files():
         "shared": {"memory_files": {"journal": "x"}, "working_memory": {}},
     }
     with pytest.raises(StateSchemaError, match="memory_files"):
-        ThreadMetaMapper.shared_from_meta(meta)
+        shared_from_meta(meta)
 
 
-def test_thread_meta_mapper_rejects_meta_with_agent_state_but_no_schema_version():
+def test_agent_state_with_a_foreign_schema_version_is_refused():
+    """Явно чужая версия схемы состояния — отказ при загрузке. Отсутствие
+    версии — нет: её ставит хранилище (как и прежний путь через
+    ``meta_from_record``), а файловое — штампом при записи."""
     meta = {
         "shared": {"working_memory": {"goal": "x"}},
+        "state_schema_version": "v1",
     }
     with pytest.raises(StateSchemaError, match="state_schema_version"):
-        ThreadMetaMapper.shared_from_meta(meta)
+        shared_from_meta(meta)
+    assert shared_from_meta({"shared": {"working_memory": {"goal": "x"}}})
 
 
 def test_thread_meta_mapper_allows_empty_meta():
-    assert ThreadMetaMapper.shared_from_meta({}) is None
+    assert shared_from_meta({}) is None
 
 
 def test_meta_has_persisted_agent_state_v2_signals_only():
@@ -114,7 +119,7 @@ def test_merge_state_into_meta_writes_v2_shared():
     state.shared.working_memory = {"constraints": "no legacy"}
     state.user_intent_log = deserialize_list([_user_ask_record("done")])
     state.user_turn_seq = 1
-    meta = ThreadMetaMapper.merge_state_into_meta({}, state)
+    meta = merge_state_into_meta({}, state)
     assert meta["state_schema_version"] == STATE_SCHEMA_VERSION
     assert meta["shared"]["working_memory"]["constraints"] == "no legacy"
     assert "memory_files" not in meta["shared"]

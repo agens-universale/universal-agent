@@ -143,16 +143,16 @@ async def apersist_subagent_trace(
             # молчаливая запись мимо контракта уже была однажды (см. докстроку
             # `FileThreadStore.archive_and_replace`).
             return None
-        from gc_core.thread_store_file import FileThreadStore
+        from gc_core.threads.file_store import FileThreadStore
 
         store = FileThreadStore(ident.threads_dir)
 
-    from gc_core.thread_store_async import athread_store
+    from gc_core.thread_store import append_subagent_record
+    from gc_core.threads.models import ThreadKey
 
-    port = athread_store(store)
-    return await port.aappend_subagent_trace(
-        ident.system_id,
-        ident.thread_id,
+    return await append_subagent_record(
+        store,
+        ThreadKey(system=ident.system_id, thread=ident.thread_id),
         parent_call_id=ident.parent_call_id,
         child_run_id=ident.child_run_id,
         kind=kind,

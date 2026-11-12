@@ -7,7 +7,7 @@ from gc_core.summarize.memory_suggestions import arequest_patch_replace
 from gc_core.summarize.prompt_loading import (
     MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER,
     MEMORY_PATCH_SUBAGENT_GUIDANCE_TEXT,
-    load_memory_patch_replace_prompt,
+    render_memory_patch_prompt,
 )
 from gc_core.summarize.summary_spec import (
     MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
@@ -24,6 +24,11 @@ from gc_testkit.settings import fake_ctx
 
 def _prompt_path() -> str:
     return str(ASSETS / "prompts" / "chat_completions_memory_patch_replace.md")
+
+
+def load_memory_patch_replace_prompt(path: str, *, subagent: bool = False):
+    raw = Path(path).read_text(encoding="utf-8")
+    return render_memory_patch_prompt(raw, label=path, subagent=subagent)
 
 
 def test_patch_replace_template_has_placeholders_on_disk():

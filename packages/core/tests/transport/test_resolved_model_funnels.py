@@ -8,6 +8,7 @@
 
 import json
 import logging
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -38,10 +39,17 @@ def _canonical_once(processing_module, *args, **kwargs):
 
 
 def _serve_main_trace(router) -> None:
-    """Main-трейс берёт модель через `ModelRouter.resolve_main_at_level` (уровень
+    """Main-трейс берёт модель через `ModelRouter.resolve_main_at` (уровень
     вызова). У фейка без уровней это тот же `resolve("main")` — счёт вызовов
-    `resolve` в проверках остаётся прежним."""
-    router.resolve_main_at_level = lambda level, **_kw: router.resolve("main")
+    `resolve` в проверках остаётся прежним. Предохранителя у фейка нет —
+    права на пробу тоже."""
+    router.resolve_main_at = lambda level, **_kw: router.resolve("main")
+    router.probing = _no_probe
+
+
+def _no_probe(_resolved):
+    """У фейкового роутера предохранителя нет — и права на пробу тоже."""
+    return nullcontext(False)
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -266,12 +274,13 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
     )
 
     router = SimpleNamespace(
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="light-model",
                 url="http://alias.local/v1/chat/completions",
             )
-        )
+        ),
     )
     ctx = fake_ctx(
         {
@@ -368,11 +377,12 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
     )
 
     router = SimpleNamespace(
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 backend_overrides={"use_ssl": False, "request_timeout_sec": 42}
             )
-        )
+        ),
     )
     ctx = fake_ctx(
         {
@@ -416,7 +426,9 @@ _JUDGE_JSON = json.dumps(
 
 
 def _router_ctx(**cfg_overrides):
-    router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
+    router = SimpleNamespace(
+        probing=_no_probe, resolve=Mock(return_value=_resolved())
+    )
     cfg = {
         "backend.completions_url": "http://backend.local/v1/chat/completions",
         "backend.request_timeout_sec": 600,
@@ -553,19 +565,21 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
 
 def test_summary_compress_declares_own_consumer(monkeypatch):
     from gc_core.summarize.summary_llm_steps import acompress_summary_text
+    from gc_core.summarize.summary_spec import assemble_summary_xml
 
-    _patch_llm_transport(monkeypatch, "short")
+    short = assemble_summary_xml({"task_and_context": "short"})
+    _patch_llm_transport(monkeypatch, short)
     ctx, router = _router_ctx()
     out = run_coro(
         acompress_summary_text(
             ctx=ctx,
             state=_state(),
-            summary_text="x" * 100,
-            max_chars=10,
+            summary_text=assemble_summary_xml({"task_and_context": "longer"}),
+            max_chars=len("short"),
             max_tokens=50,
         )
     )
-    assert out == "short"
+    assert out == short
     router.resolve.assert_called_once_with("summary")
 
 
@@ -646,8 +660,8 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
         as_coro(_fake_request_summary_text),
     )
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        as_coro(lambda _store: "prompt"),
     )
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
@@ -720,7 +734,8 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     )
 
     router = SimpleNamespace(
-        resolve=Mock(return_value=_resolved(model="light-model"))
+        probing=_no_probe,
+        resolve=Mock(return_value=_resolved(model="light-model")),
     )
     _serve_main_trace(router)
     ctx = fake_ctx(
@@ -791,6 +806,7 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
     )
 
     router = SimpleNamespace(
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="corp-model",
@@ -801,7 +817,7 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
                     "request_timeout_sec": 42,
                 },
             )
-        )
+        ),
     )
     _serve_main_trace(router)
     ctx = fake_ctx(
@@ -927,6 +943,7 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     )
 
     router = SimpleNamespace(
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="corp-model",
@@ -935,7 +952,7 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
                     "request_timeout_sec": 42,
                 },
             )
-        )
+        ),
     )
     _serve_main_trace(router)
     ctx = fake_ctx(
@@ -1078,6 +1095,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
     )
 
     router = SimpleNamespace(
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="tiny-model",
@@ -1087,7 +1105,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
                     "chat_completions_min_response_tokens": 256,
                 },
             )
-        )
+        ),
     )
     _serve_main_trace(router)
     ctx = fake_ctx(
@@ -1143,11 +1161,12 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
     )
 
     router = SimpleNamespace(
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 backend_overrides={"retry_embedded_choice_errors": False}
             )
-        )
+        ),
     )
     ctx = fake_ctx(
         {
@@ -1274,7 +1293,7 @@ def test_openai_strict_schema_is_read_per_model_of_the_call(tmp_path):
     cfg = AppConfig.model_validate(raw)
     level = {"value": "light"}
     ctx = run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: level["value"])
+        rc.acreate_run_context(cfg, choice_provider=lambda: level["value"])
     )
     state = _state(default_model="legacy-model", tools=ctx.tools_spec)
 

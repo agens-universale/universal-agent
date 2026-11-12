@@ -318,8 +318,10 @@ async def test_trace_reaches_a_store_without_files():
     """
     from types import SimpleNamespace
 
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.models import ThreadKey
     from gc_core.tools.subagents.sidecar import apersist_subagent_trace
-    from gc_testkit.memory_thread_store import MemoryThreadStore
+    from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
     store = MemoryThreadStore()
     ctx = SimpleNamespace(
@@ -338,6 +340,9 @@ async def test_trace_reaches_a_store_without_files():
     assert written is not None, (
         "запись не состоялась — гейт снова требует каталог"
     )
-    trace = store.read_subagent_trace("cli", "t1")
+    events = await Threads(store).subagent_events(
+        ThreadKey(system="cli", thread="t1")
+    )
+    trace = [entry.data for entry in events]
     assert len(trace) == 1, trace
     assert trace[0]["parent_call_id"] == "call-1", trace[0]

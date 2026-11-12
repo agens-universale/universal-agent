@@ -20,11 +20,10 @@ from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
     message_raw_payload_chars_for_trigger,
 )
-from gc_core.persistence.live_volume import (
-    bump_live_volume_for_messages,
-    live_volume_from_messages,
-)
+from gc_core.persistence.live_volume import live_volume_from_messages
 from gc_core.summarize.compaction import history_exceeds_summary_trigger
+from gc_core.threads.models import RuntimeStatus
+from gc_core.threads.runtime_rules import bumped_live_volume
 
 
 def _att(n: int, origin: str = ORIGIN_USER) -> dict:
@@ -93,9 +92,8 @@ def test_live_volume_aggregates_count_the_same_weight():
     assert (
         live_volume_from_messages(messages)["live_history_chars"] == expected
     )
-    meta: dict = {}
-    bump_live_volume_for_messages(meta, messages)
-    assert meta["runtime"]["live_history_chars"] == expected
+    runtime = bumped_live_volume(RuntimeStatus(), messages)
+    assert runtime.live_history_chars == expected
 
 
 def test_image_weight_reaches_the_summary_trigger():

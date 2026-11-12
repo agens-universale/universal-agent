@@ -181,7 +181,7 @@ def test_named_routing_judge_binding_resolves_and_validates():
         }
     )
     assert validate_model_sections(cfg) == []
-    router = ModelRouter(cfg, level_provider=lambda: "max")
+    router = ModelRouter(cfg, choice_provider=lambda: "max")
     assert router.resolve("routing_judge").alias == "judge-model"
     with pytest.raises(ValueError, match="assign.routing_judge"):
         validate_model_sections(

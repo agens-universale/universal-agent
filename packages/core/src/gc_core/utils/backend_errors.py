@@ -162,17 +162,17 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
 
 
 def has_payload(msg) -> bool:
-    """True, если в message есть нагрузка: content, tool_calls или reasoning.
+    """Classify transport payload without changing the stored response text.
 
-    content — truthiness как у транспорта (пробел/перевод строки — не пустой
-    стрим: цикл bounce «нужна тула», не ретрай completion). Reasoning —
-    nonempty после strip: пустой CoT не salvage.
+    Content and tool calls retain their existing truthiness semantics.
+    Whitespace-only reasoning does not rescue an incomplete or errored response.
     """
     if not isinstance(msg, dict):
         return False
     if msg.get("content") or msg.get("tool_calls"):
         return True
-    return nonempty_reasoning_text(msg) is not None
+    reasoning = nonempty_reasoning_text(msg)
+    return reasoning is not None and bool(reasoning.strip())
 
 
 def embedded_choice_error(

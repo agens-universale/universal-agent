@@ -420,11 +420,10 @@ async def test_thread_file_link_is_read_through_the_thread_store(tmp_path):
     процесса ни файла, ни каталога."""
     from gc_core.attachments.store import StoreImageStore
     from gc_core.thread_files import is_thread_file_uri
-    from gc_testkit.memory_thread_store import MemoryThreadStore
+    from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
-    store = MemoryThreadStore()
-    image_store = StoreImageStore(store)
-    link = image_store.write_media("cli", "t1", "shot.png", _png())
+    image_store = StoreImageStore(MemoryThreadStore())
+    link = await image_store.awrite_media("cli", "t1", "shot.png", _png())
     state = _state()
     tool = _local_tool(tmp_path, state=state)
     tool._ctx.image_store = image_store
@@ -441,7 +440,9 @@ async def test_thread_file_link_is_read_through_the_thread_store(tmp_path):
     )
     assert missing["ok"] is False
     # Ссылка на файл ЧУЖОГО треда — отказ, даже если файл существует.
-    foreign = image_store.write_media("cli", "other", "secret.png", _png())
+    foreign = await image_store.awrite_media(
+        "cli", "other", "secret.png", _png()
+    )
     denied = json.loads(await tool.acall(path=foreign))
     assert denied["ok"] is False
     assert denied["error"]["type"] == "read_denied"

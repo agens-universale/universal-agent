@@ -2,7 +2,7 @@ from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
     serialize_shared_block,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import shared_from_meta
 from gc_core.states import SharedStateData
 
 
@@ -11,7 +11,7 @@ def test_confirm_rules_round_trips_through_meta():
     shared.confirm_rules["write:/x"] = True
     block = serialize_shared_block(shared)
     assert block["confirm_rules"] == {"write:/x": True}
-    restored = ThreadMetaMapper.shared_from_meta(
+    restored = shared_from_meta(
         {"shared": block, "state_schema_version": "v2"}
     )
     assert restored.confirm_rules == {"write:/x": True}
@@ -22,7 +22,7 @@ def test_shared_defaults_confirm_rules_empty():
 
 
 def _restore(block):
-    return ThreadMetaMapper.shared_from_meta(
+    return shared_from_meta(
         {"state_schema_version": STATE_SCHEMA_VERSION, "shared": block}
     )
 

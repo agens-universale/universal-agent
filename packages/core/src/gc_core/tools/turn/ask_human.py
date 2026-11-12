@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from gc_core.attachments.model import Attachment, chip_of
-from gc_core.attachments.store import commit_to_run_thread
+from gc_core.attachments.store import acommit_to_run_thread
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.execution.ports import port as runtime_port
+from gc_core.execution.turn_clock import human_wait
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -88,28 +89,29 @@ async def _aread_human_response(
     одноразовом потоке: всё, что порт держит привязанным к своему loop —
     очередь, соединение, сессия, — там просто не работало.
     """
-    native_port = runtime_port(ctx, "human_request")
-    if callable(native_port):
-        from gc_core.execution.human import HumanRequest
+    with human_wait(ctx):
+        native_port = runtime_port(ctx, "human_request")
+        if callable(native_port):
+            from gc_core.execution.human import HumanRequest
 
-        result = await native_port(
-            HumanRequest(kind="ask_human", question=question)
-        )
-        return (str(result) if result is not None else "").strip()
-    port = getattr(ctx, "ask_human", None)
-    if callable(port):
-        result = port(question)
-        if inspect.isawaitable(result):
-            result = await result
-        if isinstance(result, HumanAnswer):
-            return result  # картинки ответа: str() их потерял бы
-        return (str(result) if result is not None else "").strip()
-    # Порта нет — читаем stdin, как CLI. Это блокирующий ввод, и нативной
-    # асинхронной формы у него нет; уводим в поток, чтобы не морозить loop
-    # приложения на всё время, пока человек печатает.
-    import asyncio
+            result = await native_port(
+                HumanRequest(kind="ask_human", question=question)
+            )
+            return (str(result) if result is not None else "").strip()
+        port = getattr(ctx, "ask_human", None)
+        if callable(port):
+            result = port(question)
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, HumanAnswer):
+                return result  # картинки ответа: str() их потерял бы
+            return (str(result) if result is not None else "").strip()
+        # Порта нет — читаем stdin, как CLI. Это блокирующий ввод, и нативной
+        # асинхронной формы у него нет; уводим в поток, чтобы не морозить loop
+        # приложения на всё время, пока человек печатает.
+        import asyncio
 
-    return await asyncio.to_thread(_read_stdin_lines)
+        return await asyncio.to_thread(_read_stdin_lines)
 
 
 def _read_stdin_lines() -> str:
@@ -277,6 +279,8 @@ Do not implement until they confirm.
         Ожидание человека не занимает поток пула: встраивающий отвечает через
         свой порт ``ctx.ask_human``, без порта — ``input()`` в потоке.
         """
+        if getattr(self._ctx, "ask_human_suspends", False):
+            return self._suspend(question)
         prepared = self._begin_ask(question)
         if isinstance(prepared, str):
             return prepared  # проверка не прошла — ждать нечего
@@ -303,9 +307,62 @@ Do not implement until they confirm.
             )
             raise
         if isinstance(response, HumanAnswer):
-            self._queue_answer_images(response.attachments)
+            await self._aqueue_answer_images(response.attachments)
             response = _answer_text(response)
         return self._ask_answered(question, via_name, response)
+
+    def _suspend(self, question: Any) -> str:
+        """Канал без живого человека (``ask_human_suspends``): вопрос
+        завершает ход. Ответа здесь не ждём — цикл не пишет вывод этого
+        вызова, а ``state.pending_question`` уходит в состояние треда;
+        следующий ход кладёт ответ выводом того же вызова. Субагент так не
+        умеет: ход родителя посреди его батча не приостановить."""
+        if getattr(self._ctx, "parent_call_id", None):
+            return self._result(
+                ok=False,
+                question=str(question),
+                response="",
+                error={
+                    "type": "question_unavailable",
+                    "message": (
+                        "In this channel only the main agent can ask the "
+                        "user: return the question in your report."
+                    ),
+                },
+            )
+        prepared = self._begin_ask(question)
+        if isinstance(prepared, str):
+            return prepared  # проверка не прошла — ждать нечего
+        question, _via_name = prepared
+        self._state.pending_question = {
+            "call_id": self._call_id,
+            "question": question,
+        }
+        return self._result(ok=True, question=question, response="")
+
+    @staticmethod
+    def answer_output(*, question: str, answer: str | None) -> str:
+        """Вывод вызова приостановившего вопроса: ответ человека или
+        «вопрос закрыт без ответа» (ход начался без ответа)."""
+        if answer is None:
+            return AskHuman._result(
+                ok=False,
+                question=question,
+                response="",
+                error={
+                    "type": "unanswered",
+                    "message": (
+                        "The user did not answer this question and sent a "
+                        "new message instead."
+                    ),
+                },
+            )
+        return AskHuman._result(
+            ok=True,
+            question=question,
+            response=answer.strip() or "(empty response)",
+            hint=_RESPONSE_HINT,
+        )
 
     def _begin_ask(self, question: Any):
         """Проверки, нормализация, событие прогресса и печать вопроса.
@@ -401,7 +458,7 @@ Do not implement until they confirm.
             hint=_RESPONSE_HINT,
         )
 
-    def _queue_answer_images(
+    async def _aqueue_answer_images(
         self, attachments: tuple[Attachment, ...]
     ) -> None:
         """Картинки ответа — в тред и в хвост батча (``state.pending_tool_attachments``).
@@ -414,7 +471,7 @@ Do not implement until they confirm.
         """
         for att in attachments:
             self._state.pending_tool_attachments.append(
-                commit_to_run_thread(self._ctx, att).to_dict()
+                (await acommit_to_run_thread(self._ctx, att)).to_dict()
             )
 
     def _console(self, *values: Any) -> None:

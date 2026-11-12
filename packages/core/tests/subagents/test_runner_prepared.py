@@ -115,7 +115,7 @@ async def test_prepared_runner_preserves_shared_state_usage_and_input(
         "release_run_logger",
     ):
         monkeypatch.setattr(runner_module, name, _forbid)
-    monkeypatch.setattr(runner, "_resolve_subagent_system_prompt", _forbid)
+    monkeypatch.setattr(runner, "_aresolve_subagent_system_prompt", _forbid)
     monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", _forbid)
     monkeypatch.setattr(builtins, "open", _forbid)
     traces = []
@@ -137,7 +137,7 @@ async def test_prepared_runner_preserves_shared_state_usage_and_input(
         assert try_enqueue_user_message(
             ctx, {"role": "user", "content": "extra", "id": "input-1"}
         )
-        assert kwargs["get_pending_messages"]() == [
+        assert await kwargs["get_pending_messages"]() == [
             {"role": "user", "content": "extra", "id": "input-1"}
         ]
         child.shared.working_memory["result"] = "shared"

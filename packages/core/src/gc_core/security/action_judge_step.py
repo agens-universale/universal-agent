@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from typing import Any
 
+from gc_core.agent_store import agent_store_of
 from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
 from gc_core.execution.ports import port
 from gc_core.message_policy.permission_denials import (
@@ -34,6 +35,7 @@ from gc_core.message_policy.user_stop import cancelled_by_user_error
 from gc_core.security.action_judge import (
     EXTERNAL_PROMPT,
     action_blocked,
+    aload_action_judge_prompts,
     build_action_judge_messages,
     build_action_judge_payload,
     has_external_words,
@@ -327,20 +329,29 @@ def _verdict_step(context, state, tool_name, payload):
 
 
 def _judge_messages_step(context, tool_name, payload):
-    """Сообщения судье; под durable инструкции читает хост. Правило о
-    внешнем запросе проба приносит, только если шаг его попросил."""
-    prompts = None
+    """Сообщения судье: инструкции — из хранилища агента, под durable их
+    читает хост. Правило о внешнем запросе приходит, только если в запросе
+    есть такие записи."""
+    external = has_external_words(payload)
     if _durable(context.ctx):
         facts = yield probe_step(
             context.ctx,
             GuardProbeRequest(
                 "action_prompts",
                 tool_name,
-                EXTERNAL_PROMPT if has_external_words(payload) else "",
+                EXTERNAL_PROMPT if external else "",
                 str(context.launch_root or ""),
             ),
         )
         prompts = facts.data
+    else:
+        prompts = yield AwaitOnCaller(
+            partial(
+                aload_action_judge_prompts,
+                agent_store_of(context.ctx),
+                external=external,
+            )
+        )
     return build_action_judge_messages(payload, prompts=prompts)
 
 

@@ -9,14 +9,13 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
     AgentStore,
+    Prompt,
     agent_store_of,
-    read_required_text,
+    aread_required,
 )
 from gc_core.auto_routing.log_events import log_routing_pair_judge
 from gc_core.auto_routing.pair_judge import (
@@ -24,7 +23,6 @@ from gc_core.auto_routing.pair_judge import (
     SOURCE_JUDGE,
     PairChoice,
     build_pair_card,
-    default_pair_judge_prompt_path,
     parse_pair_score,
 )
 from gc_core.auto_routing.pair_judge import (
@@ -43,7 +41,6 @@ from gc_core.execution.resources import (
     aload_prompt_resource,
 )
 from gc_core.runtime_notices import maybe_push_pair_prompt_notice
-from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_judge_max_tokens,
@@ -56,19 +53,20 @@ CONSUMER = "routing_judge"
 PAIR_REQUEST_LABEL = "routing_judge_pair"
 
 
-def _load_judge_prompt(
-    prompt_path: Optional[str] = None,
-    *,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-) -> str:
-    path = prompt_path or default_pair_judge_prompt_path()
-    prompt = read_required_text(
-        store,
-        AgentResource("prompt", "routing_pair_judge", path),
-        missing=f"Routing judge prompt file not found: {path}",
+async def aload_judge_prompt(store: AgentStore) -> str:
+    """Инструкция судьи пары (у файлового хранилища —
+    ``paths.chat_completions_routing_pair_judge_prompt_path`` или пакетная)."""
+    label = store.label("prompt", Prompt.ROUTING_PAIR_JUDGE)
+    prompt = (
+        await aread_required(
+            store,
+            "prompt",
+            Prompt.ROUTING_PAIR_JUDGE,
+            missing=f"Routing judge prompt file not found: {label}",
+        )
     ).strip()
     if not prompt:
-        raise ValueError(f"Routing judge prompt file is empty: {path}")
+        raise ValueError(f"Routing judge prompt file is empty: {label}")
     return prompt
 
 
@@ -91,16 +89,8 @@ async def arun_pair_judge(
         try:
             system_prompt = await aload_prompt_resource(
                 ctx,
-                PromptResourceRequest(
-                    "routing_pair_judge",
-                    path=settings_of(
-                        ctx
-                    ).paths.chat_completions_routing_pair_judge_prompt_path,
-                ),
-                local=lambda: _load_judge_prompt(
-                    pair_prompt_path(ctx),
-                    store=agent_store_of(ctx),
-                ),
+                PromptResourceRequest("routing_pair_judge"),
+                local=lambda: aload_judge_prompt(agent_store_of(ctx)),
             )
         except (FileNotFoundError, ValueError) as exc:
             path = pair_prompt_path(ctx)

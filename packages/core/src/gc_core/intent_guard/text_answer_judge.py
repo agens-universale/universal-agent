@@ -50,6 +50,16 @@ async def ajudge_text_answer(
         return None
 
 
+def text_answer_goes_to_judge(ctx: Any, assistant_text: str) -> bool:
+    """Пойдёт ли текстовый ответ к судье: режим ``judge``, текст не пуст и
+    машинерия судейства доступна. По нему поднимают «сверяюсь…»."""
+    return (
+        bool((assistant_text or "").strip())
+        and runtime_of(ctx).text_answer_mode == "judge"
+        and judge_available(settings_of(ctx))
+    )
+
+
 async def ashould_return_text_answer(
     ctx: Any, state: Any, assistant_text: str
 ) -> TextAnswerDecision:
@@ -62,12 +72,12 @@ async def ashould_return_text_answer(
     ``deny`` / нет ключа → reject generic."""
     if not (assistant_text or "").strip():
         return TextAnswerDecision(False)
-    # Режим — сигнал поверхности (только TUI), а не настройка: рантайм.
+    # The launch surface passes the configured mode through runtime settings.
     mode = runtime_of(ctx).text_answer_mode
     if mode == "allow":
         return TextAnswerDecision(True)
     if mode == "judge":
-        if not judge_available(settings_of(ctx)):
+        if not text_answer_goes_to_judge(ctx, assistant_text):
             return TextAnswerDecision(False)
         result = await ajudge_text_answer(ctx, state, assistant_text)
         if result is None:

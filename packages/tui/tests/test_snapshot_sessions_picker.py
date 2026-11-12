@@ -70,20 +70,25 @@ def _write_task(
     (tmp_path / f"meta_cli_{tid}.json").write_text(
         json.dumps(meta), encoding="utf-8"
     )
+    # История — столько сообщений, сколько в meta: число в карточке
+    # хранилище считает по истории, а не берёт на веру из meta.
     (tmp_path / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps(
-            {
-                "type": "message",
-                "seq": 1,
-                "ts": updated,
-                "payload": {
-                    "id": "u1",
-                    "role": "user",
-                    "content": first_prompt,
-                },
-            }
-        )
-        + "\n",
+        "".join(
+            json.dumps(
+                {
+                    "type": "message",
+                    "seq": n,
+                    "ts": updated,
+                    "payload": {
+                        "id": f"u{n}",
+                        "role": "user",
+                        "content": first_prompt,
+                    },
+                }
+            )
+            + "\n"
+            for n in range(1, msgs_count + 1)
+        ),
         encoding="utf-8",
     )
 

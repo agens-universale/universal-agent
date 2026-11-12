@@ -75,9 +75,9 @@ async def test_native_executor_builds_real_state_from_prepared_inputs(
         in state.call_metadata["promptVariables"]["userInstructions"]
     )
     assert rendered is None
+    # Путь роли запуска в запросе не едет: его знает хранилище исполнителя.
     assert requests == [
         {
-            "agent_md_path": "/worker/instructions.md",
             "is_tui": False,
             "agentsmd_override": False,
             "verbose": False,

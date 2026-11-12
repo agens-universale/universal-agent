@@ -27,7 +27,7 @@ class PreparedRequestEquivalence:
 def resolve_level_requests(source: Any) -> dict[str, ResolvedModel]:
     from gc_core.model_router import ModelRouter
 
-    router = ModelRouter(source, level_provider=lambda: START_LEVEL)
+    router = ModelRouter(source, choice_provider=lambda: START_LEVEL)
     kits = {}
     for level in LEVEL_ORDER:
         try:

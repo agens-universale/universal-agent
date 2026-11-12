@@ -5,6 +5,7 @@ from rich.syntax import Syntax
 from textual.widgets import Static
 
 from gc_tui.palette import BAND_BG
+from gc_tui.services.code_render import code_theme
 
 
 class _SafeReprDumper(yaml.SafeDumper):
@@ -30,18 +31,12 @@ def safe_yaml_dump(data) -> str:
     )
 
 
-# Тема подсветки YAML — один источник, меняется в одну строку при ревью.
-# Кандидаты: solarized-dark | nord | gruvbox-dark | native | github-dark |
-#            one-dark | monokai | dracula | inkpot | fruity
-_YAML_SYNTAX_THEME = "solarized-dark"
-
-
 def yaml_syntax_renderable(text: str) -> Syntax:
     """Текст YAML → Rich Syntax с подсветкой на фоне BAND_BG (для in-place update)."""
     return Syntax(
         text or "",
         lexer="yaml",
-        theme=_YAML_SYNTAX_THEME,
+        theme=code_theme(),
         background_color=BAND_BG,
         word_wrap=False,
     )

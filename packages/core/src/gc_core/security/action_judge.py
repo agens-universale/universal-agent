@@ -17,15 +17,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from gc_core.agent_store import DEFAULT_AGENT_STORE, AgentStore
-from gc_core.bundled_assets import bundled_root
+from gc_core.agent_store import AgentStore
 from gc_core.message_format.dialog_history import truncate_text
 from gc_core.plan_store import PLAN_MAX_CHARS
 from gc_core.security.command_moderation import (
     JudgeUnavailable,
     _extract_json_candidate,
-    _load_prompt_file,
     _strip_judge_response_text,
+    aload_judge_prompt,
 )
 
 # Потолки запроса, в знаках — как остальные лимиты конфига. Порядок величин
@@ -325,35 +324,34 @@ def has_external_words(payload: Mapping[str, Any]) -> bool:
     )
 
 
-def load_action_judge_prompt(
-    kind: str, *, store: AgentStore = DEFAULT_AGENT_STORE
-) -> str:
+async def aload_action_judge_prompt(kind: str, *, store: AgentStore) -> str:
     if kind not in action_judge_prompt_kinds(True):
         raise ValueError("Unknown action judge prompt kind.")
-    name = f"action_judge_{kind}"
-    path = bundled_root() / "prompts" / "security" / f"{name}.md"
-    return _load_prompt_file(path, store=store, name=name)
+    return await aload_judge_prompt(f"action_judge_{kind}", store=store)
+
+
+async def aload_action_judge_prompts(
+    store: AgentStore, *, external: bool
+) -> dict[str, str]:
+    """Части инструкции судьи действий, нужные запросу (см.
+    ``action_judge_prompt_kinds``)."""
+    return {
+        kind: await aload_action_judge_prompt(kind, store=store)
+        for kind in action_judge_prompt_kinds(external)
+    }
 
 
 def build_action_judge_messages(
-    payload: Mapping[str, Any],
-    *,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-    prompts: Mapping[str, str] | None = None,
+    payload: Mapping[str, Any], *, prompts: Mapping[str, str]
 ) -> list[dict[str, str]]:
-    """Сообщения для модели. ``prompts`` — тексты инструкции, уже добытые
-    пробой: под durable-исполнением ядру читать файлы нельзя.
+    """Сообщения для модели. ``prompts`` — тексты инструкции из хранилища
+    агента (``aload_action_judge_prompts``); под durable-исполнением их
+    добывает проба хоста.
 
     Правило о внешнем запросе дописывается к инструкции, только если такие
     записи есть: запрос CLI и TUI остаётся побайтно прежним."""
-    external = has_external_words(payload)
-    if prompts is None:
-        prompts = {
-            kind: load_action_judge_prompt(kind, store=store)
-            for kind in action_judge_prompt_kinds(external)
-        }
     system = prompts["system"]
-    if external:
+    if has_external_words(payload):
         system = f"{system}\n\n{prompts[EXTERNAL_PROMPT]}"
     user = prompts["user"].replace(
         "{judge_payload_json}",

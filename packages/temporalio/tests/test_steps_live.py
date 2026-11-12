@@ -4,9 +4,9 @@
 import asyncio
 import json
 
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio import AgentPlugin, AgentSession, step_workflow_id
-from live_support import call, temporal_cli
+from live_support import call, temporal_cli, thread_messages, thread_owner
 from order_workflow_fixture import OrderWorkflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -28,7 +28,7 @@ async def test_agent_step_inside_a_business_workflow(
             [finish("delivery ok")],
         ]
     )
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     plugin = AgentPlugin(
         {"shop": agent_settings(url, tmp_path)},
         thread_store=store,
@@ -71,14 +71,12 @@ async def test_agent_step_inside_a_business_workflow(
     assert "delivery ok" in json.dumps(result["second"], ensure_ascii=False)
     assert len(requests) == 3
     contents = [
-        m.get("content") for m in store.load_messages("sdk", "order-42")
+        m.get("content")
+        for m in await thread_messages(store, "sdk", "order-42")
     ]
     assert "Проверь заказ 42" in contents and "А доставка?" in contents
     # Шаги закончились — тред свободен для следующих сессий.
-    assert (
-        store.read_snapshot("sdk", "order-42", include_state=False).owner_id
-        is None
-    )
+    assert await thread_owner(store, "sdk", "order-42") is None
 
 
 async def test_terminated_parent_releases_the_step_thread(
@@ -94,7 +92,7 @@ async def test_terminated_parent_releases_the_step_thread(
     script.append(
         [call("ask", "turn_ask_human", {"question": "Какой адрес?"})]
     )
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     plugin = AgentPlugin(
         {"shop": agent_settings(url, tmp_path)},
         thread_store=store,
@@ -130,11 +128,6 @@ async def test_terminated_parent_releases_the_step_thread(
                     await asyncio.sleep(0.1)
             await handle.terminate("test")
 
-            def owner():
-                return store.read_snapshot(
-                    "sdk", "order-7", include_state=False
-                ).owner_id
-
             async with asyncio.timeout(30):
-                while owner() is not None:
+                while await thread_owner(store, "sdk", "order-7") is not None:
                     await asyncio.sleep(0.2)

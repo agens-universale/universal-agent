@@ -12,8 +12,6 @@ from gc_tui.services.image_paste import is_image_file
 from gc_tui.services.os_ops import ClipboardProbe
 from gc_tui.services.plural import plural_form
 
-IMAGE_OPEN_TIP = "Ctrl+клик по плашке — открыть изображение"
-
 
 def _images(n: int) -> str:
     """1 изображение · 2–4 изображения · 5+ изображений (11–14 — «изображений»)."""

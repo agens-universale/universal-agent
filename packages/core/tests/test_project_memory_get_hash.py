@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
-from gc_core.project_memory import get_hash, resolve_project_memory_path
+from gc_core.project_memory import aget_hash, resolve_project_memory_path
 from gc_core.project_memory.storage import content_hash
+from gc_testkit import run_coro
 
 
 def test_content_hash_missing_file_returns_none(tmp_path):
@@ -41,7 +42,8 @@ def test_get_hash_uses_ctx_project_gc_dir(tmp_path):
     gc.mkdir()
     (gc / "project_memory.md").write_text("project fact", encoding="utf-8")
     ctx = SimpleNamespace(project_gc_dir=gc)
-    assert get_hash(ctx) == content_hash(gc / "project_memory.md")
+    # Версия из хранилища агента — та же величина, что хеш файла.
+    assert run_coro(aget_hash(ctx)) == content_hash(gc / "project_memory.md")
 
 
 def test_resolve_project_memory_path_from_ctx(tmp_path):

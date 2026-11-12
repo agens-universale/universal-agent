@@ -10,4 +10,5 @@ def test_demo_server_config_stops_view_image():
     cfg = yaml.safe_load(
         (REPO / "demo_config_server.yml").read_text(encoding="utf-8")
     )
-    assert FS_VIEW_IMAGE_NAME in cfg["agent_overrides"]["agent.stop_tools"]
+    stop_tools = cfg["webhook"]["agent_overrides"]["agent.stop_tools"]
+    assert FS_VIEW_IMAGE_NAME in stop_tools

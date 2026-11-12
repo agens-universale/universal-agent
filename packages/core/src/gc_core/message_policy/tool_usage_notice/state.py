@@ -67,7 +67,8 @@ def hydrate_tool_usage_notice_state(
 
 
 def persist_tool_usage_notice_state(state: Any, meta: dict[str, Any]) -> None:
-    """Записать поля State в session meta (in-memory thread_session.meta / child_meta)."""
+    """Записать поля State в словарь счётчиков напоминаний (``notice``
+    сессии, ``child_meta`` субагента)."""
     meta[META_PROJECT_MEMORY_CONTENT_HASH] = getattr(
         state, "project_memory_content_hash", None
     )
@@ -80,18 +81,6 @@ def persist_tool_usage_notice_state(state: Any, meta: dict[str, Any]) -> None:
     meta[META_TODO_REMINDER_CNT] = _coerce_non_negative_int(
         getattr(state, "todo_reminder_cnt", 0)
     )
-
-
-def merge_tool_usage_notice_meta_to_base(
-    base_meta: dict[str, Any],
-    session_meta: dict[str, Any],
-) -> None:
-    """Слить ключи tool_usage_notice / project_memory из session meta в base_meta перед save."""
-    if not isinstance(session_meta, dict):
-        return
-    for key in PERSISTED_META_KEYS:
-        if key in session_meta:
-            base_meta[key] = session_meta[key]
 
 
 def get_project_memory_check_cnt(meta: dict[str, Any]) -> int:

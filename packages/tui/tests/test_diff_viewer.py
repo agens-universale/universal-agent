@@ -23,7 +23,7 @@ from gc_testkit.tui_support import (
     tui_settings,
     wait_until,
 )
-from gc_tui.palette import ERR, OK
+from gc_tui.palette import DIFF_ADD_INK, DIFF_DEL_INK
 from gc_tui.screens.diff import (
     ACCEPTED_CAPTION_STEM,
     APPROX,
@@ -775,8 +775,8 @@ async def test_viewer_header_counters_are_painted(tmp_path):
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         header = viewer.query_one("#header-left").content
-        assert span_style(header, "+2") == OK
-        assert span_style(header, "−1") == ERR
+        assert span_style(header, "+2") == DIFF_ADD_INK
+        assert span_style(header, "−1") == DIFF_DEL_INK
 
 
 @pytest.mark.asyncio

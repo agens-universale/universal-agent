@@ -63,9 +63,10 @@ class SessionResume:
     completed: dict[str, int] = field(default_factory=dict)
     #: Итоги последних ходов по номеру (``message_state``: ответ своего хода).
     turn_outcomes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: Владение тредом уже подтверждено прошлым run: перечитывать не нужно.
+    #: Эпоха аренды треда, взятой прошлым run: новый run пишет по ней без
+    #: нового захвата.
     store_owner_epoch: int | None = None
-    store_generation: int | None = None
+    store_owner_token: str | None = None
     #: Отпечаток настроек, принятый из сообщений (``settings_fingerprint``).
     message_fingerprint: dict[str, str] | None = None
     #: ``answer``/``formatted_answer``/``post_error`` — те же, что в итоге
@@ -95,6 +96,10 @@ class RunRequest:
     #: сверяет его со своим профилем на подготовке хода. ``None`` — без
     #: сверки (CLI, JSON-клиенты).
     settings_fingerprint: dict[str, str] | None = None
+    #: Внешний trace_id сессии (оркестратор): уходит заголовком в модель и
+    #: MCP каждого хода и субагентов (``agent.trace_header_enabled``,
+    #: ``trace_header_enabled`` сервера). ``None`` — без трейса.
+    trace_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,14 +111,16 @@ class ActivityCall:
     schema_version: int = 1
     resource_owner: ResourceOwnerRef | None = None
     child_context: dict[str, Any] | None = None
+    #: trace_id сессии (``RunRequest.trace_id``): воркер строит контекст
+    #: хода с ним в рантайме — в каждом вызове, чтобы и пересобранный после
+    #: рестарта контекст получил тот же трейс.
+    trace_id: str | None = None
 
 
 @dataclass
 class PreparedContext:
     context: PreparedRunContext
     tool_metadata: dict[str, dict[str, Any]]
-    store_capabilities: list[str]
-    threads_dir: str
     resource_owner: ResourceOwnerRef | None = None
     model_transport_configured: bool = False
     provider_currency: str = "$"

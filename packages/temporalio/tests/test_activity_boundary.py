@@ -10,7 +10,7 @@ from gc_core.execution.contracts import (
     InfrastructureFailure,
     ToolOutcomeUnknown,
 )
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.contracts import ActivityCall
 from gc_core_temporalio.public_config import public_config_snapshot
@@ -24,7 +24,7 @@ def activities(tmp_path):
 
     native = AgentActivities(
         context_provider=provider,
-        stores={"files": DurableFileThreadStore(str(tmp_path / "threads"))},
+        stores={"files": FileThreadStore(str(tmp_path / "threads"))},
         public_config=public_config_snapshot,
     )
     return native, ctx

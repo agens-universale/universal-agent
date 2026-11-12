@@ -264,3 +264,24 @@ def test_fitted_outcomes_do_not_change_on_the_next_fit():
         SessionResume(turns=1, turn_outcomes=dict(fitted.turn_outcomes))
     )
     assert again.turn_outcomes == fitted.turn_outcomes
+
+
+def test_lease_token_survives_idle_continue_as_new():
+    from gc_core.threads.models import Lease
+    from gc_core_temporalio.child_transport import _lease_parts
+    from gc_core_temporalio.workflow import UniversalAgentWorkflow
+
+    lease = Lease(owner="workflow", epoch=1, token="incarnation")
+    first = UniversalAgentWorkflow()
+    resume = first._session_resume(SimpleNamespace(lease=lease))
+    assert resume.store_owner_token == lease.token
+    second = UniversalAgentWorkflow()
+    second._restore_delivery(resume)
+    idle_resume = second._session_resume(None)
+    assert idle_resume.store_owner_token == lease.token
+    assert idle_resume.store_owner_epoch == lease.epoch
+    assert _lease_parts(SimpleNamespace(lease=lease)) == (
+        lease.owner,
+        lease.epoch,
+        lease.token,
+    )

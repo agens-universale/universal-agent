@@ -27,6 +27,7 @@ from typing import Any, AsyncIterator, Callable, Optional
 from gc_core.agent_edits.shell_delta import ShellDelta
 from gc_core.backends.async_protocol import arun_backend_exec_raw
 from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+from gc_core.execution.tool_call_context import current_tool_call
 
 
 def _capture_kw(capture_max_chars: Optional[int]) -> dict:
@@ -161,11 +162,15 @@ class TrackingFsBackend:
         чем молча потерянные правки: команда уже изменила диск, и экран,
         который об этом не знает, врёт пользователю.
         """
+        # Вызов команды читается здесь, явно: `to_thread` контекст и так
+        # копирует, но явная передача тестируема без привязки.
+        _tool, command_call_id = current_tool_call()
         edits_delta = await asyncio.to_thread(
             ShellDelta.begin,
             self._ctx,
             seen=self._edits_seen,
             pocket_cache=self._pocket_paths_cache,
+            command_call_id=command_call_id,
         )
         try:
             return await run()

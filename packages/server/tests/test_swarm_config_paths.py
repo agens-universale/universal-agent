@@ -6,7 +6,7 @@ import yaml
 from gc_core.bundled_assets import repo_root
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars, project_slug
-from gc_server.rest_api.server_config import load_server_config
+from gc_server.config import load_server_config
 from gc_server.swarm import config as swarm_config
 from gc_server.swarm.config import build_swarm_config
 
@@ -70,10 +70,11 @@ def test_demo_template_swarm_paths_are_usable():
     """
     root = repo_root()
     assert root is not None, "тест обязан идти в рабочей копии, а не скипаться"
-    raw = yaml.safe_load(
-        (root / "demo_config_server.yml").read_text(encoding="utf-8")
+    cfg = build_swarm_config(
+        load_server_config(
+            str(root / "demo_config_server.yml")
+        ).swarm_section()
     )
-    cfg = build_swarm_config(raw)
 
     assert os.path.isfile(cfg["wrapper_path"]), cfg["wrapper_path"]
     assert os.access(cfg["wrapper_path"], os.X_OK), cfg["wrapper_path"]
@@ -221,13 +222,13 @@ def test_config_path_of_load_server_config_feeds_the_anchor(
 ):
     """Сквозной путь: load_server_config → build_swarm_config, без ручной склейки.
 
-    Именно так их зовёт gc_server.server, и именно здесь ломался якорь: путь
+    Именно так их зовёт поверхность swarm, и именно здесь ломался якорь: путь
     прочитанного файла раньше не доезжал до swarm-конфига вовсе.
     """
     conf_dir = tmp_path / "etc"
     conf_dir.mkdir()
     (conf_dir / "config_server.yml").write_text(
-        "swarm:\n  enabled: true\n  swarm_logs_dir: ./agent_logs\n",
+        "swarm:\n  swarm_logs_dir: ./agent_logs\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -236,7 +237,7 @@ def test_config_path_of_load_server_config_feeds_the_anchor(
         EnvVars(server_config_path=conf_dir / "config_server.yml"),
     )
 
-    cfg = build_swarm_config(load_server_config())
+    cfg = build_swarm_config(load_server_config().swarm_section())
     assert Path(cfg["swarm_logs_dir"]) == conf_dir / "agent_logs"
 
 

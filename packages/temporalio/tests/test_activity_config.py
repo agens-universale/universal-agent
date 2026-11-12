@@ -188,7 +188,7 @@ def test_native_retry_policy_never_makes_a_tool_effect_retry_forever(
     остаётся одной попыткой; повторы — только явным числом."""
     from datetime import timedelta
 
-    from gc_core.thread_store_file_durable import DurableFileThreadStore
+    from gc_core.threads.file_store import FileThreadStore
     from gc_core_temporalio import AgentPlugin
     from gc_core_temporalio.activity_config import (
         activity_options,
@@ -200,7 +200,7 @@ def test_native_retry_policy_never_makes_a_tool_effect_retry_forever(
     monkeypatch.chdir(tmp_path)
     plugin = AgentPlugin(
         {"a": {}},
-        thread_store=DurableFileThreadStore(str(tmp_path / "t")),
+        thread_store=FileThreadStore(str(tmp_path / "t")),
         tool_activities={
             "exec_command": ActivityConfig(
                 retry_policy=RetryPolicy(maximum_interval=timedelta(seconds=5))
@@ -224,7 +224,7 @@ def test_native_retry_policy_keeps_level_attempt_limits(tmp_path, monkeypatch):
     RetryPolicy — «не задано»), модель по-прежнему ждёт без ограничения."""
     from datetime import timedelta
 
-    from gc_core.thread_store_file_durable import DurableFileThreadStore
+    from gc_core.threads.file_store import FileThreadStore
     from gc_core_temporalio import AgentPlugin
     from gc_core_temporalio.activity_config import (
         activity_options,
@@ -236,7 +236,7 @@ def test_native_retry_policy_keeps_level_attempt_limits(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     plugin = AgentPlugin(
         {"a": {}},
-        thread_store=DurableFileThreadStore(str(tmp_path / "t")),
+        thread_store=FileThreadStore(str(tmp_path / "t")),
         activity=ActivityConfig(
             retry_policy=RetryPolicy(maximum_interval=timedelta(seconds=7))
         ),

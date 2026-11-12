@@ -1,3 +1,4 @@
+from gc_testkit.develop_files import record_from_meta
 import pytest
 
 
@@ -23,8 +24,8 @@ async def test_status_word_reads_real_terminal_status(tmp_path):
     from gc_tui.app import TuiApp
 
     class _Store:
-        def get_task_meta(self, tid):
-            return {"tui": {"status": "completed"}}
+        def get_record(self, tid):
+            return record_from_meta({"tui": {"status": "completed"}})
 
     async with TuiApp(
         threads_dir=str(tmp_path / "threads")

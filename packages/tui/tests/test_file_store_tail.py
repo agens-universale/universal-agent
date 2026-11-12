@@ -1,8 +1,13 @@
-"""tail_events: инкремент по offset; stream_reset при смене storage_epoch."""
+"""tail_events: только новое после курсора; stream_reset при сжатии
+истории и при пересоздании треда."""
 
+import asyncio
 import json
 from pathlib import Path
 
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+from gc_testkit.thread_writes import acompact
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
@@ -45,8 +50,8 @@ def test_read_all_events_returns_records_and_cursor(tmp_path):
     records, cursor = store.read_all_events("t1")
     assert len(records) == 2
     assert records[0]["payload"]["content"] == "привет"
-    assert cursor.position_token == data.stat().st_size
     assert cursor.ordering_key == 2
+    assert store.tail_events("t1", cursor).new_records == []
 
 
 def test_tail_events_returns_only_new_after_cursor(tmp_path):
@@ -68,68 +73,53 @@ def test_tail_events_returns_only_new_after_cursor(tmp_path):
     assert tail.next_cursor.ordering_key == 2
 
 
-def test_tail_events_stream_reset_on_storage_epoch_change(tmp_path):
-    data = tmp_path / "data_cli_t1.jsonl"
-    meta = tmp_path / "meta_cli_t1.json"
-    _append_record(data, 1, "user", "x")
-    _write_meta(meta, msgs=1, epoch_suffix="2026-05-20T10-00")
-
+def test_tail_events_stream_reset_after_compaction(tmp_path):
     store = FileTaskStore(str(tmp_path), system="cli")
+    store.append_messages("t1", [{"id": "m1", "role": "user", "content": "x"}])
     _, cur = store.read_all_events("t1")
 
-    _write_meta(meta, msgs=0, epoch_suffix="2026-05-20T11-00")
+    summary = {"id": "s", "role": "user", "content": "сводка"}
+    asyncio.run(
+        acompact(
+            FileThreadStore(tmp_path),
+            ThreadKey(system="cli", thread="t1"),
+            [summary],
+        )
+    )
 
     tail = store.tail_events("t1", cur)
     assert tail.stream_reset is True
-
-
-def test_tail_events_stream_reset_on_file_truncation(tmp_path):
-    """Файл стал короче прочитанного offset → stream_reset (reason=file truncated)."""
-    data = tmp_path / "data_cli_t1.jsonl"
-    meta = tmp_path / "meta_cli_t1.json"
-    _append_record(data, 1, "user", "длинное первое сообщение")
-    _append_record(data, 2, "assistant", "длинный ответ агента")
-    _write_meta(meta, msgs=2)
-
-    store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
-
-    # Перезапись файла более коротким содержимым (size < position_token).
-    short = {
-        "type": "message",
-        "seq": 1,
-        "payload": {"id": "m1", "role": "user", "content": "x"},
-    }
-    data.write_text(json.dumps(short) + "\n", encoding="utf-8")
-    assert data.stat().st_size < cur.position_token
-
-    tail = store.tail_events("t1", cur)
-    assert tail.stream_reset is True
-    assert tail.reason == "file truncated"
     assert tail.new_records == []
-    assert tail.next_cursor.position_token == 0
-    assert tail.next_cursor.ordering_key == 0
+    records, _cur = store.read_all_events("t1")
+    assert [r["payload"]["id"] for r in records] == ["s"]
 
 
-def test_tail_events_stream_reset_on_ordering_rollback(tmp_path):
-    """Дописана запись с seq меньше максимального виденного → stream_reset."""
-    data = tmp_path / "data_cli_t1.jsonl"
-    meta = tmp_path / "meta_cli_t1.json"
-    _append_record(data, 5, "user", "первое")
-    _write_meta(meta, msgs=1)
-
+def test_tail_events_stream_reset_when_thread_is_recreated(tmp_path):
     store = FileTaskStore(str(tmp_path), system="cli")
+    store.append_messages("t1", [{"id": "m1", "role": "user", "content": "a"}])
     _, cur = store.read_all_events("t1")
-    assert cur.ordering_key == 5
-
-    _append_record(data, 3, "assistant", "из прошлого")
+    store.delete_task("t1")
+    store.append_messages("t1", [{"id": "n1", "role": "user", "content": "b"}])
 
     tail = store.tail_events("t1", cur)
     assert tail.stream_reset is True
-    assert tail.reason == "not a continuation"
-    assert tail.new_records == []
-    assert tail.next_cursor.position_token == 0
-    assert tail.next_cursor.ordering_key == 0
+    assert tail.reason == "thread recreated"
+
+
+def test_thread_created_after_attach_is_read_from_the_start(tmp_path):
+    """Треда при attach ещё нет (новая сессия): появился — его записи
+    приходят хвостом, без сброса показа."""
+    store = FileTaskStore(str(tmp_path), system="cli")
+    records, cur = store.read_all_events("t1")
+    assert records == []
+    assert store.tail_events("t1", cur).new_records == []
+
+    store.append_messages("t1", [{"id": "m1", "role": "user", "content": "a"}])
+    tail = store.tail_events("t1", cur)
+    assert tail.stream_reset is False
+    assert [r["payload"]["id"] for r in tail.new_records] == ["m1"]
+    again = store.tail_events("t1", tail.next_cursor)
+    assert again.new_records == []
 
 
 def test_tail_events_resilient_to_bad_record(tmp_path):
@@ -164,7 +154,28 @@ def test_tail_events_idempotent_with_same_cursor(tmp_path):
     t2 = store.tail_events("t1", cur)
     assert t1.new_records == []
     assert t2.new_records == []
-    assert t1.next_cursor.position_token == t2.next_cursor.position_token
+    assert t1.next_cursor == t2.next_cursor
+
+
+def test_tail_tick_survives_a_lock_timeout(tmp_path, monkeypatch):
+    """Блокировку треда держит агент, а ``msvcrt.locking`` на Windows после
+    ~10 с ждёт уже ``OSError``: тик пропускается, курсор на месте — следующий
+    дочитает; опрос UI не падает."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "первое")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    _append_record(data, 2, "assistant", "ответ")
+
+    def locked(*_args, **_kwargs):
+        raise OSError(36, "Resource deadlock avoided")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(store._threads, "tail", locked)
+        tail = store.tail_events("t1", cur)
+    assert tail.new_records == [] and tail.next_cursor == cur
+    assert len(store.tail_events("t1", cur).new_records) == 1
 
 
 def test_read_all_events_cursor_counts_archives(tmp_path):
@@ -195,7 +206,6 @@ def test_read_all_events_stops_before_partial_line(tmp_path):
     data = tmp_path / "data_cli_t1.jsonl"
     _append_record(data, 1, "user", "целая")
     _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
-    whole = data.stat().st_size
     line = json.dumps(
         {
             "type": "message",
@@ -213,7 +223,7 @@ def test_read_all_events_stops_before_partial_line(tmp_path):
     tail = store.tail_events("t1", cur)
 
     assert [r["payload"]["id"] for r in records] == ["m1"]
-    assert cur.position_token == whole
+    assert cur.ordering_key == 1
     assert [r["payload"]["id"] for r in tail.new_records] == ["m2"]
 
 
@@ -241,5 +251,5 @@ def test_tail_events_waits_for_partial_line(tmp_path):
     second = store.tail_events("t1", first.next_cursor)
 
     assert first.new_records == []
-    assert first.next_cursor.position_token == cur.position_token
+    assert first.next_cursor == cur
     assert [r["payload"]["id"] for r in second.new_records] == ["m2"]

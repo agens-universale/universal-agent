@@ -1501,6 +1501,125 @@ class TestMatchFormat:
         assert data["count"] == 2
         assert [m["line"] for m in data["matches"]] == [2, 4]
 
+    def test_duplicate_matches_preserve_next_line(self, tmp_path):
+        path = tmp_path / "repeated.txt"
+        path.write_text("x" * 30 + "\nx\n", encoding="utf-8")
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(path),
+            pattern=".",
+            query_mode="python-re-dotall",
+            limit=20,
+        )
+
+        assert [match["line"] for match in data["matches"]] == [1, 2]
+        assert data["count"] == 2
+        assert data["scan_complete"] is True
+
+    def test_distinct_windows_on_one_long_line_remain_visible(self, tmp_path):
+        path = tmp_path / "windows.txt"
+        path.write_text(
+            "a" * 650 + "TOKEN" + "b" * 650 + "TOKEN\n", encoding="utf-8"
+        )
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(path),
+            pattern="TOKEN",
+            limit=10,
+        )
+
+        assert data["count"] == 2
+        assert (
+            data["matches"][0]["line_content"]
+            != data["matches"][1]["line_content"]
+        )
+
+    def test_multiline_matches_with_distinct_end_lines_remain_visible(
+        self, tmp_path
+    ):
+        path = tmp_path / "multiline.txt"
+        path.write_text("X Y\nend\n", encoding="utf-8")
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(path),
+            pattern=r"X|Y.*?end",
+            query_mode="python-re-dotall",
+            limit=10,
+        )
+
+        assert data["count"] == 2
+        assert [match["end_line"] for match in data["matches"]] == [1, 2]
+
+    def test_zero_width_repeats_do_not_hide_next_line(self, tmp_path):
+        path = tmp_path / "zero.txt"
+        path.write_text("x" * 30 + "\ny\n", encoding="utf-8")
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(path),
+            pattern=r"(?=.)",
+            limit=20,
+        )
+
+        assert [match["line"] for match in data["matches"]] == [1, 2]
+
+    def test_case_insensitive_duplicates_preserve_next_line(self, tmp_path):
+        path = tmp_path / "case.txt"
+        path.write_text("XxXx\nX\n", encoding="utf-8")
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(path),
+            pattern="x",
+            case_insensitive=True,
+            limit=2,
+        )
+
+        assert [match["line"] for match in data["matches"]] == [1, 2]
+
+    def test_regex_match_budget_reports_partial_scan(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            FindInFiles, "max_regex_matches_examined", 10, raising=False
+        )
+        path = tmp_path / "many.txt"
+        path.write_text("x" * 30 + "\ny\n", encoding="utf-8")
+
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(path), pattern=".", limit=20
+        )
+
+        assert data["count"] == 1
+        assert data["stop_reason"] == "regex_match_budget"
+        assert data["scan_complete"] is False
+        assert data["more_matches_may_exist"] is True
+
+    def test_directory_regex_match_budget_reports_partial_scan(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(FindInFiles, "max_regex_matches_examined", 10)
+        (tmp_path / "many.txt").write_text(
+            "x" * 30 + "\ny\n", encoding="utf-8"
+        )
+
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern=".",
+            query_mode="python-re-dotall",
+            limit=20,
+        )
+
+        assert data["search_backend"] == "python"
+        assert data["count"] == 1
+        assert data["stop_reason"] == "regex_match_budget"
+        assert data["scan_complete"] is False
+        assert data["more_matches_may_exist"] is True
+
     def test_match_at_file_start(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("needle\nline2\n", encoding="utf-8")

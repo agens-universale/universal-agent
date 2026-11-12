@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from gc_core.settings import settings_of
@@ -120,7 +121,14 @@ class RedactingFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         redactor = self._redactor
-        record.msg = redactor.redact(record.getMessage())
+        # Сохраняем структуру сообщения для JSON-обработчиков приложения.
+        # str(dict) теряет ключи, по которым маскируются произвольные секреты.
+        message = (
+            dict(record.msg)
+            if isinstance(record.msg, Mapping) and not record.args
+            else record.getMessage()
+        )
+        record.msg = redactor.redact(message)
         record.args = None
         for key, value in list(record.__dict__.items()):
             if key in _RESERVED_LOGRECORD_KEYS:
@@ -249,6 +257,30 @@ _TEXT_FMT_TRACE = (
 )
 
 
+class RunLogDirUnavailable(OSError):
+    """Файл лога прогона не открыть: каталог логов недоступен на запись.
+
+    ``OSError`` — как и прежде (кто ловил ``OSError``, ловит и это), но
+    сообщение называет каталог и что сделать, а не только errno. Фронтенды
+    печатают его одной строкой вместо трейсбека.
+    """
+
+
+def _open_run_log(logging_path: str) -> FlushFileHandler:
+    """Файловый хендлер лога прогона; каталог создаётся."""
+    directory = os.path.dirname(logging_path)
+    try:
+        os.makedirs(directory, exist_ok=True)
+        return FlushFileHandler(logging_path, encoding="utf-8", mode="a")
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        raise RunLogDirUnavailable(
+            f"каталог логов прогона {directory} недоступен на запись "
+            f"({reason}): выключите logging.save_logs или укажите доступный "
+            "каталог в paths.logs_dump_dir"
+        ) from exc
+
+
 def _build_text_logger(logger, settings, logging_cfg, run_id, kind, redactor):
     # Историческое поведение main: DEBUG-уровень, .log файл, stderr ERROR-хендлер.
     logger.setLevel(logging.DEBUG)
@@ -262,8 +294,7 @@ def _build_text_logger(logger, settings, logging_cfg, run_id, kind, redactor):
         logging_path, summary_trace_path = build_run_log_paths(
             settings, run_id=run_id, agent_kind=kind, log_ext="log"
         )
-        os.makedirs(os.path.dirname(logging_path), exist_ok=True)
-        handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
+        handler = _open_run_log(logging_path)
         handler.setFormatter(
             RedactingTextFormatter(text_fmt, redactor=redactor)
         )
@@ -292,10 +323,7 @@ def _build_jsonl_logger(logger, settings, logging_cfg, run_id, kind, redactor):
         logging_path, summary_trace_path = build_run_log_paths(
             settings, run_id=run_id, agent_kind=kind, log_ext="jsonl"
         )
-        os.makedirs(os.path.dirname(logging_path), exist_ok=True)
-        file_handler = FlushFileHandler(
-            logging_path, encoding="utf-8", mode="a"
-        )
+        file_handler = _open_run_log(logging_path)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     if logging_cfg.console_trace:

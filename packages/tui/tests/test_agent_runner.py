@@ -537,3 +537,107 @@ def test_confirm_stop_unblocks_blocked_confirm():
     t.join(timeout=2.0)
     assert not t.is_alive(), "confirm-поток не разблокировался за 2 с"
     assert result_holder == ["deny_once"]
+
+
+def test_run_seq_counts_every_spawned_run():
+    """Номер прогона растёт на каждом заведённом воркере: по его смене
+    экран видит конец хода, даже если следующий стартовал между тиками."""
+    fake = _FakeExecutor()
+    runner = AgentRunner(executor=fake)
+    assert runner.run_seq == 0
+    for expected in (1, 2):
+        fake._event.clear()
+        runner.start(query="x", thread_id="t1")
+        assert runner.run_seq == expected
+        runner.stop()
+        runner.wait(timeout=1.0)
+
+
+def test_turn_effective_start_without_executor_is_none():
+    runner = AgentRunner(executor_factory=lambda: None)
+    assert runner.turn_effective_start() is None
+
+
+class _ClockExecutor(_FakeExecutor):
+    def __init__(self):
+        super().__init__()
+        self.start = None
+
+    def turn_effective_start(self):
+        return self.start
+
+
+def test_turn_effective_start_delegates_to_current_turn_clock():
+    fake = _ClockExecutor()
+    runner = AgentRunner(executor=fake)
+    runner.start(query="x", thread_id="t1")
+    try:
+        fake.start = 42.0
+        assert runner.turn_effective_start() == 42.0
+        # `/compact` — не ход: счёт от часов хода ему не принадлежит.
+        runner._thread_kind = "compact"
+        assert runner.turn_effective_start() is None
+    finally:
+        runner.stop()
+        runner.wait(timeout=1.0)
+
+
+def test_call_elapsed_delegates_to_turn_clock_of_executor():
+    from gc_tui.services.agent_runner import AgentRunner
+
+    class _Calls:
+        def turn_call_elapsed(self, call_id):
+            return {"c1": 13.0}.get(call_id)
+
+    runner = AgentRunner(executor=_Calls())
+    assert runner.call_elapsed("c1") == 13.0
+    assert runner.call_elapsed("c2") is None
+    assert AgentRunner(executor=object()).call_elapsed("c1") is None
+
+
+def test_stop_releases_run_waiting_for_human_answer():
+    """Ход ждёт ответа человека в `ask_human`: `stop()` будит ожидание, и
+    поток хода кончается — переход и выход его не ждут вечно."""
+    import threading
+
+    from gc_tui.services.agent_runner import AgentRunner
+
+    asked = threading.Event()
+
+    class _Fake:
+        def __init__(self):
+            self._ctx = type("Ctx", (), {"ask_human": None})()
+
+        async def arun(self, messages, *, thread_id, **kw):
+            asked.set()
+            await self._ctx.ask_human("?")
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
+
+    runner = AgentRunner(executor_factory=lambda: _Fake())
+    runner.start(query="hi", thread_id="t1")
+    assert asked.wait(timeout=2.0)
+    assert runner.is_running()
+    runner.stop()
+    runner.wait(timeout=2.0)
+    assert not runner.is_running()
+
+
+def test_stopped_runner_confirm_does_not_present():
+    """Остановленный (отвязанный) прогон: вопрос подтверждения не
+    показывается — баннер встал бы в чужой сессии, ответ ушёл бы в
+    никуда. Ответ — fail-closed."""
+    from gc_tui.services.agent_runner import AgentRunner
+
+    shown = []
+    runner = AgentRunner(executor_factory=lambda: None)
+    confirm = runner.make_tui_confirm(
+        lambda *a, **kw: shown.append(a) or True, timeout_sec=0.1
+    )
+    runner.stop()
+    assert confirm(title="t", question="q", fields=[]) == "deny_once"
+    assert shown == []

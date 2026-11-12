@@ -2,11 +2,10 @@ import json
 from typing import Any, Dict, List
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
     AgentStore,
+    Prompt,
     agent_store_of,
-    read_required_text,
+    aread_required,
 )
 from gc_core.bundled_assets import bundled_root
 from gc_core.execution.resources import (
@@ -97,20 +96,21 @@ def _normalize_handoff_in_finish_args(args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _load_guard_prompt(
-    prompt_path: str | None = None,
-    *,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-) -> str:
-    path = prompt_path or default_guard_prompt_path()
+async def aload_guard_prompt(store: AgentStore) -> str:
+    """Промпт finish gate (у файлового хранилища —
+    ``paths.chat_completions_intent_guard_prompt_path`` или пакетный)."""
+    label = store.label("prompt", "finish_gate")
     # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
-    prompt = read_required_text(
-        store,
-        AgentResource("prompt", "finish_gate", path),
-        missing=f"Intent guard prompt file not found: {path}",
+    prompt = (
+        await aread_required(
+            store,
+            "prompt",
+            Prompt.FINISH_GATE,
+            missing=f"Intent guard prompt file not found: {label}",
+        )
     ).strip()
     if not prompt:
-        raise ValueError(f"Intent guard prompt file is empty: {path}")
+        raise ValueError(f"Intent guard prompt file is empty: {label}")
     return prompt
 
 
@@ -288,15 +288,10 @@ async def avalidate_final_report_vs_user_intent(
             settings=settings,
         )
 
-    guard_prompt_path = (
-        settings.paths.chat_completions_intent_guard_prompt_path
-    )
     system_prompt = await aload_prompt_resource(
         ctx,
-        PromptResourceRequest("finish_gate", path=guard_prompt_path),
-        local=lambda: _load_guard_prompt(
-            guard_prompt_path, store=agent_store_of(ctx)
-        ),
+        PromptResourceRequest("finish_gate"),
+        local=lambda: aload_guard_prompt(agent_store_of(ctx)),
     )
     is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {

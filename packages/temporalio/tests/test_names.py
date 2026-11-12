@@ -25,9 +25,15 @@ ACTIVITIES = {
     "universal_agent.memory.execute",
     "universal_agent.summary.trace",
     "universal_agent.subagent.prepare",
-    "universal_agent.thread.load",
+    "universal_agent.thread.get",
+    "universal_agent.thread.read_stream",
+    "universal_agent.thread.read_archive",
+    "universal_agent.thread.resolve_alias",
     "universal_agent.thread.commit",
-    "universal_agent.thread.read_trace",
+    "universal_agent.thread.append_side",
+    "universal_agent.thread.claim",
+    "universal_agent.thread.release",
+    "universal_agent.thread.delete",
 }
 WORKFLOWS = {"UniversalAgentWorkflow", "UniversalSubagentWorkflow"}
 

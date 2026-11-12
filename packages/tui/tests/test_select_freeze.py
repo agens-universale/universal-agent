@@ -100,7 +100,9 @@ async def test_poll_freeze_sets_since(tmp_path):
 
 @pytest.mark.asyncio
 async def test_poll_freeze_timeout_clears(tmp_path, monkeypatch):
-    """F5: freeze > 5с → clear_selection() вызывается, since сбрасывается."""
+    """F5: 5 с без активности (движения мыши, автопрокрутки) →
+    clear_selection(), since сбрасывается. since — время последней
+    активности, не начала выделения."""
     import time as _time
 
     from gc_tui.app import TuiApp
@@ -126,6 +128,139 @@ async def test_poll_freeze_timeout_clears(tmp_path, monkeypatch):
         scr._poll_active()
         assert cleared["count"] == 1
         assert scr._select_freeze_since is None
+
+
+class _Clock:
+    """Часы сторожа: подменяют `time` модуля экрана, остальное — настоящее."""
+
+    def __init__(self):
+        import time as _time
+
+        self._time = _time
+        self.now = _time.monotonic()
+
+    def monotonic(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(self._time, name)
+
+
+def _watchdog_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+
+
+def _count_clears(scr, monkeypatch):
+    cleared = {"count": 0}
+
+    def fake_clear():
+        cleared["count"] += 1
+        scr._selecting = False
+
+    monkeypatch.setattr(scr, "clear_selection", fake_clear)
+    return cleared
+
+
+@pytest.mark.asyncio
+async def test_watchdog_mouse_moves_keep_selection(tmp_path, monkeypatch):
+    """F5: движение мыши каждые 2 с 12 с подряд — выделение живо."""
+    from gc_tui.screens import main as main_mod
+
+    clock = _Clock()
+    monkeypatch.setattr(main_mod, "time", clock)
+    async with _watchdog_app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        cleared = _count_clears(scr, monkeypatch)
+        scr._selecting = True
+        scr._poll_active()
+        for step in range(6):
+            clock.now += 2.0
+            await pilot.hover("#trace", offset=(2 + step % 2, 1))
+            scr._poll_active()
+        assert cleared["count"] == 0
+        assert scr._ui_frozen_for_select() is True
+
+
+@pytest.mark.asyncio
+async def test_watchdog_still_selection_cleared(tmp_path, monkeypatch):
+    """F5: 5 с без движения и без автопрокрутки — выделение снято."""
+    from gc_tui.screens import main as main_mod
+
+    clock = _Clock()
+    monkeypatch.setattr(main_mod, "time", clock)
+    async with _watchdog_app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        cleared = _count_clears(scr, monkeypatch)
+        scr._selecting = True
+        await pilot.hover("#trace", offset=(2, 1))
+        scr._poll_active()
+        clock.now += 4.0
+        scr._poll_active()
+        assert cleared["count"] == 0
+        clock.now += 1.5
+        scr._poll_active()
+        assert cleared["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_watchdog_auto_scroll_tick_is_activity(tmp_path, monkeypatch):
+    """F5 (решение плана 6): идущая автопрокрутка — активность; лента
+    доехала до края — нет, неподвижное выделение снимается."""
+    from gc_tui import textual_compat
+    from gc_tui.screens import main as main_mod
+
+    clock = _Clock()
+    monkeypatch.setattr(main_mod, "time", clock)
+    async with _watchdog_app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        cleared = _count_clears(scr, monkeypatch)
+        moving = {"on": True}
+        monkeypatch.setattr(
+            textual_compat, "auto_scroll_running", lambda _s: True
+        )
+        monkeypatch.setattr(
+            scr, "_select_auto_scrolling", lambda: moving["on"]
+        )
+        scr._selecting = True
+        scr._poll_active()
+        for _ in range(4):
+            clock.now += 3.0
+            scr._poll_active()
+        assert cleared["count"] == 0
+        moving["on"] = False
+        clock.now += 5.5
+        scr._poll_active()
+        assert cleared["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_no_pin_to_bottom_while_selecting(tmp_path, monkeypatch):
+    """F2: заказанное прижатие к низу не срабатывает под выделением —
+    автопрокрутка выделения с ним не борется."""
+    async with _watchdog_app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        trace = scr.query_one("#trace")
+        ended = {"n": 0}
+        monkeypatch.setattr(
+            trace,
+            "scroll_end",
+            lambda *a, **k: ended.__setitem__("n", ended["n"] + 1),
+        )
+        scr._stick_bottom = True
+        scr._selecting = True
+        scr._scroll_trace_end()
+        await pilot.pause(0.1)
+        assert ended["n"] == 0
+        scr._selecting = False
+        scr._scroll_trace_end()
+        await pilot.pause(0.1)
+        assert ended["n"] >= 1
 
 
 @pytest.mark.asyncio
@@ -172,7 +307,7 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
         settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
-        row = ToolCallRow(call_id="c1", tool_name="tool", args_summary="x=1")
+        row = ToolCallRow(call_id="c1", label="tool", target="x=1")
         await pilot.app.mount(row)
         updated = {"n": 0}
         if row._prefix_static is not None:
@@ -319,7 +454,7 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
     отпускания мыши — под заморозкой хвост не читается, курсор стоит."""
     import json
 
-    from gc_core.thread_store import append_new_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
 
     def _append(seq: int, *msgs: dict) -> None:
@@ -370,19 +505,18 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
         scr._poll_active()
         await pilot.pause(0.05)
         ids = [e.message_id for e in scr._task_events]
-        size = (tmp_path / "data_cli_t1.jsonl").stat().st_size
 
     assert True not in reads
     assert {"u2", "fc1", "fo1"} <= set(ids)
     assert ids.count("u2") == 1
-    assert scr._cursor.position_token == size
+    assert scr._cursor.ordering_key == 4
 
 
 @pytest.mark.asyncio
 async def test_stream_answer_under_selection_drawn_once(tmp_path, monkeypatch):
     """Ответ из стрима дописан в файл под выделением: после отпускания —
     одна строка ответа, стрим-блок снят."""
-    from gc_core.thread_store import append_new_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.widgets.stream_block import StreamBlock
 
@@ -417,3 +551,35 @@ async def test_stream_answer_under_selection_drawn_once(tmp_path, monkeypatch):
 
     assert len(answers) == 1
     assert scr._stream_block is None and not mounted
+
+
+@pytest.mark.asyncio
+async def test_select_scrolled_up_not_pulled_back_on_release(tmp_path):
+    """F2: лента у низа, выделение протянуто вверх — по концу выделения
+    лента остаётся там, липкость снята."""
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        for i in range(40):
+            scr._mount_trace_row(
+                prefix="x ", content=f"строка {i}", kind_class="line-meta"
+            )
+        await pilot.pause()
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        assert trace.scroll_y == trace.max_scroll_y
+        top = trace.max_scroll_y - 10
+        scr._selecting = True
+        trace.scroll_to(y=top, animate=False, immediate=True)
+        await pilot.pause()
+        scr._selecting = False
+        await pilot.pause()
+        await pilot.pause()
+        assert scr._stick_bottom is False
+        assert trace.scroll_y == top

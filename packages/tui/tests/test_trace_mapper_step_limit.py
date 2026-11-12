@@ -12,7 +12,7 @@ import json
 def test_step_limit_trace_summary_not_success():
     from gc_tui.services.trace_mapper import (
         _looks_like_error,
-        _summarize_output,
+        result_stop,
     )
 
     out = json.dumps(
@@ -30,4 +30,4 @@ def test_step_limit_trace_summary_not_success():
         }
     )
     assert _looks_like_error(out) is True
-    assert _summarize_output(out, error=True) == "лимит шагов"
+    assert result_stop(out) == ("halted", "лимит шагов")

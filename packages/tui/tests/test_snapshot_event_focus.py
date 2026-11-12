@@ -8,9 +8,15 @@ pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 
-def test_event_focus_snapshot(snap_compare, tmp_path):
+def test_event_focus_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
     from gc_tui.widgets.user_reply import UserReplyContainer
+
+    # Папку в шапке фиксируем — иначе снапшот стал бы машинно-зависимым.
+    monkeypatch.setattr(
+        TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
+    )
 
     tid = "t1"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(

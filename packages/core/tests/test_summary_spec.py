@@ -1,9 +1,7 @@
 import unittest
+from pathlib import Path
 
-from gc_core.summarize.prompt_loading import (
-    default_prompt_path,
-    load_prompt_template,
-)
+from gc_core.summarize.prompt_loading import render_summary_prompt
 from gc_core.summarize.summary_spec import (
     _SECTION_BODY_PATTERNS,
     SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
@@ -19,12 +17,21 @@ from gc_core.summarize.summary_spec import (
     slice_summary,
 )
 from gc_core.summarize.summary_validation import (
-    FALLBACK_SUMMARY,
     merge_repaired_summary,
-    resolve_after_repair_failure,
     validate_summary_text,
 )
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
+
+def default_prompt_path() -> str:
+    from gc_testkit.paths import ASSETS
+
+    return str(ASSETS / "prompts" / "chat_completions_summary_prompt.md")
+
+
+def load_prompt_template(path: str) -> str:
+    raw = Path(path).read_text(encoding="utf-8")
+    return render_summary_prompt(raw, label=path)
 
 
 class SummarySpecTest(unittest.TestCase):
@@ -55,7 +62,7 @@ class SummarySpecTest(unittest.TestCase):
         self.assertTrue(ok, reason)
 
     def test_prompt_template_injects_xml_sections(self) -> None:
-        raw = open(default_prompt_path(), encoding="utf-8").read()
+        raw = Path(default_prompt_path()).read_text(encoding="utf-8")
         self.assertIn(SUMMARY_SECTIONS_PLACEHOLDER, raw)
         self.assertIn("one XML document", raw)
         loaded = load_prompt_template(default_prompt_path())
@@ -119,34 +126,20 @@ class SummarySpecTest(unittest.TestCase):
         for tag in section_tags():
             self.assertIn(f"<{tag}>body-{tag}</{tag}>", sliced)
 
-    def test_partial_merged_when_strict_validate_fails(self) -> None:
+    def test_useful_partial_merge_keeps_preserved_content(self) -> None:
         pad = "- test content for validation padding."
-        invalid = assemble_summary_xml({"task_and_context": f"keep\n{pad}"})
-        repaired = "<summary></summary>"
+        invalid = assemble_summary_xml(
+            {"task_and_context": f"keep\n{pad}"}, only_present=True
+        )
+        repaired = assemble_summary_xml(
+            {"open_tasks": "- n/a"}, only_present=True
+        )
         merged = merge_repaired_summary(
             invalid_text=invalid, repaired_text=repaired
         )
-        text, resolution = resolve_after_repair_failure(
-            invalid_text=invalid,
-            merged_text=merged,
-            repaired_text=repaired,
-            accumulated_summary="",
-        )
-        self.assertEqual(resolution, "partial_merged")
-        self.assertIn("keep", text)
-        ok, reason = validate_summary_text(text)
+        self.assertIn("keep", merged)
+        ok, reason = validate_summary_text(merged)
         self.assertTrue(ok, reason)
-
-    def test_fallback_only_when_no_tags_anywhere(self) -> None:
-        text, resolution = resolve_after_repair_failure(
-            invalid_text="not xml",
-            merged_text="<summary></summary>",
-            repaired_text="",
-            accumulated_summary="",
-        )
-        self.assertEqual(resolution, "fallback")
-        self.assertEqual(text, FALLBACK_SUMMARY)
-        self.assertTrue(validate_summary_text(text)[0])
 
     def test_merge_summary_bodies_repair_overrides(self) -> None:
         merged = merge_summary_bodies(
@@ -286,14 +279,33 @@ class SummarySpecTest(unittest.TestCase):
         self.assertEqual(bodies["active_constraints"], pad)
         self.assertEqual(bodies["recent_artifacts"], pad)
 
-    def test_validate_accepts_short_all_n_a_sections(self) -> None:
+    def test_validate_rejects_all_n_a_sections(self) -> None:
+        xml = assemble_summary_xml(dict.fromkeys(section_tags(), "- N/A"))
+        self.assertEqual(validate_summary_text(xml), (False, "empty_content"))
+
+    def test_validate_accepts_n_a_in_individual_sections(self) -> None:
         bodies = dict.fromkeys(section_tags(), "- n/a")
+        bodies["task_and_context"] = "Keep the verified result"
         xml = assemble_summary_xml(bodies)
         ok, reason = validate_summary_text(xml)
         self.assertTrue(ok, reason)
 
     def test_validate_rejects_all_empty_tag_bodies(self) -> None:
         xml = assemble_summary_xml(dict.fromkeys(section_tags(), ""))
+        ok, reason = validate_summary_text(xml)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "empty_content")
+
+    def test_validate_rejects_template_ellipsis_bodies(self) -> None:
+        xml = assemble_summary_xml(dict.fromkeys(section_tags(), "..."))
+        ok, reason = validate_summary_text(xml)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "empty_content")
+
+    def test_validate_rejects_multiline_ellipsis_bodies(self) -> None:
+        xml = assemble_summary_xml(
+            {"task_and_context": "...\n...", "open_tasks": "…"}
+        )
         ok, reason = validate_summary_text(xml)
         self.assertFalse(ok)
         self.assertEqual(reason, "empty_content")

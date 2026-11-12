@@ -149,11 +149,13 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
         modal = next(
             s for s in pilot.app.screen_stack if isinstance(s, ConfirmScreen)
         )
-        assert (
-            modal.query_one("#confirm-dialog").border_title == "Новая задача"
+        # Тот же вопрос, что у любого перехода из сессии с ходом (решение 25).
+        assert modal.query_one("#confirm-dialog").border_title == "Идёт ход"
+        assert modal._message == (
+            "В этой сессии идёт ход. Остановить его и перейти?"
         )
         hint = str(modal.query_one("#confirm-hint").render())
-        assert "прервать" in hint and "продолжить" in hint
+        assert "Остановить и перейти" in hint and "Остаться" in hint
 
 
 @pytest.mark.asyncio

@@ -11,10 +11,13 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Input, Static
 
-from gc_tui.palette import BRIGHT, CODE, DIM, INK, MUTED
+from gc_tui.palette import DIM, MUTED, SKILL, SUB_INK
 from gc_tui.services.skill_view import source_label, truncate_path_left
+from gc_tui.services.trace_glyphs import PROMPT
 
-_FOOTER = "[↑↓] выбрать  [Enter] открыть  [Esc] back  /skill <id>"
+_FOOTER = (
+    "↑/↓ — выбор · Enter — открыть · /skill <id> — запустить · Esc — назад"
+)
 _PATH_MIN = 16  # минимально видимая длина пути (хвост-папка)
 _DEFAULT_WIDTH = 80  # пока ширина списка неизвестна (до первой раскладки)
 _TYPE_RESERVE = 16  # длиннейший RU-ярлык типа ("пользовательский")
@@ -45,7 +48,7 @@ class SkillsScreen(Screen):
                 yield Static("", id="header-left", markup=False)
             yield VerticalScroll(id="skills-list")
             with Horizontal(id="skills-filter-row"):
-                yield Static("> ", id="skills-filter-prompt", markup=False)
+                yield Static(PROMPT, id="skills-filter-prompt", markup=False)
                 yield Input(placeholder="фильтр…", id="skills-filter")
             yield Static(_FOOTER, id="footer", markup=False)
 
@@ -89,24 +92,26 @@ class SkillsScreen(Screen):
         # запас: паддинг (2) + ярлык типа + разделитель " · " (3)
         return max(_PATH_MIN, width - 2 - _TYPE_RESERVE - 3)
 
-    def _id_line(self, skill: dict, *, selected: bool) -> Text:
+    def _id_line(self, skill: dict) -> Text:
+        """Имя цветом скилла и на выделении (как в палитре): выделение
+        несёт фон карточки."""
         t = Text(no_wrap=True, overflow="ellipsis")
-        t.append(skill.get("id") or "?", style=BRIGHT if selected else INK)
+        t.append(skill.get("id") or "?", style=SKILL)
         return t
 
     def _meta_line(self, skill: dict, *, maxlen: int) -> Text:
         t = Text(no_wrap=True, overflow="ellipsis")
-        t.append(source_label(skill.get("source", "")), style=CODE)
+        t.append(source_label(skill.get("source", "")), style=SUB_INK)
         path = skill.get("root_path") or ""
         if path:
             t.append(" · ", style=MUTED)
             t.append(truncate_path_left(path, maxlen), style=DIM)
         return t
 
-    def _card_text(self, skill: dict, *, selected: bool, maxlen: int) -> Text:
+    def _card_text(self, skill: dict, *, maxlen: int) -> Text:
         """Карточка скилла одним 2-строчным виджетом: id + строка типа/пути."""
         t = Text(no_wrap=True, overflow="ellipsis")
-        t.append_text(self._id_line(skill, selected=selected))
+        t.append_text(self._id_line(skill))
         t.append("\n")
         t.append_text(self._meta_line(skill, maxlen=maxlen))
         return t
@@ -126,7 +131,7 @@ class SkillsScreen(Screen):
         for idx, s in enumerate(self._skills):
             suffix = " selected" if idx == self._selected_idx else ""
             card = Static(
-                self._card_text(s, selected=bool(suffix), maxlen=maxlen),
+                self._card_text(s, maxlen=maxlen),
                 classes="card" + suffix,
                 markup=False,
             )
@@ -191,4 +196,6 @@ class SkillsScreen(Screen):
         from gc_tui.services.skill_view import build_skill_viewer
 
         title, body = build_skill_viewer(detail)
-        self.app.push_screen(ViewerScreen(title=title, content=body))
+        self.app.push_screen(
+            ViewerScreen(title=title, content=body, markdown=True)
+        )

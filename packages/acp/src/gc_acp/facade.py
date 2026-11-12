@@ -13,12 +13,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.execution.constants import NO_TOOL_RESPONSE
+from gc_core.execution.message_keys import make_message_key
 from gc_core.security.permission_mode import Mode
-from gc_core.thread_store import (
-    ThreadSession,
-    resolve_threads_dir,
-    validate_thread_id,
-)
+from gc_core.thread_store import validate_thread_id
 from gc_core.tools.turn.turn_close import (
     close_view,
     closing_reply_of,
@@ -39,14 +37,14 @@ from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
 from gc_acp.model_config import (
     MODEL_CONFIG_ID,
     active_model_line,
-    level_for_choice,
+    choice_for_value,
     listed,
     model_config_option,
-    session_level,
+    session_choice,
 )
 from gc_acp.modes import (
     MODE_CONFIG_ID,
-    current_mode,
+    acurrent_mode,
     mode_choice,
     mode_config_option,
     mode_updates,
@@ -55,10 +53,11 @@ from gc_acp.modes import (
 from gc_acp.plan import (
     plan_update,
     session_info_update,
+    thread_record,
     todos_from_agent,
-    todos_from_meta,
+    todos_from_record,
     usage_from_agent,
-    usage_from_meta,
+    usage_from_record,
 )
 from gc_acp.plan_approval import (
     PLAN_REWORK,
@@ -86,10 +85,10 @@ from gc_acp.protocol import (
 )
 from gc_acp.session_index import (
     ACP_SYSTEM,
-    SessionFile,
     SessionIndex,
+    SessionRecord,
     prompt_title_line,
-    session_title,
+    thread_key,
 )
 from gc_acp.stop_reason import stop_reason
 from gc_acp.tool_flow import ToolFlow
@@ -136,9 +135,9 @@ class LiveSession:
     failed: bool = False
     tool_flow: ToolFlow | None = None
     diffs: DiffLog | None = None
-    # Выбор пикера. None — уровень конфига (``settings.level`` / ``--level``).
+    # Выбор пикера. None — выбор конфига (``settings.model`` / ``--model``).
     # close забывает сессию вместе с этим полем; в файл конфига не пишется.
-    level: str | None = None
+    choice: str | None = None
     # Title уже ушёл клиенту — повторно с тем же не слать.
     title_sent: bool = False
     # Имя тула по toolCallId (родительский ход) — для plan после session_todo.
@@ -163,9 +162,7 @@ class AcpFacade:
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._index = session_index or SessionIndex(
-            resolve_threads_dir(settings)
-        )
+        self._index = session_index or SessionIndex.from_settings(settings)
         self._sessions: dict[str, LiveSession] = {}
         self._releasing: set[asyncio.Task] = set()
         self._initialized = False
@@ -296,7 +293,7 @@ class AcpFacade:
             return
         live.agent = agent
         try:
-            self._index.create(session_id, cwd)
+            await self._index.create(session_id, cwd)
         except Exception:
             logger.exception(_METHOD_NEW)
             await _safe_aclose(agent)
@@ -306,7 +303,7 @@ class AcpFacade:
         await self._send(
             result_message(
                 request_id,
-                {"sessionId": session_id, **self._session_fields(live)},
+                {"sessionId": session_id, **await self._asession_fields(live)},
             )
         )
 
@@ -365,7 +362,7 @@ class AcpFacade:
         await self._send(
             result_message(
                 request_id,
-                {"sessions": self._index.list_sessions(cwd)},
+                {"sessions": await self._index.list_sessions(cwd)},
             )
         )
 
@@ -379,7 +376,7 @@ class AcpFacade:
             return
         await self._emit_session_snapshot(live, replayed=False)
         await self._send(
-            result_message(request_id, self._session_fields(live))
+            result_message(request_id, await self._asession_fields(live))
         )
 
     async def _session_load(self, request_id: Any, params: Any) -> None:
@@ -391,14 +388,14 @@ class AcpFacade:
             await self._fail(request_id)
             return
         try:
-            await self._replay(record.session_id)
+            await self._replay(record.session_id, live.cwd)
         except Exception:
             logger.exception("session/load")
             await self._fail(request_id)
             return
         await self._emit_session_snapshot(live, replayed=True)
         await self._send(
-            result_message(request_id, self._session_fields(live))
+            result_message(request_id, await self._asession_fields(live))
         )
 
     async def _session_set_config_option(
@@ -420,7 +417,7 @@ class AcpFacade:
         if not applied:
             await self._invalid_params(request_id)
             return
-        options = self._config_options(live, self._mode(live))
+        options = self._config_options(live, await self._amode(live))
         await self._send(
             result_message(request_id, {"configOptions": options})
         )
@@ -451,12 +448,12 @@ class AcpFacade:
         return True
 
     def _choose_model(self, live: LiveSession, value: Any) -> bool:
-        level = session_level(self._settings, live.level)
-        if not listed(model_config_option(self._settings, level), value):
+        choice = session_choice(self._settings, live.choice)
+        if not listed(model_config_option(self._settings, choice), value):
             return False
-        chosen = level_for_choice(self._settings, level, value)
+        chosen = choice_for_value(self._settings, choice, value)
         if chosen is not None:
-            live.level = chosen
+            live.choice = chosen
         return True
 
     async def _apply_mode(self, live: LiveSession, mode: str) -> None:
@@ -473,7 +470,7 @@ class AcpFacade:
 
     async def _session_delete(self, request_id: Any, params: Any) -> None:
         session_id = _session_id_of(params)
-        if session_id is None or self._index.load(session_id) is None:
+        if session_id is None or await self._index.load(session_id) is None:
             await self._missing(request_id)
             return
         live = self._sessions.pop(session_id, None)
@@ -481,7 +478,7 @@ class AcpFacade:
             # Запись индекса снимаем сразу, чтобы load не поднял второй
             # агент на тот же тред. jsonl — после хода, он ещё пишется.
             try:
-                self._index.drop_record(session_id)
+                await self._index.drop_record(session_id)
             except Exception:
                 logger.exception(_METHOD_DELETE)
                 await self._fail(request_id)
@@ -492,7 +489,7 @@ class AcpFacade:
         if live is not None:
             await self._release(live, drop_thread=False)
         try:
-            self._index.remove(session_id)
+            await self._index.remove(session_id)
         except Exception:
             logger.exception(_METHOD_DELETE)
             await self._fail(request_id)
@@ -501,7 +498,7 @@ class AcpFacade:
 
     async def _disk_session(
         self, request_id: Any, params: Any, *, mcp: bool
-    ) -> SessionFile | None:
+    ) -> SessionRecord | None:
         body = _object_params(params)
         session_id = _session_id(
             None if body is None else body.get("sessionId")
@@ -518,7 +515,7 @@ class AcpFacade:
         if mcp and not isinstance(body.get("mcpServers"), list):
             await self._invalid_params(request_id)
             return None
-        record = self._index.load(session_id)
+        record = await self._index.load(session_id)
         if record is None:
             await self._missing(request_id)
             return None
@@ -530,7 +527,7 @@ class AcpFacade:
         warn_ignored_client_fields(body)
         return record
 
-    async def _ensure_live(self, record: SessionFile) -> LiveSession | None:
+    async def _ensure_live(self, record: SessionRecord) -> LiveSession | None:
         live = self._sessions.get(record.session_id)
         if live is not None:
             return live
@@ -544,21 +541,21 @@ class AcpFacade:
         self._sessions[record.session_id] = live
         return live
 
-    async def _replay(self, session_id: str) -> None:
-        thread = await ThreadSession.afrom_config(
-            settings=self._settings,
-            system_id=ACP_SYSTEM,
-            thread_id=session_id,
-        )
+    async def _replay(self, session_id: str, cwd: str) -> None:
+        threads, key = self._index.threads, thread_key(session_id)
+        messages = _unique(entry.data for entry in await threads.history(key))
+        records = [
+            {"ts": entry.ts, "seq": entry.seq, **entry.data}
+            for entry in await threads.subagent_events(key)
+        ]
         for update in history_updates(
-            thread.get_full_history_messages(),
-            subagent_records=self._index.subagent_records(session_id),
+            messages, subagent_records=records, root=cwd
         ):
             await self._notify(session_id, update)
 
-    def _session_fields(self, live: LiveSession) -> dict:
+    async def _asession_fields(self, live: LiveSession) -> dict:
         """Опции сессии для new / load / resume: модель, режим и ``modes``."""
-        mode = self._mode(live)
+        mode = await self._amode(live)
         return {
             "configOptions": self._config_options(live, mode),
             "modes": session_modes(mode),
@@ -567,16 +564,16 @@ class AcpFacade:
     def _config_options(self, live: LiveSession, mode: str) -> list[dict]:
         """Весь список опций: модель (если есть из чего выбрать) и режим."""
         model = model_config_option(
-            self._settings, session_level(self._settings, live.level)
+            self._settings, session_choice(self._settings, live.choice)
         )
         options = [] if model is None else [model]
         return [*options, mode_config_option(mode)]
 
-    def _mode(self, live: LiveSession) -> str:
-        return current_mode(
+    async def _amode(self, live: LiveSession) -> str:
+        return await acurrent_mode(
             live.agent,
             self._settings,
-            threads_dir=self._index.threads_dir,
+            threads=self._index.threads,
             session_id=live.session_id,
         )
 
@@ -584,8 +581,8 @@ class AcpFacade:
         self._loop = asyncio.get_running_loop()
         settings = self._settings.with_runtime(launch_root=live.cwd)
 
-        def level_provider() -> str:
-            return session_level(self._settings, live.level)
+        def choice_provider() -> str:
+            return session_choice(self._settings, live.choice)
 
         async with self._create_lock:
             agent = await self._agent_factory(
@@ -593,7 +590,7 @@ class AcpFacade:
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._session_backend(live),
-                level_provider=level_provider,
+                choice_provider=choice_provider,
             )
         try:
             bind_ask_human(agent)
@@ -619,10 +616,14 @@ class AcpFacade:
     async def _confirm(self, session_id: str, request: Any) -> str:
         from gc_core.security.confirm_port import CONFIRM_TIMED_OUT
 
+        live = self._sessions.get(session_id)
+        # Карточка вызова — до вопроса: поток треда читается асинхронно, а
+        # сообщение собирается синхронно.
+        call_id = None if live is None else await _open_call_id(live)
         reply = await self._ask_client(
             session_id,
-            lambda live, request_id: permission_message(
-                request_id, session_id, request, _open_call_id(live)
+            lambda _live, request_id: permission_message(
+                request_id, session_id, request, call_id
             ),
         )
         if reply is None:
@@ -728,7 +729,7 @@ class AcpFacade:
                 logger.exception("session/prompt")
         if not live.response_sent:
             await self._close_prompt(live, request_id)
-        _touch(self._index, live.session_id)
+        await _touch(self._index, live.session_id)
 
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
@@ -751,9 +752,8 @@ class AcpFacade:
         ``deltas`` — фабрика async-итератора ``(kind, text)`` этого прогона.
         """
         await self._announce_model(live)
-        flow = ToolFlow(
-            self._index.thread_path(live.session_id),
-            sidecar_path=self._index.subagent_path(live.session_id),
+        flow = await ToolFlow.start(
+            self._index.threads, thread_key(live.session_id), root=live.cwd
         )
         live.tool_flow = flow
         stop = asyncio.Event()
@@ -843,7 +843,7 @@ class AcpFacade:
                 continue
 
     async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
-        for update in flow.poll():
+        for update in await flow.poll():
             await self._notify(
                 live.session_id, attach_diff(update, live.diffs)
             )
@@ -882,7 +882,7 @@ class AcpFacade:
         модели не прилипло к этой строке.
         """
         text = active_model_line(
-            self._settings, session_level(self._settings, live.level)
+            self._settings, session_choice(self._settings, live.choice)
         )
         if text is None:
             return
@@ -903,20 +903,20 @@ class AcpFacade:
     async def _emit_session_snapshot(
         self, live: LiveSession, *, replayed: bool
     ) -> None:
-        """После load (с replay) или resume — plan, title, usage из meta."""
+        """После load (с replay) или resume — plan, title, usage из треда."""
         del replayed
-        threads = self._index.threads_dir
         session_id = live.session_id
-        await self._notify(
-            session_id, plan_update(todos_from_meta(threads, session_id))
+        record = await thread_record(
+            self._index.threads, thread_key(session_id)
         )
-        title = session_title(threads, session_id)
+        await self._notify(session_id, plan_update(todos_from_record(record)))
+        title = await self._index.title(session_id)
         if title is not None:
             await self._notify(session_id, session_info_update(title))
             live.title_sent = True
-        level = session_level(self._settings, live.level)
-        usage = usage_from_meta(
-            threads, session_id, settings=self._settings, level=level
+        choice = session_choice(self._settings, live.choice)
+        usage = usage_from_record(
+            record, settings=self._settings, choice=choice
         )
         if usage is not None:
             await self._notify(session_id, usage)
@@ -936,13 +936,16 @@ class AcpFacade:
             )
             return
         await self._emit_usage(live)
-        reason = stop_reason(_outcome(live), cancelled=False)
-        await self._send(result_message(request_id, {"stopReason": reason}))
+        outcome = _outcome(live)
+        result = {"stopReason": stop_reason(outcome, cancelled=False)}
+        if outcome == NO_TOOL_RESPONSE:
+            result["_meta"] = {"terminal_outcome": NO_TOOL_RESPONSE}
+        await self._send(result_message(request_id, result))
 
     async def _emit_usage(self, live: LiveSession) -> None:
-        level = session_level(self._settings, live.level)
+        choice = session_choice(self._settings, live.choice)
         usage = usage_from_agent(
-            live.agent, settings=self._settings, level=level
+            live.agent, settings=self._settings, choice=choice
         )
         if usage is not None:
             await self._notify(live.session_id, usage)
@@ -1010,7 +1013,7 @@ class AcpFacade:
         if not drop_thread:
             return
         try:
-            self._index.drop_thread(live.session_id)
+            await self._index.drop_thread(live.session_id)
         except Exception:
             logger.exception(_METHOD_DELETE)
 
@@ -1112,12 +1115,12 @@ def _session_id_of(params: Any) -> str | None:
     return _session_id(body.get("sessionId"))
 
 
-def _open_call_id(live: LiveSession) -> str | None:
+async def _open_call_id(live: LiveSession) -> str | None:
     """Карточка, которая исполняется сейчас. До хода её ещё нет."""
     flow = live.tool_flow
     if flow is None:
         return None
-    return flow.current_call_id()
+    return await flow.current_call_id()
 
 
 def _prompt_running(live: LiveSession) -> bool:
@@ -1236,9 +1239,9 @@ def _mark_cancel(live: LiveSession) -> None:
         stop()
 
 
-def _touch(index: SessionIndex, session_id: str) -> None:
+async def _touch(index: SessionIndex, session_id: str) -> None:
     try:
-        index.touch(session_id)
+        await index.touch(session_id)
     except Exception:
         logger.exception("acp session touch")
 
@@ -1251,3 +1254,17 @@ async def _safe_aclose(agent: Any) -> None:
         await close()
     except Exception:
         logger.exception("acp aclose")
+
+
+def _unique(messages) -> list[dict]:
+    """История без повторов по ключу сообщения — как отдавал её develop
+    (``get_full_history_messages``): тред develop мог записать сообщение
+    дважды (повтор шага), а клиент получил бы его дважды."""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for message in messages:
+        key = make_message_key(message)
+        if key not in seen:
+            seen.add(key)
+            unique.append(message)
+    return unique

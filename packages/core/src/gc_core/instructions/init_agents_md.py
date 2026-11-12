@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gc_core.bundled_assets import bundled_root
+from gc_core.agent_store import AgentStore, Prompt, aread_required
 
 _BLOCK_NEW = "There is no AGENTS.md yet — create it from scratch."
 _BLOCK_ASK = (
@@ -17,18 +17,23 @@ _BLOCK_HEADLESS = (
 )
 
 
-def _prompt_template() -> str:
-    return (bundled_root() / "prompts" / "init_agents_md_prompt.md").read_text(
-        encoding="utf-8"
-    )
-
-
-def build_init_prompt(*, cwd: str, can_ask: bool) -> str:
+async def abuild_init_prompt(
+    *, store: AgentStore, cwd: str, can_ask: bool
+) -> str:
     """Собрать init-промпт: агент сам сканирует репо и пишет AGENTS.md через write_to_file.
 
-    Ветка по существующему файлу зашивается здесь (вызывающая сторона передаёт can_ask
-    = доступность ask_human/confirm), чтобы модель не рассуждала о доступности тулов.
+    Шаблон — промпт хранилища агента (``init_agents_md``). Ветка по
+    существующему файлу зашивается здесь (вызывающая сторона передаёт
+    can_ask = доступность ask_human/confirm), чтобы модель не рассуждала о
+    доступности тулов.
     """
+    label = store.label("prompt", Prompt.INIT_AGENTS_MD)
+    template = await aread_required(
+        store,
+        "prompt",
+        Prompt.INIT_AGENTS_MD,
+        missing=f"Init AGENTS.md prompt not found: {label}",
+    )
     exists = (Path(cwd) / "AGENTS.md").exists()
     if not exists:
         block = _BLOCK_NEW
@@ -36,4 +41,4 @@ def build_init_prompt(*, cwd: str, can_ask: bool) -> str:
         block = _BLOCK_ASK
     else:
         block = _BLOCK_HEADLESS
-    return _prompt_template().replace("{existing_block}", block)
+    return template.replace("{existing_block}", block)

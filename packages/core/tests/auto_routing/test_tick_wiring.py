@@ -176,7 +176,7 @@ def test_pending_mid_turn_pickup_does_not_reset_steps_in_turn(monkeypatch):
             [{"role": "user", "content": "первое сообщение"}],
             s,
             ctx,
-            get_pending_messages=_get_pending,
+            get_pending_messages=as_coro(_get_pending),
         )
     )
 

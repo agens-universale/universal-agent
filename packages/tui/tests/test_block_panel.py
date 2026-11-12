@@ -292,9 +292,10 @@ async def test_ctrl_click_opens_event_exactly_once():
 
 
 @pytest.mark.asyncio
-async def test_double_click_focuses_panel_when_focusable():
-    """Находка 5: двойной клик по телу ставит фокус на панель, если она
-    focusable — иначе `Tab` после клика не продолжал бы с этого события.
+async def test_double_click_copies_without_selecting_the_panel():
+    """Двойной клик по телу копирует блок, но панель не выделяет: обычные
+    жесты мыши строку ленты не выделяют (клик-модель 2026-11-01), выделяет
+    Tab или клик с модификатором.
 
     Синтетический `on_click()` (как в test_trace_row.py / test_double_click_open.py)
     идёт мимо screen-level MouseDown-фокуса — при живом клике мышью Textual
@@ -327,7 +328,7 @@ async def test_double_click_focuses_panel_when_focusable():
         )
         panel.on_click(click)
         await pilot.pause()
-        assert panel.has_focus
+        assert not panel.has_focus
 
 
 @pytest.mark.asyncio
@@ -395,11 +396,12 @@ async def test_partial_drag_on_wrapped_line_yields_dragged_part_only():
 
 
 @pytest.mark.asyncio
-async def test_focused_panel_background_is_focus_bg_not_band_bg(
+async def test_focused_panel_background_is_highlight_not_band_bg(
     tui_app_factory,
 ):
-    """Т-C (спека §6.11): фон сфокусированной панели — $focus-bg, не фон покоя
-    (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не заметит).
+    """Т-C (спека §6.11): фон сфокусированной панели — $highlight-bg, не фон
+    покоя (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не
+    заметит).
 
     Фон покоя — $block-bg: блоки ленты переехали на свой токен, тише полосы
     баннеров ($band-bg)."""
@@ -415,7 +417,7 @@ async def test_focused_panel_background_is_focus_bg_not_band_bg(
         assert panel.styles.background.hex == palette.BLOCK_BG.upper()
         panel.focus()
         await pilot.pause()
-        assert panel.styles.background.hex == palette.FOCUS_BG.upper()
+        assert panel.styles.background.hex == palette.HIGHLIGHT_BG.upper()
 
 
 @pytest.mark.asyncio
@@ -436,14 +438,17 @@ async def test_copy_button_click_does_not_focus_panel():
 
 
 @pytest.mark.asyncio
-async def test_body_click_focuses_panel():
-    """Позитивный контроль: клик по ТЕЛУ панели по-прежнему выделяет её."""
+async def test_body_click_selects_panel_only_with_a_modifier():
+    """Обычный клик по телу панель не выделяет; клик с Ctrl — выделяет."""
     panel = BlockPanel.for_code(CODE, "python", event_no=7, focusable=True)
     app = _Host(panel)
     async with app.run_test(size=(60, 20)) as pilot:
         panel.blur()
         await pilot.pause()
         await pilot.click(".block-body")
+        await pilot.pause()
+        assert not panel.has_focus
+        await pilot.click(".block-body", control=True)
         await pilot.pause()
         assert panel.has_focus
 

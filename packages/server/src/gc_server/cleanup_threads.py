@@ -1,128 +1,69 @@
 #!/usr/bin/env python3
 import argparse
-import json
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
-from gc_core.thread_store import delete_thread, thread_meta_path
+from gc_core.threads import file_layout
+from gc_core.threads.errors import OwnershipError
+from gc_core.threads.facade import Threads, run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadRecord
 
-# Константы вместо повторяющихся литералов (Sonar S1192).
-_EXT_JSON = ".json"
+#: Квитанции операций нужны только на время повторов записи.
+_RECEIPTS_TTL = timedelta(days=7)
 
 
 def _parse_datetime_maybe(value: Any) -> Optional[datetime]:
     if not isinstance(value, str) or not value.strip():
         return None
-    v = value.strip()
     try:
         # ISO-8601: datetime.fromisoformat() понимает и смещения (+00:00).
-        return datetime.fromisoformat(v)
+        return datetime.fromisoformat(value.strip())
     except ValueError:
         return None
 
 
-def _meta_to_data_path(meta_path: str) -> str:
-    """
-    Конвертируем имя:
-      threads/meta_<tail>.json -> threads/data_<tail>.jsonl
-    """
-    base = os.path.basename(meta_path)
-    if base.startswith("meta_") and base.endswith(_EXT_JSON):
-        tail = base[len("meta_") : -len(_EXT_JSON)]
-        return os.path.join(os.path.dirname(meta_path), f"data_{tail}.jsonl")
-
-    # На случай неожиданного формата оставим "как есть".
-    return meta_path + ".l"
-
-
-def _is_canonical_meta(threads_dir: str, meta_path: str, meta: dict) -> bool:
-    """Файл — каноническая meta того треда, который назван в его содержимом.
-
-    Архив компакции (``meta_<sys>_<tid>__pre_summary__<ts>.json``) и legacy
-    ``meta_<tid>.json`` несут те же system/thread_id: удаление треда по ним
-    снесло бы живой тред вместе с картинками. Их удаляем по имени файла.
-    """
-    system_id, thread_id = meta.get("system"), meta.get("thread_id")
-    if not isinstance(system_id, str) or not isinstance(thread_id, str):
+def _is_stale(record: ThreadRecord, now: datetime, cutoff: datetime) -> bool:
+    moment = _parse_datetime_maybe(
+        record.info.updated_at
+    ) or _parse_datetime_maybe(record.info.created_at)
+    if moment is None:
         return False
-    try:
-        return thread_meta_path(threads_dir, system_id, thread_id) == meta_path
-    except ValueError:
-        return False
+    # Приведём к timezone-aware: naive-значение считаем локальным.
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=now.tzinfo)
+    return moment < cutoff
 
 
-def _delete_canonical_thread(
-    threads_dir: str, meta_path: str, data_path: str, meta: dict, result: dict
-) -> bool:
-    """Тред целиком — тем же путём, что удаление сессии в TUI: вместе с
-    картинками, сайдкаром субагентов, архивами компакции и журналом правок.
-    Свой перечень файлов здесь забывал бы каждый новый — так сайдкары и архивы
-    и оставались навсегда. False — meta не каноническая, удалять по имени."""
-    if not _is_canonical_meta(threads_dir, meta_path, meta):
-        return False
-    deleted = delete_thread(threads_dir, meta["system"], meta["thread_id"])
-    if meta_path in deleted:
-        result["removed_meta"] += 1
-    if data_path in deleted:
-        result["removed_data"] += 1
-    return True
+async def _all_threads(threads: Threads) -> list[ThreadRecord]:
+    return [record async for record in threads.iter_threads()]
 
 
-def _cleanup_thread(
-    threads_dir: str,
-    meta_path: str,
-    now: datetime,
-    cutoff: datetime,
+def _delete_stale(
+    threads: Threads,
+    store: FileThreadStore,
+    record: ThreadRecord,
     dry_run: bool,
     result: dict,
 ) -> None:
-    with open(meta_path, encoding="utf-8") as f:
-        meta = json.load(f)
-    if not isinstance(meta, dict):
-        result["skipped"] += 1
-        return
-
-    dt = _parse_datetime_maybe(meta.get("updated_at"))
-    if dt is None:
-        dt = _parse_datetime_maybe(meta.get("created_at"))
-    if dt is None:
-        result["skipped"] += 1
-        return
-
-    # Приведём к timezone-aware: naive-значение считаем локальным.
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=now.tzinfo)
-
-    if dt >= cutoff:
-        result["skipped"] += 1
-        return
-
-    data_path = _meta_to_data_path(meta_path)
-
-    if dry_run:
-        result["removed_meta"] += 1
-        if os.path.exists(data_path):
-            result["removed_data"] += 1
-        return
-
-    if _delete_canonical_thread(
-        threads_dir, meta_path, data_path, meta, result
-    ):
-        return
-
-    try:
-        os.remove(meta_path)
-        result["removed_meta"] += 1
-    except FileNotFoundError:
-        pass
-
-    try:
-        if os.path.exists(data_path):
-            os.remove(data_path)
-            result["removed_data"] += 1
-    except FileNotFoundError:
-        pass
+    """Тред целиком — тем же путём, что удаление сессии в TUI: вместе с
+    картинками, трассой субагентов, архивами сжатия и журналом правок."""
+    key = record.key
+    # Счётчик develop — файлы data, а не сообщения (data бывает и без них).
+    has_data = Path(
+        file_layout.history_file(store.threads_dir, key.system, key.thread)
+    ).exists()
+    if not dry_run:
+        try:
+            run_sync(threads.delete(key))
+        except OwnershipError:
+            # Тред ведёт durable-исполнитель (Temporal): не трогаем.
+            result["skipped"] += 1
+            return
+    result["removed_meta"] += 1
+    result["removed_data"] += int(has_data)
 
 
 def cleanup_threads(
@@ -133,11 +74,9 @@ def cleanup_threads(
 ) -> dict:
     """Удалить треды, не обновлявшиеся дольше ``ttl_days``. Вернуть статистику.
 
-    Была частью ``main()`` этого файла, когда он лежал в ``scripts/`` и
-    вызывался фоновым janitor'ом через ``subprocess``. Путь к скрипту считался
-    от корня репозитория, а сам ``scripts/`` не попадал ни в одно колесо —
-    в установленном профиле чистка не работала в принципе. Теперь это обычная
-    функция пакета, а CLI ниже — тонкая обёртка над ней.
+    Треды — через фасад ``Threads`` (удаление целиком); устаревшие архивы
+    сжатия и meta старых форматов — обслуживанием файлового хранилища
+    (``sweep_orphans``); квитанции записи старше недели — ``prune``.
     """
     result = {
         "threads_dir": threads_dir,
@@ -148,60 +87,59 @@ def cleanup_threads(
         "removed_data": 0,
         "errors": 0,
     }
-    if not os.path.isdir(threads_dir):
+    if not Path(threads_dir).is_dir():
         result["missing_dir"] = True
         return result
 
     now = datetime.now().astimezone()
     cutoff = now - timedelta(days=ttl_days)
+    store = FileThreadStore(threads_dir)
+    threads = Threads(store)
 
-    meta_paths = [
-        os.path.join(threads_dir, name)
-        for name in os.listdir(threads_dir)
-        if name.startswith("meta_") and name.endswith(_EXT_JSON)
-    ]
-
-    for meta_path in sorted(meta_paths):
-        if not os.path.exists(meta_path):
-            continue  # архив, удалённый раньше в этом проходе вместе со своим тредом
+    for record in run_sync(_all_threads(threads)):
         result["scanned"] += 1
+        if not _is_stale(record, now, cutoff):
+            result["skipped"] += 1
+            continue
         try:
-            _cleanup_thread(
-                threads_dir, meta_path, now, cutoff, dry_run, result
-            )
+            _delete_stale(threads, store, record, dry_run, result)
         except Exception as e:
             result["errors"] += 1
-            print(f"[cleanup] error for {meta_path}: {e!r}")
+            print(f"[cleanup] error for {record.key}: {e!r}")
 
+    removed_meta, removed_data = store.sweep_orphans(cutoff, dry_run=dry_run)
+    result["removed_meta"] += removed_meta
+    result["removed_data"] += removed_data
+    if not dry_run:
+        result["pruned_receipts"] = run_sync(threads.prune(_RECEIPTS_TTL))
     return result
 
 
 def _default_threads_dir() -> str:
-    """Тот же каталог, который чистит фоновый janitor сервера.
+    """Каталог тредов вебхука из серверного конфига.
 
     Импорт локальный: модуль обязан оставаться запускаемым как
     ``python -m gc_server.cleanup_threads`` и без разбора конфига, если каталог
     задан явно.
     """
+    from gc_core.config import load_settings
     from gc_core.thread_store import resolve_threads_dir
 
-    from gc_server.rest_api.server_config import (
-        build_agent_settings_for_server,
-        load_server_config,
-    )
+    from gc_server.config import load_server_config, surface_settings
 
     return resolve_threads_dir(
-        build_agent_settings_for_server(load_server_config())
+        surface_settings(load_settings(), load_server_config(), "webhook")
     )
 
 
 def main() -> int:
     """CLI-обёртка: `python -m gc_server.cleanup_threads`.
 
-    Дефолт ``--threads-dir`` берётся ОТТУДА ЖЕ, откуда его берёт фоновый janitor
-    (``server_cleanup_threads.register_cleanup_threads_on_startup``) — из
-    серверного конфига через ``resolve_threads_dir``. Иначе одна и та же чистка
-    имела бы два разных представления о том, что чистит.
+    Дефолт ``--threads-dir`` — каталог тредов вебхука из серверного конфига
+    (``resolve_threads_dir``). Команда — явное действие оператора над
+    каталогом: удаляет все устаревшие треды в нём. Фоновая чистка сервера
+    уже, она трогает только задачи вебхука (``WebhookSurface.aprune_once``):
+    каталог по умолчанию общий с gc-cli и TUI.
 
     Пока чистка лежала в ``scripts/``, дефолт считался от файла скрипта
     (``<script>/../threads``). Переезд внутрь пакета этот якорь обессмыслил, и на
@@ -223,7 +161,7 @@ def main() -> int:
         "--threads-dir",
         default=None,
         help=(
-            "Каталог с файлами threads (meta_*.json / data_*.jsonl). По умолчанию — тот же, что чистит janitor сервера."
+            "Каталог с файлами threads (meta_*.json / data_*.jsonl). По умолчанию — каталог тредов вебхука из серверного конфига."
         ),
     )
     parser.add_argument(

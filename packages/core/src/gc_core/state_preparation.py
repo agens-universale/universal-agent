@@ -12,13 +12,12 @@ from typing import Any
 from uuid import uuid4
 
 from gc_core.agent_store import AgentStore, agent_store_of
-from gc_core.instructions.loader import LoadedInstructions, build_instructions
-from gc_core.project_memory import attach_status_to_prompt_vars
+from gc_core.instructions.loader import LoadedInstructions, abuild_instructions
+from gc_core.project_memory import aattach_status_to_prompt_vars, project_of
 
 
 @dataclass(frozen=True)
 class StatePreparationRequest:
-    agent_md_path: str | None = None
     is_tui: bool = False
     agentsmd_override: bool = False
     verbose: bool = False
@@ -36,7 +35,7 @@ class PreparedState:
 StatePreparer = Callable[[StatePreparationRequest], Awaitable[PreparedState]]
 
 
-def load_state_metadata(
+async def aload_state_metadata(
     request: StatePreparationRequest,
     *,
     logger: Any = None,
@@ -49,14 +48,23 @@ def load_state_metadata(
     Инструкции отдаёт хранилище агента (по умолчанию — его же или файловое).
     """
     variables: dict[str, Any] = {}
-    attach_status_to_prompt_vars(variables, settings=metadata_config)
-    instructions = build_instructions(
-        agent_md_path=request.agent_md_path,
+    store = store if store is not None else agent_store_of(metadata_config)
+    # Проект рана: каталог контекста и agent.project_id (без контекста —
+    # текущий каталог).
+    project = project_of(metadata_config)
+    await aattach_status_to_prompt_vars(
+        variables,
+        store=store,
+        project=project,
+        settings=metadata_config,
+    )
+    instructions = await abuild_instructions(
         is_tui=request.is_tui,
         agentsmd_override=request.agentsmd_override,
+        project=project,
         logger=logger,
         verbose=request.verbose,
-        store=store if store is not None else agent_store_of(metadata_config),
+        store=store,
     )
     return variables.get("longMemoryStatus"), instructions
 
@@ -66,7 +74,6 @@ async def prepare_state(
     workspace_config=None,
     workspace=None,
     os_backend=None,
-    agent_md_path: str | None = None,
     is_tui: bool = False,
     agentsmd_override: bool = False,
     verbose: bool = False,
@@ -88,9 +95,8 @@ async def prepare_state(
         workspace_config, workspace=workspace, backend=os_backend
     )
     state_id = str(uuid4())
-    status, instructions = load_state_metadata(
+    status, instructions = await aload_state_metadata(
         StatePreparationRequest(
-            agent_md_path=agent_md_path,
             is_tui=is_tui,
             agentsmd_override=agentsmd_override,
             verbose=verbose,

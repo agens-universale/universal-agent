@@ -22,7 +22,7 @@ def _cfg(raw: dict) -> AppConfig:
 
 
 def _router(cfg: AppConfig, level: str = "default") -> ModelRouter:
-    return ModelRouter(cfg, level_provider=lambda: level)
+    return ModelRouter(cfg, choice_provider=lambda: level)
 
 
 def _main_payload(cfg: AppConfig, resolved) -> dict:
@@ -135,7 +135,7 @@ _PROFILE = {
 def test_level_switch_uses_that_alias_main_and_drops_the_other_dialect():
     held = {"level": "light"}
     cfg = _cfg(_PROFILE)
-    router = ModelRouter(cfg, level_provider=lambda: held["level"])
+    router = ModelRouter(cfg, choice_provider=lambda: held["level"])
     light = _main_payload(cfg, router.resolve("main"))
     held["level"] = "max"
     hot = _main_payload(cfg, router.resolve("main"))
@@ -385,7 +385,7 @@ def test_two_aliases_with_one_model_id_do_not_collapse():
     held = {"level": "default"}
     direct = ModelRouter(
         cfg,
-        level_provider=lambda: held["level"],
+        choice_provider=lambda: held["level"],
     )
     # Оба алиаса с одним id остаются разными записями снимка.
     models = cfg.models

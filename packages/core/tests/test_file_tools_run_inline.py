@@ -191,12 +191,15 @@ async def test_project_memory_acall_runs_file_work_on_the_calling_thread():
     seen = {}
 
     class _Probe(ProjectMemory):
-        def _dispatch_sync(self, action, content):
+        async def _adispatch_simple(self, action, content):
             seen["thread"] = threading.get_ident()
             return "ok"
 
+    from gc_testkit.memory_agent_store import MemoryAgentStore
+
     probe = _Probe(ctx=None)
-    probe._path = object()  # не None — иначе тул откажет до диспетчеризации
+    probe._project = object()  # не None — иначе тул откажет до диспетчеризации
+    probe._store = MemoryAgentStore()  # тул зовёт restore_memory до работы
 
     assert await probe.acall(action="read") == "ok"
     assert seen["thread"] == threading.get_ident(), (
@@ -238,7 +241,7 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
 
     out = await aapply_tool(
         ReadFile.registered_tool_name(),
-        {"path": str(target)},
+        {"path": str(target), "add_line_numbers": False},
         _tools_data(ReadFile),
         ctx=local_ctx(),
     )
@@ -303,4 +306,7 @@ async def test_view_image_sends_only_normalization_to_the_pool(
 
     assert json.loads(out)["attached"] is True
     # Pillow и запись копии — в пуле; решение по id (живая, в шаге, лимит) — на loop.
-    assert went_to_pool == ["_normalized", "_store"]
+    assert went_to_pool == [
+        "_normalized",
+        "stage",
+    ]  # прогон без треда — карман

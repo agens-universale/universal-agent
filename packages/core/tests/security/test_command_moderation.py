@@ -10,10 +10,10 @@ from gc_core.security.command_moderation import (
     JudgeResult,
     JudgeUnavailable,
     ModerationContext,
+    aload_command_judge_prompt,
     build_judge_payload,
     decide_command_execution,
     effective_command_cwd,
-    load_command_judge_prompt,
     make_block_error,
     moderate_command_execution,
     validate_judge_result,
@@ -172,9 +172,16 @@ def test_moderation_context_default_os_name_uses_sys_platform(monkeypatch):
     assert ctx.os_name == "macOS"
 
 
+def _judge_prompt(kind: str) -> str:
+    from gc_core.agent_store import FileAgentStore
+    from gc_testkit import run_coro
+
+    return run_coro(aload_command_judge_prompt(kind, store=FileAgentStore()))
+
+
 def test_command_judge_prompts_are_loaded_from_files():
-    system_prompt = load_command_judge_prompt("system")
-    user_prompt = load_command_judge_prompt("user")
+    system_prompt = _judge_prompt("system")
+    user_prompt = _judge_prompt("user")
 
     assert "security judge" in system_prompt
     assert "allowed_command_examples are positive examples" in system_prompt
@@ -189,7 +196,11 @@ def test_build_judge_messages_uses_external_prompt_templates():
             "payload": "pytest",
             "launch_root": "/repo",
             "allowed_write_paths": ["/repo"],
-        }
+        },
+        prompts={
+            "system": _judge_prompt("system"),
+            "user": _judge_prompt("user"),
+        },
     )
 
     assert messages[0]["role"] == "system"

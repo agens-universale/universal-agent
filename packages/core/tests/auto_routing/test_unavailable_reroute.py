@@ -28,7 +28,7 @@ RAW = {
     "models": {"fast": {}, "mid": {}, "big": {}},
     "slots": {"light": "fast", "default": "mid", "max": "big"},
     "backend": {"api_mode": "chat_completions"},
-    "level": "auto",
+    "model": "auto",
     "logging": {"save_logs": False},
 }
 STEPS = {"weak_steps": 10, "strong_steps": 2}
@@ -53,7 +53,7 @@ def _ctx(box, registry=None, **agent):
     }
     cfg = AppConfig.model_validate(raw)
     return run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: box["value"])
+        rc.acreate_run_context(cfg, choice_provider=lambda: box["value"])
     )
 
 
@@ -122,6 +122,7 @@ def _transport(monkeypatch, dead=(), reply=None, on_dead=None):
         resolved,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         sent.append(resolved.alias)
         if resolved.alias in dead:
@@ -227,6 +228,17 @@ def test_manual_level_keeps_the_honest_error(monkeypatch):
     with pytest.raises(MainModelUnavailable):
         _ask(s, ctx)
     assert sent == ["mid"]
+
+
+def test_manual_breaker_error_suggests_model_command(monkeypatch):
+    ctx = _ctx({"value": "default"})
+    s = _state(ctx)
+    _transport(monkeypatch, dead={"mid"})
+    with pytest.raises(MainModelUnavailable) as excinfo:
+        _ask(s, ctx)
+    message = str(excinfo.value)
+    assert "Выберите другую модель /model или профиль /profile." in message
+    assert "/level" not in message
 
 
 def test_the_pair_judge_is_not_asked_again_after_a_replacement(monkeypatch):
@@ -336,6 +348,7 @@ def test_a_failed_attempt_leaves_no_trace_in_the_history(monkeypatch):
         resolved,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         attempts.append(resolved.alias)
         ctx.on_stream_delta("reset", "")

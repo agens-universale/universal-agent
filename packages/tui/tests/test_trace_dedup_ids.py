@@ -57,10 +57,29 @@ async def test_live_tick_skips_already_rendered_id(tmp_path):
         assert "второе" in text
 
 
+async def _persist(threads_dir, tid, mid, content):
+    """Реплика в тред сессией ядра: номер записи даёт хранилище, номер
+    удалённой оно не переиспользует (контракт потоков)."""
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.file_store import FileThreadStore
+
+    session = await ThreadSession.afrom_config(
+        settings=None,
+        system_id="cli",
+        thread_id=tid,
+        store=FileThreadStore(str(threads_dir)),
+    )
+    await session.apersist_batch(
+        [{"id": mid, "role": "user", "content": content}],
+        previous_response_id=None,
+    )
+    await session.arelease_lease()
+
+
 @pytest.mark.asyncio
 async def test_cancel_undo_resend_renders_new_reply(tmp_path):
     pytest.importorskip("textual")
-    _write(tmp_path, "t2", 1, "A", "user", "повтор")
+    await _persist(tmp_path, "t2", "A", "повтор")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -72,14 +91,14 @@ async def test_cancel_undo_resend_renders_new_reply(tmp_path):
         widgets = list(scr.query(UserReplyContainer))
         assert len(widgets) == 1
 
-        # Как продакшен-откат: точечно снять виджет + удалить запись по id
-        # и сдвинуть курсор; _rendered_ids не очищается.
+        # Как продакшен-откат: точечно снять виджет и удалить запись по id;
+        # курсор хвоста остаётся на месте.
         widgets[0].remove()
         assert scr._discard_orphan_and_resync("t2", "A")
         await pilot.pause(0.05)
         assert not list(scr.query(UserReplyContainer))
 
-        _write(tmp_path, "t2", 1, "B", "user", "повтор")
+        await _persist(tmp_path, "t2", "B", "повтор")
         scr._poll_active()
         await pilot.pause(0.1)
 

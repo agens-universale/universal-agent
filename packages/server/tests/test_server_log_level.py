@@ -8,10 +8,8 @@
 обновления не поднялась бы вовсе — молча, до первого взгляда в systemd.
 """
 
-import logging
-
 import pytest
-from gc_server import server as server_mod
+from gc_server import cli as server_mod
 
 
 @pytest.mark.parametrize(
@@ -28,14 +26,13 @@ from gc_server import server as server_mod
     ],
 )
 def test_known_levels_are_normalized(raw, expected):
-    assert server_mod._normalize_log_level(raw) == expected
+    assert server_mod.normalize_log_level(raw) == expected
 
 
-def test_unknown_level_falls_back_to_info_loudly(caplog):
+def test_unknown_level_falls_back_to_info_loudly(capsys):
     """Мусор в поле не роняет старт: поднятый сервер лучше упавшего, но с криком."""
-    with caplog.at_level(logging.WARNING, logger=server_mod.__name__):
-        assert server_mod._normalize_log_level("verbose") == "info"
-    assert "log_level" in caplog.text
+    assert server_mod.normalize_log_level("verbose") == "info"
+    assert "log_level" in capsys.readouterr().err
 
 
 def test_every_normalized_level_is_accepted_by_uvicorn():

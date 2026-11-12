@@ -197,14 +197,16 @@ class ChildTransport:
             "parent_owner_id": self.operations.owner_id,
             "parent_context": self.operations.child_context,
             "tool_name": tool_name,
-            "frozen_level": router.active_level(),
+            # цель: уровень или алиас
+            "frozen_level": router.active_target(),
             "force_legacy": router.force_legacy,
             "circuit_breaker": router.breaker.snapshot(),
         }
         # Старые истории сохраняют прежний вход child workflow; новые
         # передают AUTO отдельно от уровня уже выбранного вызова родителя.
         if workflow.patched("subagent-frozen-live-level-v1"):
-            child_context["frozen_live_level"] = router.live_level()
+            # цель: уровень или алиас
+            child_context["frozen_live_level"] = router.live_choice()
         if workflow.patched("subagent-independent-auto-v1"):
             child_context["independent_auto"] = True
         # Слова человека корня — данными: лёгкий снимок родителя переписки и
@@ -256,9 +258,7 @@ class ChildTransport:
             tool_name,
             arguments,
             parent_call_id,
-            self.store.owner_id,
-            self.store.owner_epoch,
-            self.store._generation,
+            *_lease_parts(self.store),
         )
         # Вход дочернего workflow — запись истории родителя: больше
         # лимита — сервер отверг бы команду, и задача родителя падала бы
@@ -346,3 +346,11 @@ def install_subagents(
     ctx.subagent_executor = transport.execute
     operations.stop_child = transport.stop_child
     return transport
+
+
+def _lease_parts(store) -> tuple[str | None, int | None, str | None]:
+    """Владелец, эпоха и токен аренды треда сессии (нет аренды — ``None``)."""
+    lease = getattr(store, "lease", None)
+    if lease is None:
+        return None, None, None
+    return lease.owner, lease.epoch, lease.token

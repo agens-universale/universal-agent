@@ -90,38 +90,32 @@ SESSION_KEYS: Dict[str, SessionKey] = {
     "tui.text_answer_mode": SessionKey(
         "tui.text_answer_mode", text_answer_mode_of
     ),
-    # Профили и уровни: `level` — обычный ключ, ложится сессионным слоем поверх
+    "tui.show_reasoning": SessionKey("tui.show_reasoning"),
+    # Профили и модель: `model` — обычный ключ, ложится сессионным слоем поверх
     # настроек как любой другой. `profile` тоже регистрируется здесь для
     # персиста/восстановления/санации (белый список), но слоем НЕ накладывается —
     # `TuiApp.effective_settings()` перехватывает его отдельно: смена профиля
     # требует пере-сборки базы под ним, а не подмены одного поля. Действующее
     # значение — профиль, под которым база собрана (`RuntimeEnv.active_profile`).
-    "level": SessionKey("level"),
+    "model": SessionKey("model"),
     "profile": SessionKey("profile", _active_profile_of),
 }
 
 
 META_KEY = "session_settings"
-BREAKER_META_KEY = "circuit_breaker"
 
 
-def read_breaker_from_meta(meta: Dict[str, Any]) -> Dict[str, str]:
-    """Снимок предохранителя моделей (спека §8) из метаданных треда."""
-    return dict(((meta or {}).get("tui") or {}).get(BREAKER_META_KEY) or {})
-
-
-def to_breaker_meta_patch(snapshot: Dict[str, str]) -> Dict[str, Any]:
-    """Снимок предохранителя как патч для meta.tui."""
-    return {BREAKER_META_KEY: dict(snapshot or {})}
-
-
-def read_from_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
-    """Переопределения из метаданных треда (`FileTaskStore.get_task_meta`).
+def read_from_tui(tui: Dict[str, Any]) -> Dict[str, Any]:
+    """Переопределения из секции TUI треда (``record_view.tui_section``).
 
     Форма хранения известна только здесь: читателей у неё больше одного, и
-    выражение вида `meta["tui"]["session_settings"]`, расписанное по экранам,
+    выражение вида `tui["session_settings"]`, расписанное по экранам,
     третьим читателем породило бы третью копию."""
-    return dict(((meta or {}).get("tui") or {}).get(META_KEY) or {})
+    stored = dict((tui or {}).get(META_KEY) or {})
+    legacy = stored.pop("level", None)
+    if legacy is not None:
+        stored.setdefault("model", legacy)
+    return stored
 
 
 def to_meta_patch(overrides: Dict[str, Any]) -> Dict[str, Any]:

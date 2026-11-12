@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from gc_core.thread_store import read_subagent_trace
+from gc_testkit.develop_files import read_subagent_trace
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
 

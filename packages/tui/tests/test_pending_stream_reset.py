@@ -1,6 +1,6 @@
 """Pending-реплика × stream_reset (компакция треда во время бегущего run)."""
 
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import compact_thread, tui_settings
 import json
 import threading
 from pathlib import Path
@@ -110,40 +110,13 @@ async def test_pending_record_survives_stream_reset(tmp_path):
         assert len(pending_widgets) == 1
         assert pending_widgets[0].state == "pending"
 
-        # Компакция, как её видит file_store: live-файл переписан с нуля,
-        # meta обновлена in-place (last_summary_archive_suffix → новая эпоха;
-        # остальные ключи, включая tui.pending_user_messages, сохраняются —
-        # как в thread_store.archive_and_compact_summary_payload).
-        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
-            json.dumps(
-                {
-                    "type": "message",
-                    "thread_id": tid,
-                    "system": "cli",
-                    "seq": 1,
-                    "ts": "2026-06-11T11:00:00+00:00",
-                    "payload": {
-                        "id": "s1",
-                        "role": "assistant",
-                        "content": "после-сжатия",
-                    },
-                },
-                ensure_ascii=False,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta.update(
-            {
-                "updated_at": "2026-06-11T11:00:00+00:00",
-                "messages_count": 1,
-                "last_summarized_at": "2026-06-11T11:00:00+00:00",
-                "last_summary_archive_suffix": "2026-06-11T11-00-00",
-            }
-        )
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        # Компакция ядром: прежняя история — в архив, живая — с нуля;
+        # meta-ключи TUI, включая tui.pending_user_messages, сохраняются.
+        compact_thread(
+            str(tmp_path),
+            "cli",
+            tid,
+            [{"id": "s1", "role": "assistant", "content": "после-сжатия"}],
         )
 
         def trace_text():

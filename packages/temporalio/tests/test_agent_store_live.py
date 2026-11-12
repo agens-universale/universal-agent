@@ -11,7 +11,7 @@ import pytest
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core_temporalio import AgentPlugin, AgentSession
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 from gc_testkit.memory_agent_store import MemoryAgentStore
 from live_support import temporal_cli
 from temporalio.testing import WorkflowEnvironment

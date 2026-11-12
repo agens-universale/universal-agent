@@ -10,28 +10,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from gc_core.thread_store import (
-    ThreadSession,
-    delete_thread,
-    touched_journal_path,
-)
+from gc_core.thread_store import ThreadSession
 from gc_testkit.settings import make_settings
 
 
 def _seed_touched(threads: Path, system_id: str, thread_id: str) -> Path:
     """Legacy-файл в формате умершего журнала — как он лежит у пользователей."""
-    path = Path(touched_journal_path(str(threads), system_id, thread_id))
+    path = threads / f"touched_{system_id.lower()}_{thread_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"paths": {"src/a.py": {"ts": 1}}}) + "\n", encoding="utf-8"
     )
     return path
-
-
-def test_path_helper_matches_data_meta_suffix(tmp_path):
-    threads = str(tmp_path / "threads")
-    path = touched_journal_path(threads, "Tui", "abc-1")
-    assert path == str(Path(threads) / "touched_tui_abc-1.json")
 
 
 async def test_summary_leaves_touched_journal_intact(tmp_path):
@@ -77,20 +67,3 @@ async def test_summary_leaves_touched_journal_intact(tmp_path):
     assert touched.is_file()
     assert touched.read_text(encoding="utf-8") == before
     assert not list(threads.glob(f"touched_tui_{tid}__pre_summary__*.json"))
-
-
-def test_delete_thread_removes_touched_and_legacy_archives(tmp_path):
-    threads = tmp_path / "threads"
-    threads.mkdir()
-    tid = "del1"
-    touched = _seed_touched(threads, "tui", tid)
-    legacy = threads / f"touched_tui_{tid}__pre_summary__20260101_000000.json"
-    legacy.write_text('{"paths": {}}\n', encoding="utf-8")
-    (threads / f"data_tui_{tid}.jsonl").write_text("", encoding="utf-8")
-    (threads / f"meta_tui_{tid}.json").write_text("{}", encoding="utf-8")
-
-    deleted = delete_thread(str(threads), "tui", tid)
-    assert str(touched) in deleted
-    assert str(legacy) in deleted
-    assert not touched.exists()
-    assert not legacy.exists()

@@ -1,11 +1,12 @@
-"""TraceScreen Esc confirm-hint в footer-left (clear / stop); выход — модалка."""
+"""TraceScreen Esc confirm-hint в слоте футера (clear / stop); выход —
+модалка."""
 
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_show_esc_hint_clear_swaps_footer_left():
-    """_show_esc_hint('clear') пишет в footer-left текст подсказки."""
+async def test_show_esc_hint_clear_swaps_footer_slot():
+    """_show_esc_hint('clear') пишет в слоте футера текст подсказки."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -13,13 +14,13 @@ async def test_show_esc_hint_clear_swaps_footer_left():
         scr = pilot.app.screen
         scr._show_esc_hint("clear")
         await pilot.pause()
-        text = str(pilot.app.query_one("#footer-left").render())
+        text = str(pilot.app.query_one("#footer-slot").render())
         assert "Esc ещё раз, чтобы очистить" in text
         assert scr._esc_confirm_kind == "clear"
 
 
 @pytest.mark.asyncio
-async def test_show_esc_hint_stop_swaps_footer_left():
+async def test_show_esc_hint_stop_swaps_footer_slot():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -28,14 +29,15 @@ async def test_show_esc_hint_stop_swaps_footer_left():
         scr._show_esc_hint("stop")
         await pilot.pause()
         assert "Esc ещё раз, чтобы остановить" in str(
-            pilot.app.query_one("#footer-left").render()
+            pilot.app.query_one("#footer-slot").render()
         )
         assert scr._esc_confirm_kind == "stop"
 
 
 @pytest.mark.asyncio
-async def test_clear_footer_hint_restores_footer_left():
-    """_clear_footer_hint возвращает команды в footer-left и обнуляет state."""
+async def test_clear_footer_hint_restores_footer_slot():
+    """_clear_footer_hint возвращает бейдж в слоте футера и обнуляет
+    state."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -45,7 +47,7 @@ async def test_clear_footer_hint_restores_footer_left():
         await pilot.pause()
         scr._clear_footer_hint()
         await pilot.pause()
-        text = str(pilot.app.query_one("#footer-left").render())
+        text = str(pilot.app.query_one("#footer-slot").render())
         assert "Esc ещё раз" not in text
         assert scr._esc_confirm_kind is None
 
@@ -174,7 +176,6 @@ async def test_esc_during_active_run_with_events_shows_stop_hint():
 
     async with TuiApp().run_test() as pilot:
         pilot.app.active_runner = _FakeRunner()
-        pilot.app.screen._events_since_last_user_send = 3
         pilot.app.query_one("#cmdinput").text = ""
         await pilot.press("escape")
         await pilot.pause()
@@ -201,7 +202,6 @@ async def test_esc_during_run_with_text_shows_clear_hint_not_stop():
 
     async with TuiApp().run_test() as pilot:
         pilot.app.active_runner = _FakeRunner()
-        pilot.app.screen._events_since_last_user_send = 3
         pilot.app.query_one("#cmdinput").text = "недописанное сообщение"
         await pilot.press("escape")
         await pilot.pause()
@@ -229,14 +229,17 @@ async def test_esc_during_run_zero_events_with_text_clears_first():
         def is_running(self) -> bool:
             return True
 
+        def produced_output(self) -> bool:
+            return False
+
         def stop(self) -> None:
             pass
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
-        scr._events_since_last_user_send = 0
-        scr._last_user_send_text = "previous"
+        scr._last_user_message_id = "m_undo"
+        scr._mount_user_reply("previous", state="pending")
         pilot.app.query_one("#cmdinput").text = "новый текст"
         await pilot.press("escape")
         await pilot.pause()
@@ -254,14 +257,17 @@ async def test_esc_during_active_run_zero_events_cancels_immediately():
         def is_running(self) -> bool:
             return True
 
+        def produced_output(self) -> bool:
+            return False
+
         def stop(self) -> None:
             pass
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
-        scr._events_since_last_user_send = 0
-        scr._last_user_send_text = "previous"
+        scr._last_user_message_id = "m_undo"
+        scr._mount_user_reply("previous", state="pending")
         pilot.app.query_one("#cmdinput").text = ""
         await pilot.press("escape")
         await pilot.pause()

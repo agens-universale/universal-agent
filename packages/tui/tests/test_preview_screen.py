@@ -69,6 +69,7 @@ async def test_preview_summary_marker_collapsed_then_toggles():
     pytest.importorskip("textual")
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.trace_row import SummaryMarker
+    from gc_testkit.tui_support import wait_until
     from textual.app import App
 
     # seg0 [вопрос] сжат → СИНТЕЗ; seg1 (live) [ответ]
@@ -111,8 +112,11 @@ async def test_preview_summary_marker_collapsed_then_toggles():
             for w in scr.query(SummaryMarker)
             if w.has_class("summary-marker")
         )
-        prefix = lambda: str(marker.query_one(".trace-prefix").render())
+        prefix = lambda: marker._content.plain
         # свёрнут по умолчанию — стрелка вправо
+        await wait_until(
+            pilot, lambda: "▸" in prefix(), "collapsed summary marker"
+        )
         assert body.has_class("hidden")
         assert "▸" in prefix() and "▾" not in prefix()
 
@@ -288,7 +292,8 @@ async def test_preview_mounts_nested_subagent_rows():
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         nested_tools = scr.query(ToolCallRow).filter(".nested-tool")
-        assert len(nested_tools) == 1  # fs_read_file
+        # fs_read_file — член вложенного блока `Explored` (P4 §7).
+        assert [r.mode for r in nested_tools] == ["header", "member"]
         todo_rows = scr.query(".line-todo-nested")
         assert len(todo_rows) == 1  # развёрнутый чек-лист
 

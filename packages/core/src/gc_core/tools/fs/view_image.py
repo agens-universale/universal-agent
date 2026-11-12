@@ -184,9 +184,7 @@ class ViewImage(AbstractSimpleTool):
             return self._no_vision(path)
         if audience.native is not None:
             return await self._aattach(path, image)
-        att = await asyncio.to_thread(
-            self._store, image, self._report_path(path)
-        )
+        att = await self._astore(image, self._report_path(path))
         return await self._adescribe(path, att, question, audience.eyes)
 
     async def _aattach(self, path: str, image: NormalizedImage) -> str:
@@ -203,9 +201,7 @@ class ViewImage(AbstractSimpleTool):
             refusal = self._step_limit_refusal(path, len(step))
             if refusal is not None:
                 return refusal
-            att = await asyncio.to_thread(
-                self._store, image, self._report_path(path)
-            )
+            att = await self._astore(image, self._report_path(path))
             self._state.pending_tool_attachments.append(att.to_dict())
         return self._attached(path, image)
 
@@ -235,8 +231,8 @@ class ViewImage(AbstractSimpleTool):
                     "read_denied",
                     MSG_READ_DENIED.format(reason="file of another thread"),
                 )
-            reader = getattr(self._ctx.image_store, "read_uri", None)
-            data = reader(path) if callable(reader) else None
+            reader = getattr(self._ctx.image_store, "aread_uri", None)
+            data = await reader(path) if callable(reader) else None
             if data is None:
                 raise _InputError("not_found", MSG_NOT_FOUND.format(path=path))
             if len(data) > MAX_INPUT_BYTES:
@@ -280,17 +276,22 @@ class ViewImage(AbstractSimpleTool):
                 "read_denied", MSG_READ_DENIED.format(reason=exc)
             ) from exc
 
-    def _store(self, image: NormalizedImage, source: str) -> Attachment:
-        """Копия снимка в тред — вне loop: зовётся через ``asyncio.to_thread``."""
+    async def _astore(self, image: NormalizedImage, source: str) -> Attachment:
+        """Копия снимка в тред (запись в хранилище картинок)."""
         store = self._ctx.image_store
         address = thread_address(self._ctx)
         if address is None:
-            # Прогон без треда (CLI без -t): копия остаётся в кармане процесса.
-            return store.stage(
-                image, origin=ORIGIN_TOOL, label=TOOL_LABEL, source=source
+            # Прогон без треда (CLI без -t): копия остаётся в кармане процесса
+            # (запись файла — вне loop).
+            return await asyncio.to_thread(
+                store.stage,
+                image,
+                origin=ORIGIN_TOOL,
+                label=TOOL_LABEL,
+                source=source,
             )
         system_id, thread_id = address
-        return store.snapshot(
+        return await store.asnapshot(
             image,
             system_id,
             thread_id,

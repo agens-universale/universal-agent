@@ -34,7 +34,7 @@ async def test_cmd_init_busy_guard(tmp_path):
     app.active_runner = rec
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._cmd_init()
+        await scr._cmd_init()
         await pilot.pause(0.1)
         assert rec.started == []
         text = "\n".join(str(s.render()) for s in scr.query("Static"))
@@ -58,7 +58,7 @@ async def test_cmd_init_starts_run_with_init_prompt(tmp_path):
     app.get_runner = lambda: rec
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._cmd_init()
+        await scr._cmd_init()
         await pilot.pause(0.1)
         assert len(rec.started) == 1
         assert "write_to_file" in rec.started[0]["query"]

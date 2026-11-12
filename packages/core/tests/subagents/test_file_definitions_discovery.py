@@ -8,9 +8,15 @@ test_file_subagent). Здесь всё деградирует до варнин�
 import logging
 
 from gc_core.tools.subagents.custom.file_definitions import (
-    discover_subagent_definitions,
+    adiscover_subagent_definitions,
 )
+from gc_testkit import run_coro
 from gc_testkit.settings import make_settings
+
+
+def discover_subagent_definitions(settings, **kwargs):
+    return run_coro(adiscover_subagent_definitions(settings, **kwargs))
+
 
 BUILTIN = {"subagent_worker", "subagent_coder"}
 
