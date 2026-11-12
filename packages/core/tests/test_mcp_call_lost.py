@@ -19,6 +19,7 @@ from gc_core.tools.connect_mcp.call_errors import (
     McpCallOutcomeUnknown,
     McpCallTimedOut,
     McpServerGone,
+    first_leaf,
 )
 from gc_core.tools.connect_mcp.durable_scope import (
     McpSessionLostError,
@@ -38,6 +39,7 @@ from gc_testkit.mcp import (
     launches,
     set_behavior,
     stdio_cfg,
+    stream_server,
     wait_for,
 )
 from gc_testkit.mcp.fixtures import mcp_owner, mcp_reaper
@@ -107,6 +109,67 @@ async def test_timeout_is_error_with_cancel(tmp_path, mcp_reaper, mcp_owner):
     await wait_for(lambda: f"cancelled {nap_id}" in events(control))
     after = await call_tool("srv", cfg, "echo", {"text": "b"})
     assert after["pid"] == first["pid"]
+
+
+@pytest.mark.parametrize("transport", ["stream_http", "stream_sse"])
+async def test_network_call_timeout_is_error_and_session_stays(
+    tmp_path, mcp_reaper, mcp_owner, transport
+):
+    """Потоковый сервер не ответил за срок вызова — ``McpCallTimedOut``
+    в пределах срока, а не ожидание без конца; запрос ушёл один раз,
+    следующий вызов идёт той же сессией."""
+    async with stream_server(tmp_path, transport) as (network, control):
+        cfg = {**network, "persistent_session": True}
+        first = await call_tool("srv", cfg, "action", {})
+
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(McpCallTimedOut, match="не ответил за 1 с"):
+            await call_tool(
+                "srv", cfg, "action", {"delay": 30}, timeout=1, ceiling=8
+            )
+        assert asyncio.get_running_loop().time() - started < 4
+
+        after = await call_tool("srv", cfg, "action", {})
+        assert after["session"] == first["session"]
+        assert after["count"] == 3
+        assert len(_requests(control, "tools/call")) == 3
+
+
+@pytest.mark.parametrize("transport", ["stream_http", "stream_sse"])
+async def test_one_shot_network_call_timeout_is_error(
+    tmp_path, mcp_reaper, mcp_owner, transport
+):
+    """Без постоянной сессии — тот же исход по сроку, не ожидание.
+
+    Разовое соединение отдаёт его листом группы исключений задач SDK —
+    как и ошибку тула на этом пути; лист и проверяем.
+    """
+    async with stream_server(tmp_path, transport) as (network, control):
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(BaseException) as caught:
+            await call_tool(
+                "srv", network, "action", {"delay": 30}, timeout=1, ceiling=8
+            )
+        assert asyncio.get_running_loop().time() - started < 4
+        leaf = first_leaf(caught.value)
+        assert isinstance(leaf, McpCallTimedOut)
+        assert str(leaf) == "сервер не ответил за 1 с"
+        assert len(_requests(control, "tools/call")) == 1
+
+
+async def test_stream_stdio_call_is_not_bounded_by_timeout(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    """У ``stream_stdio`` срока вызова нет: долгий тул дожидается ответа."""
+    control = tmp_path / "s.json"
+    set_behavior(control)
+    cfg = {**_persistent(control), "transport": "stream_stdio"}
+
+    out = await call_tool(
+        "srv", cfg, "nap", {"seconds": 2}, timeout=0.5, ceiling=10
+    )
+
+    assert out["pid"] in launches(control)
 
 
 @pytest.mark.parametrize(

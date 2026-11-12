@@ -557,6 +557,33 @@ async def test_call_timeout_keeps_session(
     assert (await _call(view, _ECHO, text="hi"))["pid"] == pid
 
 
+@pytest.mark.parametrize("transport", ["stream_http", "stream_sse"])
+async def test_network_call_timeout_keeps_session_and_status(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, transport
+):
+    """Потоковый сервер не ответил за срок вызова: модель получает «сервер
+    не ответил за N с» в пределах срока, статус и сессия остаются."""
+    async with stream_server(tmp_path, transport) as (network, _):
+        settings = _settings({"a": {**network, "persistent_session": True}})
+        service = McpService(connect_on_start=True)
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+        first = await _call(view, _ACTION)
+
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(McpToolCallError) as caught:
+            await asyncio.wait_for(
+                _wrapper(view, _ACTION, timeout=1).acall(delay=30), 8
+            )
+        assert asyncio.get_running_loop().time() - started < 4
+
+        assert caught.value.error.message == "сервер не ответил за 1 с"
+        assert _status(consumer).state == STATE_CONNECTED
+        after = await _call(view, _ACTION)
+        assert after["session"] == first["session"]
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+
 async def test_call_started_before_removal_closes_session_after(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):

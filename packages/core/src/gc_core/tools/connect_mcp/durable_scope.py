@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import timedelta
 
 from gc_core.execution.contracts import ToolOutcomeUnknown
 
@@ -24,9 +25,13 @@ def require_no_reconnect():
         )
 
 
-async def call_tool_with_progress(session, name, arguments):
+async def call_tool_with_progress(session, name, arguments, timeout=None):
+    """``tools/call`` по сессии SDK; ``timeout`` — срок ответа, ``None`` —
+    без срока."""
     callback = _PROGRESS.get()
     options = {"progress_callback": callback} if callback is not None else {}
+    if timeout is not None:
+        options["read_timeout_seconds"] = timedelta(seconds=timeout)
     return await session.call_tool(name, arguments or {}, **options)
 
 

@@ -28,6 +28,7 @@ from mcp.types import CONNECTION_CLOSED
 
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp.call_errors import McpCallTimedOut
 from gc_core.tools.connect_mcp.durable_scope import (
     call_tool_with_progress,
     require_no_reconnect,
@@ -315,15 +316,30 @@ def is_connection_closed(exc: BaseException) -> bool:
     )
 
 
-async def _call_tool_request(session, name, arguments):
+async def _call_tool_request(session, name, arguments, timeout=None):
+    """``tools/call``; ``timeout`` — срок ответа (у сетевых транспортов).
+
+    Срок нужен самому запросу: SDK потокового http глотает обрыв и срок
+    чтения потока ответа, и без него запрос ждал бы без конца. Истёкший
+    срок — ``McpCallTimedOut``: ответа нет, сессия жива.
+    """
     try:
-        return await call_tool_with_progress(session, name, arguments)
+        return await call_tool_with_progress(session, name, arguments, timeout)
     except McpError as exc:
+        if (
+            timeout is not None
+            and exc.error.code == httpx.codes.REQUEST_TIMEOUT
+        ):
+            raise McpCallTimedOut(timeout) from exc
         raise McpToolCallError(exc.error) from exc
 
 
 def _raise_rpc_error(exc):
-    # Ошибка инструмента — ответ сервера, а не повод повторять внешний эффект.
+    # Ошибка инструмента — ответ сервера, а не повод повторять внешний
+    # эффект; истёкший срок — запрос ушёл, сессия жива: открывать заново и
+    # повторять тоже нельзя.
+    if isinstance(exc, McpCallTimedOut):
+        raise exc
     if isinstance(exc, McpToolCallError) and not _is_session_terminated(exc):
         raise exc
 
@@ -651,7 +667,9 @@ async def _call_tool_stream_sse_async(
     ):
         await session.initialize()
 
-        result = await _call_tool_request(session, tool_name, arguments)
+        result = await _call_tool_request(
+            session, tool_name, arguments, timeout
+        )
 
         # Преобразуем контент в JSON-совместимый вид.
         content_items: List[Any] = []
@@ -708,9 +726,12 @@ async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
 
 
 async def _acall_tool_on_session(
-    s: ClientSession, tool_name: str, arguments: Dict[str, Any]
+    s: ClientSession,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
-    result = await _call_tool_request(s, tool_name, arguments)
+    result = await _call_tool_request(s, tool_name, arguments, timeout)
     content_items: List[Any] = []
     for item in getattr(result, "content", []) or []:
         if hasattr(item, "model_dump"):
@@ -857,7 +878,7 @@ async def acall_tool_stream_sse(
                     timeout,
                 ),
                 request=lambda s: _acall_tool_on_session(
-                    s, tool_name, arguments
+                    s, tool_name, arguments, timeout
                 ),
             )
         except Exception as exc:
@@ -1015,7 +1036,7 @@ async def _call_tool_stream_http_async(
                 await session.initialize()
 
                 result = await _call_tool_request(
-                    session, tool_name, arguments
+                    session, tool_name, arguments, timeout
                 )
 
                 content_items: List[Any] = []
@@ -1158,6 +1179,7 @@ async def _arequest_stream_http_persistent(
                 continue
             raise
         except Exception as exc:
+            _raise_rpc_error(exc)
             last_error = exc
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
@@ -1210,7 +1232,9 @@ async def acall_tool_stream_http(
             extra_headers=extra_headers,
             timeout=timeout,
             verify=verify,
-            request=lambda s: _acall_tool_on_session(s, tool_name, arguments),
+            request=lambda s: _acall_tool_on_session(
+                s, tool_name, arguments, timeout
+            ),
             cert=cert,
         )
     except Exception as exc:
