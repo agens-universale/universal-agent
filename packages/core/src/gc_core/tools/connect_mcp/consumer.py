@@ -38,6 +38,7 @@ from gc_core.tools.connect_mcp.service_records import (
     McpServiceClosed,
     ServerEntry,
 )
+from gc_core.trace_id import trace_id_from_config
 
 if TYPE_CHECKING:
     from gc_core.tools.connect_mcp.service import McpService
@@ -80,7 +81,9 @@ class McpConsumer:
     ``_pin_stale`` — набор контекста не пересобран по нему (``reset_pin``);
     ``_backend_cache`` — кэш тулов серверов, исполняемых внутри бэкенда
     сборки (§5.10), пока исходный бэкенд сборки (под обёрткой записи
-    правок) — тот же объект. Все три меняются только на цикле сервиса.
+    правок) — тот же объект; ``_trace_id`` — trace последней сверенной
+    сборки (её настройки строят определения подключений и обёрток).
+    Все четыре меняются только на цикле сервиса.
     """
 
     def __init__(self, service: "McpService", label: str) -> None:
@@ -92,6 +95,7 @@ class McpConsumer:
         self._pinned: dict[str, tuple[ServerEntry, ServerStatus]] = {}
         self._pin_stale = False
         self._backend_cache: ToolsCache | None = None
+        self._trace_id = ""
 
     @property
     def owner(self) -> str:
@@ -214,6 +218,7 @@ class McpConsumer:
         gone = self._connections.replace_set(build, settings, entries)
         if gone is None:
             return
+        self._trace_id = trace_id_from_config(settings)
         for entry in gone:
             self._connections.leave(entry)
         self.pin()
@@ -295,13 +300,38 @@ class McpConsumer:
     async def aend_turn(self) -> None:
         """Уборка конца хода — порт ``mcp_cleanup`` контекста (спека §5.2).
 
-        Сессии потребителя живут дольше хода и здесь не закрываются; только
-        сборка циклического мусора, как в прежней уборке хода. Закрытый
-        потребитель ничего не делает.
+        Сессии потребителя живут дольше хода. Исключение — серверы с
+        ``trace_header_enabled``, когда у сборки есть trace: он зашит в
+        сессию, поэтому их подключения снимаются и закрываются, а следующий
+        ход подключает их заново по обычным правилам (§5.9). Снятие — не
+        отказ: правило 30 с не срабатывает, идущий вызов получает «сессия
+        закрыта во время вызова». Идущая попытка подключения не трогается.
+        Затем сборка циклического мусора, как в прежней уборке хода.
+        Закрытый потребитель ничего не делает.
         """
         if self.closed:
             return
+        if self._trace_id:
+            await asyncio.gather(
+                *(
+                    self._connections.adrop(entry)
+                    for entry in self._trace_sessions()
+                )
+            )
         gc.collect()
+
+    def _trace_sessions(self) -> list[ServerEntry]:
+        """Подключённые серверы набора, которым разрешён trace.
+
+        Идущая попытка не в счёт: закрытие сессии посреди подключения
+        сделало бы его отказом, а с ним — и правило 30 с.
+        """
+        return [
+            entry
+            for entry in self.servers().values()
+            if entry.cfg.get("trace_header_enabled")
+            and self._connections.attempt_of(entry)[0]
+        ]
 
     async def aclose(self) -> None:
         """Отказать в новой работе, снять попытки, серии, перечитывания
