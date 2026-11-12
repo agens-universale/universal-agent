@@ -78,6 +78,15 @@ def test_same_size_digit_change():
     assert same_size("· 5с", "· 6с", markup=False) is True
 
 
+def test_size_measured_by_chunks_not_code_points():
+    """Ширина — по кускам целиком, как у Rich и Textual: графема из
+    нескольких кодовых точек занимает свою ширину, а не их сумму."""
+    assert same_size(Text("❤️ a"), Text("b a"), markup=False) is False
+    assert same_size("❤️ a", "b a", markup=False) is False
+    assert same_size(Text("👨‍👩‍👧 a"), Text("abcdef a"), markup=True) is False
+    assert same_size(Text("👨‍👩‍👧 a"), Text("ab a"), markup=True) is True
+
+
 def test_size_changes_on_width():
     assert same_size(Text("· 9с"), Text("· 10с"), markup=True) is False
 

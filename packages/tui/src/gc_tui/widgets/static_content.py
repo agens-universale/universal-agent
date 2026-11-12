@@ -5,6 +5,8 @@
 содержимое того же размера обновляет без перекладки.
 """
 
+import re
+
 from rich.cells import cell_len
 from rich.text import Text
 from textual.widgets import Static
@@ -59,14 +61,21 @@ def _layout_view(content: object, markup: bool) -> tuple[str, tuple] | None:
     return None
 
 
+# Куски строки, как их меряет перенос Textual: слово целиком или один
+# пробельный символ. Ширина графемы из нескольких кодовых точек (ZWJ,
+# селектор вида) — не сумма ширин её точек.
+_CHUNK = re.compile(r"\S+|\s")
+
+
 def _line_shape(line: str) -> tuple[int, tuple[int, ...]]:
     """Ширина строки в ячейках и позиции её пробельных символов."""
     cells = 0
     spaces = []
-    for char in line:
-        if char.isspace():
+    for chunk in _CHUNK.finditer(line):
+        text = chunk.group()
+        if text.isspace():
             spaces.append(cells)
-        cells += cell_len(char)
+        cells += cell_len(text)
     return cells, tuple(spaces)
 
 
@@ -83,12 +92,15 @@ def same_size(old: object, new: object, *, markup: bool) -> bool:
     ``Text`` те же ``no_wrap``, ``overflow``, ``justify``, ``tab_size``.
     Табуляция, прочие типы и строка с разметкой — ``False``.
 
-    Пара ``Text``/``str`` не совпадает по параметрам — ``False``.
+    Разные типы (``Text``/``str``) — ``False``. Ширина — по кускам
+    (слово, пробельный символ) целиком, как у Rich и Textual.
 
     Неучтённый остаток: символы разной ширины при равной сумме ячеек
     (``"字a"`` против ``"a字"``) — перенос по символам в узком окне может
     разойтись, а размер посчитан равным.
     """
+    if type(old) is not type(new):
+        return False
     old_view = _layout_view(old, markup)
     new_view = _layout_view(new, markup)
     if old_view is None or new_view is None:
