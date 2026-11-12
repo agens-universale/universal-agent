@@ -251,6 +251,48 @@ def test_card_expanded_lists_tools_with_stripped_prefix_and_description():
     assert lines[0].index("Читает") == lines[1].index("Создаёт")
 
 
+def _rendered_lines(renderable, width: int) -> list[str]:
+    import io
+
+    from rich.console import Console
+
+    console = Console(width=width, file=io.StringIO(), color_system=None)
+    with console.capture() as cap:
+        console.print(renderable)
+    return [line.rstrip() for line in cap.get().splitlines()]
+
+
+def test_card_expanded_rendering_keeps_gap_after_longest_tool_name():
+    """Между самым длинным именем тула и описанием — два пробела и на
+    экране; перенос описания встаёт под его начало (дизайн-код §10)."""
+    card = _card(
+        "fixture",
+        {
+            "status": "connected",
+            "reason": None,
+            "description": "",
+            "tools": [
+                {"name": "mcp_fixture_echo", "description": "Вернуть текст."},
+                {
+                    "name": "mcp_fixture_add",
+                    "description": "Сложить два числа",
+                },
+                {"name": "mcp_fixture_ping", "description": ""},
+            ],
+        },
+    )
+    card.toggle()
+
+    assert _rendered_lines(card._renderable(), 80)[1:] == [
+        "    echo  Вернуть текст.",
+        "    add   Сложить два числа",
+        "    ping",
+    ]
+    narrow = _rendered_lines(card._renderable(), 24)
+    at = narrow.index("    add   Сложить два")
+    assert narrow[at + 1] == "          числа"
+
+
 def test_card_tool_name_without_prefix_kept_as_is():
     card = _card(
         "search",

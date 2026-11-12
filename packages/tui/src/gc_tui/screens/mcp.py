@@ -178,18 +178,15 @@ class ServerCard(ColumnStatic):
             for tt in tools
         ]
         width = max(len(n) for n, _ in shorts)
+        # Промежуток до описания — в голове: колонка хвоста срезает ведущие
+        # пробелы куска, и перенос встаёт под начало описания.
         return [
             ColumnRow(
-                Text(f"    {n.ljust(width)}", style=_TOOL_NAME),
-                [
-                    Text(
-                        f"  {_truncate(d, _TOOL_DESC_LIMIT)}",
-                        style=_DEEP_DIM,
-                    )
-                ]
-                if d
-                else [],
+                Text(f"    {n.ljust(width)}  ", style=_TOOL_NAME),
+                [Text(_truncate(d, _TOOL_DESC_LIMIT), style=_DEEP_DIM)],
             )
+            if d
+            else ColumnRow(Text(f"    {n}", style=_TOOL_NAME), [])
             for n, d in shorts
         ]
 
