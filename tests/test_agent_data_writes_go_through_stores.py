@@ -49,6 +49,11 @@ _EDITS = (
     "журнал и снимки правок workspace — до перевода журнала на append_side"
 )
 _MCP_RUNTIME = "MCP runtime: установка и состояние серверов"
+_MCP_PROCESSES = (
+    "журнал процессов MCP — учёт процессов хоста (pid, группа, метка) для "
+    "аварийного гашения и уборки сирот, не данные агента; файл запуска "
+    "пишет сам пускатель"
+)
 _VOICE = "голосовой рантайм: свои аренды и состояние"
 _UPDATER = "апдейтер"
 _TESTKIT_REASON = "тестовый инструментарий, в продукт не входит"
@@ -101,6 +106,8 @@ ALLOWED: dict[str, str] = {
     _CORE + "tools/connect_mcp/catalog.py": (
         "каталог тулов MCP — кеш сырых списков тулов серверов"
     ),
+    _CORE + "tools/connect_mcp/process_journal.py": _MCP_PROCESSES,
+    _CORE + "tools/connect_mcp/spawn_launcher.py": _MCP_PROCESSES,
     _MCP + "install.py": _MCP_RUNTIME,
     _MCP + "process_supervisor.py": _MCP_RUNTIME,
     _MCP + "runtime/wiring.py": _MCP_RUNTIME,
