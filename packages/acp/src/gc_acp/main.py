@@ -35,7 +35,7 @@ from gc_core.onboarding import explain_broken_config
 from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.settings import LoadedSettings
 from gc_core.stores import files_only_rejection
-from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_core.tools.connect_mcp.service import McpService
 
 from gc_acp.facade import AcpFacade
 from gc_acp.protocol import StdoutWriter, stdin_lines
@@ -183,13 +183,15 @@ def backend_rejection(loaded: Any) -> str | None:
 def build_facade(loaded: LoadedSettings, protocol_out: TextIO) -> AcpFacade:
     auth = build_auth_connector(loaded)
     backend = resolve_os_backend(loaded)
-    cache = ToolsCache(os_backend=backend)
+    # Один сервис MCP на процесс: агент каждой сессии открывает у него
+    # своего потребителя, закрывает сервис ``facade.shutdown``.
+    service = McpService(os_backend=backend, connect_on_start=True)
     return AcpFacade(
         settings=loaded,
         writer=StdoutWriter(protocol_out),
         agent_factory=_create_agent,
         auth_connector=auth,
-        tools_cache=cache,
+        mcp_service=service,
         os_backend=backend,
     )
 
@@ -207,14 +209,14 @@ async def _create_agent(
     loaded: LoadedSettings,
     *,
     auth_connector: Any,
-    tools_cache: Any,
+    mcp_service: Any,
     os_backend: Any,
     choice_provider: Any = None,
 ) -> AsyncAgent:
     return await AsyncAgent.create(
         loaded,
         auth_connector=auth_connector,
-        tools_cache=tools_cache,
+        mcp_service=mcp_service,
         os_backend=os_backend,
         force_legacy=cli_forces_legacy_model(loaded),
         choice_provider=choice_provider,

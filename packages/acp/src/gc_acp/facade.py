@@ -152,7 +152,7 @@ class AcpFacade:
         writer: Any,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         session_index: SessionIndex | None = None,
     ) -> None:
@@ -160,7 +160,9 @@ class AcpFacade:
         self._writer = writer
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        # Сервис MCP процесса: агент сессии открывает у него своего
+        # потребителя, ``shutdown`` закрывает его после агентов.
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._index = session_index or SessionIndex.from_settings(settings)
         self._sessions: dict[str, LiveSession] = {}
@@ -212,11 +214,20 @@ class AcpFacade:
             return CONFIRM_TIMED_OUT
 
     async def shutdown(self) -> None:
-        """Отменить живые ходы и закрыть простаивающих агентов.
+        """Отменить живые ходы, закрыть простаивающих агентов, затем сервис
+        MCP.
 
         Идущий ход не ждём: stop() кооперативный, команда может занять
-        весь таймаут, а stdin после выхода уже закрыт.
+        весь таймаут, а stdin после выхода уже закрыт. Сессии MCP агентов с
+        идущим ходом закрывает сервис: его закрытие закрывает всех
+        оставшихся потребителей и укладывается в свой бюджет.
         """
+        try:
+            await self._aclose_agents()
+        finally:
+            await _aclose_service(self._mcp_service)
+
+    async def _aclose_agents(self) -> None:
         self._pending.cancel_all(cancelled_reply())
         leftover = list(self._sessions.values())
         self._sessions.clear()
@@ -588,7 +599,7 @@ class AcpFacade:
             agent = await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=self._tools_cache,
+                mcp_service=self._mcp_service,
                 os_backend=self._session_backend(live),
                 choice_provider=choice_provider,
             )
@@ -1254,6 +1265,16 @@ async def _safe_aclose(agent: Any) -> None:
         await close()
     except Exception:
         logger.exception("acp aclose")
+
+
+async def _aclose_service(service: Any) -> None:
+    """Закрыть сервис MCP; его отказ — в лог, остановку не роняет."""
+    if service is None:
+        return
+    try:
+        await service.aclose()
+    except Exception:
+        logger.exception("acp mcp service close")
 
 
 def _unique(messages) -> list[dict]:
