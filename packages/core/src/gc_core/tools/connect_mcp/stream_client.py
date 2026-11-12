@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import weakref
+from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial, wraps
 from typing import (
@@ -28,8 +29,13 @@ from mcp.types import CONNECTION_CLOSED
 
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
-from gc_core.tools.connect_mcp.call_errors import McpCallTimedOut
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallOutcomeUnknown,
+    McpCallTimedOut,
+    first_leaf,
+)
 from gc_core.tools.connect_mcp.durable_scope import (
+    McpSessionLostError,
     call_tool_with_progress,
     require_no_reconnect,
 )
@@ -316,6 +322,21 @@ def is_connection_closed(exc: BaseException) -> bool:
     )
 
 
+#: Начало текста, с которым SDK снимает запрос по его сроку.
+_SDK_REQUEST_TIMED_OUT = "Timed out while waiting for response"
+
+
+def _is_request_timeout(exc: McpError) -> bool:
+    """Запрос снят сроком SDK, а не ответ сервера ошибкой.
+
+    Код 408 один не годится — его может прислать и сервер, — поэтому
+    сверяется и текст SDK (как в ``is_connection_closed``).
+    """
+    return exc.error.code == httpx.codes.REQUEST_TIMEOUT and (
+        exc.error.message.startswith(_SDK_REQUEST_TIMED_OUT)
+    )
+
+
 async def _call_tool_request(session, name, arguments, timeout=None):
     """``tools/call``; ``timeout`` — срок ответа (у сетевых транспортов).
 
@@ -326,12 +347,33 @@ async def _call_tool_request(session, name, arguments, timeout=None):
     try:
         return await call_tool_with_progress(session, name, arguments, timeout)
     except McpError as exc:
-        if (
-            timeout is not None
-            and exc.error.code == httpx.codes.REQUEST_TIMEOUT
-        ):
+        if timeout is not None and _is_request_timeout(exc):
             raise McpCallTimedOut(timeout) from exc
         raise McpToolCallError(exc.error) from exc
+
+
+#: Исходы вызова, известные вызывающему: на них решают, повторять ли.
+_CALL_OUTCOMES = (McpToolCallError, McpCallOutcomeUnknown, McpSessionLostError)
+
+
+@contextmanager
+def _call_outcome_as_is():
+    """Исход разового вызова — самим исключением, а не группой задач.
+
+    Разовое соединение SDK (транспорт и ``ClientSession``) держит группы
+    задач anyio, и исход вызова выходит из них ``ExceptionGroup``: ни
+    автоповтор (``acall_mcp_tool``), ни граница durable, ни ``except
+    McpError`` здесь его не узнали бы, и ошибку тула или срок вызов
+    повторил бы. Разворачиваются только исходы вызова; прочее (в том числе
+    ``CancelledError`` из группы — это не отмена вызывающего) — как было.
+    """
+    try:
+        yield
+    except BaseExceptionGroup as group:
+        leaf = first_leaf(group)
+        if isinstance(leaf, _CALL_OUTCOMES):
+            raise leaf from group
+        raise
 
 
 def _raise_rpc_error(exc):
@@ -656,39 +698,37 @@ async def _call_tool_stream_sse_async(
         url=base_url,
     )
 
-    async with (
-        sse_client(
-            endpoint,
-            headers=headers or None,
-            timeout=timeout,
-            httpx_client_factory=httpx_factory,
-        ) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
-    ):
-        await session.initialize()
+    with _call_outcome_as_is():
+        async with (
+            sse_client(
+                endpoint,
+                headers=headers or None,
+                timeout=timeout,
+                httpx_client_factory=httpx_factory,
+            ) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await session.initialize()
+            result = await _call_tool_request(
+                session, tool_name, arguments, timeout
+            )
 
-        result = await _call_tool_request(
-            session, tool_name, arguments, timeout
-        )
+    # Преобразуем контент в JSON-совместимый вид.
+    content_items: List[Any] = []
+    for item in getattr(result, "content", []) or []:
+        if hasattr(item, "model_dump"):
+            content_items.append(
+                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
+            )
+        else:
+            content_items.append(item)
 
-        # Преобразуем контент в JSON-совместимый вид.
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(
-                    item.model_dump(
-                        by_alias=True, mode="json", exclude_unset=True
-                    )
-                )
-            else:
-                content_items.append(item)
+    is_error = bool(getattr(result, "isError", False))
 
-        is_error = bool(getattr(result, "isError", False))
-
-        return {
-            "content": content_items,
-            "isError": is_error,
-        }
+    return {
+        "content": content_items,
+        "isError": is_error,
+    }
 
 
 _SESSION_TERMINATED_MARKER = "Session terminated"
@@ -1018,44 +1058,47 @@ async def _call_tool_stream_http_async(
 
     for endpoint in endpoints:
         try:
-            async with (
-                _make_stream_http_client(
-                    token=token,
-                    extra_headers=extra_headers,
-                    timeout=timeout,
-                    verify=verify,
-                    cert=cert,
-                    base_url=base_url,
-                ) as http_client,
-                streamable_http_client(
-                    endpoint,
-                    http_client=http_client,
-                ) as (read_stream, write_stream, _),
-                ClientSession(read_stream, write_stream) as session,
-            ):
-                await session.initialize()
+            with _call_outcome_as_is():
+                async with (
+                    _make_stream_http_client(
+                        token=token,
+                        extra_headers=extra_headers,
+                        timeout=timeout,
+                        verify=verify,
+                        cert=cert,
+                        base_url=base_url,
+                    ) as http_client,
+                    streamable_http_client(
+                        endpoint,
+                        http_client=http_client,
+                    ) as (read_stream, write_stream, _),
+                    ClientSession(read_stream, write_stream) as session,
+                ):
+                    await session.initialize()
 
-                result = await _call_tool_request(
-                    session, tool_name, arguments, timeout
-                )
+                    result = await _call_tool_request(
+                        session, tool_name, arguments, timeout
+                    )
 
-                content_items: List[Any] = []
-                for item in getattr(result, "content", []) or []:
-                    if hasattr(item, "model_dump"):
-                        content_items.append(
-                            item.model_dump(
-                                by_alias=True, mode="json", exclude_unset=True
+                    content_items: List[Any] = []
+                    for item in getattr(result, "content", []) or []:
+                        if hasattr(item, "model_dump"):
+                            content_items.append(
+                                item.model_dump(
+                                    by_alias=True,
+                                    mode="json",
+                                    exclude_unset=True,
+                                )
                             )
-                        )
-                    else:
-                        content_items.append(item)
+                        else:
+                            content_items.append(item)
 
-                is_error = bool(getattr(result, "isError", False))
+                    is_error = bool(getattr(result, "isError", False))
 
-                return {
-                    "content": content_items,
-                    "isError": is_error,
-                }
+                    return {
+                        "content": content_items,
+                        "isError": is_error,
+                    }
         except McpError as exc:
             _raise_rpc_error(exc)
             last_error = exc
@@ -1341,31 +1384,29 @@ async def _call_tool_stream_stdio_async(
         cwd=server_cfg.get("cwd") or None,
     )
 
-    async with (
-        stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
-    ):
-        await session.initialize()
+    with _call_outcome_as_is():
+        async with (
+            stdio_client(params) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await session.initialize()
+            result = await _call_tool_request(session, tool_name, arguments)
 
-        result = await _call_tool_request(session, tool_name, arguments)
+    content_items: List[Any] = []
+    for item in getattr(result, "content", []) or []:
+        if hasattr(item, "model_dump"):
+            content_items.append(
+                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
+            )
+        else:
+            content_items.append(item)
 
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(
-                    item.model_dump(
-                        by_alias=True, mode="json", exclude_unset=True
-                    )
-                )
-            else:
-                content_items.append(item)
+    is_error = bool(getattr(result, "isError", False))
 
-        is_error = bool(getattr(result, "isError", False))
-
-        return {
-            "content": content_items,
-            "isError": is_error,
-        }
+    return {
+        "content": content_items,
+        "isError": is_error,
+    }
 
 
 async def _aopen_persistent_stdio_session(

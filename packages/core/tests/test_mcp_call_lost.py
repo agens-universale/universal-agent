@@ -14,12 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.tools.connect_mcp import registry as reg
+from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.call_errors import (
     McpCallOutcomeUnknown,
     McpCallTimedOut,
     McpServerGone,
-    first_leaf,
 )
 from gc_core.tools.connect_mcp.durable_scope import (
     McpSessionLostError,
@@ -30,6 +30,7 @@ from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     PersistentStdioSession,
 )
+from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.transport import forget_stdio_reader
 from gc_core.utils import aretry
 from gc_testkit.mcp import (
@@ -43,6 +44,8 @@ from gc_testkit.mcp import (
     wait_for,
 )
 from gc_testkit.mcp.fixtures import mcp_owner, mcp_reaper
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="процессы POSIX")
 
@@ -64,7 +67,9 @@ def _requests(control, method: str) -> list[str]:
     ]
 
 
-async def _acall_with_retry(cfg: dict, tool: str) -> object:
+async def _acall_with_retry(
+    cfg: dict, tool: str, arguments: dict | None = None, *, timeout=5.0
+) -> object:
     """Вызов через ``acall_mcp_tool`` с включённым автоповтором."""
     registry = {
         f"mcp_srv_{tool}": {
@@ -75,10 +80,10 @@ async def _acall_with_retry(cfg: dict, tool: str) -> object:
     return await asyncio.wait_for(
         acall_mcp_tool(
             f"mcp_srv_{tool}",
-            {},
+            arguments or {},
             {"srv": {**cfg, "use_retry": True}},
             registry,
-            timeout=5.0,
+            timeout=timeout,
         ),
         _CEILING_SEC,
     )
@@ -139,21 +144,61 @@ async def test_network_call_timeout_is_error_and_session_stays(
 async def test_one_shot_network_call_timeout_is_error(
     tmp_path, mcp_reaper, mcp_owner, transport
 ):
-    """Без постоянной сессии — тот же исход по сроку, не ожидание.
-
-    Разовое соединение отдаёт его листом группы исключений задач SDK —
-    как и ошибку тула на этом пути; лист и проверяем.
-    """
+    """Без постоянной сессии — тот же исход по сроку, не ожидание, и
+    самим исключением, а не группой задач SDK."""
     async with stream_server(tmp_path, transport) as (network, control):
         started = asyncio.get_running_loop().time()
-        with pytest.raises(BaseException) as caught:
+        with pytest.raises(McpCallTimedOut, match="не ответил за 1 с"):
             await call_tool(
                 "srv", network, "action", {"delay": 30}, timeout=1, ceiling=8
             )
         assert asyncio.get_running_loop().time() - started < 4
-        leaf = first_leaf(caught.value)
-        assert isinstance(leaf, McpCallTimedOut)
-        assert str(leaf) == "сервер не ответил за 1 с"
+        assert len(_requests(control, "tools/call")) == 1
+
+
+@pytest.mark.parametrize("transport", ["stream_http", "stream_sse"])
+@pytest.mark.parametrize(
+    ("arguments", "error"),
+    [({"delay": 30}, McpCallTimedOut), ({"fail": True}, McpToolCallError)],
+    ids=["срок", "ошибка-тула"],
+)
+async def test_one_shot_network_call_is_not_repeated(
+    tmp_path, mcp_reaper, mcp_owner, transport, arguments, error
+):
+    """Автоповтор прежнего пути не повторяет разовый сетевой вызов,
+    кончившийся сроком или ошибкой тула: запрос мог исполниться."""
+    async with stream_server(tmp_path, transport) as (network, control):
+        with pytest.raises(error):
+            await _acall_with_retry(network, "action", arguments, timeout=1)
+
+        assert len(_requests(control, "tools/call")) == 1
+
+
+async def test_one_shot_stream_stdio_tool_error_is_not_repeated(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    """То же у разового ``stream_stdio``: ошибка тула — один запрос."""
+    control = tmp_path / "s.json"
+    set_behavior(control, tools=["echo"])
+    cfg = {**stdio_cfg(control), "transport": "stream_stdio"}
+
+    with pytest.raises(McpToolCallError):
+        await _acall_with_retry(cfg, "unlisted")
+
+    assert len(_requests(control, "tools/call")) == 1
+
+
+async def test_durable_one_shot_network_timeout_is_bare_outcome(
+    tmp_path, mcp_reaper, mcp_owner
+):
+    """Под durable до activity доходит сам исход вызова, а не группа:
+    её граница переносит ``McpCallTimedOut`` как «исход неизвестен»."""
+    async with stream_server(tmp_path, "stream_http") as (network, control):
+        with durable_mcp_calls(), pytest.raises(McpCallTimedOut):
+            await _acall_with_retry(
+                network, "action", {"delay": 30}, timeout=1
+            )
+
         assert len(_requests(control, "tools/call")) == 1
 
 
@@ -294,3 +339,27 @@ def test_read_matching_on_closed_stream_still_empty():
     finally:
         stream.close()
         forget_stdio_reader(stream)
+
+
+@pytest.mark.parametrize(
+    ("message", "error"),
+    [
+        (
+            "Timed out while waiting for response to ClientRequest. "
+            "Waited 1.0 seconds.",
+            McpCallTimedOut,
+        ),
+        ("сервер сам ответил кодом 408", McpToolCallError),
+    ],
+    ids=["срок-SDK", "ответ-сервера-408"],
+)
+async def test_only_sdk_deadline_is_call_timeout(message, error):
+    """Срок — только снятие запроса сроком SDK; ошибка сервера с тем же
+    кодом 408 — ответ сервера, ошибка тула."""
+
+    class _Session:
+        async def call_tool(self, *_args, **_kwargs):
+            raise McpError(ErrorData(code=408, message=message))
+
+    with pytest.raises(error):
+        await stream_client._call_tool_request(_Session(), "t", {}, 1)
