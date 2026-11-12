@@ -47,7 +47,9 @@ from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
 from gc_testkit.mcp import (
+    BACKEND_ECHO_TEXT,
     FakeClock,
+    IsolatedBackend,
     alive,
     events,
     exits,
@@ -617,16 +619,6 @@ async def test_consumer_close_cancels_inflight(
     await wait_for(lambda: pid in exits(control), _CEILING_SEC)
 
 
-class _ExecResult:
-    def __init__(self, stdout: str) -> None:
-        self.stdout = stdout
-        self.stderr = ""
-        self.return_code = 0
-        self.timed_out = False
-        self.stdout_hit_capture_cap = False
-        self.stderr_hit_capture_cap = False
-
-
 _BACKEND_ECHO = {
     "name": "echo",
     "inputSchema": {
@@ -636,46 +628,6 @@ _BACKEND_ECHO = {
 }
 
 
-class _StdioSandbox:
-    """Изолированный бэкенд: отвечает списком из ``echo`` и вызовом."""
-
-    is_sandbox = True
-
-    def __init__(self) -> None:
-        self.methods: list[str] = []
-
-    def exec_argv(
-        self,
-        argv,
-        *,
-        stdin=None,
-        cwd=None,
-        timeout=None,
-        env=None,
-        capture_max_chars=None,
-    ):
-        request = json.loads(stdin.splitlines()[-1])
-        self.methods.append(request["method"])
-        text = json.dumps({"text": "из бэкенда", "pid": 0})
-        frames = [
-            {"jsonrpc": "2.0", "id": 1, "result": {}},
-            {
-                "jsonrpc": "2.0",
-                "id": "gc-tools/list",
-                "result": {"tools": [_BACKEND_ECHO]},
-            },
-            {
-                "jsonrpc": "2.0",
-                "id": "gc-tools/call",
-                "result": {"content": [{"type": "text", "text": text}]},
-            },
-        ]
-        return _ExecResult("\n".join(json.dumps(f) for f in frames))
-
-    def exec(self, command, *, cwd=None, timeout=None, env=None):
-        return _ExecResult("/usr/bin/python3")
-
-
 async def test_backend_side_tool_goes_straight(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
@@ -683,7 +635,7 @@ async def test_backend_side_tool_goes_straight(
     settings = _settings(
         {"a": {**stdio_cfg(control), "execute_on": "os_backend"}}
     )
-    backend = _StdioSandbox()
+    backend = IsolatedBackend()
     service = McpService(connect_on_start=True)
     consumer = await _ready(mcp_reaper, service, settings, os_backend=backend)
     view = await _view(consumer, settings, os_backend=backend)
@@ -694,7 +646,7 @@ async def test_backend_side_tool_goes_straight(
         _CEILING_SEC,
     )
 
-    assert _payload(envelope)["text"] == "из бэкенда"
+    assert _payload(envelope)["text"] == BACKEND_ECHO_TEXT
     assert backend.methods == ["tools/list", "tools/call"]
     assert launches(control) == []
 

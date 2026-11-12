@@ -19,8 +19,10 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+from gc_core.backends.local import LocalFsBackend
 from gc_core.config_modules.field_meta import plain_dump
 from gc_core.tools.connect_mcp.catalog import write_catalog
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
@@ -279,9 +281,68 @@ class FakeClock:
         self._now += sec
 
 
+#: Ответ ``echo`` изолированного бэкенда (поле ``text``).
+BACKEND_ECHO_TEXT = "из бэкенда"
+_BACKEND_ECHO_TOOL = {
+    "name": "echo",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+    },
+}
+
+
+class IsolatedBackend(LocalFsBackend):
+    """Бэкенд, исполняющий команды в изоляции (``isolates_exec``, как
+    песочница): серверы ``execute_on: os_backend`` идут через него. Файлы
+    — хоста.
+
+    stdio-обмен MCP (``aexec_argv``) отвечает без процесса: ``initialize``,
+    список из одного ``echo`` и ответ вызова ``{"text":
+    BACKEND_ECHO_TEXT, "pid": 0}``. ``argv`` — команда каждого обмена,
+    ``methods`` — его метод MCP (``tools/list``, ``tools/call``).
+    """
+
+    isolates_exec = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.argv: list[list[str]] = []
+        self.methods: list[str] = []
+
+    async def aexec_argv(self, argv: list, **kwargs: Any) -> Any:
+        request = json.loads(kwargs["stdin"].splitlines()[-1])
+        self.argv.append(list(argv))
+        self.methods.append(request["method"])
+        text = json.dumps({"text": BACKEND_ECHO_TEXT, "pid": 0})
+        frames = [
+            {"jsonrpc": "2.0", "id": 1, "result": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": "gc-tools/list",
+                "result": {"tools": [_BACKEND_ECHO_TOOL]},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": "gc-tools/call",
+                "result": {"content": [{"type": "text", "text": text}]},
+            },
+        ]
+        return SimpleNamespace(
+            stdout="\n".join(json.dumps(f) for f in frames),
+            stderr="",
+            return_code=0,
+            timed_out=False,
+            stdout_hit_capture_cap=False,
+            stderr_hit_capture_cap=False,
+        )
+
+
 __all__ = [
+    "BACKEND_ECHO_TEXT",
     "JOURNAL_SUFFIX",
     "FakeClock",
+    "IsolatedBackend",
     "alive",
     "call_tool",
     "children",

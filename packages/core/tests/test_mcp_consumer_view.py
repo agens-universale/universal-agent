@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 
 import pytest
@@ -42,6 +41,7 @@ from gc_core.tools.mcp_snapshot import (
 )
 from gc_testkit.mcp import (
     FakeClock,
+    IsolatedBackend,
     launches,
     seed_catalog,
     set_behavior,
@@ -266,49 +266,6 @@ async def test_trace_goes_to_wrapper_cfg_not_to_fingerprint(
     assert keys[0] == keys[1]
 
 
-class _ExecResult:
-    def __init__(self, stdout: str) -> None:
-        self.stdout = stdout
-        self.stderr = ""
-        self.return_code = 0
-        self.timed_out = False
-        self.stdout_hit_capture_cap = False
-        self.stderr_hit_capture_cap = False
-
-
-class _StdioSandbox:
-    """Изолированный бэкенд: stdio-обмен отвечает списком из одного тула."""
-
-    is_sandbox = True
-
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-
-    def exec_argv(
-        self,
-        argv,
-        *,
-        stdin=None,
-        cwd=None,
-        timeout=None,
-        env=None,
-        capture_max_chars=None,
-    ):
-        self.calls.append(list(argv))
-        frames = [
-            {"jsonrpc": "2.0", "id": 1, "result": {}},
-            {
-                "jsonrpc": "2.0",
-                "id": "gc-tools/list",
-                "result": {"tools": [{"name": "echo"}]},
-            },
-        ]
-        return _ExecResult("\n".join(json.dumps(f) for f in frames))
-
-    def exec(self, command, *, cwd=None, timeout=None, env=None):
-        return _ExecResult("/usr/bin/python3")
-
-
 def _backend_settings(control) -> object:
     return _settings({"a": {**stdio_cfg(control), "execute_on": "os_backend"}})
 
@@ -318,7 +275,7 @@ async def test_backend_part_uses_build_backend_and_is_cached(
 ):
     control = tmp_path / "a.json"
     settings = _backend_settings(control)
-    first, second = _StdioSandbox(), _StdioSandbox()
+    first, second = IsolatedBackend(), IsolatedBackend()
     service = McpService(connect_on_start=True)
     consumer = await _ready(mcp_reaper, service, settings, os_backend=first)
 
@@ -328,7 +285,7 @@ async def test_backend_part_uses_build_backend_and_is_cached(
     ]
     third = await _view(consumer, settings, os_backend=second)
 
-    assert (len(first.calls), len(second.calls)) == (1, 1)
+    assert (len(first.methods), len(second.methods)) == (1, 1)
     assert all(_tools_of(v, "a") == [_ECHO] for v in [*views, third])
     assert third.status["a"]["status"] == STATE_CONNECTED
     assert (
@@ -351,7 +308,7 @@ async def test_service_backend_cache_serves_backend_part(
         }
     )
     seed_catalog(settings, "b", ["echo"])
-    surface = _StdioSandbox()
+    surface = IsolatedBackend()
     service = McpService(connect_on_start=False, os_backend=surface)
     first = await _ready(
         mcp_reaper, service, settings, "A", os_backend=surface
@@ -363,7 +320,7 @@ async def test_service_backend_cache_serves_backend_part(
     view_a = await _view(first, settings, os_backend=surface)
     view_b = await _view(second, settings, os_backend=surface)
 
-    assert len(surface.calls) == 1
+    assert len(surface.methods) == 1
     assert view_a.registry == view_b.registry
     assert set(view_a.status) == {"a", "b"}
     assert launches(control) == []

@@ -18,7 +18,6 @@ import os
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
-from gc_core.backends.local import LocalFsBackend
 from gc_core.mcp_session_owner import use_owner
 from gc_core.run_context import acreate_run_context
 from gc_core.tools import abuild_tools_data
@@ -28,6 +27,8 @@ from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.utils.logging_module import release_run_logger
 from gc_testkit.mcp import (
+    BACKEND_ECHO_TEXT,
+    IsolatedBackend,
     alive,
     events,
     exits,
@@ -343,56 +344,6 @@ async def test_child_builds_keep_parent_pin_and_signal(
     assert consumer.next_build() == 2
 
 
-class _ExecResult:
-    def __init__(self, stdout: str) -> None:
-        self.stdout = stdout
-        self.stderr = ""
-        self.return_code = 0
-        self.timed_out = False
-        self.stdout_hit_capture_cap = False
-        self.stderr_hit_capture_cap = False
-
-
-_BACKEND_ECHO = {
-    "name": "echo",
-    "inputSchema": {
-        "type": "object",
-        "properties": {"text": {"type": "string"}},
-    },
-}
-
-
-class _IsolatedBackend(LocalFsBackend):
-    """Локальный бэкенд, исполняющий команды в изоляции (как песочница):
-    stdio-обмен MCP отвечает списком из ``echo`` и вызовом; файлы — хоста.
-    """
-
-    isolates_exec = True
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.methods: list[str] = []
-
-    async def aexec_argv(self, argv, **kwargs):
-        request = json.loads(kwargs["stdin"].splitlines()[-1])
-        self.methods.append(request["method"])
-        text = json.dumps({"text": "из бэкенда", "pid": 0})
-        frames = [
-            {"jsonrpc": "2.0", "id": 1, "result": {}},
-            {
-                "jsonrpc": "2.0",
-                "id": "gc-tools/list",
-                "result": {"tools": [_BACKEND_ECHO]},
-            },
-            {
-                "jsonrpc": "2.0",
-                "id": "gc-tools/call",
-                "result": {"content": [{"type": "text", "text": text}]},
-            },
-        ]
-        return _ExecResult("\n".join(json.dumps(f) for f in frames))
-
-
 def _backend_server(control) -> dict:
     return {**stdio_cfg(control), "execute_on": "os_backend"}
 
@@ -417,7 +368,7 @@ async def test_backend_side_server_end_to_end(
             ]
         ),
     )
-    os_backend = _IsolatedBackend()
+    os_backend = IsolatedBackend()
     consumer = _open_consumer(mcp_reaper)
 
     async with _context(
@@ -427,7 +378,7 @@ async def test_backend_side_server_end_to_end(
 
     model.assert_clean()
     (reply,) = _tool_outputs(settings, "t1", _BK_ECHO)
-    assert _server_answer(reply)["text"] == "из бэкенда"
+    assert _server_answer(reply)["text"] == BACKEND_ECHO_TEXT
     assert os_backend.methods == ["tools/list", "tools/call"]
     assert consumer.servers() == {}
     assert not catalog._key_dir("bk").exists()
@@ -451,7 +402,7 @@ async def test_backend_part_survives_refresh_without_discovery(
     seed_catalog(settings, "srv", ["echo"])
     monkeypatch.chdir(tmp_path)
     model = install(monkeypatch, ScriptedBackend([_finish("1"), _finish("2")]))
-    os_backend = _IsolatedBackend()
+    os_backend = IsolatedBackend()
     consumer = _open_consumer(mcp_reaper, on_start=False)
 
     async with _context(
