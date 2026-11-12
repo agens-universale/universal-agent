@@ -37,6 +37,10 @@ POLL_S = 1.0  # период проверки терминала
 HANGUP_SIGNALS: tuple[int, ...] = (
     (signal.SIGHUP,) if hasattr(signal, "SIGHUP") else ()
 )
+# Повтор этих сигналов — немедленный выход (спека §5.12): после первого сторож
+# убирается, а второй действует по умолчанию. Повторный SIGHUP уборку не
+# обрывает: обрыв терминала может прийти дважды — от ядра и от оболочки.
+_REPEAT_EXITS_AT_ONCE = (signal.SIGTERM,)
 # Уборка идёт шагами, и каждый ограничен graceful-таймаутом супервизора (5 с)
 # независимо от числа демонов: все MCP-демоны разом, затем голос. Параллельно
 # хуки atexit закрывают stdio-MCP-серверы (браузер) — до ~15 с на сессию. Бюджет
@@ -66,6 +70,21 @@ def _silence_output() -> None:
     null = os.open(os.devnull, os.O_WRONLY)
     os.dup2(null, 1)
     os.dup2(null, 2)
+
+
+def _quiet(signum: int, frame: object) -> None:
+    """Сигнал разбирает сторож по wakeup fd; здесь делать нечего."""
+
+
+def _default_from_now_on(signum: int, frame: object) -> None:
+    """Номер сигнала уже в wakeup fd — сторож уберётся и выйдет; повторный
+    сигнал действует по умолчанию и завершает процесс сразу."""
+    del frame
+    signal.signal(signum, signal.SIG_DFL)
+
+
+def _handler_for(signum: int) -> Callable[[int, object], None]:
+    return _default_from_now_on if signum in _REPEAT_EXITS_AT_ONCE else _quiet
 
 
 class TerminalGuard:
@@ -104,17 +123,22 @@ class TerminalGuard:
             return
         self._wake_r, self._wake_w = os.pipe()
         os.set_blocking(self._wake_w, False)
-        # Python-обработчик пустой: он нужен лишь затем, чтобы стоял C-обработчик,
-        # пишущий номер сигнала в wakeup fd. Локов в нём нет — дедлока не будет.
-        # Унаследованный SIG_IGN (nohup) перекрываем осознанно: TUI без терминала
-        # бесполезен.
-        self._previous_handlers = {
-            signum: signal.signal(signum, lambda *_: None)
-            for signum in self._signals
-        }
+        # Сначала wakeup fd, потом обработчики: сигнал, попавший в наш
+        # обработчик, всегда записан в канал, и сторож прочтёт его, когда
+        # стартует. В обратном порядке сигнал между ними проглотил бы
+        # обработчик, а в канал он бы не попал.
         self._previous_wakeup = signal.set_wakeup_fd(
             self._wake_w, warn_on_full_buffer=False
         )
+        # Python-обработчик нужен затем, чтобы стоял C-обработчик, пишущий
+        # номер сигнала в wakeup fd (у SIGTERM он ещё отдаёт повтор действию
+        # по умолчанию). Локов в нём нет — дедлока не будет.
+        # Унаследованный SIG_IGN (nohup) перекрываем осознанно: TUI без терминала
+        # бесполезен.
+        self._previous_handlers = {
+            signum: signal.signal(signum, _handler_for(signum))
+            for signum in self._signals
+        }
         # Опрос — терминала вывода (stderr: туда рисует Textual, и зависание
         # начинается с записи в него), и только если он был терминалом на старте:
         # пайпы, run_test и headless сторож не трогает.

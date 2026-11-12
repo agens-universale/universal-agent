@@ -1,17 +1,22 @@
 """SIGTERM у gc-ua — тем же путём сторожа терминала, что SIGHUP (спека §5.12).
 
 Сторож слушает переданные ему сигналы одним wakeup fd и выходит с уборкой
-кодом 128 + номер сигнала; ``close`` возвращает прежние обработчики всех
-своих сигналов. ``main`` отдаёт сторожу SIGHUP и SIGTERM. Выход сторожа —
+кодом 128 + номер сигнала; повторный SIGTERM завершает процесс сразу.
+``close`` возвращает прежние обработчики всех своих сигналов. ``main``
+отдаёт сторожу SIGHUP и SIGTERM. Выход сторожа —
 ``os._exit``, поэтому сигналы проверяются в отдельном процессе.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
+import select
 import signal
 import subprocess
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -21,17 +26,21 @@ posix_only = pytest.mark.skipif(
     sys.platform == "win32", reason="SIGHUP и сигналы сторожа — только POSIX"
 )
 
+#: Потолок старта процесса со сторожем (строка «ready»).
+_READY_SEC = 30.0
 #: Срок выхода процесса со сторожем после сигнала.
 _EXIT_SEC = 10.0
 
-#: Процесс со сторожем SIGHUP и SIGTERM; уборка пишет файл-метку.
+#: Процесс со сторожем SIGHUP и SIGTERM; уборка длится ``argv[2]`` секунд и
+#: пишет файл-метку.
 _GUARDED = """
 import os, signal, sys, time
 from gc_tui.services.terminal_guard import TerminalGuard
 
-work = sys.argv[1]
+work, cleanup_sec = sys.argv[1], float(sys.argv[2])
 
 def cleanup():
+    time.sleep(cleanup_sec)
     open(os.path.join(work, "cleanup"), "w").close()
 
 guard = TerminalGuard(cleanup, signals=(signal.SIGHUP, signal.SIGTERM))
@@ -44,14 +53,15 @@ finally:
 """
 
 
-def _exit_code_after(signum: int, work: Path) -> int:
-    """Код выхода процесса со сторожем после сигнала ``signum``."""
+@contextlib.contextmanager
+def _guarded(work: Path, cleanup_sec: float = 0.0) -> Iterator:
+    """Процесс со сторожем, дошедший до «ready»; на выходе добит и пожат."""
     sources = [str(path) for path in package_src_dirs()]
     if os.environ.get("PYTHONPATH"):
         sources.append(os.environ["PYTHONPATH"])
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sources))
     proc = subprocess.Popen(
-        [sys.executable, "-c", _GUARDED, str(work)],
+        [sys.executable, "-c", _GUARDED, str(work), str(cleanup_sec)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -59,14 +69,21 @@ def _exit_code_after(signum: int, work: Path) -> int:
         start_new_session=True,
     )
     try:
+        assert select.select([proc.stdout], [], [], _READY_SEC)[0]
         assert proc.stdout.readline().strip() == b"ready"
-        proc.send_signal(signum)
-        return proc.wait(_EXIT_SEC)
+        yield proc
     finally:
         if proc.poll() is None:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(_EXIT_SEC)
         proc.stdout.close()
+
+
+def _exit_code_after(signum: int, work: Path) -> int:
+    """Код выхода процесса со сторожем после сигнала ``signum``."""
+    with _guarded(work) as proc:
+        proc.send_signal(signum)
+        return proc.wait(_EXIT_SEC)
 
 
 @posix_only
@@ -79,6 +96,20 @@ def test_guard_handles_sigterm_with_code_143(tmp_path):
 def test_sighup_code_is_still_129(tmp_path):
     assert _exit_code_after(signal.SIGHUP, tmp_path) == 129
     assert (tmp_path / "cleanup").exists()
+
+
+@posix_only
+def test_second_sigterm_exits_at_once(tmp_path):
+    """Уборка идёт долго: повторный SIGTERM завершает процесс сразу, по
+    сигналу, не дожидаясь её (спека §5.12)."""
+    with _guarded(tmp_path, cleanup_sec=10.0) as proc:
+        proc.send_signal(signal.SIGTERM)
+        time.sleep(0.5)
+        assert proc.poll() is None  # уборка ещё идёт
+        proc.send_signal(signal.SIGTERM)
+
+        assert proc.wait(2.0) == -signal.SIGTERM
+    assert not (tmp_path / "cleanup").exists()
 
 
 @posix_only
