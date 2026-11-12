@@ -97,7 +97,7 @@ def test_fingerprint_is_32_hex_and_ignores_key_order():
     fp = connection_fingerprint(a)
     assert fp == connection_fingerprint(b)
     assert len(fp) == 32
-    int(fp, 16)
+    assert set(fp) <= set("0123456789abcdef")
 
 
 def test_secret_change_keeps_catalog_fingerprint():

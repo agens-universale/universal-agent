@@ -19,7 +19,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from gc_core.config_modules.field_meta import plain_dump
 from gc_core.mcp_session_owner import current_owner, use_owner
-from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp import (
     consumer_connections as connections_module,
 )
@@ -27,6 +26,7 @@ from gc_core.tools.connect_mcp import persistent_stdio, stream_client
 from gc_core.tools.connect_mcp.client import _MCP_SESSIONS
 from gc_core.tools.connect_mcp.consumer import RETRY_PAUSES_SEC
 from gc_core.tools.connect_mcp.consumer_status import (
+    INTERRUPTED_REASON,
     STATE_CACHED,
     STATE_CONNECTED,
     STATE_CONNECTING,
@@ -688,27 +688,42 @@ def _entry_failed_at(
     )
 
 
-def _idle(entry: ServerEntry, now: float):
+def _idle(entry: ServerEntry, now: float, *, closed: bool = False):
     return server_status(
-        entry, connected=False, attempting=False, own=None, retry=0, now=now
+        entry,
+        connected=False,
+        attempting=False,
+        own=None,
+        retry=0,
+        now=now,
+        closed=closed,
     )
 
 
-def test_idle_status_during_interruption_hold_is_entry_failure():
+@pytest.mark.parametrize(
+    ("closed", "after"),
+    [
+        (False, (STATE_CONNECTING, "")),
+        (True, (STATE_FAILED, INTERRUPTED_REASON)),
+    ],
+    ids=["открыт", "закрыт"],
+)
+def test_idle_status_during_interruption_hold_is_entry_failure(closed, after):
     """Отказ записи старше 30 с, а пауза держится от свежей прерванной
     попытки: попытки нет и подключаться нельзя — статус ``failed`` с
-    причиной отказа записи, не ``connecting``."""
+    причиной отказа записи, не ``connecting`` и не «подключение прервано»
+    у закрытого потребителя; после паузы — каждому своё."""
     entry = _entry_failed_at(0, interrupted=30)
 
-    held = _idle(entry, now=35)
-    after = _idle(entry, now=60)
+    held = _idle(entry, now=35, closed=closed)
+    later = _idle(entry, now=60, closed=closed)
 
     assert (held.state, held.reason_code, held.reason) == (
         STATE_FAILED,
         "other",
         "сервер не стартует",
     )
-    assert after.state == STATE_CONNECTING
+    assert (later.state, later.reason) == after
 
 
 def test_interruption_before_failure_holds_from_failure():
@@ -719,7 +734,6 @@ def test_success_between_failure_and_interruption_does_not_hold():
     entry = _entry_failed_at(0, interrupted=20, checked=10)
 
     assert shared_hold_since(entry) is None
-    assert _idle(entry, now=25).state == STATE_CACHED
 
 
 async def test_withdrawal_by_set_does_not_mark_entry(

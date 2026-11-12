@@ -399,7 +399,7 @@ async def test_overlay_takes_connecting_and_empties_failed(
     service = McpService(connect_on_start=True)
     consumer = await _ready(mcp_reaper, service, settings)
     statuses = service.status(consumer)
-    assert statuses["c"].state == "connecting"
+    assert statuses["c"].state == STATE_CONNECTING
     assert statuses["a"].state == STATE_FAILED
     # Снимок сборки с прежними значениями: у a — тулы, у c — свои отметки.
     stale_tool = {"name": _ECHO, "description": "", "tool": "echo"}
