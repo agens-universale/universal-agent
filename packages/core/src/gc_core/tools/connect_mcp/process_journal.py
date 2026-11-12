@@ -90,9 +90,10 @@ class ProcessRecord:
 class ProcessJournal:
     """Журнал процессов одного сервиса.
 
-    Каталог и ``owner.json`` создаются при первом ``launch_argv``; не
-    вышло или журнал удалён (``remove``) — новых каталогов журнал больше
-    не заводит (``_spent``), запуски идут без учёта. ``kill_all`` и ``prune`` замков не берут: список читается с
+    Объект — только путь: каталог и ``owner.json`` создаются при первом
+    ``launch_argv``. Не вышло или журнал удалён (``remove``) — новых
+    каталогов журнал больше не заводит (``_spent``), запуски идут без
+    учёта. ``kill_all`` и ``prune`` замков не берут: список читается с
     диска, поэтому их можно звать из обработчика сигнала и из чужого
     потока, одновременно друг с другом.
     """
@@ -102,6 +103,11 @@ class ProcessJournal:
         self._dir: Path | None = None
         self._spent = False
         self._lock = threading.Lock()
+
+    @property
+    def directory(self) -> Path | None:
+        """Каталог журнала; не заведён или удалён — ``None``."""
+        return self._dir
 
     def launch_argv(
         self, command: str, args: list[str], server_key: str

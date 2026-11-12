@@ -200,11 +200,15 @@ class McpCallExecutor:
         generation: int,
     ) -> Any:
         """Шаги 4–5, 7: исход вызова; ответ после закрытия — «сервис MCP
-        остановлен». Задачу, отменённую не закрытием (её снял транспорт),
-        — как потерю соединения."""
+        остановлен». Снятый закрытием или гашением вызов постоянного
+        stdio закрывает сессию, как брошенный (шаг 6): иначе его поток
+        мог бы поднять процесс в ещё открытую сессию. Задачу, отменённую
+        не закрытием (её снял транспорт), — как потерю соединения."""
         if self._connections.refused():
             if not task.cancelled():
                 task.exception()
+            elif is_persistent_stdio(cfg):
+                await self._connections.adrop(entry)
             raise tool_error(SERVICE_CLOSED_TEXT)
         if task.cancelled():
             raise await self._atransport_failure(

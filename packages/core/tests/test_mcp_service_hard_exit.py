@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 from gc_core.tools.connect_mcp import service as service_module
 from gc_core.tools.connect_mcp.consumer_connections import session_key_of
+from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.process_journal import (
     ProcessJournal,
     journal_root,
@@ -102,6 +103,12 @@ def _wrapper(view, name: str) -> MCPToolWrapper:
         default_use_retry=False,
         caller=view.caller,
     )
+
+
+def _stdio_sessions(consumer) -> list:
+    """Сессии постоянного stdio потребителя в реестре."""
+    sessions = PersistentStdioRegistry.instance()._sessions
+    return [key for key in list(sessions) if key[0] == consumer.owner]
 
 
 def _in_flight(control: Path) -> bool:
@@ -247,6 +254,9 @@ async def test_kill_now_from_foreign_thread_during_call(
         with pytest.raises(McpToolCallError) as caught:
             await asyncio.wait_for(call, _CEILING_SEC)
         assert caught.value.error.message == SERVICE_CLOSED_TEXT
+        # Снятый вызов постоянного stdio закрыл свою сессию: поток вызова
+        # не поднимет процесс в открытую сессию.
+        assert _stdio_sessions(consumer) == []
         late = thread.submit(_wrapper(view, _ECHO).acall(text="hi"))
         with pytest.raises(McpToolCallError) as caught:
             await asyncio.wait_for(late, _CEILING_SEC)
@@ -406,6 +416,38 @@ async def test_foreign_mark_gets_no_signal_on_aclose_and_kill(
         assert _journal_dirs() == []
     finally:
         _reap(proc)
+
+
+async def test_cancelled_close_still_kills_and_removes_journal(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Задачу закрытия отменили посреди закрытия глухого потребителя
+    (свёртка цикла): процессы добиты по журналу, каталога нет, отмена
+    осталась отменой."""
+    control = tmp_path / "deaf.json"
+    service = McpService(connect_on_start=True)
+    await _ready(service, _settings({"a": _deaf(control)}))
+    [pid] = launches(control)
+    caller = asyncio.create_task(service.aclose())
+    await wait_for(lambda: service._close_task is not None, _CEILING_SEC)
+    await asyncio.sleep(0.3)  # закрытие ждёт эскалации глухого сервера
+
+    service._close_task.cancel()
+    await asyncio.wait({service._close_task, caller}, timeout=_CEILING_SEC)
+
+    assert service._close_task.cancelled()
+    assert caller.cancelled()
+    await _dead(pid)
+    assert _journal_dirs() == []
+    await _settle_background()
+
+
+async def _settle_background() -> None:
+    """Дождаться фоновых задач теста (хвосты закрытий доигрывают)."""
+    others = asyncio.all_tasks() - {asyncio.current_task()}
+    if others:
+        _, pending = await asyncio.wait(others, timeout=_CEILING_SEC)
+        assert not pending
 
 
 # ---- линия 3: уборка сирот при первой сверке ----

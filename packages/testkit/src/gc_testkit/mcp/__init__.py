@@ -300,9 +300,8 @@ def connections_of(consumer: Any) -> Any:
 
 
 def journal_records(service: Any) -> list:
-    """Записи журнала процессов сервиса MCP; журнала ещё нет — пусто."""
-    journal = service._journal
-    return journal.records() if journal is not None else []
+    """Записи журнала процессов сервиса MCP; каталога ещё нет — пусто."""
+    return service._journal.records()
 
 
 def count_attempts(monkeypatch: Any) -> list[str]:

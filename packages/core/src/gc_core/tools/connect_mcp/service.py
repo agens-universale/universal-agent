@@ -159,10 +159,10 @@ class McpService:
     открывают с любого потока. ``_backend_cache`` — кэш тулов серверов,
     исполняемых внутри бэкенда сервиса (§5.10); заводится при первом
     запросе. ``_close_task`` — задача закрытия: её ждут все вызовы
-    ``aclose``. ``_journal`` — журнал процессов серверов (§5.12);
-    заводится при первой подстановке пускателя (или закрытием сервиса —
-    удалённым: срез закрытого потребителя каталога не заведёт).
-    ``_sweep_task`` — уборка сирот, начатая первой сверкой.
+    ``aclose``. ``_journal`` — журнал процессов серверов (§5.12): объект
+    есть сразу, каталог заводится при первой подстановке пускателя, у
+    сервиса без процессных серверов его нет. ``_sweep_task`` — уборка
+    сирот, начатая первой сверкой.
     """
 
     def __init__(
@@ -187,7 +187,7 @@ class McpService:
         self._consumers: set[McpConsumer] = set()
         self._backend_cache: ToolsCache | None = None
         self._close_task: asyncio.Task | None = None
-        self._journal: ProcessJournal | None = None
+        self._journal = ProcessJournal()
         self._sweep_task: asyncio.Task | None = None
 
     @property
@@ -276,8 +276,6 @@ class McpService:
         """
         if not _launches_process(server_cfg):
             return server_cfg
-        if self._journal is None:
-            self._journal = ProcessJournal()
         command, args = self._journal.launch_argv(
             _resolve_command(str(server_cfg["command"])),
             _launch_args(server_cfg),
@@ -287,11 +285,10 @@ class McpService:
 
     async def aprune_journal(self) -> None:
         """Снять из журнала записи вышедших процессов — в рабочем потоке
-        (на macOS метка процесса читается через ``ps``). Журнала нет —
-        ничего."""
-        journal = self._journal
-        if journal is not None:
-            await asyncio.to_thread(journal.prune)
+        (на macOS метка процесса читается через ``ps``). Каталога журнала
+        нет — ничего, и поток не заводится."""
+        if self._journal.directory is not None:
+            await asyncio.to_thread(self._journal.prune)
 
     def _begin_orphan_sweep(self) -> None:
         """Первая сверка сервиса: уборка сирот мёртвых хостов в фоне
@@ -307,12 +304,15 @@ class McpService:
 
         Сначала запрет: вызовы, сверки и новые подключения получают
         «сервис MCP остановлен» (иначе идущий ход поднял бы сервер
-        заново); цикл сервиса, если он жив, снимает фоновую работу и
-        идущие вызовы потребителей. Затем по журналу — SIGTERM группам,
-        до ``KILL_WAIT_SEC`` ожидания, SIGKILL каждой; журнал читается
-        ещё раз. Замков сервиса и потребителей не берёт, цикла не ждёт;
-        повторный вызов и вызов одновременно с ``aclose`` безопасны.
-        Сессии потребителей не закрывает — их закрывает ``aclose``.
+        заново). Цикл сервиса, если он жив, снимет фоновую работу и
+        идущие вызовы потребителей, когда получит управление: из чужого
+        потока — раньше, чем увидит смерть серверов, из обработчика
+        сигнала на потоке цикла — после возврата гашения. Затем по
+        журналу — SIGTERM группам, до ``KILL_WAIT_SEC`` ожидания, SIGKILL
+        каждой; журнал читается ещё раз. Замков сервиса и потребителей не
+        берёт, цикла не ждёт; повторный вызов и вызов одновременно с
+        ``aclose`` безопасны. Сессии потребителей не закрывает — их
+        закрывает ``aclose``.
         """
         self._stopped = True
         loop = self._loop
@@ -320,9 +320,7 @@ class McpService:
             # Цикл уже закрыт — будить и снимать на нём некого.
             with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(self._halt)
-        journal = self._journal
-        if journal is not None:
-            journal.kill_all(wait_sec=KILL_WAIT_SEC)
+        self._journal.kill_all(wait_sec=KILL_WAIT_SEC)
 
     def _halt(self) -> None:
         """На цикле сервиса после аварийного гашения: разбудить ждущих
@@ -341,7 +339,7 @@ class McpService:
         сервера не дошёл до его команды (сбой ``exec`` пускателя), —
         исключение, которым кончился бы запуск без пускателя; иначе
         ``None``. Срок, протокол и ответы сервера журнал не читают."""
-        if self._journal is None or not _launches_process(entry.cfg):
+        if not _launches_process(entry.cfg):
             return None
         if not is_server_gone(exc):
             return None
@@ -398,10 +396,22 @@ class McpService:
 
     async def _aclose_all(self, budget: float) -> None:
         """Задача закрытия: потребители в бюджет, добивание по журналу,
-        уборка сирот — в остаток бюджета."""
+        уборка сирот — в остаток бюджета.
+
+        Отмена посреди закрытия потребителей (свёртка цикла: отмена
+        оставшихся задач при остановке цикла агента, выход
+        ``asyncio.run``) добивает по журналу синхронно, на потоке цикла:
+        ждать рабочий поток на сворачиваемом цикле уже нельзя, а блок
+        цикла до ``KILL_WAIT_SEC`` — только на этом пути. Отмена остаётся
+        отменой.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + budget
-        await self._aclose_consumers(budget)
+        try:
+            await self._aclose_consumers(budget)
+        except BaseException:
+            _kill_and_remove(self._journal)
+            raise
         await self._aclose_journal()
         sweep = self._sweep_task
         if sweep is not None:
@@ -414,16 +424,15 @@ class McpService:
         потребителей, и удалить журнал (в рабочем потоке).
 
         Журнал читается заново: брошенный поток попытки или вызова мог
-        запустить процесс уже после закрытия сессий. Журнала не было —
-        заводится удалённый: подстановка пускателя после закрытия
-        (срез закрытого потребителя) каталога не заводит.
+        запустить процесс уже после закрытия сессий. Удалённый журнал
+        каталога больше не заводит — и подстановка пускателя после
+        закрытия (срез закрытого потребителя) тоже. Каталога не было —
+        рабочий поток не нужен.
         """
-        journal = self._journal
-        if journal is None:
-            self._journal = journal = ProcessJournal()
-            journal.remove()
+        if self._journal.directory is None:
+            self._journal.remove()
             return
-        await asyncio.to_thread(_kill_and_remove, journal)
+        await asyncio.to_thread(_kill_and_remove, self._journal)
 
     async def _aclose_consumers(self, budget: float) -> None:
         """Закрыть потребителей, числящихся за сервисом, в общий бюджет.
