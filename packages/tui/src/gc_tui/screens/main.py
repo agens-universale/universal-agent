@@ -733,6 +733,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
         self._stream_answer_row = None  # type: Optional["TraceRow"]
+        # Что уже нарисовано в стрим-виджет: (версия sink, виджет). Совпала
+        # с текущей — `_refresh_stream_content` ничего не трогает.
+        self._stream_drawn: tuple[int, object] | None = None
         # Строки мыслей ленты (`ThoughtRow`, спека мыслей §7) — только из
         # стрима, нигде не хранятся: строка на попытку, законченные стоят на
         # своих местах до перерисовки ленты.
@@ -3165,35 +3168,50 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
         Зовётся poll-веткой (после mount/switch) и событийно (StreamPump → app →
-        call_from_thread). НЕ монтирует/снимает/переключает — это poll."""
+        `_post_stream_signal`). НЕ монтирует/снимает/переключает — это poll.
+        Без новых данных (та же версия sink, тот же виджет) — ничего не
+        трогает: лишние сигналы и тики опроса ничего не стоят."""
         # F3: freeze UI на время app-select — не красим стрим и не двигаем stick
         # (здесь зовутся _update_stick_state/_scroll_trace_end). Гейт железный:
-        # покрывает и poll, и событийный путь _stream_signal → call_from_thread.
+        # покрывает и poll, и событийный путь _stream_signal. Нарисованное не
+        # запоминается — после отпускания первый вызов догонит содержимое.
         if self._ui_frozen_for_select():
             return
         sink = getattr(self.app, "_stream_sink", None)
         if sink is None:
             return
+        version, think, answer = sink.versioned_snapshot()
+        target = self._stream_answer_row
+        if target is None:
+            target = self._stream_block
+        if target is None or (version, target) == self._stream_drawn:
+            return
+        self._update_stick_state()
+        if self._draw_stream(think, answer):
+            self._stream_drawn = (version, target)
+        if self._stick_bottom:
+            self._scroll_trace_end()
+
+    def _draw_stream(self, think: str, answer: str) -> bool:
+        """Нарисовать снимок sink в стрим-виджет; True — текст лёг.
+        `StreamBlock` до монтажа текст молча не берёт (опрос монтирует его
+        и зовёт перерисовку в одном обработчике), `TraceRow` берёт до
+        `compose`."""
         from gc_tui.services.markdown_render import render_prose
         from gc_tui.services.stream_sink import (
             format_reasoning_line,
             format_stream_block,
         )
 
-        self._update_stick_state()
-        think, answer = sink.snapshot()
         if self._stream_answer_row is not None:
             self._stream_answer_row.set_content(
                 render_prose(format_stream_block(answer=answer))
             )
-        elif self._stream_block is not None:
-            self._stream_block.set_text(
-                format_reasoning_line(think=think), thinking=True
-            )
-        else:
-            return
-        if self._stick_bottom:
-            self._scroll_trace_end()
+            return True
+        self._stream_block.set_text(
+            format_reasoning_line(think=think), thinking=True
+        )
+        return self._stream_block.is_mounted
 
     def _commit_stream(self) -> None:
         """Строка ленты закоммичена — живой вывод шага уходит из-под неё.
@@ -3217,6 +3235,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         reset_sink=False: виджет убирается, но sink не трогается — счётчик и
         reasoning-состояние индикатора продолжают жить (нужно для
         tui.show_*=False: действие в drain без сброса буфера)."""
+        self._stream_drawn = None
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None

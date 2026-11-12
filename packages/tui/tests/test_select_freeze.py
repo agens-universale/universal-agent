@@ -380,7 +380,11 @@ async def test_refresh_stream_content_gated_by_selecting(
                 "S",
                 (),
                 {
-                    "snapshot": lambda self: ("think", "answer"),
+                    "versioned_snapshot": lambda self: (
+                        1,
+                        "think",
+                        "answer",
+                    ),
                     "has_content": lambda self: True,
                 },
             )(),
