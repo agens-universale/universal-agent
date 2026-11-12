@@ -23,6 +23,7 @@ from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.service import McpService, classify_failure
 from gc_core.tools.connect_mcp.service_records import Failure
+from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_testkit.mcp import FakeClock, seed_catalog, stdio_cfg
 from gc_testkit.mcp.fixtures import mcp_home
 from mcp.shared.exceptions import McpError
@@ -300,14 +301,70 @@ def test_secret_in_url_is_masked_in_connect_reason():
     assert reason == "нет соединения с https://h/mcp?api_key=***"
 
 
-def test_query_value_of_url_is_masked_without_secret_fields():
-    """Секрет только в адресе (``?apikey=…``) — в причине его нет."""
-    reason = _reason(
-        ConnectionRefusedError(),
-        url="https://h/mcp?apikey=URL-SECRET-0123&v=1",
-    )
+@pytest.mark.parametrize(
+    ("url", "shown"),
+    [
+        (
+            "https://h/mcp?apikey=URL-SECRET-0123&v=1",
+            "https://h/mcp?apikey=***&v=***",
+        ),
+        ("https://h/mcp?key=ab%2Bcd%2Fefgh1234", "https://h/mcp?key=***"),
+        ("https://h/mcp?key=abc+defgh1234", "https://h/mcp?key=***"),
+        (
+            "http://localhost:8001/mcp?server=localhost",
+            "http://localhost:8001/mcp?server=***",
+        ),
+        ("http://h:8001/mcp?port=8001", "http://h:8001/mcp?port=***"),
+        (
+            "https://h/mcp/tools?path=/mcp/tools",
+            "https://h/mcp/tools?path=***",
+        ),
+        ("https://user:pass-SECRET@h/mcp", "https://user:***@h/mcp"),
+    ],
+    ids=["plain", "percent", "plus", "host", "port", "path", "password"],
+)
+def test_url_secrets_are_masked_in_place(url, shown):
+    """Секреты адреса маскируются по месту, как записаны в определении:
+    хост, порт и путь целы, даже если значение параметра их повторяет."""
+    reason = _reason(ConnectionRefusedError(), url=url)
 
-    assert reason == "нет соединения с https://h/mcp?apikey=***&v=1"
+    assert reason == f"нет соединения с {shown}"
+
+
+def test_http_status_reason_has_no_address():
+    """Причина ответа HTTP — код и фраза, без адреса и ссылки httpx."""
+    request = httpx.Request("POST", "https://h/mcp?apikey=URL-SECRET-0123")
+    response = httpx.Response(401, request=request)
+    with pytest.raises(httpx.HTTPStatusError) as caught:
+        response.raise_for_status()
+
+    reason = _reason(caught.value)
+
+    assert reason == "сервер ответил 401 Unauthorized"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        McpError(
+            ErrorData(code=CONNECTION_CLOSED, message="Connection closed")
+        ),
+        McpToolCallError(
+            ErrorData(code=CONNECTION_CLOSED, message="Connection closed")
+        ),
+        McpServerGone(),
+    ],
+    ids=["sdk", "wrapped", "stdio"],
+)
+def test_connection_lost_mid_request_has_one_text(exc):
+    assert _reason(exc) == "сервер завершился, не ответив"
+
+
+@pytest.mark.parametrize(
+    "exc", [httpx.ConnectTimeout(""), httpx.PoolTimeout("")]
+)
+def test_connect_timeout_reason_is_readable(exc):
+    assert _reason(exc) == f"нет соединения с {_URL}: истёк срок подключения"
 
 
 def test_secret_in_command_is_masked_in_not_found_reason():

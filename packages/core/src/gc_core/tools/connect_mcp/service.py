@@ -45,6 +45,7 @@ from gc_core.tools.connect_mcp.service_records import (
     McpServiceClosed,
     ServerEntry,
 )
+from gc_core.tools.connect_mcp.stream_client import is_connection_closed
 
 # У подключения срок — любой: и срок вызова, и срок соединения.
 _TIMEOUTS = (*CALL_TIMEOUTS, httpx.TimeoutException)
@@ -84,6 +85,22 @@ def _failure_code(exc: BaseException) -> str:
     return "other"
 
 
+def _failure_text(leaf: BaseException, server_cfg: dict, message: str) -> str:
+    """Текст причины: свои формулировки сервиса, иначе — общие шаблоны
+    обнаружения. Сырой текст httpx (адрес, ссылка на документацию) и
+    текст SDK о разрыве в причину не идут."""
+    if isinstance(leaf, httpx.HTTPStatusError):
+        response = leaf.response
+        status = f"{response.status_code} {response.reason_phrase}"
+        return f"сервер ответил {status.strip()}"
+    if isinstance(leaf, (httpx.ConnectTimeout, httpx.PoolTimeout)):
+        target = server_cfg.get("url") or server_cfg.get("command") or "?"
+        return f"нет соединения с {target}: истёк срок подключения"
+    if is_connection_closed(leaf):
+        return str(McpServerGone())
+    return _discovery_error_text(leaf, server_cfg, message)
+
+
 def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     """Код и текст причины отказа подключения.
 
@@ -97,7 +114,7 @@ def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     # Итоговый текст маскируется ещё раз: шаблоны причины подставляют
     # ``command`` и ``url``, где тоже бывают секреты.
     message = without_secrets(str(leaf), server_cfg)
-    reason = _discovery_error_text(leaf, server_cfg, message)
+    reason = _failure_text(leaf, server_cfg, message)
     return _failure_code(leaf), without_secrets(reason, server_cfg)
 
 
