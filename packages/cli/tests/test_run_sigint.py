@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import signal
 import threading
 
@@ -45,3 +46,54 @@ def test_cli_sigint_stops_the_run_and_ask_human_stays_a_refusal():
         loop.run_until_complete(_body())
     finally:
         loop.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(signal, "pthread_sigmask"), reason="маски сигналов POSIX"
+)
+def test_press_wakes_a_loop_asleep_without_events():
+    """Нажатие, которое принял не главный поток, пока цикл спит без
+    событий, снимает ход сразу, а не при следующем пробуждении цикла.
+
+    Главный поток сигнал блокирует, поэтому его принимает поток-нажиматель:
+    системный вызов ожидания цикла сигналом не прерывается. Так же выглядит
+    сигнал, пришедший между последней проверкой цикла и входом в ожидание.
+    """
+    loop = asyncio.new_event_loop()
+    stopped_after: list[float] = []
+    asleep = threading.Event()
+
+    async def _body() -> None:
+        started = loop.time()
+        stopped = asyncio.Event()
+
+        class _Executor:
+            def stop_run(self) -> None:
+                stopped_after.append(loop.time() - started)
+                stopped.set()
+
+        def _press() -> None:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+            asleep.wait(5)
+            signal.pthread_kill(threading.get_ident(), signal.SIGINT)
+
+        previous = install_run_sigint(_Executor())
+        assert previous is not None
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        try:
+            presser = threading.Thread(target=_press)
+            presser.start()
+            # Флаг ставит сам цикл перед сном: дальше событий у него нет.
+            loop.call_soon(asleep.set)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stopped.wait(), 3)
+        finally:
+            presser.join(5)
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+            restore_run_sigint(previous)
+
+    try:
+        loop.run_until_complete(_body())
+    finally:
+        loop.close()
+    assert stopped_after and stopped_after[0] < 1.0

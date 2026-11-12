@@ -5,7 +5,14 @@ from __future__ import annotations
 import asyncio
 import signal
 import threading
-from typing import Any
+from typing import Any, NamedTuple
+
+
+class _Installed(NamedTuple):
+    previous: Any
+    #: Цикл, которому поставлено пробуждение по сигналу; ``None`` — не
+    #: поставлено (цикл без ``add_signal_handler``, как на Windows).
+    woken: asyncio.AbstractEventLoop | None
 
 
 def install_run_sigint(executor: Any):
@@ -17,6 +24,14 @@ def install_run_sigint(executor: Any):
     Из сигнала только очередь на цикл. ``stop_run`` берёт замок исполнителя,
     и вызов из обработчика на том же потоке встал бы навсегда, если замок
     уже держит ход.
+
+    Обработчик Python исполняется только на главном потоке между
+    инструкциями: сигнал, пришедший, когда цикл уже заснул в ожидании
+    событий (или принятый другим потоком), сам цикл не будит, и нажатие
+    ждало бы следующего пробуждения — в закрытии MCP весь бюджет. Поэтому
+    сигнал ещё и будит цикл (``_wake_loop_on_sigint``), а решает по-прежнему
+    обработчик ниже: перехват вопроса его подменяет, и нажатие на вопросе
+    стоп хода не задевает.
     """
     if threading.current_thread() is not threading.main_thread():
         return None
@@ -35,17 +50,39 @@ def install_run_sigint(executor: Any):
             raise KeyboardInterrupt
         loop.call_soon_threadsafe(executor.stop_run)
 
+    woken = loop if _wake_loop_on_sigint(loop) else None
     try:
         signal.signal(signal.SIGINT, _handler)
     except (ValueError, OSError):
+        restore_run_sigint(_Installed(previous, woken))
         return None
-    return previous
+    return _Installed(previous, woken)
 
 
-def restore_run_sigint(previous: Any) -> None:
-    if previous is None:
-        return
+def _wake_loop_on_sigint(loop: asyncio.AbstractEventLoop) -> bool:
+    """Сигнал будит цикл: ``add_signal_handler`` ставит процессу wakeup-fd
+    цикла. Сам колбэк цикла пуст — нажатие разбирает обработчик Python,
+    который ставится поверх. Цикл без поддержки (Windows) — ``False``:
+    там цикл и так просыпается по сигналу сам."""
     try:
-        signal.signal(signal.SIGINT, previous)
+        loop.add_signal_handler(signal.SIGINT, _woken)
+    # ``NotImplementedError`` (цикл без поддержки) — подкласс
+    # ``RuntimeError``.
+    except (RuntimeError, ValueError):
+        return False
+    return True
+
+
+def _woken() -> None:
+    """Колбэк цикла на SIGINT: цикл проснулся, остальное — у обработчика."""
+
+
+def restore_run_sigint(installed: Any) -> None:
+    if installed is None:
+        return
+    if installed.woken is not None and not installed.woken.is_closed():
+        installed.woken.remove_signal_handler(signal.SIGINT)
+    try:
+        signal.signal(signal.SIGINT, installed.previous)
     except (ValueError, OSError, TypeError):
         pass
