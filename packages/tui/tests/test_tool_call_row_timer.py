@@ -298,3 +298,45 @@ async def test_visible_row_ticks_draw():
         before = app.row._prefix_static.content
         app.row._pulse_tick()
         assert app.row._prefix_static.content is not before
+
+
+@pytest.mark.asyncio
+async def test_row_widths_offscreen_no_full_map():
+    """Ширины колонки и строки — без чтения размеров невидимых виджетов:
+    строка за экраном и её путь отрисовки карту не пересобирают."""
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await _scroll(pilot)
+        with count_arranges() as counts:
+            app.row._content_width()
+            app.row._row_width()
+            app.row._render_content()
+        with count_arranges() as control:
+            app.row.is_on_screen  # карту пересобирает
+        assert (counts.full_map, control.full_map) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_row_widths_equal_laid_out_sizes():
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        row = app.row
+        assert row._content_width() == row._content_static.size.width
+        assert row._row_width() == row.size.width > 0
+
+
+@pytest.mark.asyncio
+async def test_unlaid_row_width_is_trace_width():
+    """Строка, скрытая с монтирования (ещё без раскладки), — ширина
+    ленты, как раньше."""
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        host = app.query_one("#host", VerticalScroll)
+        row = ToolCallRow(call_id="c2", label="t", target="x")
+        row.display = False
+        await host.mount(row, before=0)
+        await pilot.pause()
+        assert row.outer_size.width == 0
+        assert row._row_width() == host.scrollable_content_region.width

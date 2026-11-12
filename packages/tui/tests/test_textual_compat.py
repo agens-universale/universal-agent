@@ -666,6 +666,34 @@ async def test_other_version_is_visible_answers_visible(monkeypatch):
         assert textual_compat.is_visible(first) is True
 
 
+@pytest.mark.asyncio
+async def test_laid_out_widths_equal_region_widths():
+    """Ширины по последней раскладке — те же, что из карты экрана:
+    контент без отступов, у прокрутки — ещё без полосы."""
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = pilot.app.query_one("#first", Static)
+        host = pilot.app.query_one("#host", VerticalScroll)
+        assert host.scrollbar_size_vertical > 0
+        assert textual_compat.laid_out_width(first) == first.size.width
+        assert textual_compat.laid_out_scrollable_width(host) == (
+            host.scrollable_content_region.width
+        )
+        assert textual_compat.laid_out_width(Static("нет")) == 0
+
+
+@pytest.mark.asyncio
+async def test_laid_out_widths_offscreen_no_full_map():
+    from arrange_counter import count_arranges
+
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = await _scrolled_away(pilot)
+        with count_arranges() as counts:
+            width = textual_compat.laid_out_width(first)
+        with count_arranges() as control:
+            assert first.size.width == width
+        assert (counts.full_map, control.full_map) == (0, 1)
+
+
 def test_arrange_counter_refuses_renamed_caller(monkeypatch):
     """Счётчик раскладок считает по именам вызывающих Textual: пропажа
     имени — ошибка, а не молчаливые нули."""

@@ -299,3 +299,44 @@ async def test_narrow_row_keeps_error_line_one_row(width):
         line.focus()
         await pilot.press("space")
         assert line.expanded is True
+
+
+class _ScrolledLineApp(LineApp):
+    """Строка итога первой в длинной ленте; после `scroll_end` она за
+    экраном."""
+
+    def compose(self) -> ComposeResult:
+        from textual.containers import VerticalScroll
+        from textual.widgets import Static
+
+        with VerticalScroll(id="t"):
+            yield self.line
+            for i in range(200):
+                yield Static(f"строка {i}")
+
+
+@pytest.mark.asyncio
+async def test_status_width_equals_laid_out_width():
+    line = build_turn_line(word="completed")
+    async with _ScrolledLineApp(line).run_test(size=(80, 20)) as pilot:
+        await pilot.pause()
+        assert line._status_width() == line.size.width > 0
+
+
+@pytest.mark.asyncio
+async def test_offscreen_status_width_no_full_map():
+    """Ширина строки и её отрисовка за экраном — без чтения её размера
+    из карты экрана: полная карта не пересобирается."""
+    from arrange_counter import count_arranges
+
+    line = build_turn_line(word="completed")
+    async with _ScrolledLineApp(line).run_test(size=(80, 20)) as pilot:
+        line.freshen((2, 14, 3), None)
+        pilot.app.query_one("#t").scroll_end(animate=False)
+        await pilot.pause()
+        with count_arranges() as counts:
+            line._status_width()
+            line.render()
+        with count_arranges() as control:
+            line.is_on_screen  # карту пересобирает
+        assert (counts.full_map, control.full_map) == (0, 1)

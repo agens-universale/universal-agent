@@ -4,13 +4,15 @@
 версии `PATCHED_TEXTUAL`: на иной патч не ставится, протяжка ниже ленты
 не работает, в журнал уходит предупреждение, страж
 `test_textual_compat.py` падает с напоминанием пересмотреть модуль.
-Исключение — `mounted` и `paint_after_mount`: только публичный API, к
+Исключение — `mounted`, `paint_after_mount` и ширины по раскладке
+(`laid_out_width`, `laid_out_scrollable_width`): только публичный API, к
 версии не привязаны.
 
 Видимость и геометрия Textual 8.2.8: перерисовка виджета за экраном или
 чтение его `size` / `region` после прокрутки пересобирает полную карту
 экрана (`Compositor.full_map`). `is_visible` смотрит готовую карту
-видимых последнего кадра.
+видимых последнего кадра; ширины по раскладке берутся из размера, который
+раскладка записала виджету, — без поиска в карте.
 
 Ошибка Textual 8.2.8 (апстрим #6639): `SelectStart.pointer_start_offset`
 прибавляет сдвиг прокрутки контейнера вместо вычитания — при прокрутке во
@@ -168,6 +170,22 @@ def is_visible(widget: Widget | None) -> bool:
         return widget in screen._compositor.visible_widgets
     except AttributeError:
         return True
+
+
+def laid_out_width(widget: Widget) -> int:
+    """Ширина контента (без отступов и рамки) по последней раскладке —
+    то же, что `widget.size.width` у разложенного виджета, но без поиска
+    в карте экрана. Ещё не раскладывался — 0. Скрытый (`display: none`)
+    хранит ширину своей последней раскладки."""
+    gutter = widget.styles.gutter.width
+    return max(0, widget.outer_size.width - gutter)
+
+
+def laid_out_scrollable_width(widget: Widget) -> int:
+    """Ширина прокручиваемого контента (ещё и без полосы прокрутки) по
+    последней раскладке — то же, что
+    `widget.scrollable_content_region.width`, без поиска в карте."""
+    return max(0, laid_out_width(widget) - widget.scrollbar_size_vertical)
 
 
 def is_being_removed(widget: Widget) -> bool:

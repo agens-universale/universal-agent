@@ -783,14 +783,13 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _content_width(self) -> int:
         """Ширина content-колонки; ещё не раскладывалась — та, что даст
-        раскладка (`_row_width` без префикса и ❐)."""
+        раскладка (`_row_width` без префикса и ❐). Ширины — по последней
+        раскладке, а не из карты экрана: строка, частично или целиком за
+        экраном, иначе пересобирает её на каждой отрисовке."""
         static = self._content_static
-        if (
-            self._think_body is None
-            and static is not None
-            and (static.size.width > 0)
-        ):
-            return static.size.width
+        laid = 0 if static is None else textual_compat.laid_out_width(static)
+        if self._think_body is None and laid > 0:
+            return laid
         width = self._row_width() - self._render_prefix().cell_len
         if width > 0 and self.has_class("edited"):
             # ❐: `width: auto` и поле справа в одну клетку.
@@ -803,11 +802,12 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         во всю ширину): объект сокращается заранее, и первый показ
         (раскрытие окна) — один кадр, без несокращённого объекта до
         `Resize`."""
-        if self.size.width > 0:
-            return self.size.width
+        width = textual_compat.laid_out_width(self)
+        if width > 0:
+            return width
         parent = self.parent
         if isinstance(parent, Widget):
-            return parent.scrollable_content_region.width
+            return textual_compat.laid_out_scrollable_width(parent)
         return 0
 
     def _tail_room(self, label_cols: int, sep: int = 2) -> Optional[int]:
