@@ -525,15 +525,87 @@ def test_mcp_screen_shows_connecting_and_cached():
         card.toggle()
     text = mcp_text(screen)
 
-    assert "подключается · 1 тулов" in text
-    assert "из каталога · 1 тулов" in text
+    assert "• browser    подключается · 1 тул" in text
+    assert "• office    из кэша · 1 тул" in text
     assert "navigate" in text and "read" in text
     assert "✗" not in text
     summary = text.splitlines()[-1]
-    assert "0 failed" in summary
-    assert "1 подключается" in summary
-    assert "1 из каталога" in summary
-    assert "2 тулов" in summary
+    assert summary == (
+        "итого: 0 подключены · 1 подключается · 1 из кэша"
+        " · 0 не подключены · 2 тула"
+    )
+
+
+def test_mcp_screen_summary_declines_by_number():
+    """Итог склоняет состояния и «тулов» по числу; неизвестный статус —
+    сырым текстом в строке сервера, в итоге — среди не подключённых."""
+    from gc_tui.screens.mcp import McpScreen
+
+    def _server(status: str, n_tools: int) -> dict:
+        tools = [{"name": f"t{i}", "description": ""} for i in range(n_tools)]
+        return {"status": status, "reason": None, "tools": tools}
+
+    snapshot = {
+        "a": _server(STATE_CONNECTED, 3),
+        "b": _server(STATE_CONNECTED, 2),
+        "c": _server(STATE_CACHED, 0),
+        "d": _server(STATE_CACHED, 0),
+        "e": _server(STATE_CONNECTING, 0),
+        "f": _server(STATE_CONNECTING, 0),
+        "g": _server(STATE_FAILED, 0),
+        "h": _server("unknown", 0),
+    }
+    text = mcp_text(McpScreen(tools_snapshot=snapshot))
+
+    assert "✓ a    подключён · 3 тула" in text
+    assert "✗ h    unknown" in text
+    assert "✗ g    не подключён" in text
+    assert text.splitlines()[-1] == (
+        "итого: 2 подключены · 2 подключаются · 2 из кэша"
+        " · 2 не подключены · 5 тулов"
+    )
+
+
+def _expanded_rows(status: str, tools: list[str]) -> list:
+    from gc_tui.screens.mcp import ServerCard
+
+    info = {
+        "status": status,
+        "reason": None,
+        "tools": [{"name": f"mcp_srv_{n}", "description": ""} for n in tools],
+    }
+    card = ServerCard("srv", info)
+    card.toggle()
+    return card._renderable().rows
+
+
+def test_expanded_cached_card_starts_with_note():
+    """Раскрытая карточка «из кэша»: первая строка тела — пояснение
+    (приглушённо, отступ строк тела), затем тулы."""
+    from gc_tui.palette import DIM
+
+    rows = _expanded_rows(STATE_CACHED, ["read"])
+
+    assert rows[1].plain == (
+        "    соединения нет · тулы из кэша · подключится при первом вызове"
+    )
+    assert str(rows[1].style) == DIM
+    assert [r.plain.strip() for r in rows[2:]] == ["read"]
+
+
+@pytest.mark.parametrize(
+    ("status", "tools"),
+    [
+        (STATE_CONNECTED, ["read"]),
+        (STATE_CONNECTING, ["read"]),
+        (STATE_CONNECTING, []),
+    ],
+)
+def test_expanded_card_without_note(status, tools):
+    """У подключённого и подключающегося пояснения нет: тело — тулы."""
+    rows = _expanded_rows(status, tools)
+
+    assert [r.plain.strip() for r in rows[1:]] == tools
 
 
 def test_mcp_screen_waiting_states_use_note_ink():
