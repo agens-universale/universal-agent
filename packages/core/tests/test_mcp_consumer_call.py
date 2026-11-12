@@ -24,7 +24,7 @@ from gc_core.config_modules.field_meta import plain_dump
 from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp import abandonable
-from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp import consumer_executor as executor_module
 from gc_core.tools.connect_mcp.catalog import write_catalog
 from gc_core.tools.connect_mcp.consumer_call import (
     SERVER_GONE_TEXT,
@@ -205,7 +205,7 @@ def _raise_on_call(monkeypatch, make_exc) -> None:
     async def raising(**kwargs):
         raise make_exc()
 
-    monkeypatch.setattr(consumer_module, "acall_mcp_tool", raising)
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", raising)
 
 
 def _stop_gate() -> UserStop:
@@ -757,13 +757,13 @@ async def test_call_runs_under_consumer_owner_and_slots(
     mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
 ):
     seen: list[tuple[str, object]] = []
-    real = consumer_module.acall_mcp_tool
+    real = executor_module.acall_mcp_tool
 
     async def spy(**kwargs):
         seen.append((current_owner(), abandonable._call_slots.get()))
         return await real(**kwargs)
 
-    monkeypatch.setattr(consumer_module, "acall_mcp_tool", spy)
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", spy)
     settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
     service = McpService(connect_on_start=True)
     consumer = await _ready(mcp_reaper, service, settings)
@@ -955,7 +955,7 @@ async def test_old_call_failure_keeps_session_of_returned_server(
 ):
     # Сервер убрали и вернули с тем же отпечатком, новая сессия уже
     # открыта — и только потом приходит сбой вызова старой сессии.
-    real = consumer_module.acall_mcp_tool
+    real = executor_module.acall_mcp_tool
     held, release = asyncio.Event(), asyncio.Event()
 
     async def late_failure(**kwargs):
@@ -966,7 +966,7 @@ async def test_old_call_failure_keeps_session_of_returned_server(
             await release.wait()
             raise
 
-    monkeypatch.setattr(consumer_module, "acall_mcp_tool", late_failure)
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", late_failure)
     control = tmp_path / "a.json"
     settings = _settings({"a": stdio_cfg(control)})
     service = McpService(connect_on_start=True)
@@ -1102,13 +1102,13 @@ async def test_unexpected_type_is_logged_with_frames(
     view = await _view(consumer, settings)
     _raise_on_call(monkeypatch, lambda: error("bad wiring"))
 
-    with caplog.at_level(logging.WARNING, logger=consumer_module.__name__):
+    with caplog.at_level(logging.WARNING, logger=executor_module.__name__):
         text = await _refused(view, _ECHO, text="hi")
 
     assert text == _entry(consumer).last_failure.reason
     assert _status(consumer).state == STATE_FAILED
     [record] = [
-        r for r in caplog.records if r.name == consumer_module.__name__
+        r for r in caplog.records if r.name == executor_module.__name__
     ]
     assert record.levelno == logging.ERROR
     message = record.getMessage()
@@ -1121,7 +1121,7 @@ async def test_success_after_sibling_drop_keeps_connection_dropped(
 ):
     # Вызов ответил уже после того, как сосед снял соединение: ключ не
     # возвращается, следующий вызов подключается заново по правилам.
-    real = consumer_module.acall_mcp_tool
+    real = executor_module.acall_mcp_tool
     held, release = asyncio.Event(), asyncio.Event()
     calls: list[str] = []
 
@@ -1133,7 +1133,7 @@ async def test_success_after_sibling_drop_keeps_connection_dropped(
             await release.wait()
         return result
 
-    monkeypatch.setattr(consumer_module, "acall_mcp_tool", late_success)
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", late_success)
     control = tmp_path / "a.json"
     settings = _settings({"a": stdio_cfg(control)})
     service = McpService(connect_on_start=True)
@@ -1161,7 +1161,7 @@ async def test_legacy_http_success_after_sibling_failure_confirms(
     # Сосед записал отказ, пока вызов к легаси-http шёл; вызов ответил —
     # сервер только что отвечал: связь подтверждена, правило 30 с
     # следующий вызов не держит.
-    real = consumer_module.acall_mcp_tool
+    real = executor_module.acall_mcp_tool
     held, release = asyncio.Event(), asyncio.Event()
     calls: list[str] = []
 
@@ -1187,7 +1187,7 @@ async def test_legacy_http_success_after_sibling_failure_confirms(
         consumer = await _ready(mcp_reaper, service, settings)
         view = await _view(consumer, settings)
         monkeypatch.setattr(
-            consumer_module, "acall_mcp_tool", late_success_then_refused
+            executor_module, "acall_mcp_tool", late_success_then_refused
         )
 
         echo = asyncio.create_task(_wrapper(view, _ECHO).acall(text="1"))
@@ -1226,7 +1226,7 @@ async def test_cancel_group_under_stop_is_stop_not_failure(
     consumer = await _ready(mcp_reaper, service, settings)
     view = await _view(consumer, settings)
     entry = _entry(consumer)
-    monkeypatch.setattr(consumer_module, "acall_mcp_tool", cancelled_group)
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", cancelled_group)
     gate = _stop_gate()
 
     task = _call_under_stop(gate, view, _ECHO, text="hi")
