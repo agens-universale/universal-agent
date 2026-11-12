@@ -36,6 +36,10 @@ def kill_mcp_on_sigterm(service: McpService) -> Callable[[], None]:
     Вне главного потока и не на POSIX ничего не ставится — вернётся
     пустая функция. Снятие возвращает прежний обработчик и снимает
     пробуждение цикла.
+
+    Предусловие (``wake_loop_on_signal``): у цикла нет своего колбэка на
+    SIGTERM, а у процесса — чужого wakeup-fd; пробуждение их заменило бы
+    без возврата.
     """
     if os.name != "posix" or (
         threading.current_thread() is not threading.main_thread()

@@ -24,6 +24,10 @@ def wake_loop_on_signal(loop: asyncio.AbstractEventLoop, signum: int) -> bool:
     остаётся один обработчик Python. ``ProactorEventLoop`` (умолчание
     Windows) сам ставит wakeup-fd и просыпается по сигналу, селекторный
     цикл Windows — нет.
+
+    Предусловие: у цикла нет своего колбэка на этот сигнал, а у процесса —
+    чужого wakeup-fd. Пробуждение молча заменяет и то, и другое, а снятие
+    не возвращает ни колбэк, ни прежний wakeup-fd.
     """
     try:
         loop.add_signal_handler(signum, _woken)
