@@ -186,20 +186,22 @@ class McpService:
     def open_consumer(self, label: str) -> McpConsumer:
         """Новый потребитель со своим владельцем сессий; с любого потока.
 
-        После начала остановки сервиса — ``McpServiceClosed``. С цикла
-        событий — обращение с цикла, как любое другое: сервис привязывается
-        к нему, чужой цикл — ``RuntimeError`` до открытия (потребителя с
-        чужого цикла не закрыть). Поток без цикла сервис не привязывает.
+        После начала остановки сервиса — ``McpServiceClosed`` с любого
+        потока и цикла. Иначе с цикла событий — обращение с цикла, как
+        любое другое: сервис привязывается к нему, чужой цикл —
+        ``RuntimeError`` до открытия (потребителя с чужого цикла не
+        закрыть). Поток без цикла сервис не привязывает. Привязка идёт под
+        замком: открывать потребителя могут разные потоки.
         """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        else:
-            self._bind_loop()
         with self._lock:
             if self._stopped:
                 raise McpServiceClosed(SERVICE_CLOSED_TEXT)
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                self._bind_loop()
             consumer = McpConsumer(self, label)
             self._consumers.add(consumer)
         return consumer

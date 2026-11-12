@@ -22,7 +22,10 @@ from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.service import McpService, classify_failure
-from gc_core.tools.connect_mcp.service_records import Failure
+from gc_core.tools.connect_mcp.service_records import (
+    Failure,
+    McpServiceClosed,
+)
 from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_testkit.mcp import FakeClock, seed_catalog, stdio_cfg
 from gc_testkit.mcp.fixtures import mcp_home
@@ -450,6 +453,40 @@ async def test_open_consumer_on_another_loop_is_rejected(mcp_home):
 
     assert isinstance(error, RuntimeError)
     assert "другом цикле" in str(error)
+    assert not service._consumers
+
+
+async def test_open_consumer_on_stopped_service_refused_from_any_loop(
+    mcp_home,
+):
+    """Остановка сервиса проверяется раньше цикла: с чужого цикла и из
+    потока без цикла — ``McpServiceClosed``, а не ошибка цикла."""
+    service = McpService(connect_on_start=True)
+    service.entry(
+        "a", {"transport": "stdio", "command": "x"}, discovery_timeout=5
+    )
+    service._stopped = True
+    service._stopped_event.set()
+
+    async def open_there() -> None:
+        service.open_consumer("чужой")
+
+    def on_other_loop() -> BaseException | None:
+        try:
+            asyncio.run(open_there())
+        except BaseException as exc:
+            return exc
+        return None
+
+    from_loop = await asyncio.wait_for(
+        asyncio.to_thread(on_other_loop), _CEILING_SEC
+    )
+    with pytest.raises(McpServiceClosed, match="сервис MCP остановлен"):
+        await asyncio.wait_for(
+            asyncio.to_thread(service.open_consumer, "поток"), _CEILING_SEC
+        )
+
+    assert isinstance(from_loop, McpServiceClosed)
     assert not service._consumers
 
 
