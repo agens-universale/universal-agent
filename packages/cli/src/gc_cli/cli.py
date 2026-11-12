@@ -49,6 +49,8 @@ from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
 from gc_core.tools.connect_mcp.consumer import McpConsumer
+from gc_core.tools.connect_mcp.consumer_status import STATE_FAILED
+from gc_core.tools.connect_mcp.registry import unavailable_line
 from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.updater import check as updater_check
@@ -81,8 +83,11 @@ from gc_cli.structured_output import (
 logger = logging.getLogger(__name__)
 
 #: Общий бюджет закрытия MCP на выходе прогона: потребитель, затем сервис
-#: (спека §5.12). Закрытие возвращается не позже него и отсрочки сервиса.
+#: (спека §5.12). Закрытие возвращается не позже него и отсрочки сервиса;
+#: у прерванного прогона бюджета нет — только отсрочка.
 _MCP_CLOSE_BUDGET_SEC = 10.0
+#: Сколько ждать снятую задачу недоделанного закрытия потребителя.
+_MCP_CLOSE_TASK_GRACE_SEC = 0.5
 
 
 def _ensure_project_gc_dir() -> None:
@@ -635,6 +640,17 @@ def _print_startup_notices(
         print(render_notices_for_cli(notices), file=sys.stderr)
 
 
+def _print_mcp_failures(ctx: Any, consumer: McpConsumer) -> None:
+    """По каждому отказавшему серверу потребителя — прежняя строка
+    консоли (stdout): ядро на пути потребителя ничего не печатает.
+    Серверы, исполняемые внутри бэкенда, печатает их обнаружение само."""
+    statuses = getattr(ctx, "mcp_status", None) or {}
+    for key in consumer.servers():
+        status = statuses.get(key) or {}
+        if status.get("status") == STATE_FAILED:
+            print(unavailable_line(key, status.get("reason") or ""))
+
+
 @asynccontextmanager
 async def _mcp_service_scope() -> AsyncIterator[McpConsumer]:
     """Сервис MCP прогона ``gc-cli`` и его потребитель (спека §5.1, §6).
@@ -643,35 +659,64 @@ async def _mcp_service_scope() -> AsyncIterator[McpConsumer]:
     сервис к циклу, на котором открыт. Сервис подключает серверы на старте,
     и сборка ждёт подключения всех (решение В5): у ``gc-cli`` весь заход —
     один ход. На выходе при любом исходе — ``_aclose_mcp``: исключение
-    тела выходит как есть, отказ закрытия его не подменяет.
+    тела выходит как есть, отказ закрытия его не подменяет. Прерванный
+    прогон (отмена, ``KeyboardInterrupt``) закрывает MCP без бюджета:
+    выход не ждёт глухих серверов дольше отсрочки сервиса.
     """
     service = McpService(connect_on_start=True, wait_all=True)
     consumer = service.open_consumer("cli")
+    budget = _MCP_CLOSE_BUDGET_SEC
     try:
         yield consumer
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        budget = 0.0
+        raise
     finally:
-        await _aclose_mcp(service, consumer)
+        await _aclose_mcp(service, consumer, budget)
 
 
-async def _aclose_mcp(service: McpService, consumer: McpConsumer) -> None:
-    """Закрыть потребителя, затем сервис, в общий ``_MCP_CLOSE_BUDGET_SEC``.
+async def _aclose_mcp(
+    service: McpService, consumer: McpConsumer, budget: float
+) -> None:
+    """Закрыть потребителя, затем сервис, в общий бюджет ``budget``.
 
     У закрытия потребителя своего срока нет (сессии закрываются по
     очереди), поэтому его ждут не дольше бюджета и не снимают: недоделанное
     доделает закрытие сервиса остатком бюджета, а оно возвращается не позже
-    бюджета и своей отсрочки. Отказы обоих закрытий — в лог.
+    бюджета и своей отсрочки. Прерывание посреди ожидания обнуляет
+    остаток. Затем недоделанная задача закрытия снимается. Отказы обоих
+    закрытий — в лог.
     """
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + _MCP_CLOSE_BUDGET_SEC
+    deadline = loop.time() + budget
     closing = loop.create_task(consumer.aclose())
     closing.add_done_callback(_log_consumer_close)
     try:
-        await asyncio.wait({closing}, timeout=_MCP_CLOSE_BUDGET_SEC)
+        await asyncio.wait({closing}, timeout=budget)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        deadline = loop.time()
+        raise
     finally:
         try:
-            await service.aclose(budget=max(deadline - loop.time(), 0.0))
-        except Exception as exc:
-            logger.warning("gc-cli: сервис MCP не закрылся: %r", exc)
+            await _aclose_service(service, max(deadline - loop.time(), 0.0))
+        finally:
+            await _adrop_task(closing)
+
+
+async def _aclose_service(service: McpService, budget: float) -> None:
+    try:
+        await service.aclose(budget=budget)
+    except Exception as exc:
+        logger.warning("gc-cli: сервис MCP не закрылся: %r", exc)
+
+
+async def _adrop_task(task: asyncio.Task) -> None:
+    """Снять недоделанную задачу и коротко дождаться: цикл прогона не
+    закрывается с живой задачей («Task was destroyed but it is pending»)."""
+    if task.done():
+        return
+    task.cancel()
+    await asyncio.wait({task}, timeout=_MCP_CLOSE_TASK_GRACE_SEC)
 
 
 def _log_consumer_close(task: asyncio.Task) -> None:
@@ -754,6 +799,7 @@ async def _arun_init_turn(
         mcp_consumer=consumer,
         **run_store_kwargs(loaded, stores),
     )
+    _print_mcp_failures(ctx, consumer)
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
     # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
     # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
@@ -1193,6 +1239,9 @@ async def _arun_loaded(
             loaded,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
+    from gc_cli.run_stop import install_run_sigint, restore_run_sigint
+
+    sigint_previous = None
     try:
         async with _mcp_service_scope() as consumer:
             # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и
@@ -1208,6 +1257,7 @@ async def _arun_loaded(
             )
             if ctx is None:
                 return 1
+            _print_mcp_failures(ctx, consumer)
             # Порт «спросить человека». Без него ядро читает stdin через
             # `to_thread`: поток из пула, который `asyncio.run` ждёт на
             # выходе, и Ctrl+C во время вопроса отменяет прогон целиком
@@ -1225,7 +1275,13 @@ async def _arun_loaded(
                 wrap_technical=arg_parser.run_args.wrap_technical,
                 forced_skill_id=forced_skill_id,
             )
+            executor = AgentExecutor(ctx)
+            # Ctrl+C прогона — до конца закрытия MCP: нажатие в закрытии
+            # после удачного хода — стоп хода (уже вхолостую), не потеря
+            # ответа; второе нажатие — прерывание без ожидания сессий.
+            sigint_previous = install_run_sigint(executor)
             turn = await _arun_cli_turn(
+                executor,
                 ctx,
                 loaded,
                 user_parts,
@@ -1236,6 +1292,7 @@ async def _arun_loaded(
                 start_new_thread=start_new_thread,
             )
     finally:
+        restore_run_sigint(sigint_previous)
         # После закрытия MCP и при любом исходе прогона. Пул httpx привязан
         # к этому loop — закрыть его надо до его остановки, иначе на выходе
         # получим «Event loop is closed» из деструктора.
@@ -1264,6 +1321,7 @@ class _CliTurn(NamedTuple):
 
 
 async def _arun_cli_turn(
+    executor: AgentExecutor,
     ctx: RunContext,
     loaded: Any,
     user_parts: list[str],
@@ -1274,13 +1332,9 @@ async def _arun_cli_turn(
     thread_id: str | None,
     start_new_thread: bool,
 ) -> _CliTurn:
-    """Ход прогона с одобрением плана и перефразом; Ctrl+C на время хода
-    ставит стоп. Клиенты, MCP и карман убирает ``finally`` прогона."""
-    from gc_cli.run_stop import install_run_sigint, restore_run_sigint
-
+    """Ход прогона с одобрением плана и перефразом. Обработчик Ctrl+C,
+    клиенты, MCP и карман убирает ``finally`` прогона."""
     verbose = arg_parser.run_args.verbose
-    executor = AgentExecutor(ctx)
-    _sigint_previous = install_run_sigint(executor)
     # Флаг запуска — выбор режима на эту сессию: он сильнее сохранённого в
     # треде, поэтому идёт исполнителю, а не слоем конфига.
     permission_mode = getattr(arg_parser.run_args, "permission_mode", None)
@@ -1322,7 +1376,6 @@ async def _arun_cli_turn(
             executor=executor,
         )
     finally:
-        restore_run_sigint(_sigint_previous)
         # Запись меты может бросить исключение: уборка прогона от него не
         # зависит — она во внешнем `finally`.
         if ran and close_accounting_after:
