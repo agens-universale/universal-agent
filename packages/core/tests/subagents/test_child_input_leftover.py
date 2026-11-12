@@ -219,3 +219,76 @@ def test_unconsumed_messages_are_not_shown_in_child_feed(monkeypatch):
     assert [
         m["content"] for m in asyncio.run(executor._atake_pending_messages())
     ] == ["parent"]
+
+
+async def test_failed_attachment_batch_returns_all_messages_in_order(
+    monkeypatch,
+):
+    import pytest
+    from gc_core.tools.subagents import runner as module
+    from gc_core.tools.subagents.active_scope import ChildInputScope
+
+    scope = ChildInputScope(parent_call_id="child")
+    messages = [_msg("one"), _msg("two")]
+    for message in messages:
+        scope.enqueue(message)
+
+    async def broken(message, ctx):
+        if message == messages[-1]:
+            scope.enqueue(_msg("new"))
+            raise OSError("attachment failure")
+        return message
+
+    monkeypatch.setattr(module, "awith_committed_attachments", broken)
+    with pytest.raises(OSError):
+        await module._adrain_with_attachments(scope, _child_ctx())
+    parent = []
+    scope.close(parent.append)
+    assert [message["content"] for message in parent] == ["one", "two", "new"]
+
+
+async def test_progress_failure_does_not_lose_child_messages(monkeypatch):
+    from gc_core.tools.subagents import runner as module
+    from gc_core.tools.subagents.active_scope import ChildInputScope
+
+    scope = ChildInputScope(parent_call_id="child")
+    messages = [_msg("one"), _msg("two")]
+    for message in messages:
+        scope.enqueue(message)
+
+    async def trace(*args):
+        pass
+
+    def broken(message):
+        raise OSError("progress sink failed")
+
+    monkeypatch.setattr(module, "_apersist_child_user", trace)
+    assert (
+        await module._adrain_with_attachments(scope, _child_ctx(), broken)
+        == messages
+    )
+    parent = []
+    scope.close(parent.append)
+    assert parent == []
+
+
+async def test_cancelled_attachment_batch_returns_to_closed_parent(
+    monkeypatch,
+):
+    import pytest
+    from gc_core.tools.subagents import runner as module
+    from gc_core.tools.subagents.active_scope import ChildInputScope
+
+    scope = ChildInputScope(parent_call_id="child")
+    message = _msg("one")
+    scope.enqueue(message)
+    parent = []
+
+    async def cancelled(message, ctx):
+        scope.close(parent.append)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(module, "awith_committed_attachments", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await module._adrain_with_attachments(scope, _child_ctx())
+    assert parent == [message]

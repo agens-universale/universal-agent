@@ -406,6 +406,29 @@ _IMAGE_REJECTION_MARKERS = (
 )
 
 
+_KNOWN_PROVIDER_CODES = frozenset(
+    {"context_length_exceeded", "rate_limit_exceeded"}
+)
+
+
+def known_provider_code(exc: BaseException) -> str | None:
+    """Известный код отказа без переноса текста/HTTP-объектов между процессами."""
+    code = getattr(exc, "status_code", None)
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code not in (400, 413, 422):
+            return None
+        try:
+            error = exc.response.json().get("error", {})
+            code = error.get("code") if isinstance(error, dict) else None
+        except (ValueError, AttributeError, httpx.ResponseNotRead):
+            return None
+    return (
+        code
+        if isinstance(code, str) and code in _KNOWN_PROVIDER_CODES
+        else None
+    )
+
+
 def _rejection_text(exc: BaseException) -> str:
     """Текст отказа бэкенда: тело HTTP-ответа или сообщение исключения.
 

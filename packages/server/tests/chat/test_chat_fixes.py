@@ -301,7 +301,8 @@ def test_classified_and_transport_errors(tmp_path, error, expected):
 @pytest.mark.parametrize(
     "status,expected",
     [
-        ("context_length_exceeded", "upstream_error"),
+        ("context_length_exceeded", "context_length_exceeded"),
+        ("rate_limit_exceeded", "upstream_rate_limited"),
         ("401", "upstream_authentication_error"),
         ("503", "upstream_unavailable"),
         (None, "upstream_error"),
@@ -335,7 +336,7 @@ def test_named_stream_error_finishes_request(tmp_path, api, stream):
             "stream": stream,
         }
         response = client.post("/v1/" + api, json=body)
-        assert "upstream_error" in response.text
+        assert "context_length_exceeded" in response.text
         if api == "responses":
             for run in list(app.state.responses_facade._live.values()):
                 client.portal.call(asyncio.wait_for, run.done.wait(), 2)
@@ -398,3 +399,42 @@ def test_response_storage_failures_are_logged_and_return_json(
     assert response.json()["error"]["code"] == "server_error"
     assert "private storage detail" not in response.text
     assert any(record.exc_info for record in caplog.records)
+
+
+@pytest.mark.parametrize("api", ["responses", "chat/completions"])
+@pytest.mark.parametrize("typed", [False, True])
+def test_context_overflow_has_same_public_error_in_local_and_durable(
+    tmp_path, api, typed
+):
+    import httpx
+    from gc_core.execution.contracts import ContextWindowExceeded
+
+    if typed:
+        error = ContextWindowExceeded("private context window details")
+    else:
+        request = httpx.Request("POST", "https://secret.invalid/model")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={"error": {"code": "context_length_exceeded"}},
+        )
+        error = httpx.HTTPStatusError(
+            "private", request=request, response=response
+        )
+    with TestClient(
+        app_for(tmp_path, error), base_url="http://127.0.0.1"
+    ) as client:
+        response = client.post(
+            "/v1/" + api,
+            json={
+                "model": "GC-UA",
+                "input": "hi",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+    assert response.status_code == 400
+    assert "context_length_exceeded" in response.text
+    assert (
+        "private" not in response.text
+        and "secret.invalid" not in response.text
+    )

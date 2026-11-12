@@ -7,9 +7,11 @@ from gc_core.execution.contracts import (
     ModelProviderError,
     PayloadTooLarge,
 )
+from gc_core.execution.finish_reason import is_context_overflow_error
 from gc_core.utils.backend_errors import (
     BackendBadResponseError,
     EmbeddedChoiceError,
+    known_provider_code,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
@@ -49,6 +51,10 @@ _ERRORS = {
         "Request is too large for the execution backend. Reduce its size.",
     ),
 }
+_NAMED_CODES = {
+    "context_length_exceeded": "context_length_exceeded",
+    "rate_limit_exceeded": "upstream_rate_limited",
+}
 _STATUSES = {
     401: "upstream_authentication_error",
     403: "upstream_permission_denied",
@@ -57,6 +63,8 @@ _STATUSES = {
 
 
 def _status_code(status: object) -> str:
+    if isinstance(status, str) and status in _NAMED_CODES:
+        return _NAMED_CODES[status]
     # SSE error.code бывает именем ошибки, а не HTTP-статусом.
     try:
         status = int(status)
@@ -77,14 +85,19 @@ def _provider_code(exc: ModelProviderError) -> str:
         return "upstream_timeout"
     if failure.error_type == "BackendBadResponseError":
         return "upstream_invalid_response"
+    code = failure.details.get("provider_code")
+    if isinstance(code, str) and code in _NAMED_CODES:
+        return _NAMED_CODES[code]
     status = failure.details.get("status_code")
-    if isinstance(status, int):
+    if isinstance(status, (int, str)):
         return _status_code(status)
     return "upstream_unavailable" if failure.unavailable else "upstream_error"
 
 
 def _code(exc: BaseException) -> str:
-    if isinstance(exc, ContextWindowExceeded):
+    if isinstance(exc, ContextWindowExceeded) or is_context_overflow_error(
+        exc
+    ):
         return "context_length_exceeded"
     if isinstance(exc, PayloadTooLarge):
         return "request_too_large"
@@ -95,7 +108,9 @@ def _code(exc: BaseException) -> str:
     if isinstance(exc, BackendBadResponseError):
         return "upstream_invalid_response"
     if isinstance(exc, httpx.HTTPStatusError):
-        return _status_code(exc.response.status_code)
+        return _status_code(
+            known_provider_code(exc) or exc.response.status_code
+        )
     if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
         return _status_code(exc.status_code)
     if isinstance(

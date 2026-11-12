@@ -312,3 +312,20 @@ def test_install_only_missing_hook_preserves_existing_bytes(
     assert _installed(root) == list(_HOOK_TYPES)
     assert hook.read_bytes() == original
     assert not hook.with_name(existing + ".legacy").exists()
+
+
+def test_installed_hooks_allow_switching_to_branch_without_config(tmp_path):
+    root = _working_copy(tmp_path)
+    result = _run(root)
+    assert result.returncode == 0, _output(result)
+    (root / ".pre-commit-config.yaml").unlink()
+    for hook in _HOOK_TYPES:
+        result = subprocess.run(
+            [str(_hooks_dir(root) / hook)],
+            cwd=root,
+            input="",
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 0, _output(result)
+        assert "config file not found" in _output(result).lower()

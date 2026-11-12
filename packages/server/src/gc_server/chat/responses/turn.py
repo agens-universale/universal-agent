@@ -34,6 +34,7 @@ from gc_server.chat.turn_common import (
 logger = logging.getLogger(__name__)
 
 _TOOL_POLL_S = 0.05
+_FINALIZATION_BATCHES = 3
 SYSTEM = "responses"
 
 
@@ -68,6 +69,7 @@ class TurnRun(TurnLifecycle):
         self.done = asyncio.Event()
         self.sealed = False
         self.persistence_failed = False
+        self._finalization_batches = 0
         self._failed_response: dict | None = None
         self.cancel_requested = False
         self.response_id = record.response_id
@@ -174,30 +176,19 @@ class TurnRun(TurnLifecycle):
             )
             body = events[-1]["response"]
             self._record = replace(self._record, status=status, response=body)
+            self._finalization_batches += 1
             try:
-                if await self._save_final():
-                    # Терминальное событие подтверждает уже сохранённый итог.
+                try:
+                    saved = await self._save_final()
+                except asyncio.CancelledError:
+                    # Отмена записи не отменяет уже выполненные действия.
+                    # Клиент всё равно получает закрывающие события и ошибку.
+                    self._report_persistence_failure(events)
+                    raise
+                if saved:
                     _put(self._queue, events)
                 else:
-                    self.persistence_failed = True
-                    self._failed_response = {
-                        **body,
-                        "status": "failed",
-                        "error": {
-                            "code": "response_persistence_failed",
-                            "message": "Response could not be saved. Do not repeat the request; check its status later.",
-                        },
-                        "incomplete_details": None,
-                    }
-                    _put(
-                        self._queue,
-                        [
-                            {
-                                "type": "response.failed",
-                                "response": self._failed_response,
-                            }
-                        ],
-                    )
+                    self._report_persistence_failure(events)
             finally:
                 self.sealed = True
                 try:
@@ -207,6 +198,23 @@ class TurnRun(TurnLifecycle):
                         )
                 finally:
                     self.done.set()
+
+    def _report_persistence_failure(self, events: list[dict]) -> None:
+        self.persistence_failed = True
+        self._failed_response = {
+            **self._record.response,
+            "status": "failed",
+            "error": {
+                "code": "response_persistence_failed",
+                "message": "Response could not be saved. Do not repeat the request; check its status later.",
+            },
+            "incomplete_details": None,
+        }
+        _put(self._queue, events[:-1])
+        _put(
+            self._queue,
+            [{"type": "response.failed", "response": self._failed_response}],
+        )
 
     async def _save_final(self) -> bool:
         for attempt in range(3):
@@ -232,20 +240,27 @@ class TurnRun(TurnLifecycle):
         async with self._seal_lock:
             if not self.persistence_failed:
                 return
-            thread = await self._index.threads.get(thread_key(self.thread_id))
-            frontend = thread.frontend if thread else {}
-            admission = frontend.get("chat", {}).get("admission") or {}
-            if admission.get("token") != self._record.reservation:
-                # Другой владелец уже отвечает за итог; старый не может
-                # перезаписать его или навсегда удерживать локальный busy.
-                logger.warning(
-                    "responses finalization lost its admission: %s",
-                    self.response_id,
-                )
-                await self._release_busy(self.thread_id, self.response_id)
-            elif await self._save_final():
-                self.persistence_failed = False
-                await self._release_busy(self.thread_id, self.response_id)
+            self._finalization_batches += 1
+            try:
+                await self._retry_owned_result()
+            finally:
+                if self._finalization_batches >= _FINALIZATION_BATCHES:
+                    # execution_started запрещает повтор действий. После
+                    # восстановления хранилища recovery закроет неизвестный итог.
+                    await self._release_busy(self.thread_id, self.response_id)
+
+    async def _retry_owned_result(self) -> None:
+        thread = await self._index.threads.get(thread_key(self.thread_id))
+        frontend = thread.frontend if thread else {}
+        admission = frontend.get("chat", {}).get("admission") or {}
+        if admission.get("token") != self._record.reservation:
+            logger.warning(
+                "responses finalization lost admission: %s", self.response_id
+            )
+            await self._release_busy(self.thread_id, self.response_id)
+        elif await self._save_final():
+            self.persistence_failed = False
+            await self._release_busy(self.thread_id, self.response_id)
 
     async def _tool_events(self) -> list[dict]:
         events: list[dict] = []

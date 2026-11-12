@@ -142,17 +142,34 @@ async def _adrain_with_attachments(
     родителю (``activate_child_input``) и за субагентом остаться не должна —
     иначе в его треде висит обращение, на которое он не ответил.
     """
-    out = []
-    for message in scope.drain():
-        message = await awith_committed_attachments(message, child_ctx)
-        out.append(message)
-        try:
-            await _apersist_child_user(message, child_ctx)
-        except Exception:
-            _log.exception("subagent_trace_write_failed")
-        if on_consumed is not None:
-            on_consumed(message)
+    pending = scope.drain()
+    try:
+        out = [
+            await awith_committed_attachments(message, child_ctx)
+            for message in pending
+        ]
+    except BaseException:
+        scope.return_pending(pending)
+        raise
+    try:
+        for message in out:
+            await _notify_child_input(message, child_ctx, on_consumed)
+    except BaseException:
+        scope.return_pending(pending)
+        raise
     return out
+
+
+async def _notify_child_input(message, child_ctx, on_consumed):
+    try:
+        await _apersist_child_user(message, child_ctx)
+    except Exception:
+        _log.exception("subagent_trace_write_failed")
+    if on_consumed is not None:
+        try:
+            on_consumed(message)
+        except Exception:
+            _log.exception("subagent_input_notification_failed")
 
 
 async def _apersist_child_user(

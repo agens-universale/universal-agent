@@ -47,7 +47,12 @@ class ResponsesRecovery:
     async def recover_once(self):
         for run in list(self.facade._live.values()):
             if run.persistence_failed:
-                await run.retry_finalization()
+                try:
+                    await run.retry_finalization()
+                except Exception:
+                    logger.exception(
+                        "responses finalization %s", run.response_id
+                    )
         await self._recover_records()
 
     async def _recover_records(self):
@@ -60,9 +65,13 @@ class ResponsesRecovery:
             if any(record.status == _RUNNING for record in records)
         }
         async for thread in index.threads.iter_threads(system=SYSTEM):
-            summary = index.summary(thread)
-            if summary and summary.get("status") == _RUNNING:
-                ids.add(thread.key.thread)
+            try:
+                if await index.pending_responses(thread):
+                    ids.add(thread.key.thread)
+            except Exception:
+                logger.exception(
+                    "responses recovery candidates %s", thread.key
+                )
         for thread_id in ids:
             try:
                 for record in await index.thread_records(
@@ -116,6 +125,8 @@ class ResponsesRecovery:
         summary = self.facade._index.summary(thread) if thread else None
         if summary and summary.get("latest_response_id") != record.response_id:
             return "execution_interrupted"
+        if record.execution_started:
+            return "execution_outcome_unknown"
         if not self.config.enabled or not record.request_text:
             return "execution_interrupted"
         if time.time() - record.created_at > self.config.lookback_hours * 3600:
@@ -160,9 +171,14 @@ class ResponsesRecovery:
                 await self._finish(record, error.code, error.message)
             return False
 
-    async def _finish(
-        self, record, code, message="Response interrupted by server restart."
-    ):
+    async def _finish(self, record, code, message=None):
+        if message is None:
+            message = (
+                "Execution may have performed actions before interruption. "
+                "Automatic replay is disabled; inspect results before retrying."
+                if code == "execution_outcome_unknown"
+                else "Response interrupted by server restart."
+            )
         status = "cancelled" if code == "cancelled" else "failed"
         body = {
             **record.response,

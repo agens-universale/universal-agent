@@ -684,7 +684,9 @@ async def _astartup_exit_error(
     deadline = time.monotonic() + _STARTUP_EXIT_GRACE_SEC
     while proc.returncode is None and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
-    return _exit_error_from_log(proc.returncode is not None, log_path)
+    return await asyncio.to_thread(
+        _exit_error_from_log, proc.returncode is not None, log_path
+    )
 
 
 def _wait_startup_exit_error(

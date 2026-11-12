@@ -128,6 +128,7 @@ def ensure_hooks_installed(root: Path) -> None:
                 "-m",
                 "pre_commit",
                 "install",
+                "--allow-missing-config",
                 *[arg for hook in wanted for arg in ("--hook-type", hook)],
             ],
             cwd=root,

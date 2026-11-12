@@ -189,3 +189,49 @@ def test_closed_log_retention_does_not_remove_a_live_writer(monkeypatch):
         live.write(b"still alive")
     stderr_capture.finish(live_path)
     assert live_path.read_bytes() == b"still alive"
+
+
+async def test_sdk_failed_start_does_not_wait_for_stderr_on_event_loop(
+    monkeypatch,
+):
+    import threading
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    finish = stderr_capture.finish
+    loop_thread = threading.get_ident()
+    workers = []
+
+    def checked(path):
+        workers.append(threading.get_ident())
+        assert threading.get_ident() != loop_thread
+        finish(path)
+        assert path not in stderr_capture._READERS
+
+    monkeypatch.setattr(stderr_capture, "finish", checked)
+    await test_stream_stdio_crash_before_initialize_names_the_real_cause()
+    assert workers
+
+
+def test_retention_migrates_stale_legacy_logs_and_keeps_fresh_ones(tmp_path):
+    import os
+    import time
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    old = tmp_path / "old.stderr.log"
+    fresh = tmp_path / "fresh.stderr.log"
+    old.write_bytes(b"old version")
+    fresh.write_bytes(b"possibly active old version")
+    stamp = time.time() - 8 * 86400
+    os.utime(old, (stamp, stamp))
+    stderr_capture._prune(tmp_path, fresh)
+    assert not old.exists()
+    assert fresh.exists()
+
+
+def test_closed_retention_has_order_when_clock_does_not_advance(monkeypatch):
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    monkeypatch.setattr(
+        stderr_capture.time, "time_ns", lambda: 1_700_000_000_000_000_000
+    )
+    test_closed_log_retention_does_not_remove_a_live_writer(monkeypatch)

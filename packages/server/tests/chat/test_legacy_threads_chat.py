@@ -78,4 +78,5 @@ async def test_v2_answers_are_also_written_for_develop(tmp_path):
         "created_at": 100,
         "status": "completed",
         "response": {"output": []},
+        "execution_started": False,
     }

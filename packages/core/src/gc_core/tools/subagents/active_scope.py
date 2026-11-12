@@ -66,6 +66,15 @@ class ChildInputScope:
             self._pending.clear()
             return out
 
+    def return_pending(self, messages: List[Dict[str, Any]]) -> None:
+        """Вернуть забранный пакет при ошибке до передачи ребёнку."""
+        with self._q_lock:
+            if self._closed_sink is None:
+                self._pending[:0] = messages
+            else:
+                for message in messages:
+                    self._closed_sink(message)
+
     def close(self, sink: Callable[[Dict[str, Any]], None]) -> None:
         """Закрыть очередь: остаток и всё, что придёт позже, — в ``sink``.
 

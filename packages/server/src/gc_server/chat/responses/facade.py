@@ -138,6 +138,14 @@ class ResponsesFacade:
             await run.request_stop()
         for run in runs:
             await run.done.wait()
+        for run in runs:
+            if run.persistence_failed:
+                try:
+                    await run.retry_finalization()
+                except Exception:
+                    logger.exception(
+                        "responses shutdown finalization %s", run.response_id
+                    )
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
@@ -265,21 +273,9 @@ class ResponsesFacade:
             request_text=None,
         )
         try:
-            await self._admissions[thread_id].validate()
-            await self._index.save(record)
             return await self._launch(record, agent, incoming.text)
-        except BaseException as exc:
-            try:
-                from gc_server.chat.model_errors import model_api_error
-
-                error = model_api_error(exc)
-                await self.recovery._finish(record, error.code, error.message)
-            except Exception:
-                logger.exception(
-                    "responses failed opening status was not saved"
-                )
-            finally:
-                await self._release(thread_id, "")
+        except BaseException:
+            await self._release(thread_id, "")
             raise
 
     async def _launch(
@@ -296,7 +292,13 @@ class ResponsesFacade:
             self._index.threads, thread_key(record.thread_id), root=record.cwd
         )
         await self._admissions[record.thread_id].validate()
-        record = replace(record, request_text=record.request_text or prompt)
+        # После этой записи автоматический повтор запрещён: даже если
+        # процесс погибнет до stream(), отсутствие эффектов уже недоказуемо.
+        record = replace(
+            record,
+            request_text=record.request_text or prompt,
+            execution_started=True,
+        )
         await self._index.save(record)
         run = TurnRun(
             agent=agent,

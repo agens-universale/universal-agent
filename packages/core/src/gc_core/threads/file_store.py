@@ -46,6 +46,7 @@ from gc_core.threads.errors import (
     ThreadConflict,
 )
 from gc_core.threads.file_namespace import namespace_scope
+from gc_core.threads.local_io import local_io
 from gc_core.threads.meta_map import (
     ARCHIVE_SUFFIX_KEY,
     meta_from_parts,
@@ -800,14 +801,13 @@ class FileThreadStore(ThreadStore):
         смотрятся). Порядок списка — по ``updated_at`` из meta каждого
         треда, так что любая страница ``list_threads`` читает весь каталог:
         фасад обходит файловое хранилище этим, а не N/страница проходами."""
-        return in_list_order(self._matching(query), query)
+        return in_list_order(await local_io(self._matching, query), query)
 
     def _matching(self, query: ThreadQuery) -> list[ThreadRecord]:
         # Треды, чьи файлы не менялись с ``updated_after``, отсеиваются по
         # mtime до чтения meta: обход восстановления — stat, а не разбор
         # каждого треда каталога. Тред чужой системы — до блокировки и
-        # сборки записи. Обход — на месте, не в потоке: фасад над
-        # файловым хранилищем зовут и синхронно (``run_sync`` в TUI).
+        # сборки записи. list_all_threads выносит этот обход из event loop.
         since = _mtime_floor(query.updated_after)
         records = []
         for key in self._known_keys(since):

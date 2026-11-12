@@ -1158,7 +1158,7 @@ async def _ainitialize_stdio(
     try:
         await session.initialize()
     except McpError as exc:
-        _raise_if_stdio_closed_at_start(exc, log_path)
+        await asyncio.to_thread(_raise_if_stdio_closed_at_start, exc, log_path)
         raise
 
 
@@ -1312,7 +1312,9 @@ async def _call_tool_stream_stdio_persistent(
                     stdio_client(params, errlog=errlog)
                 )
             except McpError as exc:
-                _raise_if_stdio_closed_at_start(exc, log_path)
+                await asyncio.to_thread(
+                    _raise_if_stdio_closed_at_start, exc, log_path
+                )
                 raise
         _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session

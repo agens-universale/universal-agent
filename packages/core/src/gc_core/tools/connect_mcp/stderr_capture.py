@@ -3,6 +3,7 @@
 import os
 import re
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -11,6 +12,10 @@ from gc_core.utils.pid_alive import is_pid_alive
 MAX_BYTES = 1024 * 1024
 KEEP_CLOSED = 32
 _READERS: dict[Path, threading.Event] = {}
+_WRITERS: dict[Path, object] = {}
+_PRUNE_LOCK = threading.Lock()
+_LAST_CLOSED_NS = 0
+_LEGACY_MAX_AGE = 7 * 86400
 _NAME = re.compile(r".+\.(\d+)\.[0-9a-f]{12}\.stderr\.log$")
 
 
@@ -27,13 +32,20 @@ def _prune(directory: Path, closed_path: Path) -> None:
         closed = []
         for path in directory.glob("*.stderr.log"):
             match = _NAME.fullmatch(path.name)
-            if match is None or (path in _READERS and path != closed_path):
+            if match is None:
+                # Старый формат не содержит PID: не трогаем свежий лог
+                # потенциально работающей старой версии. Старые архивы
+                # очищаем после недели без записи.
+                if time.time() - path.stat().st_mtime > _LEGACY_MAX_AGE:
+                    path.unlink(missing_ok=True)
+                continue
+            if path in _READERS and path != closed_path:
                 continue
             pid = int(match[1])
             if pid != os.getpid() and is_pid_alive(pid):
                 continue
             closed.append(path)
-        closed.sort(key=lambda path: path.stat().st_mtime)
+        closed.sort(key=lambda path: (path.stat().st_mtime_ns, path.name))
         for path in closed[:-KEEP_CLOSED]:
             path.unlink(missing_ok=True)
     except OSError:
@@ -66,9 +78,23 @@ def _drain(fd: int, handle, path: Path, done: threading.Event) -> None:
     finally:
         if handle is not None:
             _close(handle)
-        _prune(path.parent, path)
-        done.set()
+        _retire(path)
         _READERS.pop(path, None)
+        done.set()
+
+
+def _retire(path: Path) -> None:
+    global _LAST_CLOSED_NS
+    # Читатели заканчиваются в разных потоках. Порядок закрытия должен
+    # сохраняться даже при одинаковом mtime записей и грубых часах ФС.
+    with _PRUNE_LOCK:
+        stamp = max(time.time_ns(), _LAST_CLOSED_NS + 1)
+        _LAST_CLOSED_NS = stamp
+        try:
+            os.utime(path, ns=(stamp, stamp))
+        except OSError:
+            pass
+        _prune(path.parent, path)
 
 
 @contextmanager
@@ -94,11 +120,19 @@ def capture(path: Path, opener):
         raise
     # После spawn у ребёнка своя копия write_fd. Читатель живёт до её EOF.
     with os.fdopen(write_fd, "wb", buffering=0) as writer:
-        yield writer, path
+        _WRITERS[path] = writer
+        try:
+            yield writer, path
+        finally:
+            _WRITERS.pop(path, None)
 
 
 def finish(path: Path) -> None:
     """После завершения дочернего процесса дождаться последнего stderr-чанка."""
+    # Родительская копия pipe иначе удерживает EOF даже после выхода ребёнка.
+    writer = _WRITERS.pop(path, None)
+    if writer is not None:
+        _close(writer)
     done = _READERS.get(path)
     if done is not None:
         done.wait(timeout=1)
