@@ -469,8 +469,15 @@ class AsyncAgent:
         заденет. Без этого долгоживущий stdio (браузер под
         ``@playwright/mcp``) гасил только ``finally`` прогона: агент без
         прогона оставлял процессы жить до выхода из процесса.
+
+        С портом уборки MCP (потребитель сервиса, спека §5.2) сессии
+        контекста не агента: под владельцем потребителя закрылись бы
+        сессии всех его контекстов. Их закрывает тот, кто открыл
+        потребителя, — как и конец хода (``_ateardown_run``).
         """
         ctx = getattr(self._executor, "_ctx", None)
+        if getattr(ctx, "mcp_cleanup", None) is not None:
+            return
         owner = getattr(ctx, "mcp_session_owner", "") or None
         if not owner:
             return
