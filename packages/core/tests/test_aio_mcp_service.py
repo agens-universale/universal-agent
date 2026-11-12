@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 
 import pytest
 from gc_core import run_context as run_context_module
 from gc_core.aio.agent import AsyncAgent
+from gc_core.tools.connect_mcp.consumer import McpConsumer
 from gc_core.tools.connect_mcp.registry import ToolsCache, mcp_tool_full_name
 from gc_core.tools.connect_mcp.service import McpService
 from gc_testkit.mcp import (
@@ -69,6 +71,30 @@ async def _create(reaper, settings, **kwargs) -> AsyncAgent:
         AsyncAgent.create(settings, **kwargs), _CEILING_SEC
     )
     return reaper.track(agent)
+
+
+def _count_opens(monkeypatch, service: McpService) -> list[str]:
+    """Метки потребителей, открытых у ``service`` после этого вызова."""
+    opened: list[str] = []
+    real = service.open_consumer
+
+    def counted(label: str):
+        opened.append(label)
+        return real(label)
+
+    monkeypatch.setattr(service, "open_consumer", counted)
+    return opened
+
+
+def _failing_consumer_close(monkeypatch) -> None:
+    """Закрытие потребителя доходит до конца и затем бросает."""
+    real = McpConsumer.aclose
+
+    async def failing(self) -> None:
+        await real(self)
+        raise RuntimeError("закрытие потребителя упало")
+
+    monkeypatch.setattr(McpConsumer, "aclose", failing)
 
 
 def _echo_turn(call_id: str) -> list[dict]:
@@ -182,17 +208,59 @@ async def test_cancelled_create_closes_its_consumer(
     assert not service._consumers
 
 
+async def test_failed_close_keeps_build_error(
+    mcp_home, tmp_path, monkeypatch, caplog, mcp_reaper, mcp_owner
+):
+    settings = _cfg(tmp_path, monkeypatch, {})
+    service = McpService(connect_on_start=True)
+    _failing_consumer_close(monkeypatch)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("досборка упала")
+
+    monkeypatch.setattr(run_context_module, "_finish_run_context", broken)
+    with caplog.at_level(logging.WARNING, logger="gc_core.aio.agent"):
+        with pytest.raises(RuntimeError, match="досборка упала"):
+            await _create(mcp_reaper, settings, mcp_service=service)
+
+    assert "закрытие потребителя упало" in caplog.text
+    assert not service._consumers
+
+
+async def test_failed_close_keeps_cancellation(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    slow = tmp_path / "slow.json"
+    set_behavior(slow, start_delay=60)
+    settings = _cfg(tmp_path, monkeypatch, {"slow": stdio_cfg(slow)})
+    service = McpService(connect_on_start=True)
+    _failing_consumer_close(monkeypatch)
+
+    create = asyncio.ensure_future(
+        AsyncAgent.create(settings, mcp_service=service)
+    )
+    await wait_for(lambda: bool(launches(slow)), _CEILING_SEC)
+    create.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(create, _CEILING_SEC)
+
+    assert create.cancelled()
+    assert not service._consumers
+
+
 async def test_service_with_durable_is_rejected(
     mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
 ):
     settings = _cfg(tmp_path, monkeypatch, {})
     service = McpService(connect_on_start=True)
+    opened = _count_opens(monkeypatch, service)
 
     with pytest.raises(TypeError, match="durable="):
         await _create(
             mcp_reaper, settings, durable=object(), mcp_service=service
         )
 
+    assert opened == []
     assert not service._consumers
 
 
@@ -227,6 +295,7 @@ async def test_service_with_tools_cache_is_rejected(
 ):
     settings = _cfg(tmp_path, monkeypatch, {})
     service = McpService(connect_on_start=True)
+    opened = _count_opens(monkeypatch, service)
 
     with pytest.raises(ValueError, match="tools_cache"):
         await _create(
@@ -236,6 +305,7 @@ async def test_service_with_tools_cache_is_rejected(
             tools_cache=ToolsCache(),
         )
 
+    assert opened == []
     assert not service._consumers
 
 
@@ -245,6 +315,7 @@ async def test_service_with_host_consumer_is_rejected(
     settings = _cfg(tmp_path, monkeypatch, {})
     service = McpService(connect_on_start=True)
     consumer = mcp_reaper.track(service.open_consumer("хост"))
+    opened = _count_opens(monkeypatch, service)
 
     with pytest.raises(ValueError, match="mcp_consumer"):
         await _create(
@@ -252,8 +323,27 @@ async def test_service_with_host_consumer_is_rejected(
         )
 
     # Отказ не открыл агенту своего потребителя и не тронул чужого.
+    assert opened == []
     assert service._consumers == {consumer}
     assert not consumer.closed
+
+
+@pytest.mark.parametrize("name", ["tools_cache", "mcp_consumer"])
+async def test_service_with_empty_source_is_accepted(
+    mcp_home, tmp_path, monkeypatch, name, mcp_reaper, mcp_owner
+):
+    """Явный ``None`` по старой сигнатуре фабрики хоста безвреден."""
+    control = tmp_path / "srv.json"
+    settings = _cfg(tmp_path, monkeypatch, {"srv": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+
+    agent = await _create(
+        mcp_reaper, settings, mcp_service=service, **{name: None}
+    )
+
+    assert service._consumers == {agent._mcp_consumer}
+    assert agent.executor._ctx.tools_cache is agent._mcp_consumer
+    assert await _echo_pid(agent) == launches(control)[0]
 
 
 async def test_two_agents_share_entries_not_sessions(
@@ -283,6 +373,7 @@ async def test_host_consumer_stays_open_after_agent_close(
     service = McpService(connect_on_start=True)
     consumer = mcp_reaper.track(service.open_consumer("хост"))
     agent = await _create(mcp_reaper, settings, mcp_consumer=consumer)
+    (pid,) = launches(control)
 
     await asyncio.wait_for(agent.aclose(), _CEILING_SEC)
 

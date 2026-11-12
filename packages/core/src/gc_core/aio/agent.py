@@ -62,16 +62,26 @@ def _open_mcp_consumer(
     if durable is not None:
         raise TypeError(_DURABLE_TAKES_NO_CONTEXT)
     for name in ("tools_cache", "mcp_consumer"):
-        if name in context_kwargs:
+        if context_kwargs.get(name) is not None:
             raise ValueError(f"mcp_service= и {name}= вместе: выберите одно")
     return mcp_service.open_consumer("agent")
 
 
 async def _aundo_create(consumer: Any) -> None:
-    """Откат упавшей сборки: свой потребитель агента и заявка на пул."""
+    """Откат упавшей сборки: свой потребитель агента и заявка на пул.
+
+    Отказ закрытия потребителя только пишется в лог: наружу уходит
+    исходная ошибка сборки (или её отмена), а не сбой отката.
+    """
     try:
         if consumer is not None:
             await consumer.aclose()
+    except Exception as exc:
+        logger.warning(
+            "потребитель MCP не закрыт после отказа сборки: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
     finally:
         await release_clients()
 
