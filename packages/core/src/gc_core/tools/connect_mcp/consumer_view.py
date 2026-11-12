@@ -19,6 +19,7 @@ from gc_core.tools.connect_mcp.consumer_status import (
     STATE_FAILED,
     ServerStatus,
 )
+from gc_core.tools.connect_mcp.failure_reason import classify_failure
 from gc_core.tools.connect_mcp.registry import (
     ToolsCache,
     build_checked_entries,
@@ -64,14 +65,17 @@ def server_offer(
             server_key, server_cfg, list(status.tools), quiet=True
         )
     except McpProtocolError as exc:
-        logger.warning(
-            "MCP %s: тулы сервера не предложены: %s", server_key, exc
+        reason = classify_failure(exc, server_cfg)[1]
+        # Срез строится на каждой сборке и входе в ход; предупреждение
+        # пишет запись сервера при чтении каталога, один раз.
+        logger.debug(
+            "MCP %s: тулы сервера не предложены: %s", server_key, reason
         )
         failed = replace(
             status,
             state=STATE_FAILED,
             reason_code="protocol",
-            reason=str(exc),
+            reason=reason,
             from_catalog=False,
             tools=(),
         )

@@ -591,3 +591,51 @@ def test_overlay_isolates_bad_list(tmp_path):
     assert snapshot["b"]["status"] == STATE_FAILED
     assert status["b"]["reason_code"] == "protocol"
     assert status["a"]["status"] == STATE_CONNECTED
+
+
+async def test_bad_catalog_warns_once_per_record(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, caplog
+):
+    """Негодный каталог — одно предупреждение на запись сервера, а не на
+    каждый срез (сборка, вход в ход, наложение статусов)."""
+    import logging
+
+    settings = _settings({"b": stdio_cfg(tmp_path / "b.json")})
+    _write_raw_catalog(settings, "b", _BAD_TOOLS)
+    service = McpService(connect_on_start=False)
+    with caplog.at_level(logging.DEBUG, logger="gc_core.tools.connect_mcp"):
+        consumer = await _ready(mcp_reaper, service, settings)
+        for _ in range(3):
+            await _view(consumer, settings)
+        overlay_service_statuses({}, {}, settings, service.status(consumer))
+
+    warnings = [
+        r
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and "«echo»" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+
+
+def test_bad_list_reason_masked_and_truncated(tmp_path):
+    """Причина отказа по негодному списку — с той же маской секретов и
+    обрезкой, что на пути подключения."""
+    from gc_core.tools.connect_mcp.consumer_status import ServerStatus
+    from gc_core.tools.connect_mcp.consumer_view import server_offer
+
+    secret = "supersecretvalue1"
+    cfg = {**stdio_cfg(tmp_path / "b.json"), "env": {"API_KEY": secret}}
+    servers = mcp_cache_config(_settings({"b": cfg}))["mcp-servers"]
+    bad_name = secret + "x" * 200
+    status = ServerStatus(
+        STATE_CONNECTED,
+        tools=({"name": bad_name, "description": {"text": "x"}},),
+    )
+
+    _, failed = server_offer("b", servers["b"], status)
+
+    assert failed.state == STATE_FAILED
+    assert failed.reason_code == "protocol"
+    assert secret not in failed.reason
+    assert failed.reason.endswith("…")
+    assert len(failed.reason) <= 121
