@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 from gc_core.constants.tool_names import shorten_tool_name
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.secret_mask import without_secrets
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -17,7 +18,12 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     while getattr(exc, "exceptions", None) and depth < 5:
         exc = exc.exceptions[0]
         depth += 1
-    return _discovery_error_text(exc, server_cfg, str(exc))
+    # Без секретов определения, как у причины сервиса: сообщение — до
+    # обрезки (иначе секрет на границе среза остался бы началом), итог — ещё
+    # раз (шаблоны подставляют ``url`` и ``command``).
+    message = without_secrets(str(exc), server_cfg)
+    reason = _discovery_error_text(exc, server_cfg, message)
+    return without_secrets(reason, server_cfg)
 
 
 def _discovery_error_text(
@@ -407,10 +413,13 @@ async def _adiscover_one(
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
     except Exception as exc:  # дискавери никогда не бросает наверх
-        reason = _humanize_discovery_error(
-            exc, server_cfg if isinstance(server_cfg, dict) else {}
+        cfg = server_cfg if isinstance(server_cfg, dict) else {}
+        reason = _humanize_discovery_error(exc, cfg)
+        logger.warning(
+            "MCP discovery failed for %s: %s",
+            server_name,
+            without_secrets(str(exc), cfg),
         )
-        logger.warning("MCP discovery failed for %s: %s", server_name, exc)
         print(unavailable_line(server_name, reason))
         return [], {
             "status": "failed",
