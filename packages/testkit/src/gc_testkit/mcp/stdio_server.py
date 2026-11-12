@@ -35,9 +35,9 @@ stdin читает отдельный поток, каждый запрос ис
 ``nap``, следующие запросы обслуживаются.
 
 Журнал ``<control>.mcp-journal``: ``start <pid>``, ``child <pid>``,
-``exit <pid>``, ``req <method> <id>``, ``cancelled <id>``. ``exit`` пишется при штатном
-выходе — по концу stdin и по SIGTERM; аварийные (``fail_start``, ``exit_on``,
-``crash``) его не пишут.
+``exit <pid>``, ``req <method> <id>``, ``cancelled <id>``. ``exit``
+пишется при штатном выходе — по концу stdin и по SIGTERM; аварийные
+(``fail_start``, ``exit_on``, ``crash``) его не пишут.
 """
 
 import json
