@@ -50,3 +50,49 @@ def test_find_entry_by_name():
     )
     assert inst.find_entry([a, b], "science") is b
     assert inst.find_entry([a, b], "nope") is None
+
+
+def test_failure_reason_names_the_command_that_failed():
+    exc = subprocess.CalledProcessError(
+        1,
+        [
+            "/d/node/v24.22.2/bin/npx",
+            "-y",
+            "@playwright/mcp@0.0.70",
+            "install-browser",
+            "--with-deps",
+            "chromium",
+        ],
+    )
+    assert inst._short_reason(exc) == (
+        "команда «npx -y @playwright/mcp@0.0.70 install-browser … chromium» "
+        "завершилась с кодом 1"
+    )
+    # Последний аргумент — что ставили: у pip без него причина безлика.
+    pip = subprocess.CalledProcessError(
+        1, ["/venv/bin/python", "-m", "pip", "install", "office-mcp==0.3.0"]
+    )
+    assert inst._short_reason(pip) == (
+        "команда «python -m pip install office-mcp==0.3.0» "
+        "завершилась с кодом 1"
+    )
+    short = subprocess.CalledProcessError(2, ["/usr/bin/npm", "ls"])
+    assert (
+        inst._short_reason(short) == "команда «npm ls» завершилась с кодом 2"
+    )
+
+
+def test_platform_skip_reason_names_supported_os(monkeypatch):
+    entry = MCPEntry(
+        name="computer",
+        path=Path("."),
+        install=InstallSpec(type="source", platforms=("win32",)),
+    )
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert inst.platform_skip_reason(entry) == "только для Windows"
+    results = inst.run_install_entries(
+        [entry], Path("."), None, editable=False
+    )
+    assert results == [("computer", "skipped", "только для Windows")]
+    monkeypatch.setattr("sys.platform", "win32")
+    assert inst.platform_skip_reason(entry) is None

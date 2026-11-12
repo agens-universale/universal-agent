@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from gc_core.mcp_runtime.env import augment_process_env, resolve_mcp_command
+from gc_core.mcp_runtime.env import mcp_process_env, resolve_mcp_command
 
 from recommended_mcp.manifest import RunSpec
 
@@ -317,9 +317,7 @@ class RunSupervisor:
             remove_pid(name, self.pids_dir)
 
         cmd = build_command_argv(run)
-        env = augment_process_env()
-        for key, value in run.env:
-            env[str(key)] = str(value)
+        env = mcp_process_env(cmd[0], dict(run.env))
         if extra_env:
             env.update({str(k): str(v) for k, v in extra_env.items()})
 

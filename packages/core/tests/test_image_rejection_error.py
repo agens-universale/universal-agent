@@ -506,7 +506,7 @@ def _patch_policy_transport(monkeypatch, outcomes: list) -> dict:
     async def _no_sleep(*_a, **_k):
         return None
 
-    monkeypatch.setattr(policy.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr("asyncio.sleep", _no_sleep)
     calls = {"n": 0}
 
     async def _fake_request(

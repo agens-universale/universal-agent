@@ -230,8 +230,8 @@ class BackendConfig(_BackendNormalizers, BaseModel):
 
 
 #: Поля backend, которые на уровне модели не применяются: протокол и режим
-#: потока выбираются для всего бэкенда, строгость схем тулов — тоже. В
-#: ``models.<alias>.backend`` их нет: лишний ключ в YAML — предупреждение.
+#: потока выбираются для всего бэкенда. В ``models.<alias>.backend`` их нет:
+#: лишний ключ в YAML — предупреждение.
 #: ``chat_completion_kwargs`` модели — секции ``models.<alias>.main`` и
 #: ``.auxiliary`` (старый ключ переносит миграция ``compat``).
 MODEL_LEVEL_UNSUPPORTED = frozenset(

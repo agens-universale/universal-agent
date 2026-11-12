@@ -40,7 +40,7 @@ def _patch_transport(monkeypatch, responder):
     async def _no_sleep(*_a, **_k):
         return None
 
-    monkeypatch.setattr(policy.asyncio, "sleep", _no_sleep)  # без задержек
+    monkeypatch.setattr("asyncio.sleep", _no_sleep)  # без задержек
     calls = {"n": 0}
 
     async def _fake_request(

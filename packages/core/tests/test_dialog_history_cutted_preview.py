@@ -287,3 +287,41 @@ def test_long_reasoning_answer_keeps_prior_tool_output_in_history():
     assert "TOOL_FACT_123" in text
     assert "short-reason" in text
     assert len(text) < 200_000
+
+
+def test_build_history_text_can_omit_reasoning():
+    message = {
+        "role": "assistant",
+        "content": "answer",
+        "reasoning_content": "R" * 100,
+    }
+    text = build_history_text(
+        [message],
+        max_chars=0,
+        max_message_chars=5_000,
+        include_reasoning=False,
+    )
+    assert "RRRR" not in text
+    assert "answer" in text
+
+
+def test_trim_ignores_reasoning_in_budget_when_omitted():
+    messages = [
+        {
+            "role": "assistant",
+            "content": f"short {n}",
+            "reasoning_content": "r" * 5_000,
+        }
+        for n in range(2)
+    ]
+    kept = trim_history_to_max_dialogue_chars(
+        messages,
+        max_dialogue_chars=1_000,
+        max_message_chars=5_000,
+        include_reasoning=False,
+    )
+    default = trim_history_to_max_dialogue_chars(
+        messages, max_dialogue_chars=1_000, max_message_chars=5_000
+    )
+    assert len(kept) == 2
+    assert len(default) == 1

@@ -15,6 +15,7 @@ import threading
 import time
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from gc_core.backends.async_protocol import SyncExecAdapter
 from gc_core.backends.local import LocalFsBackend
@@ -1105,3 +1106,196 @@ def test_run_logger_accepts_the_stop_event():
     assert found[0].event == "user_stop_killed"  # type: ignore[attr-defined]
     assert found[0].kind == "exec"  # type: ignore[attr-defined]
     assert not hasattr(found[0], "stdout")
+
+
+async def _stop_during_retry_pause(monkeypatch, request):
+    """Модель отвечает 503, ход уходит в паузу между попытками — стоп в
+    паузе кончает запрос сразу: остановленный ход не держит тред до конца
+    паузы, а следующая попытка не уходит."""
+    from transport_fakes import install_transport
+
+    spy = install_transport(
+        monkeypatch, lambda _request: httpx.Response(503, json={})
+    )
+    log = _Log()
+    gate = _stop(log)
+
+    async def _run():
+        with bind_user_stop(gate):
+            return await request()
+
+    task = asyncio.create_task(_run())
+    await asyncio.wait_for(_first_request(spy), timeout=3)
+    await asyncio.sleep(0.05)
+    started = time.monotonic()
+    gate.request()
+    with pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(task, timeout=3)
+    assert time.monotonic() - started < 1
+    assert len(spy.requests) == 1
+    killed = log.events("user_stop_killed")
+    assert [event["kind"] for event in killed] == ["retry"]
+
+
+async def _first_request(spy) -> None:
+    while not spy.requests:
+        await asyncio.sleep(0.01)
+
+
+async def test_stop_during_transport_retry_pause_ends_request(monkeypatch):
+    await _stop_during_retry_pause(
+        monkeypatch,
+        lambda: arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            "http://model/v1/chat/completions",
+            use_retry=True,
+            on_delta=lambda kind, text: None,
+        ),
+    )
+
+
+async def test_late_stop_in_transport_pause_ends_request_and_spares_turn(
+    monkeypatch,
+):
+    """Стоп нажат в паузе ретрая запроса к модели, а снятие дошло до loop
+    уже после её конца: запрос кончается остановкой без новой попытки, а
+    следующая работа хода — запись итога — не обрывается."""
+    from transport_fakes import install_transport
+
+    spy = install_transport(
+        monkeypatch, lambda _request: httpx.Response(503, json={})
+    )
+    loop = asyncio.get_running_loop()
+    gate = _stop()
+    held: list = []
+
+    async def pause_with_late_stop(delay, *_args, **_kwargs):
+        if delay:
+            loop.call_soon_threadsafe = lambda cb, *a: held.append((cb, a))
+            try:
+                gate.request()
+            finally:
+                del loop.call_soon_threadsafe
+        await _REAL_SLEEP(0)
+
+    monkeypatch.setattr("asyncio.sleep", pause_with_late_stop)
+    with bind_user_stop(gate):
+        with pytest.raises(ModelRequestStopped):
+            await arequest_backend_chat_completions(
+                {"model": "m", "messages": []},
+                {},
+                "http://model/v1/chat/completions",
+                use_retry=True,
+            )
+        assert len(held) == 1
+        for callback, args in held:
+            callback(*args)
+        await gate.await_settled(1)
+        await _REAL_SLEEP(0.01)  # запись итога хода
+    assert len(spy.requests) == 1
+
+
+async def test_release_after_the_work_left_is_skipped():
+    """Снятие дошло до loop, когда работа уже вышла из блока: снимать
+    нечего — release не зовётся, «снято» в лог не пишется."""
+    log = _Log()
+    gate = _stop(log)
+    loop = asyncio.get_running_loop()
+    held: list = []
+    released: list = []
+    async with gate.arm(kind="exec", release=lambda: released.append(1)):
+        loop.call_soon_threadsafe = lambda cb, *a: held.append((cb, a))
+        try:
+            gate.request(log)
+        finally:
+            del loop.call_soon_threadsafe
+    for callback, args in held:
+        callback(*args)
+    await gate.await_settled(1)
+    assert len(held) == 1
+    assert released == []
+    assert log.events("user_stop_killed") == []
+
+
+async def test_stop_during_adaptive_retry_pause_ends_request(monkeypatch):
+    await _stop_during_retry_pause(monkeypatch, _policy_request)
+
+
+def _policy_request():
+    from gc_core.request_backend_policy import (
+        arequest_chat_completions_with_policy,
+    )
+
+    return arequest_chat_completions_with_policy(
+        payload_factory=lambda n: {"model": "m", "max_tokens": n},
+        initial_max_tokens=1000,
+        min_response_tokens=100,
+        headers={},
+        url="http://model/v1/chat/completions",
+        verify=True,
+        use_retry=False,
+        runtime_notices_enabled=True,
+    )
+
+
+async def test_stop_during_reduced_retry_is_a_stop_not_backend_error(
+    monkeypatch,
+):
+    """Стоп посреди повтора с уменьшенным max_tokens обрывает висящий
+    запрос — остановка хода, а не исходная 503 и не уведомление."""
+    calls = {"n": 0}
+
+    def answer_once_then_hang(gate):
+        async def handler(_request):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(503, json={})
+            return await _hang_after_stop(gate)
+
+        return handler
+
+    await _stop_policy_request(monkeypatch, answer_once_then_hang)
+    assert calls["n"] == 2
+
+
+async def test_stop_on_first_attempt_pushes_no_failure_notice(monkeypatch):
+    def hang(gate):
+        async def handler(_request):
+            return await _hang_after_stop(gate)
+
+        return handler
+
+    await _stop_policy_request(monkeypatch, hang)
+
+
+#: Настоящая пауза: тесты ниже подменяют ``asyncio.sleep`` глобально.
+_REAL_SLEEP = asyncio.sleep
+
+
+async def _hang_after_stop(gate: UserStop):
+    gate.request()
+    await _REAL_SLEEP(600)
+    raise AssertionError("stop did not cut the hanging request")
+
+
+async def _stop_policy_request(monkeypatch, make_handler) -> None:
+    """Стоп во время висящего запроса политики: наверх — остановка, стоп
+    снял именно запрос, уведомления об ошибке модели нет."""
+    from gc_core import runtime_notices
+    from transport_fakes import install_transport
+
+    notices: list = []
+    monkeypatch.setattr(runtime_notices, "push_runtime_notice", notices.append)
+    monkeypatch.setattr("asyncio.sleep", _no_pause)
+    log = _Log()
+    gate = _stop(log)
+    install_transport(monkeypatch, make_handler(gate))
+    with bind_user_stop(gate), pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(_policy_request(), timeout=3)
+    assert [e["kind"] for e in log.events("user_stop_killed")] == ["model"]
+    assert notices == []
+
+
+async def _no_pause(_delay, *_args, **_kwargs):
+    await _REAL_SLEEP(0)

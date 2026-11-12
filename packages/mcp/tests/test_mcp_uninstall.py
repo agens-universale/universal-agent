@@ -13,8 +13,9 @@
 
 from pathlib import Path
 
-from recommended_mcp import install as inst
 from recommended_mcp.manifest import InstallSpec, MCPEntry
+
+from recommended_mcp import install as inst
 
 
 def _wheel_layout(tmp_path: Path, name: str) -> Path:
@@ -66,14 +67,14 @@ def test_uninstall_entry_pypi_calls_pip(monkeypatch):
     assert calls and "uninstall" in calls[0] and "ddgs-mcp" in calls[0]
 
 
-def test_uninstall_entry_npx_calls_npm(monkeypatch):
+def test_uninstall_entry_npx_calls_npm(monkeypatch, tmp_path):
     calls = []
+    npm = tmp_path / "npm"
+    npm.write_text("", encoding="utf-8")
     monkeypatch.setattr(
         inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
     )
-    monkeypatch.setattr(
-        inst, "_node_install_paths", lambda dep: {"npm": "NPM"}
-    )
+    monkeypatch.setattr(inst, "_node_install_paths", lambda dep: {"npm": npm})
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.gc_paths",
         lambda: {
@@ -90,6 +91,36 @@ def test_uninstall_entry_npx_calls_npm(monkeypatch):
     )
     inst.uninstall_entry(e, Path("."))
     assert calls and "uninstall" in calls[0] and "@playwright/mcp" in calls[0]
+
+
+def test_uninstall_entry_npx_without_agent_node_warns(
+    monkeypatch, tmp_path, capsys
+):
+    # Node агента сменилась, а новая ещё не скачана: npm на диске нет.
+    calls = []
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
+    monkeypatch.setattr(
+        inst, "_node_install_paths", lambda dep: {"npm": tmp_path / "npm"}
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.gc_paths",
+        lambda: {"data": tmp_path},
+    )
+    e = MCPEntry(
+        name="pw",
+        path=Path("."),
+        install=InstallSpec(type="npx", npm_package="@playwright/mcp"),
+    )
+    inst.uninstall_entry(e, Path("."))
+    assert calls == []
+    out = capsys.readouterr().out
+    assert f"[warn] pw: Node агента v{inst.NODE_VERSION} не найдена" in out
+    # Путь к каталогу прошлых Node — а не remove --all, который сносит
+    # все MCP ради одного пакета.
+    assert str(tmp_path / "node") in out
+    assert "remove --all" not in out
 
 
 def test_dist_name_wheel(tmp_path):
