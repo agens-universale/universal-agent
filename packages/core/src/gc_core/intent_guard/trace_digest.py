@@ -80,6 +80,7 @@ def build_finish_gate_trace_digest(
         max_message_chars=limits["max_message_chars"],
         tags=tags,
         strip_think=True,
+        include_reasoning=False,
     )
     trace_digest_text = dialog_history.build_history_text(
         trimmed,
@@ -87,6 +88,7 @@ def build_finish_gate_trace_digest(
         max_message_chars=limits["max_message_chars"],
         tags=tags,
         strip_think=True,
+        include_reasoning=False,
     )
     return FinishGateTraceDigest(
         trace_digest_text=trace_digest_text,
