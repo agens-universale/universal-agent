@@ -31,6 +31,7 @@ from gc_testkit.mcp import (
     call_tool,
     events,
     exits,
+    free_port,
     launches,
     seed_catalog,
     set_behavior,
@@ -83,6 +84,40 @@ def _state(consumer, key: str) -> str:
 
 def _with_args(cfg: dict, *extra: str) -> dict:
     return {**cfg, "args": [*cfg["args"], *extra]}
+
+
+def _closed_port_cfg() -> dict:
+    return {
+        "transport": "stream_http",
+        "url": f"http://127.0.0.1:{free_port()}",
+    }
+
+
+def _count_attempts(monkeypatch) -> list[str]:
+    """Каждое обращение потребителя к серверу; транспорт настоящий."""
+    calls: list[str] = []
+    real = consumer_module.alist_raw_tools
+
+    async def counting(server_key, server_cfg, *, timeout):
+        calls.append(server_key)
+        return await real(server_key, server_cfg, timeout=timeout)
+
+    monkeypatch.setattr(consumer_module, "alist_raw_tools", counting)
+    return calls
+
+
+class _ParkedSleep:
+    """Сон сервиса, который ждёт, пока тест сдвинет подставные часы."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        self.clock = clock
+        self.pauses: list[float] = []
+
+    async def __call__(self, sec: float) -> None:
+        self.pauses.append(sec)
+        deadline = self.clock.now() + sec
+        while self.clock.now() < deadline:
+            await asyncio.sleep(0.01)
 
 
 def _gate_close(consumer, key: str):
@@ -667,6 +702,83 @@ async def test_close_during_build_wait_is_refused(
 
     with pytest.raises(McpServiceClosed, match="сервис MCP остановлен"):
         await asyncio.wait_for(building, _CEILING_SEC)
+
+
+async def test_series_runs_after_ensure(
+    mcp_home, monkeypatch, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    sleep = _ParkedSleep(clock)
+    attempts = _count_attempts(monkeypatch)
+    service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
+    consumer = _open(mcp_reaper, service)
+
+    await _ensure(consumer, _settings({"a": _closed_port_cfg()}))
+    await wait_for(lambda: sleep.pauses == [1])
+    clock.advance(1)
+    await wait_for(lambda: len(attempts) == 2 and sleep.pauses == [1, 3])
+
+    assert consumer._series
+    assert consumer.status_of(consumer.servers()["a"]).retry == 2
+
+
+async def test_removal_stops_series(
+    mcp_home, monkeypatch, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    sleep = _ParkedSleep(clock)
+    attempts = _count_attempts(monkeypatch)
+    service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
+    consumer = _open(mcp_reaper, service)
+    await _ensure(consumer, _settings({"a": _closed_port_cfg()}))
+    await wait_for(lambda: sleep.pauses == [1])
+    series = next(iter(consumer._series.values()))
+
+    await _ensure(consumer, _settings({}))
+    await asyncio.wait({series}, timeout=_CEILING_SEC)
+    await _settle(consumer)
+    clock.advance(sum(consumer_module.RETRY_PAUSES_SEC))
+
+    assert series.cancelled()
+    assert consumer._series == {}
+    assert attempts == ["a"]
+    assert sleep.pauses == [1]
+
+
+async def test_concurrent_builds_share_one_attempt(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=1)
+    settings = _settings({"a": stdio_cfg(control)})
+    consumer = _open(mcp_reaper, McpService(connect_on_start=True))
+    first = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), settings)
+    )
+    await wait_for(lambda: bool(consumer._connects))
+    second = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), settings)
+    )
+
+    done, _ = await asyncio.wait({first, second}, timeout=_CEILING_SEC)
+
+    assert done == {first, second}
+    assert first.exception() is None and second.exception() is None
+    assert _state(consumer, "a") == STATE_CONNECTED
+    assert len(launches(control)) == 1
+
+
+async def test_backend_server_without_isolation_stays_in_set(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    cfg = {**stdio_cfg(tmp_path / "a.json"), "execute_on": "os_backend"}
+    settings = _settings({"a": cfg})
+    seed_catalog(settings, "a", ["echo"])
+    consumer = _open(mcp_reaper, McpService(connect_on_start=False))
+
+    await _ensure(consumer, settings)
+
+    assert _state(consumer, "a") == STATE_CACHED
 
 
 async def test_old_close_keeps_legacy_session_of_changed_server(
