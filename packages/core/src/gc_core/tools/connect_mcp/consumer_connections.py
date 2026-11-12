@@ -149,7 +149,7 @@ class McpConnections:
         self._service = service
         self.owner = owner
         self.label = label
-        self.closed = False
+        self._closed = False
         self.slots = threading.BoundedSemaphore(_SLOTS_PER_CONSUMER)
         self._settings: Any = None
         self._lock = threading.Lock()
@@ -169,6 +169,12 @@ class McpConnections:
         self._generations: dict[str, int] = {}
         # Хвост закрытия (сессии владельца) идёт по одному вызову за раз.
         self._closing_sessions = asyncio.Lock()
+
+    @property
+    def closed(self) -> bool:
+        """Потребитель закрывается или закрыт; ставит только ``aclose``,
+        под замком."""
+        return self._closed
 
     def wrapper_cfg(self, entry: ServerEntry) -> dict:
         """Определение для подключения и обёрток тулов.
@@ -831,7 +837,7 @@ class McpConnections:
         self._service._bind_loop()
         cancels = asyncio.current_task().cancelling()
         with self._lock:
-            self.closed = True
+            self._closed = True
             work = [
                 *self._connects.values(),
                 *self._series.values(),

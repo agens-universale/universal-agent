@@ -482,7 +482,7 @@ async def test_closing_consumer_turn_end_does_nothing(
     # работе (флаг ставится первым), а сессии ещё не закрыты — их закроет
     # он сам.
     if closing == "consumer":
-        _conn(consumer).closed = True
+        _conn(consumer)._closed = True
     else:
         consumer._service._stopped = True
 
