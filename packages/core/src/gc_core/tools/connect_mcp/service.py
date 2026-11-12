@@ -26,7 +26,10 @@ from gc_core.tools.connect_mcp.catalog import read_catalog, write_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.consumer import McpConsumer
 from gc_core.tools.connect_mcp.consumer_status import ServerStatus
-from gc_core.tools.connect_mcp.failure_reason import classify_failure
+from gc_core.tools.connect_mcp.failure_reason import (
+    classify_failure,
+    is_server_gone,
+)
 from gc_core.tools.connect_mcp.process_journal import ProcessJournal
 from gc_core.tools.connect_mcp.registry import (
     ToolsCache,
@@ -259,11 +262,16 @@ class McpService:
         if journal is not None:
             await asyncio.to_thread(journal.prune)
 
-    def _launch_failure(self, entry: ServerEntry) -> OSError | None:
-        """Последний запуск сервера не дошёл до его команды (сбой ``exec``
-        пускателя) — исключение, которым кончился бы запуск без пускателя;
-        иначе ``None``."""
+    def _launch_failure(
+        self, entry: ServerEntry, exc: BaseException
+    ) -> OSError | None:
+        """Отказ «сервер завершился, не ответив», а последний запуск
+        сервера не дошёл до его команды (сбой ``exec`` пускателя), —
+        исключение, которым кончился бы запуск без пускателя; иначе
+        ``None``. Срок, протокол и ответы сервера журнал не читают."""
         if self._journal is None or not _launches_process(entry.cfg):
+            return None
+        if not is_server_gone(exc):
             return None
         record = self._journal.launch_error(entry.key)
         if record is None:
@@ -389,11 +397,12 @@ class McpService:
     ) -> Failure:
         """Отказ подключения; тулы записи остаются.
 
-        Процесс сервера не запустился (сбой ``exec`` пускателя) — причина
-        из журнала: транспорт видит только сервер, вышедший до ответа.
+        Сервер завершился, не ответив, потому что его процесс не
+        запустился (сбой ``exec`` пускателя), — причина из журнала:
+        транспорт видит только сервер, вышедший до ответа.
         """
         self._bind_loop()
-        launch = self._launch_failure(entry)
+        launch = self._launch_failure(entry, exc)
         cause = exc if launch is None else launch
         failure = Failure(self._clock(), *classify_failure(cause, entry.cfg))
         entry.last_failure = failure

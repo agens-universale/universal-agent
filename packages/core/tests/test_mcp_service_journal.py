@@ -17,6 +17,7 @@ import stat
 import subprocess
 
 import pytest
+from gc_core.tools.connect_mcp.call_errors import McpServerGone
 from gc_core.tools.connect_mcp.consumer_status import STATE_FAILED
 from gc_core.tools.connect_mcp.process_journal import journal_root
 from gc_core.tools.connect_mcp.registry import mcp_tool_full_name
@@ -177,9 +178,12 @@ async def test_record_removed_after_session_close(
     [pid] = launches(control)
     assert [r.pid for r in journal_records(service)] == [pid]
 
-    await _ensure(consumer, _settings({}))
+    # Закрытие по ключу без сверки: запись снимает именно чистка после
+    # закрытия сессии, а не чистка сверки.
+    connections = connections_of(consumer)
+    await asyncio.wait_for(connections.adrop(_entry(consumer)), _CEILING_SEC)
 
-    await wait_for(lambda: journal_records(service) == [], _CEILING_SEC)
+    assert journal_records(service) == []
     assert not alive(pid)
 
 
@@ -271,6 +275,47 @@ async def test_missing_command_reason_survives_launcher(
     assert status.reason_code == "command_not_found"
     assert status.reason == "команда 'no-such-xyz' не найдена"
     assert _entry(consumer).last_failure.reason == status.reason
+
+
+async def test_journal_reason_only_for_server_gone(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    # Свежий сбой exec у ключа объясняет только отказ «сервер завершился,
+    # не ответив»; срок и прочие отказы журнал не подменяет.
+    settings = _settings({"a": {"transport": "stdio", "command": "no-such"}})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    entry = _entry(consumer)
+    assert entry.last_failure.code == "command_not_found"
+
+    timeout = service.record_failure(entry, TimeoutError())
+    gone = service.record_failure(entry, McpServerGone())
+
+    assert (timeout.code, timeout.reason) == ("timeout", "таймаут подключения")
+    assert gone.code == "command_not_found"
+
+
+async def test_failed_journal_dir_warns_once(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, caplog
+):
+    # Каталог журнала не создать: серверы работают без учёта, попытка и
+    # предупреждение — один раз на сервис, а не на каждую сборку.
+    journal_root().parent.parent.mkdir(parents=True, exist_ok=True)
+    journal_root().parent.write_text("")
+    control = tmp_path / "a.json"
+    settings = _settings({"a": _server(control)})
+    service = McpService(connect_on_start=True)
+    with caplog.at_level("WARNING"):
+        consumer = await _ready(mcp_reaper, service, settings)
+        for _ in range(3):
+            await _ensure(consumer, settings)
+            out = await _call(consumer, settings, _ECHO, text="hi")
+
+    warned = [r for r in caplog.records if "журнал процессов" in r.message]
+    assert len(warned) == 1
+    assert "spawn_launcher" not in " ".join(_launcher_args(consumer))
+    assert launches(control) == [_pid_of(out)]
+    assert journal_records(service) == []
 
 
 async def test_server_without_command_does_not_break_view(

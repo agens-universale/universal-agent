@@ -75,6 +75,16 @@ def _failure_text(leaf: BaseException, server_cfg: dict, message: str) -> str:
     return _discovery_error_text(leaf, server_cfg, message)
 
 
+def is_server_gone(exc: BaseException) -> bool:
+    """Отказ — сервер завершился, не ответив. Так транспорт видит и
+    процесс, который не дошёл до команды сервера (сбой ``exec``): конец
+    вывода, разрыв сессии SDK или запись в трубу вышедшего процесса."""
+    leaf = first_leaf(exc)
+    if isinstance(leaf, (McpServerGone, BrokenPipeError)):
+        return True
+    return is_connection_closed(leaf)
+
+
 def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     """Код и текст причины отказа подключения.
 
@@ -92,4 +102,4 @@ def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     return _failure_code(leaf), without_secrets(reason, server_cfg)
 
 
-__all__ = ["classify_failure"]
+__all__ = ["classify_failure", "is_server_gone"]

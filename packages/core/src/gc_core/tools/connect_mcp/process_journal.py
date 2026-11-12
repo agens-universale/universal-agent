@@ -31,6 +31,7 @@ Linux и macOS — полноценно; на других ОС пускател
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -89,15 +90,17 @@ class ProcessRecord:
 class ProcessJournal:
     """Журнал процессов одного сервиса.
 
-    Каталог и ``owner.json`` создаются при первом ``launch_argv``.
-    ``kill_all`` и ``prune`` замков не берут: список читается с диска,
-    поэтому их можно звать из обработчика сигнала и из чужого потока,
-    одновременно друг с другом.
+    Каталог и ``owner.json`` создаются при первом ``launch_argv``; не
+    вышло — журнал больше не пробует (``_failed``), запуски идут без
+    учёта. ``kill_all`` и ``prune`` замков не берут: список читается с
+    диска, поэтому их можно звать из обработчика сигнала и из чужого
+    потока, одновременно друг с другом.
     """
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root if root is not None else journal_root()
         self._dir: Path | None = None
+        self._failed = False
         self._lock = threading.Lock()
 
     def launch_argv(
@@ -174,8 +177,9 @@ class ProcessJournal:
 
     def _ensure_dir(self) -> Path | None:
         with self._lock:
-            if self._dir is None:
+            if self._dir is None and not self._failed:
                 self._dir = _create_dir(self._root)
+                self._failed = self._dir is None
             return self._dir
 
 
@@ -225,10 +229,17 @@ def _alnum(text: str) -> str:
     return _NOT_ALNUM.sub("", text) or "0"
 
 
+@functools.cache
+def _host_identity(pid: int) -> tuple[str | None, str]:
+    """Метка и загрузка процесса хоста ``pid`` — константы процесса,
+    читаются один раз (на macOS это запуск ``ps`` и ``sysctl``). Ключ —
+    pid: у форка хоста своя метка."""
+    return process_start_mark(pid), boot_id()
+
+
 def _create_dir(root: Path) -> Path | None:
     """Каталог журнала с ``owner.json``; не вышло — ``None`` и строка в лог."""
-    mark = process_start_mark(os.getpid())
-    boot = boot_id()
+    mark, boot = _host_identity(os.getpid())
     parts = (boot, str(os.getpid()), mark or "", uuid.uuid4().hex[:8])
     directory = root / "-".join(_alnum(part) for part in parts)
     owner = {

@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 import pytest
-from gc_core.tools.connect_mcp import spawn_launcher
+from gc_core.tools.connect_mcp import process_journal, spawn_launcher
 from gc_core.tools.connect_mcp.process_journal import (
     ProcessJournal,
     journal_root,
@@ -368,6 +368,44 @@ async def test_prune_does_not_revive_superseded_launch_error(
 
     assert journal.launch_error("srv") is None
     assert [r.pid for r in journal.records()] == [lone.pid]
+
+
+def test_host_identity_is_read_once(mcp_home, monkeypatch, tmp_path):
+    # Метка и загрузка хоста — константы процесса: на macOS их чтение —
+    # запуск утилит, на каждый журнал его не повторяем.
+    reads: list[str] = []
+    real_mark = process_journal.process_start_mark
+
+    def mark(pid: int) -> str | None:
+        reads.append(f"mark {pid}")
+        return real_mark(pid)
+
+    def boot() -> str:
+        reads.append("boot")
+        return "b1"
+
+    monkeypatch.setattr(process_journal, "process_start_mark", mark)
+    monkeypatch.setattr(process_journal, "boot_id", boot)
+    process_journal._host_identity.cache_clear()
+    try:
+        for n in range(3):
+            ProcessJournal(tmp_path / f"j{n}").launch_argv("x", [], "k")
+    finally:
+        process_journal._host_identity.cache_clear()
+    assert reads == [f"mark {os.getpid()}", "boot"]
+
+
+def test_failed_journal_dir_is_not_retried(mcp_home, tmp_path, caplog):
+    # Каталог не создать — запуски идут без учёта, а журнал не повторяет
+    # попытку (и предупреждение) на каждом запуске.
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    journal = ProcessJournal(blocker / "processes")
+    with caplog.at_level("WARNING", logger=process_journal.__name__):
+        argvs = [journal.launch_argv("srv", ["-x"], "k") for _ in range(3)]
+    assert argvs == [("srv", ["-x"])] * 3
+    warned = [r for r in caplog.records if "не создан" in r.getMessage()]
+    assert len(warned) == 1
 
 
 async def test_exec_failure_recorded(mcp_home, procs, tmp_path):
