@@ -483,11 +483,7 @@ class McpConsumer:
         После остановки сервиса или закрытия — ``McpServiceClosed``.
         """
         self._service._bind_loop()
-        with self._lock:
-            if self.closed or self._service.closed:
-                raise McpServiceClosed(SERVICE_CLOSED_TEXT)
-            if build < self._build:
-                return
+        self._refuse_if_closed()
         timeout = settings_of(settings).mcp.meta.discovery_timeout_sec
         entries = {
             key: self._service.entry(key, cfg, discovery_timeout=timeout)
@@ -495,19 +491,39 @@ class McpConsumer:
                 settings, os_backend
             ).items()
         }
-        for entry in self._replace_set(settings, entries):
+        gone = self._replace_set(build, settings, entries)
+        if gone is None:
+            return
+        for entry in gone:
             self._leave(entry)
         self.pin()
-        waits = {self._connect_for_build(entry) for entry in entries.values()}
-        waits.discard(None)
+        waits: set[asyncio.Task] = set()
+        for entry in entries.values():
+            task = self._connect_for_build(entry)
+            if task is not None:
+                waits.add(task)
         await self._await_build(waits, timeout)
-        self.pin()
+        self._refuse_if_closed()
+        with self._lock:
+            latest = build == self._build
+        # Обогнанная сборка не закрепляет срез: иначе вход в ход не увидел
+        # бы изменения, случившегося после возврата новой сборки.
+        if latest:
+            self.pin()
+
+    def _refuse_if_closed(self) -> None:
+        if self.closed or self._service.closed:
+            raise McpServiceClosed(SERVICE_CLOSED_TEXT)
 
     def _replace_set(
-        self, settings: Any, entries: dict[str, ServerEntry]
-    ) -> list[ServerEntry]:
-        """Заменить набор; вернуть убранные и изменённые записи."""
+        self, build: int, settings: Any, entries: dict[str, ServerEntry]
+    ) -> list[ServerEntry] | None:
+        """Заменить набор, если сборка не устарела; вернуть убранные и
+        изменённые записи (устаревшая сборка — ``None``). Номер сборки
+        проверяется под тем же замком, под которым меняется набор."""
         with self._lock:
+            if build < self._build:
+                return None
             gone = [
                 entry
                 for key, entry in self._servers.items()

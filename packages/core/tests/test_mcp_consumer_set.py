@@ -554,6 +554,33 @@ async def test_call_in_flight_on_removed_server_ends_with_error(
     assert pid in exits(control)
 
 
+async def test_overtaken_build_does_not_pin(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Обогнанная сборка, проснувшись, не съедает признак «срез
+    изменился» для следующего входа в ход."""
+    slow = stdio_cfg(tmp_path / "a.json")
+    set_behavior(tmp_path / "a.json", start_delay=5)
+    cataloged = stdio_cfg(tmp_path / "b.json")
+    seed_catalog(_settings({"b": cataloged}), "b", ["echo", "nap"])
+    consumer = _open(mcp_reaper, McpService(connect_on_start=False))
+    gate, entered = _gate_close(consumer, "a")
+    old = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), _settings({"a": slow}))
+    )
+    await wait_for(lambda: bool(consumer._connects))
+
+    await _ensure(consumer, _settings({"b": cataloged}))
+    await asyncio.wait_for(entered.wait(), _CEILING_SEC)
+    b = consumer.servers()["b"]
+    await asyncio.wait_for(consumer.start_connect(b), _CEILING_SEC)
+    assert _state(consumer, "b") == STATE_CONNECTED
+    gate.set()
+    await asyncio.wait_for(old, _CEILING_SEC)
+
+    assert consumer.pin() is True
+
+
 async def test_rest_close_is_tracked_by_key(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
@@ -621,6 +648,25 @@ async def test_swallowed_cancel_does_not_leave_session_key(
     await _ensure(consumer, settings)
     assert _state(consumer, "a") == STATE_CONNECTED
     assert len(launches(control)) == 1
+
+
+async def test_close_during_build_wait_is_refused(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=5)
+    consumer = _open(mcp_reaper, McpService(connect_on_start=True))
+    building = asyncio.create_task(
+        consumer.aensure(
+            consumer.next_build(), _settings({"a": stdio_cfg(control)})
+        )
+    )
+    await wait_for(lambda: bool(consumer._connects))
+
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    with pytest.raises(McpServiceClosed, match="сервис MCP остановлен"):
+        await asyncio.wait_for(building, _CEILING_SEC)
 
 
 async def test_old_close_keeps_legacy_session_of_changed_server(
