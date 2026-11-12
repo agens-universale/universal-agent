@@ -1,0 +1,726 @@
+"""Исполнитель вызова тула потребителя сервиса MCP (спека §5.4, §5.8).
+
+Вызов идёт по сессии потребителя, под его владельцем и слотами: ждёт своё
+подключение, подключает сервер при первом вызове по правилу 30 с. Потеря
+сессии, смерть сервера, истёкший срок, «сервер отключён» и «сервис
+остановлен» доходят до модели ошибкой тула. Вызовы — через обёртку тула,
+собранную из среза потребителя так же, как это делает сборка контекста.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import signal
+
+import pytest
+from gc_core.config_modules.field_meta import plain_dump
+from gc_core.execution.tool_call_context import bind_tool_call
+from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp import abandonable
+from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp.catalog import write_catalog
+from gc_core.tools.connect_mcp.consumer_call import (
+    SERVER_GONE_TEXT,
+    SESSION_LOST_TEXT,
+)
+from gc_core.tools.connect_mcp.consumer_status import (
+    STATE_CONNECTED,
+    STATE_FAILED,
+)
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+from gc_core.tools.connect_mcp.registry import mcp_tool_full_name
+from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
+from gc_core.tools.connect_mcp.service import McpService
+from gc_core.tools.connect_mcp.service_records import SERVICE_CLOSED_TEXT
+from gc_core.tools.connect_mcp.stream_client import McpToolCallError
+from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
+from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
+from gc_testkit.mcp import (
+    FakeClock,
+    alive,
+    events,
+    exits,
+    free_port,
+    launches,
+    set_behavior,
+    stdio_cfg,
+    stream_server,
+    wait_for,
+)
+from gc_testkit.mcp.fixtures import mcp_home, mcp_owner, mcp_reaper
+from gc_testkit.settings import make_settings
+
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="процессы и сигналы POSIX"
+)
+
+#: Потолок одного ожидания в тесте: зависание не повесит прогон.
+_CEILING_SEC = 30.0
+_ECHO = mcp_tool_full_name("a", "echo")
+_NAP = mcp_tool_full_name("a", "nap")
+_ACTION = mcp_tool_full_name("a", "action")
+
+
+def _settings(servers: dict, *, discovery: int = 30):
+    return make_settings(
+        {
+            "mcp": {
+                "servers": servers,
+                "meta": {"discovery_timeout_sec": discovery},
+            }
+        }
+    )
+
+
+def _seed(settings, key: str = "a") -> None:
+    """Каталог тулов тестового сервера со схемами аргументов — как его
+    запишет подключение (``seed_catalog`` пишет только имена)."""
+    cfg = plain_dump(effective_mcp_servers(settings)[key], by_alias=True)
+    schemas = {
+        "echo": {"text": {"type": "string"}},
+        "nap": {"seconds": {"type": "number"}},
+    }
+    tools = [
+        {
+            "name": name,
+            "inputSchema": {"type": "object", "properties": props},
+        }
+        for name, props in schemas.items()
+    ]
+    write_catalog(key, cfg, tools)
+
+
+async def _ready(reaper, service, settings, label="c", **kwargs):
+    """Потребитель, сверивший набор с ``settings``."""
+    consumer = reaper.track(service.open_consumer(label))
+    await _ensure(consumer, settings, **kwargs)
+    return consumer
+
+
+async def _ensure(consumer, settings, **kwargs) -> None:
+    build = consumer.next_build()
+    await asyncio.wait_for(
+        consumer.aensure(build, settings, **kwargs), _CEILING_SEC
+    )
+
+
+async def _view(consumer, settings, **kwargs):
+    return await asyncio.wait_for(
+        consumer.aview(settings, **kwargs), _CEILING_SEC
+    )
+
+
+def _wrapper(view, name: str, *, timeout: float = 20.0, os_backend=None):
+    """Обёртка тула из среза — как её строит сборка контекста."""
+    return MCPToolWrapper(
+        name,
+        view.servers_cfg,
+        view.registry,
+        timeout,
+        default_use_retry=False,
+        os_backend=os_backend,
+        caller=view.caller,
+    )
+
+
+def _payload(envelope: str) -> dict:
+    """Ответ тестового сервера из конверта результата вызова."""
+    result = json.loads(envelope)["result"]
+    if isinstance(result, str):
+        return json.loads(result)
+    return json.loads(result["content"][0]["text"])
+
+
+async def _call(view, name: str, *, timeout: float = 20.0, **arguments):
+    """Вызов тула через срез; ответ тестового сервера."""
+    envelope = await asyncio.wait_for(
+        _wrapper(view, name, timeout=timeout).acall(**arguments),
+        _CEILING_SEC,
+    )
+    return _payload(envelope)
+
+
+async def _refused(view, name: str, **arguments) -> str:
+    """Вызов, отвеченный ошибкой тула; её текст."""
+    with pytest.raises(McpToolCallError) as caught:
+        await _call(view, name, **arguments)
+    return caught.value.error.message
+
+
+def _entry(consumer, key: str = "a"):
+    return consumer.servers()[key]
+
+
+def _status(consumer, key: str = "a"):
+    return consumer.status_of(_entry(consumer, key))
+
+
+def _in_flight(control) -> bool:
+    return any(line.startswith("req tools/call") for line in events(control))
+
+
+async def _settled(task: asyncio.Task):
+    """Дождаться задачи вызова; её исход — исключение или результат."""
+    done, _ = await asyncio.wait({task}, timeout=_CEILING_SEC)
+    assert done, "вызов не завершился"
+    return task
+
+
+def _stop_gate() -> UserStop:
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), None)
+    return gate
+
+
+def _call_under_stop(gate: UserStop, view, name: str, **arguments):
+    async def work():
+        with bind_user_stop(gate), bind_tool_call(name, "call-1"):
+            return await _wrapper(view, name).acall(**arguments)
+
+    return asyncio.create_task(work())
+
+
+async def test_call_waits_own_connect_and_uses_its_session(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=1.0)
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+
+    out = await _call(view, _ECHO, text="hi")
+
+    assert out["text"] == "hi"
+    assert launches(control) == [out["pid"]]
+    assert consumer.has_session(_entry(consumer))
+
+
+async def test_lazy_first_call_connects_and_runs(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    assert launches(control) == []
+
+    out = await _call(view, _ECHO, text="hi")
+
+    assert out["text"] == "hi"
+    assert launches(control) == [out["pid"]]
+    assert _status(consumer).state == STATE_CONNECTED
+
+
+async def test_recent_failure_is_tool_error_old_failure_reconnects(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False, clock=clock.now)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    set_behavior(control, fail_start=True)
+    entry = _entry(consumer)
+    ok = await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+    assert ok is False
+    started = len(launches(control))
+
+    text = await _refused(view, _ECHO, text="hi")
+
+    assert text == f"сервер недоступен: {entry.last_failure.reason}"
+    assert len(launches(control)) == started
+
+    set_behavior(control, fail_start=False)
+    clock.advance(30)
+    out = await _call(view, _ECHO, text="hi")
+
+    assert out["text"] == "hi"
+    assert _status(consumer).state == STATE_CONNECTED
+
+
+async def test_stop_cancels_the_wait(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=3.0)
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    gate = _stop_gate()
+
+    task = _call_under_stop(gate, view, _ECHO, text="hi")
+    await wait_for(lambda: bool(consumer._connects), _CEILING_SEC)
+    loop = asyncio.get_running_loop()
+    asked = loop.time()
+    gate.request()
+    await _settled(task)
+
+    assert loop.time() - asked < 2
+    with pytest.raises(UserStopInterrupt):
+        task.result()
+    await wait_for(
+        lambda: _status(consumer).state == STATE_CONNECTED, _CEILING_SEC
+    )
+    assert len(launches(control)) == 1
+
+
+async def test_argument_error_keeps_status_and_session(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    first = await _call(view, _ECHO, text="hi")
+
+    with pytest.raises(ValueError):
+        await _call(view, _ECHO, text=7)
+
+    assert _status(consumer).state == STATE_CONNECTED
+    second = await _call(view, _ECHO, text="hi")
+    assert second["pid"] == first["pid"]
+    assert launches(control) == [first["pid"]]
+
+
+@pytest.mark.parametrize("change", ["removed", "changed"])
+async def test_removed_and_changed_server_refused_from_old_view(
+    change, mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    cfg = stdio_cfg(control)
+    settings = _settings({"a": cfg})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    servers = (
+        {}
+        if change == "removed"
+        else {"a": {**cfg, "args": [*cfg["args"], "--x"]}}
+    )
+    await _ensure(consumer, _settings(servers))
+    started = len(launches(control))
+
+    text = await _refused(view, _ECHO, text="hi")
+
+    assert text == SERVER_GONE_TEXT
+    assert len(launches(control)) == started
+
+
+async def test_vanished_tool_returns_server_error(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    # Тестовый сервер читает список тулов на каждом запросе: перезапуск
+    # процесса для смены списка не нужен.
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    [pid] = launches(control)
+    set_behavior(control, tools=["echo"])
+
+    try:
+        envelope = await asyncio.wait_for(
+            _wrapper(view, _NAP).acall(seconds=0), _CEILING_SEC
+        )
+    except McpToolCallError:
+        pass
+    else:
+        assert "error" in json.dumps(json.loads(envelope)["result"])
+
+    assert _status(consumer).state == STATE_CONNECTED
+    assert launches(control) == [pid]
+
+
+async def test_cancel_without_stop_closes_stdio_session(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    [old] = launches(control)
+
+    task = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    task.cancel()
+    await _settled(task)
+    assert task.cancelled()
+
+    out = await _call(view, _ECHO, text="hi")
+    assert out["pid"] != old
+    await wait_for(lambda: old in exits(control), _CEILING_SEC)
+
+
+async def test_cancel_with_stop_keeps_session(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    [pid] = launches(control)
+    gate = _stop_gate()
+
+    task = _call_under_stop(gate, view, _NAP, seconds=30)
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    gate.request()
+    await _settled(task)
+    with pytest.raises(UserStopInterrupt):
+        task.result()
+
+    out = await asyncio.wait_for(_wrapper(view, _ECHO).acall(text="hi"), 5)
+    assert _payload(out)["pid"] == pid
+    assert _status(consumer).state == STATE_CONNECTED
+
+
+async def test_nine_calls_of_two_consumers_do_not_block(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    controls = [tmp_path / f"s{i}.json" for i in range(8)]
+    many = _settings(
+        {f"s{i}": stdio_cfg(control) for i, control in enumerate(controls)}
+    )
+    lone = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    first = await _ready(mcp_reaper, service, many, "A")
+    second = await _ready(mcp_reaper, service, lone, "B")
+    view_a = await _view(first, many)
+    view_b = await _view(second, lone)
+
+    naps = [
+        asyncio.create_task(
+            _wrapper(view_a, mcp_tool_full_name(f"s{i}", "nap")).acall(
+                seconds=60
+            )
+        )
+        for i in range(8)
+    ]
+    try:
+        await wait_for(
+            lambda: all(_in_flight(c) for c in controls), _CEILING_SEC
+        )
+        out = await asyncio.wait_for(
+            _wrapper(view_b, _ECHO).acall(text="hi"), 10
+        )
+        assert _payload(out)["text"] == "hi"
+        assert not any(task.done() for task in naps)
+    finally:
+        for task in naps:
+            task.cancel()
+        await asyncio.wait_for(
+            asyncio.gather(*naps, return_exceptions=True), _CEILING_SEC
+        )
+
+
+async def test_transport_failure_is_own_failure(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    first = await _ready(mcp_reaper, service, settings, "A")
+    second = await _ready(mcp_reaper, service, settings, "B")
+    view_a = await _view(first, settings)
+    view_b = await _view(second, settings)
+    pid_a = (await _call(view_a, _ECHO, text="a"))["pid"]
+    pid_b = (await _call(view_b, _ECHO, text="b"))["pid"]
+    assert pid_a != pid_b
+
+    os.kill(pid_a, signal.SIGKILL)
+    await wait_for(lambda: not alive(pid_a), _CEILING_SEC)
+    set_behavior(control, fail_start=True)
+    text = await _refused(view_a, _ECHO, text="a")
+
+    status = _status(first)
+    assert status.state == STATE_FAILED
+    assert text == status.reason
+    assert not first.has_session(_entry(first))
+    assert _status(second).state == STATE_CONNECTED
+    out = await _call(view_b, _ECHO, text="b")
+    assert out["pid"] == pid_b
+
+
+async def test_network_failure_reconnects_in_background(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    port = free_port()
+    pause = asyncio.Event()
+
+    async def sleep(sec: float) -> None:
+        await pause.wait()
+
+    service = McpService(connect_on_start=True, sleep=sleep)
+    server = stream_server(tmp_path, "stream_http", port=port)
+    network, _ = await server.__aenter__()
+    try:
+        settings = _settings({"a": network})
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+        assert "count" in await _call(view, _ACTION)
+    finally:
+        await server.__aexit__(None, None, None)
+
+    text = await _refused(view, _ACTION)
+    assert text == _entry(consumer).last_failure.reason
+    # Фоновая попытка сразу после сбоя тоже не удаётся; серия ждёт паузы.
+    await wait_for(
+        lambda: _status(consumer).state == STATE_FAILED, _CEILING_SEC
+    )
+
+    async with stream_server(tmp_path, "stream_http", port=port):
+        pause.set()
+        await wait_for(
+            lambda: _status(consumer).state == STATE_CONNECTED,
+            _CEILING_SEC,
+        )
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+
+async def test_call_timeout_keeps_session(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    [pid] = launches(control)
+
+    text = await _refused(view, _NAP, timeout=1, seconds=30)
+
+    assert text == "сервер не ответил за 1 с"
+    assert _status(consumer).state == STATE_CONNECTED
+    assert (await _call(view, _ECHO, text="hi"))["pid"] == pid
+
+
+async def test_call_started_before_removal_closes_session_after(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+    [pid] = launches(control)
+
+    task = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=5))
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    await _ensure(consumer, _settings({}))
+    await _settled(task)
+
+    with pytest.raises(McpToolCallError) as caught:
+        task.result()
+    assert caught.value.error.message == SERVER_GONE_TEXT
+    await wait_for(lambda: pid in exits(control), _CEILING_SEC)
+    assert entry.last_failure is None
+
+
+async def test_closed_consumer_refuses_calls(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    text = await _refused(view, _ECHO, text="hi")
+
+    assert text == SERVICE_CLOSED_TEXT
+    assert launches(control) == []
+
+
+async def test_consumer_close_cancels_inflight(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    [pid] = launches(control)
+
+    task = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+    await _settled(task)
+
+    assert not task.cancelled()
+    with pytest.raises(McpToolCallError) as caught:
+        task.result()
+    assert caught.value.error.message == SERVICE_CLOSED_TEXT
+    await wait_for(lambda: pid in exits(control), _CEILING_SEC)
+
+
+class _ExecResult:
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+        self.stderr = ""
+        self.return_code = 0
+        self.timed_out = False
+        self.stdout_hit_capture_cap = False
+        self.stderr_hit_capture_cap = False
+
+
+_BACKEND_ECHO = {
+    "name": "echo",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+    },
+}
+
+
+class _StdioSandbox:
+    """Изолированный бэкенд: отвечает списком из ``echo`` и вызовом."""
+
+    is_sandbox = True
+
+    def __init__(self) -> None:
+        self.methods: list[str] = []
+
+    def exec_argv(
+        self,
+        argv,
+        *,
+        stdin=None,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
+        request = json.loads(stdin.splitlines()[-1])
+        self.methods.append(request["method"])
+        text = json.dumps({"text": "из бэкенда", "pid": 0})
+        frames = [
+            {"jsonrpc": "2.0", "id": 1, "result": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": "gc-tools/list",
+                "result": {"tools": [_BACKEND_ECHO]},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": "gc-tools/call",
+                "result": {"content": [{"type": "text", "text": text}]},
+            },
+        ]
+        return _ExecResult("\n".join(json.dumps(f) for f in frames))
+
+    def exec(self, command, *, cwd=None, timeout=None, env=None):
+        return _ExecResult("/usr/bin/python3")
+
+
+async def test_backend_side_tool_goes_straight(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings(
+        {"a": {**stdio_cfg(control), "execute_on": "os_backend"}}
+    )
+    backend = _StdioSandbox()
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings, os_backend=backend)
+    view = await _view(consumer, settings, os_backend=backend)
+    assert SESSION_KEY_FIELD not in view.servers_cfg["a"]
+
+    envelope = await asyncio.wait_for(
+        _wrapper(view, _ECHO, os_backend=backend).acall(text="hi"),
+        _CEILING_SEC,
+    )
+
+    assert _payload(envelope)["text"] == "из бэкенда"
+    assert backend.methods == ["tools/list", "tools/call"]
+    assert launches(control) == []
+
+
+async def test_connect_wait_is_bounded_by_discovery_timeout(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Подключение, которое само не кончается (ждёт закрытия прежней
+    # сессии, зависло в транспорте), не держит вызов дольше срока.
+    hang = asyncio.Event()
+
+    async def stuck(entry):
+        await hang.wait()
+
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)}, discovery=1)
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    monkeypatch.setattr(consumer, "_alist_and_record", stuck)
+
+    text = await _refused(view, _ECHO, text="hi")
+
+    assert text == "сервер недоступен: подключение не завершилось за 1 с"
+    assert consumer._connects
+
+
+async def test_sibling_cancel_close_is_not_a_failure(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    # Второй вызов стоит за первым на той же сессии; отмена первого без
+    # стопа закрывает сессию — это не отказ сервера.
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+
+    nap = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    echo = asyncio.create_task(_wrapper(view, _ECHO).acall(text="hi"))
+    await asyncio.sleep(0.3)
+    nap.cancel()
+    await _settled(nap)
+    await _settled(echo)
+
+    with pytest.raises(McpToolCallError) as caught:
+        echo.result()
+    assert caught.value.error.message == SESSION_LOST_TEXT
+    entry = _entry(consumer)
+    assert entry.last_failure is None
+    assert _status(consumer).state != STATE_FAILED
+    assert (await _call(view, _ECHO, text="hi"))["text"] == "hi"
+
+
+async def test_call_runs_under_consumer_owner_and_slots(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    seen: list[tuple[str, object]] = []
+    real = consumer_module.acall_mcp_tool
+
+    async def spy(**kwargs):
+        seen.append((current_owner(), abandonable._call_slots.get()))
+        return await real(**kwargs)
+
+    monkeypatch.setattr(consumer_module, "acall_mcp_tool", spy)
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+
+    await _call(view, _ECHO, text="hi")
+
+    assert seen == [(consumer.owner, consumer._slots)]
