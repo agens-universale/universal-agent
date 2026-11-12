@@ -363,3 +363,25 @@ async def test_only_sdk_deadline_is_call_timeout(message, error):
 
     with pytest.raises(error):
         await stream_client._call_tool_request(_Session(), "t", {}, 1)
+
+
+def _tool_error() -> McpToolCallError:
+    return McpToolCallError(ErrorData(code=-32603, message="tool failed"))
+
+
+@pytest.mark.parametrize(
+    ("other", "unwrapped"),
+    [(McpServerGone(), True), (asyncio.CancelledError(), False)],
+    ids=["все-исходы", "отмена-рядом"],
+)
+def test_group_unwraps_only_when_every_leaf_is_an_outcome(other, unwrapped):
+    """Группа разворачивается до исхода, только если все её листы —
+    исходы вызова; голая отмена рядом с ошибкой тула не теряется."""
+    first = _tool_error()
+    group = BaseExceptionGroup("tasks", [first, other])
+
+    with pytest.raises(BaseException) as caught:
+        with stream_client._call_outcome_as_is():
+            raise group
+
+    assert caught.value is (first if unwrapped else group)

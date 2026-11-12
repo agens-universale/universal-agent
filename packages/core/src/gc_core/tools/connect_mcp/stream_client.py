@@ -364,15 +364,17 @@ def _call_outcome_as_is():
     задач anyio, и исход вызова выходит из них ``ExceptionGroup``: ни
     автоповтор (``acall_mcp_tool``), ни граница durable, ни ``except
     McpError`` здесь его не узнали бы, и ошибку тула или срок вызов
-    повторил бы. Разворачиваются только исходы вызова; прочее (в том числе
-    ``CancelledError`` из группы — это не отмена вызывающего) — как было.
+    повторил бы. Разворачивается группа, все листы которой — исходы вызова;
+    группа с чем-то ещё (в том числе ``CancelledError`` рядом с ошибкой
+    тула — это не отмена вызывающего) — как была, иначе прочее потерялось
+    бы.
     """
     try:
         yield
     except BaseExceptionGroup as group:
-        leaf = first_leaf(group)
-        if isinstance(leaf, _CALL_OUTCOMES):
-            raise leaf from group
+        _, rest = group.split(_CALL_OUTCOMES)
+        if rest is None:
+            raise first_leaf(group) from group
         raise
 
 
