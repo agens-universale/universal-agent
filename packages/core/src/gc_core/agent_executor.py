@@ -860,7 +860,8 @@ class AgentExecutor:
         Источник назначает фоновую работу и сообщает, изменился ли срез;
         изменился — набор тулов контекста пересобирается до хода. Без
         такого источника ход прежний; отказ не роняет ход: он идёт на
-        прежнем наборе.
+        прежнем наборе, а закрепление сбрасывается — следующий вход в ход
+        пересоберёт набор снова.
         """
         source = getattr(self._ctx, "tools_cache", None)
         start_turn = getattr(source, "astart_turn", None)
@@ -870,6 +871,7 @@ class AgentExecutor:
             if await start_turn():
                 await arefresh_context_tools(self._ctx)
         except Exception:
+            source.reset_pin()
             logger = getattr(self._ctx, "logger", None)
             if logger is not None:
                 logger.warning("mcp_tools_refresh_failed", exc_info=True)

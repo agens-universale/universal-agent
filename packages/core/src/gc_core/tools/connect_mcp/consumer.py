@@ -77,9 +77,10 @@ class McpConsumer:
     ``_connections`` — соединения и всё состояние под замком;
     ``_executor`` — исполнитель вызова по этим соединениям.
     ``_pinned`` — закреплённый срез ``{ключ: (запись, статус)}``;
+    ``_pin_stale`` — набор контекста не пересобран по нему (``reset_pin``);
     ``_backend_cache`` — кэш тулов серверов, исполняемых внутри бэкенда
     сборки (§5.10), пока исходный бэкенд сборки (под обёрткой записи
-    правок) — тот же объект. Оба меняются только на цикле сервиса.
+    правок) — тот же объект. Все три меняются только на цикле сервиса.
     """
 
     def __init__(self, service: "McpService", label: str) -> None:
@@ -89,6 +90,7 @@ class McpConsumer:
         )
         self._executor = McpCallExecutor(self._connections)
         self._pinned: dict[str, tuple[ServerEntry, ServerStatus]] = {}
+        self._pin_stale = False
         self._backend_cache: ToolsCache | None = None
 
     @property
@@ -118,14 +120,22 @@ class McpConsumer:
 
         Возвращает, отличается ли он от прошлого закреплённого по
         отпечатку, состоянию, коду причины, признаку каталога и тулам;
-        время проверки и номер повтора на пересборку не влияют.
+        время проверки и номер повтора на пересборку не влияют. После
+        ``reset_pin`` — изменился в любом случае.
         """
         pinned = {
             key: (entry, self.status_of(entry))
             for key, entry in self.servers().items()
         }
         previous, self._pinned = self._pinned, pinned
-        return _pin_view(previous) != _pin_view(pinned)
+        stale, self._pin_stale = self._pin_stale, False
+        return stale or _pin_view(previous) != _pin_view(pinned)
+
+    def reset_pin(self) -> None:
+        """Набор контекста не пересобран по закреплённому срезу (сбой
+        пересборки): следующее закрепление сообщит об изменении. Сам срез
+        остаётся — его читают сборки субагентов."""
+        self._pin_stale = True
 
     async def aview(
         self, settings: Any, *, os_backend: Any = None

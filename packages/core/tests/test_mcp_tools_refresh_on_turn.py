@@ -638,7 +638,10 @@ async def test_refresh_failure_does_not_break_turn(
         handler = logging.Handler()
         handler.emit = records.append
         ctx.logger.addHandler(handler)
-        ctx.tools_cache = SimpleNamespace(astart_turn=start_turn)
+        resets: list[bool] = []
+        ctx.tools_cache = SimpleNamespace(
+            astart_turn=start_turn, reset_pin=lambda: resets.append(True)
+        )
         try:
             result = await _turn(AgentExecutor(ctx), "t1")
         finally:
@@ -648,6 +651,7 @@ async def test_refresh_failure_does_not_break_turn(
     assert result
     [warning] = [r for r in records if r.msg == "mcp_tools_refresh_failed"]
     assert warning.exc_info is not None
+    assert resets == [True]
 
 
 @pytest.mark.parametrize("cache", [False, True])
@@ -674,6 +678,45 @@ async def test_context_without_consumer_untouched(
     backend.assert_clean()
     assert all(a is b for a, b in zip(before, after))
     assert rebuilt == []
+
+
+async def test_failed_rebuild_is_retried_on_next_turn(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "srv.json"
+    settings = _cfg(tmp_path, monkeypatch, {"srv": stdio_cfg(control)})
+    monkeypatch.chdir(tmp_path)
+    backend = install(monkeypatch, ScriptedBackend([_finish(1), _finish(2)]))
+    real_rebuild = agent_executor.arefresh_context_tools
+    rebuilds: list = []
+
+    async def flaky_rebuild(ctx) -> None:
+        rebuilds.append(ctx)
+        if len(rebuilds) == 1:
+            raise RuntimeError("пересборка упала")
+        await real_rebuild(ctx)
+
+    monkeypatch.setattr(
+        agent_executor, "arefresh_context_tools", flaky_rebuild
+    )
+    consumer = _consumer(mcp_reaper, FakeClock())
+
+    async with _context(settings, mcp_consumer=consumer) as ctx:
+        executor = AgentExecutor(ctx)
+        set_behavior(control, tools=["echo"])
+        entry = consumer.servers()["srv"]
+        assert await asyncio.wait_for(
+            _conn(consumer).start_connect(entry), _CEILING_SEC
+        )
+        await _turn(executor, "t1")
+        await _turn(executor, "t2")
+
+    backend.assert_clean()
+    first, second = (_tool_names(call) for call in backend.calls)
+    # Сбой пересборки: ход на прежнем наборе, следующий вход повторяет.
+    assert _NAP in first
+    assert _NAP not in second
+    assert len(rebuilds) == 2
 
 
 _BK_ECHO = mcp_tool_full_name("bk", "echo")
