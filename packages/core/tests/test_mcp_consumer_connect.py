@@ -20,7 +20,9 @@ import pytest
 from gc_core.config_modules.field_meta import plain_dump
 from gc_core.mcp_session_owner import current_owner, use_owner
 from gc_core.settings import settings_of
-from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp import (
+    consumer_connections as connections_module,
+)
 from gc_core.tools.connect_mcp import persistent_stdio, stream_client
 from gc_core.tools.connect_mcp.client import _MCP_SESSIONS
 from gc_core.tools.connect_mcp.consumer import RETRY_PAUSES_SEC
@@ -62,6 +64,11 @@ _CEILING_SEC = 30.0
 _INTERRUPTED = "подключение прервано"
 
 
+def _conn(consumer):
+    """Соединения потребителя — владелец его состояния."""
+    return consumer._connections
+
+
 def _settings(servers: dict, *, discovery: int = 30, **runtime):
     return make_settings(
         {
@@ -77,7 +84,7 @@ def _settings(servers: dict, *, discovery: int = 30, **runtime):
 def _consumer(reaper, service: McpService, settings, label: str = "c"):
     """Потребитель с настройками сборки — сверки ещё нет."""
     consumer = reaper.track(service.open_consumer(label))
-    consumer._settings = settings
+    _conn(consumer)._settings = settings
     return consumer
 
 
@@ -91,18 +98,18 @@ def _entry(service: McpService, settings, key: str = "srv"):
 def _in_set(consumer, entry):
     """Сервер в наборе потребителя, как после сверки: серия повторов
     кончается, если сервера в наборе нет."""
-    consumer._servers[entry.key] = entry
+    _conn(consumer)._servers[entry.key] = entry
     return entry
 
 
 async def _connect(consumer, entry) -> None:
     """Подключить и дождаться; срок ожидания попытку не прерывает."""
-    await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+    await asyncio.wait_for(_conn(consumer).start_connect(entry), _CEILING_SEC)
 
 
 def _attempt(consumer, entry) -> asyncio.Task:
     """Сама задача попытки — её отменяют только сверка и закрытие."""
-    return consumer._connects[session_key(entry.key, entry.fingerprint)]
+    return _conn(consumer)._connects[session_key(entry.key, entry.fingerprint)]
 
 
 def _closed_port_cfg() -> dict:
@@ -115,13 +122,13 @@ def _closed_port_cfg() -> dict:
 def _count_attempts(monkeypatch) -> list[str]:
     """Каждое обращение потребителя к серверу; транспорт настоящий."""
     calls: list[str] = []
-    real = consumer_module.alist_raw_tools
+    real = connections_module.alist_raw_tools
 
     async def counting(server_key, server_cfg, *, timeout):
         calls.append(server_key)
         return await real(server_key, server_cfg, timeout=timeout)
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", counting)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", counting)
     return calls
 
 
@@ -181,7 +188,7 @@ async def test_connect_is_the_session(
     await _connect(consumer, entry)
     with use_owner(consumer.owner):
         out = await call_tool(
-            "srv", consumer.wrapper_cfg(entry), "echo", {"text": "hi"}
+            "srv", _conn(consumer).wrapper_cfg(entry), "echo", {"text": "hi"}
         )
 
     status = consumer.status_of(entry)
@@ -189,7 +196,7 @@ async def test_connect_is_the_session(
     assert [tool["name"] for tool in status.tools] == ["echo", "nap"]
     assert launches(control) == [out["pid"]]
     assert alive(out["pid"])
-    assert consumer.has_session(entry)
+    assert _conn(consumer).has_session(entry)
 
 
 async def test_status_is_connecting_before_first_step(
@@ -200,11 +207,11 @@ async def test_status_is_connecting_before_first_step(
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
-    waiting = consumer.start_connect(entry)
+    waiting = _conn(consumer).start_connect(entry)
     task = _attempt(consumer, entry)
 
     assert consumer.status_of(entry).state == STATE_CONNECTING
-    again = consumer.start_connect(entry)
+    again = _conn(consumer).start_connect(entry)
     assert _attempt(consumer, entry) is task
     assert await asyncio.wait_for(waiting, _CEILING_SEC) is True
     assert await asyncio.wait_for(again, _CEILING_SEC) is True
@@ -220,7 +227,7 @@ async def test_cancel_before_first_step_leaves_no_connecting(
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
-    consumer.start_connect(entry)
+    _conn(consumer).start_connect(entry)
     task = _attempt(consumer, entry)
     task.cancel()
     await asyncio.wait({task}, timeout=_CEILING_SEC)
@@ -228,7 +235,7 @@ async def test_cancel_before_first_step_leaves_no_connecting(
     status = consumer.status_of(entry)
     assert status.state == STATE_FAILED
     assert (status.reason_code, status.reason) == ("other", _INTERRUPTED)
-    assert consumer._connects == {}
+    assert _conn(consumer)._connects == {}
     assert launches(control) == []
 
 
@@ -262,7 +269,7 @@ async def test_connect_timeout_comes_from_consumer_settings(
         _settings({"srv": stdio_cfg(control)}, discovery=1),
     )
 
-    await asyncio.wait_for(consumer.start_connect(entry), 4)
+    await asyncio.wait_for(_conn(consumer).start_connect(entry), 4)
 
     status = consumer.status_of(entry)
     assert (status.state, status.reason_code) == (STATE_FAILED, "timeout")
@@ -317,7 +324,9 @@ async def test_reason_codes_end_to_end(
         entries = [_entry(service, settings, key) for key in keys]
 
         await asyncio.wait_for(
-            asyncio.gather(*(consumer.start_connect(e) for e in entries)),
+            asyncio.gather(
+                *(_conn(consumer).start_connect(e) for e in entries)
+            ),
             _CEILING_SEC,
         )
 
@@ -339,7 +348,7 @@ async def test_trace_reaches_server_on_connect(
     await _connect(consumer, entry)
     with use_owner(consumer.owner):
         out = await call_tool(
-            "srv", consumer.wrapper_cfg(entry), "echo", {"text": "hi"}
+            "srv", _conn(consumer).wrapper_cfg(entry), "echo", {"text": "hi"}
         )
 
     assert out["trace"] == "t1"
@@ -365,7 +374,7 @@ async def test_failure_of_one_consumer_keeps_other_session(
     assert second.status_of(entry).state == STATE_FAILED
     with use_owner(first.owner):
         out = await call_tool(
-            "srv", first.wrapper_cfg(entry), "echo", {"text": "hi"}
+            "srv", _conn(first).wrapper_cfg(entry), "echo", {"text": "hi"}
         )
     assert out["pid"] == pid
 
@@ -390,8 +399,8 @@ async def test_network_server_retries_five_times(
     await wait_for(
         lambda: (
             clock.now() >= 104
-            and not consumer._series
-            and not consumer._connects
+            and not _conn(consumer)._series
+            and not _conn(consumer)._connects
         ),
         _CEILING_SEC,
     )
@@ -436,7 +445,7 @@ async def test_retry_succeeds_when_server_appears(
         await wait_for(
             lambda: (
                 consumer.status_of(entry).state == STATE_CONNECTED
-                and not consumer._series
+                and not _conn(consumer)._series
             ),
             _CEILING_SEC,
         )
@@ -464,7 +473,7 @@ async def test_retries_stop_on_consumer_close(
     await asyncio.sleep(0.2)
 
     assert len(attempts) == 1
-    assert consumer._series == {}
+    assert _conn(consumer)._series == {}
 
 
 async def test_lazy_service_does_not_retry(
@@ -485,7 +494,7 @@ async def test_lazy_service_does_not_retry(
 
     assert consumer.status_of(entry).state == STATE_FAILED
     assert len(attempts) == 1
-    assert consumer._series == {}
+    assert _conn(consumer)._series == {}
 
 
 async def test_process_server_does_not_retry(
@@ -507,7 +516,7 @@ async def test_process_server_does_not_retry(
 
     assert consumer.status_of(entry).state == STATE_FAILED
     assert len(launches(control)) == 1
-    assert consumer._series == {}
+    assert _conn(consumer)._series == {}
 
 
 async def test_may_connect_interval(mcp_home, tmp_path, mcp_reaper, mcp_owner):
@@ -522,11 +531,11 @@ async def test_may_connect_interval(mcp_home, tmp_path, mcp_reaper, mcp_owner):
     entry = _entry(service, settings)
     await _connect(consumer, entry)
 
-    seen = [consumer.may_connect(entry)]
+    seen = [_conn(consumer).may_connect(entry)]
     clock.advance(30)
-    seen.append(consumer.may_connect(entry))
-    task = consumer.start_connect(entry)
-    seen.append(consumer.may_connect(entry))
+    seen.append(_conn(consumer).may_connect(entry))
+    task = _conn(consumer).start_connect(entry)
+    seen.append(_conn(consumer).may_connect(entry))
     await asyncio.wait_for(task, _CEILING_SEC)
 
     assert seen == [False, True, False]
@@ -544,18 +553,18 @@ async def test_interrupted_attempt_counts_from_its_start(
     )
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
-    consumer.start_connect(entry)
+    _conn(consumer).start_connect(entry)
     task = _attempt(consumer, entry)
     await wait_for(lambda: launches(control))
     clock.advance(20)
 
     task.cancel()
     await asyncio.wait({task}, timeout=_CEILING_SEC)
-    blocked = consumer.may_connect(entry)
+    blocked = _conn(consumer).may_connect(entry)
     clock.advance(10)
 
     assert blocked is False
-    assert consumer.may_connect(entry) is True
+    assert _conn(consumer).may_connect(entry) is True
     assert entry.last_failure is None
 
 
@@ -586,7 +595,7 @@ async def test_success_does_not_block_reconnect(
         )
 
     assert closed is True
-    assert consumer.may_connect(entry) is True
+    assert _conn(consumer).may_connect(entry) is True
 
 
 async def test_retry_status_between_attempts(mcp_home, mcp_reaper, mcp_owner):
@@ -602,7 +611,9 @@ async def test_retry_status_between_attempts(mcp_home, mcp_reaper, mcp_owner):
     for done, pause in enumerate(RETRY_PAUSES_SEC[:3], start=1):
         await wait_for(lambda: len(sleep.pauses) == done)
         status = consumer.status_of(entry)
-        seen.append((status.state, status.retry, dict(consumer._connects)))
+        seen.append(
+            (status.state, status.retry, dict(_conn(consumer)._connects))
+        )
         clock.advance(pause)
 
     assert seen == [(STATE_FAILED, n, {}) for n in (1, 2, 3)]
@@ -623,7 +634,7 @@ async def test_fresh_consumer_respects_shared_failure(
     await _connect(first, entry)
     second = _consumer(mcp_reaper, service, settings, "b")
 
-    blocked = second.may_connect(entry)
+    blocked = _conn(second).may_connect(entry)
     status = second.status_of(entry)
     clock.advance(30)
 
@@ -633,7 +644,7 @@ async def test_fresh_consumer_respects_shared_failure(
         entry.last_failure.code,
         entry.last_failure.reason,
     )
-    assert second.may_connect(entry) is True
+    assert _conn(second).may_connect(entry) is True
 
 
 async def test_shared_failure_before_success_does_not_block(
@@ -655,9 +666,9 @@ async def test_shared_failure_before_success_does_not_block(
     fresh = _consumer(mcp_reaper, service, settings, "c")
 
     assert entry.last_failure is not None
-    assert fresh.may_connect(entry) is True
+    assert _conn(fresh).may_connect(entry) is True
     assert fresh.status_of(entry).state == STATE_CACHED
-    assert failed.may_connect(entry) is False
+    assert _conn(failed).may_connect(entry) is False
 
 
 async def test_background_connect_does_not_see_turn_stop(
@@ -669,14 +680,14 @@ async def test_background_connect_does_not_see_turn_stop(
         seen.append((current_user_stop(), current_owner()))
         return [{"name": "echo"}]
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", fake_list)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", fake_list)
     settings = _settings({"srv": stdio_cfg(tmp_path / "s.json")})
     service = McpService(connect_on_start=True)
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
     with bind_user_stop(UserStop()):
-        task = consumer.start_connect(entry)
+        task = _conn(consumer).start_connect(entry)
     await asyncio.wait_for(task, _CEILING_SEC)
 
     assert seen == [(None, consumer.owner)]
@@ -690,7 +701,7 @@ async def test_close_during_connect(mcp_home, tmp_path, mcp_reaper, mcp_owner):
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
-    consumer.start_connect(entry)
+    _conn(consumer).start_connect(entry)
     await wait_for(lambda: launches(control))
     await asyncio.sleep(0.5)
     await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
@@ -717,7 +728,7 @@ async def test_close_closes_own_sessions(
     assert exits(control) == [pid]
     assert consumer.closed is True
     assert consumer not in service._consumers
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
 
 
 async def test_server_without_persistent_session_has_no_session(
@@ -739,7 +750,7 @@ async def test_server_without_persistent_session_has_no_session(
         await _connect(consumer, local)
         await _connect(consumer, net)
         statuses = {consumer.status_of(e).state for e in (local, net)}
-        sessions, ok = set(consumer._sessions), set(consumer._ok)
+        sessions, ok = set(_conn(consumer)._sessions), set(_conn(consumer)._ok)
         await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
     assert statuses == {STATE_CONNECTED}
@@ -764,7 +775,7 @@ async def test_failed_reconnect_with_live_session_is_failed(
     await _connect(consumer, entry)
 
     assert consumer.status_of(entry).state == STATE_FAILED
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
 
 
 async def test_exception_in_connect_marks_failed_silently(
@@ -773,7 +784,7 @@ async def test_exception_in_connect_marks_failed_silently(
     async def boom(server_key, server_cfg, *, timeout):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", boom)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", boom)
     settings = _settings({"srv": stdio_cfg(tmp_path / "s.json")})
     service = McpService(connect_on_start=True)
     consumer = _consumer(mcp_reaper, service, settings)
@@ -835,7 +846,7 @@ async def test_close_or_cancel_before_process_start_leaves_no_process(
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
 
-    consumer.start_connect(entry)
+    _conn(consumer).start_connect(entry)
     task = _attempt(consumer, entry)
     await asyncio.sleep(0.15)  # поток уже в запуске, процесса ещё нет
     if how == "close":
@@ -898,7 +909,7 @@ async def test_series_stops_when_connected_during_pause(
         await _connect(consumer, entry)  # подключение мимо серии
         assert consumer.status_of(entry).state == STATE_CONNECTED
         clock.advance(1)
-        await wait_for(lambda: not consumer._series)
+        await wait_for(lambda: not _conn(consumer)._series)
         await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
     assert len(attempts) == 2
@@ -918,7 +929,7 @@ async def test_cancelled_waiter_keeps_attempt_and_series(
             await gate.wait()
         raise ConnectionRefusedError("нет соединения")
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", gated_list)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", gated_list)
     settings = _settings({"srv": _closed_port_cfg()})
     service = McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     consumer = _consumer(mcp_reaper, service, settings)
@@ -930,9 +941,9 @@ async def test_cancelled_waiter_keeps_attempt_and_series(
 
     # Внешний ожидающий той же попытки сдаётся по своему сроку.
     with pytest.raises(TimeoutError):
-        await asyncio.wait_for(consumer.start_connect(entry), 0.1)
+        await asyncio.wait_for(_conn(consumer).start_connect(entry), 0.1)
     still_running = not _attempt(consumer, entry).done()
-    series_alive = bool(consumer._series)
+    series_alive = bool(_conn(consumer)._series)
     gate.set()
     await wait_for(lambda: sleep.pauses == [1, 3])
 
@@ -968,7 +979,7 @@ async def test_failure_record_error_still_drops_session(
         "other",
         "внутренняя ошибка подключения",
     )
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
     await wait_for(lambda: not alive(pid))
     assert capsys.readouterr().out == ""
 
@@ -983,7 +994,7 @@ async def test_start_connect_after_close_is_refused(
     await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
     with pytest.raises(McpServiceClosed, match="сервис MCP остановлен"):
-        consumer.start_connect(entry)
+        _conn(consumer).start_connect(entry)
     assert launches(tmp_path / "s.json") == []
 
 
@@ -997,7 +1008,7 @@ async def test_close_waits_for_closing_tasks(
     consumer = _consumer(mcp_reaper, service, settings)
     entry = _entry(service, settings)
     started, finished = asyncio.Event(), []
-    real_close = consumer._aclose_session
+    real_close = _conn(consumer)._aclose_session
 
     async def slow_close(entry):
         started.set()
@@ -1005,14 +1016,14 @@ async def test_close_waits_for_closing_tasks(
         await real_close(entry)
         finished.append(entry.key)
 
-    consumer._aclose_session = slow_close
-    consumer.start_connect(entry)
+    _conn(consumer)._aclose_session = slow_close
+    _conn(consumer).start_connect(entry)
     await asyncio.wait_for(started.wait(), _CEILING_SEC)
 
     await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
     assert finished == ["srv"]
-    assert consumer._closing == set()
+    assert _conn(consumer)._closing == set()
 
 
 async def test_cancel_before_first_step_keeps_live_session(
@@ -1026,15 +1037,15 @@ async def test_cancel_before_first_step_keeps_live_session(
     await _connect(consumer, entry)
     [pid] = launches(control)
 
-    consumer.start_connect(entry)
+    _conn(consumer).start_connect(entry)
     task = _attempt(consumer, entry)
     task.cancel()
     await asyncio.wait({task}, timeout=_CEILING_SEC)
 
     assert consumer.status_of(entry).state == STATE_CONNECTED
-    assert consumer.has_session(entry)
+    assert _conn(consumer).has_session(entry)
     with use_owner(consumer.owner):
         out = await call_tool(
-            "srv", consumer.wrapper_cfg(entry), "echo", {"text": "hi"}
+            "srv", _conn(consumer).wrapper_cfg(entry), "echo", {"text": "hi"}
         )
     assert out["pid"] == pid

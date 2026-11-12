@@ -72,6 +72,11 @@ _NAP = mcp_tool_full_name("a", "nap")
 _ACTION = mcp_tool_full_name("a", "action")
 
 
+def _conn(consumer):
+    """Соединения потребителя — владелец его состояния."""
+    return consumer._connections
+
+
 def _settings(servers: dict, *, discovery: int = 30):
     return make_settings(
         {
@@ -232,7 +237,7 @@ async def test_call_waits_own_connect_and_uses_its_session(
 
     assert out["text"] == "hi"
     assert launches(control) == [out["pid"]]
-    assert consumer.has_session(_entry(consumer))
+    assert _conn(consumer).has_session(_entry(consumer))
 
 
 async def test_lazy_first_call_connects_and_runs(
@@ -265,7 +270,9 @@ async def test_recent_failure_is_tool_error_old_failure_reconnects(
     view = await _view(consumer, settings)
     set_behavior(control, fail_start=True)
     entry = _entry(consumer)
-    ok = await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+    ok = await asyncio.wait_for(
+        _conn(consumer).start_connect(entry), _CEILING_SEC
+    )
     assert ok is False
     started = len(launches(control))
 
@@ -295,7 +302,7 @@ async def test_stop_cancels_the_wait(
     gate = _stop_gate()
 
     task = _call_under_stop(gate, view, _ECHO, text="hi")
-    await wait_for(lambda: bool(consumer._connects), _CEILING_SEC)
+    await wait_for(lambda: bool(_conn(consumer)._connects), _CEILING_SEC)
     gate.request()
     await _settled(task)
 
@@ -484,7 +491,7 @@ async def test_transport_failure_is_own_failure(
     status = _status(first)
     assert status.state == STATE_FAILED
     assert text == status.reason
-    assert not first.has_session(_entry(first))
+    assert not _conn(first).has_session(_entry(first))
     assert _status(second).state == STATE_CONNECTED
     out = await _call(view_b, _ECHO, text="b")
     assert out["pid"] == pid_b
@@ -708,12 +715,12 @@ async def test_connect_wait_is_bounded_by_discovery_timeout(
     service = McpService(connect_on_start=False)
     consumer = await _ready(mcp_reaper, service, settings)
     view = await _view(consumer, settings)
-    monkeypatch.setattr(consumer, "_alist_and_record", stuck)
+    monkeypatch.setattr(_conn(consumer), "_alist_and_record", stuck)
 
     text = await _refused(view, _ECHO, text="hi")
 
     assert text == "сервер недоступен: подключение не завершилось за 1 с"
-    assert consumer._connects
+    assert _conn(consumer)._connects
 
 
 async def test_sibling_cancel_close_is_not_a_failure(
@@ -764,7 +771,7 @@ async def test_call_runs_under_consumer_owner_and_slots(
 
     await _call(view, _ECHO, text="hi")
 
-    assert seen == [(consumer.owner, consumer._slots)]
+    assert seen == [(consumer.owner, _conn(consumer).slots)]
 
 
 _OUTCOMES = {
@@ -828,7 +835,7 @@ async def test_unlisted_exception_is_connection_failure(
         return
     assert text == entry.last_failure.reason
     assert _status(consumer).state == STATE_FAILED
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
 
 
 def _http_handler(state: dict):
@@ -935,7 +942,7 @@ async def test_stream_stdio_death_mid_call_is_own_failure(
     assert caught.value.error.message == "сервер завершился, не ответив"
     assert entry.last_failure.reason == caught.value.error.message
     assert _status(consumer).state == STATE_FAILED
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
 
     # В пределах 30 с правило не пускает: процесс заново не поднимается.
     text = await _refused(view, _ECHO, text="hi")
@@ -973,7 +980,7 @@ async def test_old_call_failure_keeps_session_of_returned_server(
     await _ensure(consumer, _settings({}))
     await asyncio.wait_for(held.wait(), _CEILING_SEC)
     await _ensure(consumer, settings)
-    await wait_for(lambda: consumer.has_session(entry), _CEILING_SEC)
+    await wait_for(lambda: _conn(consumer).has_session(entry), _CEILING_SEC)
     new = launches(control)[-1]
     release.set()
     await _settled(nap)
@@ -1020,7 +1027,7 @@ async def test_server_returned_while_call_waits_connect(
     view = await _view(consumer, settings)
 
     call = asyncio.create_task(_wrapper(view, _ECHO).acall(text="hi"))
-    await wait_for(lambda: bool(consumer._connects), _CEILING_SEC)
+    await wait_for(lambda: bool(_conn(consumer)._connects), _CEILING_SEC)
     set_behavior(control)
     await _ensure(consumer, _settings({}))
     await _ensure(consumer, settings)
@@ -1140,12 +1147,12 @@ async def test_success_after_sibling_drop_keeps_connection_dropped(
     await wait_for(lambda: _calls_sent(control) == 2, _CEILING_SEC)
     nap.cancel()
     await _settled(nap)
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
     release.set()
     await _settled(echo)
 
     assert _payload(echo.result())["text"] == "hi"
-    assert not consumer.has_session(entry)
+    assert not _conn(consumer).has_session(entry)
 
 
 async def test_legacy_http_success_after_sibling_failure_confirms(
@@ -1179,7 +1186,6 @@ async def test_legacy_http_success_after_sibling_failure_confirms(
         service = McpService(connect_on_start=False, clock=FakeClock().now)
         consumer = await _ready(mcp_reaper, service, settings)
         view = await _view(consumer, settings)
-        entry = _entry(consumer)
         monkeypatch.setattr(
             consumer_module, "acall_mcp_tool", late_success_then_refused
         )
@@ -1233,4 +1239,4 @@ async def test_cancel_group_under_stop_is_stop_not_failure(
         task.result()
     assert entry.last_failure is None
     assert _status(consumer).state == STATE_CONNECTED
-    assert consumer.has_session(entry)
+    assert _conn(consumer).has_session(entry)

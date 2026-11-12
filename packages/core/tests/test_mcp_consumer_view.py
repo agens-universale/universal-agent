@@ -13,7 +13,9 @@ import json
 import os
 
 import pytest
-from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp import (
+    consumer_connections as connections_module,
+)
 from gc_core.tools.connect_mcp.agent_tools import (
     _assemble_mcp_tools_data,
     mcp_cache_config,
@@ -56,6 +58,11 @@ pytestmark = pytest.mark.skipif(
 _CEILING_SEC = 30.0
 _ECHO = mcp_tool_full_name("a", "echo")
 _NAP = mcp_tool_full_name("a", "nap")
+
+
+def _conn(consumer):
+    """Соединения потребителя — владелец его состояния."""
+    return consumer._connections
 
 
 def _settings(servers: dict, **extra):
@@ -226,10 +233,10 @@ async def test_view_is_pinned_until_next_pin(
     async def refused(server_key, server_cfg, *, timeout):
         raise ConnectionError("сервер не отвечает")
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", refused)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", refused)
     entry = consumer.servers()["a"]
     connected = await asyncio.wait_for(
-        consumer.start_connect(entry), _CEILING_SEC
+        _conn(consumer).start_connect(entry), _CEILING_SEC
     )
     second = await _view(consumer, settings)
     changed = consumer.pin()
@@ -402,7 +409,9 @@ async def test_overlay_matches_build_snapshot(
     consumer = await _ready(mcp_reaper, service, own)
     snap0, status0 = _build_snapshot(await _view(consumer, both), both)
     entry = consumer.servers()["a"]
-    assert await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+    assert await asyncio.wait_for(
+        _conn(consumer).start_connect(entry), _CEILING_SEC
+    )
 
     snap, status = overlay_service_statuses(
         snap0, status0, both, service.status(consumer)

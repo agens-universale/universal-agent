@@ -15,6 +15,9 @@ import os
 import pytest
 from gc_core.mcp_session_owner import use_owner
 from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp import (
+    consumer_connections as connections_module,
+)
 from gc_core.tools.connect_mcp.client import _MCP_SESSIONS
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CACHED,
@@ -49,6 +52,11 @@ pytestmark = pytest.mark.skipif(
 _CEILING_SEC = 30.0
 
 
+def _conn(consumer):
+    """Соединения потребителя — владелец его состояния."""
+    return consumer._connections
+
+
 def _settings(servers: dict, *, discovery: int = 30):
     return make_settings(
         {
@@ -74,7 +82,7 @@ async def _ensure(consumer, settings, **kwargs) -> None:
 async def _settle(consumer) -> None:
     """Дождаться фонового закрытия убранных сессий."""
     await asyncio.wait_for(
-        asyncio.gather(*list(consumer._closing)), _CEILING_SEC
+        asyncio.gather(*list(_conn(consumer)._closing)), _CEILING_SEC
     )
 
 
@@ -96,13 +104,13 @@ def _closed_port_cfg() -> dict:
 def _count_attempts(monkeypatch) -> list[str]:
     """Каждое обращение потребителя к серверу; транспорт настоящий."""
     calls: list[str] = []
-    real = consumer_module.alist_raw_tools
+    real = connections_module.alist_raw_tools
 
     async def counting(server_key, server_cfg, *, timeout):
         calls.append(server_key)
         return await real(server_key, server_cfg, timeout=timeout)
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", counting)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", counting)
     return calls
 
 
@@ -123,7 +131,7 @@ class _ParkedSleep:
 def _gate_close(consumer, key: str):
     """Закрытие сессии сервера ``key`` ждёт, пока тест откроет ворота."""
     gate, entered = asyncio.Event(), asyncio.Event()
-    real = consumer._aclose_session
+    real = _conn(consumer)._aclose_session
 
     async def gated(entry):
         if entry.key == key:
@@ -131,7 +139,7 @@ def _gate_close(consumer, key: str):
             await gate.wait()
         await real(entry)
 
-    consumer._aclose_session = gated
+    _conn(consumer)._aclose_session = gated
     return gate, entered
 
 
@@ -296,7 +304,7 @@ async def test_rebuild_does_not_hammer_failed_server(
     first = len(launches(control))
     await _ensure(consumer, settings)
     rebuilt = len(launches(control))
-    attempting = bool(consumer._connects)
+    attempting = bool(_conn(consumer)._connects)
     clock.advance(30)
     await _ensure(consumer, settings)
     await wait_for(lambda: len(launches(control)) == 2, _CEILING_SEC)
@@ -365,7 +373,7 @@ async def test_cancelled_ensure_keeps_new_set(
             _settings({"b": stdio_cfg(tmp_path / "b.json")}),
         )
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
     building.cancel()
     await asyncio.wait({building}, timeout=_CEILING_SEC)
 
@@ -466,7 +474,7 @@ async def test_pin_reports_slice_change(
     entry = consumer.servers()["a"]
 
     unchanged = consumer.pin()
-    await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+    await asyncio.wait_for(_conn(consumer).start_connect(entry), _CEILING_SEC)
     connected = consumer.pin()
     again = consumer.pin()
 
@@ -485,13 +493,13 @@ async def test_readded_server_waits_for_old_session_close(
     await _ensure(consumer, settings)
     entry = consumer.servers()["a"]
     [old_pid] = launches(control)
-    real_close = consumer._aclose_session
+    real_close = _conn(consumer)._aclose_session
 
     async def slow_close(entry):
         await asyncio.sleep(0.3)
         await real_close(entry)
 
-    consumer._aclose_session = slow_close
+    _conn(consumer)._aclose_session = slow_close
     await _ensure(consumer, _settings({}))
     await _ensure(consumer, settings)
     await wait_for(lambda: len(launches(control)) == 2, _CEILING_SEC)
@@ -503,7 +511,7 @@ async def test_readded_server_waits_for_old_session_close(
     journal = events(control)
     assert journal.index(f"exit {old_pid}") < journal.index(f"start {new_pid}")
     assert alive(new_pid)
-    assert consumer.has_session(entry)
+    assert _conn(consumer).has_session(entry)
 
 
 async def test_series_ends_when_server_left_set(
@@ -517,7 +525,7 @@ async def test_series_ends_when_server_left_set(
         attempts.append(server_key)
         raise ConnectionError("нет связи")
 
-    monkeypatch.setattr(consumer_module, "alist_raw_tools", counting)
+    monkeypatch.setattr(connections_module, "alist_raw_tools", counting)
     clock = FakeClock()
     service = McpService(
         connect_on_start=False, clock=clock.now, sleep=clock.sleep
@@ -534,8 +542,8 @@ async def test_series_ends_when_server_left_set(
     await _ensure(consumer, new)
     await _settle(consumer)
 
-    consumer._start_series(left)
-    await wait_for(lambda: not consumer._series)
+    _conn(consumer)._start_series(left)
+    await wait_for(lambda: not _conn(consumer)._series)
 
     assert attempts == []
     assert consumer.servers()["a"] is not left
@@ -551,7 +559,7 @@ async def test_attempt_cut_by_removal_does_not_hold_readd(
     building = asyncio.create_task(
         consumer.aensure(consumer.next_build(), settings)
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
 
     await _ensure(consumer, _settings({}))
     await asyncio.wait_for(building, _CEILING_SEC)
@@ -570,7 +578,7 @@ async def test_call_in_flight_on_removed_server_ends_with_error(
     control = tmp_path / "a.json"
     consumer = _open(mcp_reaper, McpService(connect_on_start=True))
     await _ensure(consumer, _settings({"a": stdio_cfg(control)}))
-    cfg = consumer.wrapper_cfg(consumer.servers()["a"])
+    cfg = _conn(consumer).wrapper_cfg(consumer.servers()["a"])
     [pid] = launches(control)
 
     async def nap() -> dict:
@@ -606,12 +614,12 @@ async def test_overtaken_build_does_not_pin(
     old = asyncio.create_task(
         consumer.aensure(consumer.next_build(), _settings({"a": slow}))
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
 
     await _ensure(consumer, _settings({"b": cataloged}))
     await asyncio.wait_for(entered.wait(), _CEILING_SEC)
     b = consumer.servers()["b"]
-    await asyncio.wait_for(consumer.start_connect(b), _CEILING_SEC)
+    await asyncio.wait_for(_conn(consumer).start_connect(b), _CEILING_SEC)
     assert _state(consumer, "b") == STATE_CONNECTED
     gate.set()
     await asyncio.wait_for(old, _CEILING_SEC)
@@ -634,7 +642,7 @@ async def test_rest_close_is_tracked_by_key(
     )
     await asyncio.wait_for(entered.wait(), _CEILING_SEC)
     entry = consumer.servers()["a"]
-    assert consumer._closing_servers.get("a")
+    assert _conn(consumer)._closing_servers.get("a")
 
     await _ensure(consumer, _settings({}))
     await asyncio.wait_for(building, _CEILING_SEC)
@@ -644,7 +652,7 @@ async def test_rest_close_is_tracked_by_key(
     readding = asyncio.create_task(
         consumer.aensure(consumer.next_build(), settings)
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
     gate.set()
     await asyncio.wait_for(readding, _CEILING_SEC)
     await _settle(consumer)
@@ -652,7 +660,7 @@ async def test_rest_close_is_tracked_by_key(
 
     _, new_pid = launches(control)
     assert alive(new_pid)
-    assert consumer.has_session(entry)
+    assert _conn(consumer).has_session(entry)
 
 
 async def test_swallowed_cancel_does_not_leave_session_key(
@@ -663,25 +671,27 @@ async def test_swallowed_cancel_does_not_leave_session_key(
     control = tmp_path / "a.json"
     settings = _settings({"a": stdio_cfg(control)})
     consumer = _open(mcp_reaper, McpService(connect_on_start=False))
-    real = consumer._alist_and_record
+    real = _conn(consumer)._alist_and_record
 
     async def swallowing(entry):
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.Event().wait()
-        with consumer._lock:
-            consumer._sessions.add(session_key(entry.key, entry.fingerprint))
+        with _conn(consumer)._lock:
+            _conn(consumer)._sessions.add(
+                session_key(entry.key, entry.fingerprint)
+            )
 
-    consumer._alist_and_record = swallowing
+    _conn(consumer)._alist_and_record = swallowing
     building = asyncio.create_task(
         consumer.aensure(consumer.next_build(), settings)
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
     await _ensure(consumer, _settings({}))
     await asyncio.wait_for(building, _CEILING_SEC)
     await _settle(consumer)
 
-    assert consumer._sessions == set()
-    consumer._alist_and_record = real
+    assert _conn(consumer)._sessions == set()
+    _conn(consumer)._alist_and_record = real
     await _ensure(consumer, settings)
     assert _state(consumer, "a") == STATE_CONNECTED
     assert len(launches(control)) == 1
@@ -698,7 +708,7 @@ async def test_close_during_build_wait_is_refused(
             consumer.next_build(), _settings({"a": stdio_cfg(control)})
         )
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
 
     await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
@@ -720,7 +730,7 @@ async def test_series_runs_after_ensure(
     clock.advance(1)
     await wait_for(lambda: len(attempts) == 2 and sleep.pauses == [1, 3])
 
-    assert consumer._series
+    assert _conn(consumer)._series
     assert consumer.status_of(consumer.servers()["a"]).retry == 2
 
 
@@ -734,7 +744,7 @@ async def test_removal_stops_series(
     consumer = _open(mcp_reaper, service)
     await _ensure(consumer, _settings({"a": _closed_port_cfg()}))
     await wait_for(lambda: sleep.pauses == [1])
-    series = next(iter(consumer._series.values()))
+    series = next(iter(_conn(consumer)._series.values()))
 
     await _ensure(consumer, _settings({}))
     await asyncio.wait({series}, timeout=_CEILING_SEC)
@@ -742,7 +752,7 @@ async def test_removal_stops_series(
     clock.advance(sum(consumer_module.RETRY_PAUSES_SEC))
 
     assert series.cancelled()
-    assert consumer._series == {}
+    assert _conn(consumer)._series == {}
     assert attempts == ["a"]
     assert sleep.pauses == [1]
 
@@ -757,7 +767,7 @@ async def test_concurrent_builds_share_one_attempt(
     first = asyncio.create_task(
         consumer.aensure(consumer.next_build(), settings)
     )
-    await wait_for(lambda: bool(consumer._connects))
+    await wait_for(lambda: bool(_conn(consumer)._connects))
     second = asyncio.create_task(
         consumer.aensure(consumer.next_build(), settings)
     )
