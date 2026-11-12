@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
+import threading
+
 import pytest
 from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
 from gc_core.startup_notices import Notice
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.notices_ui import (
     WARN_GLYPH,
 )  # в значке вариационный селектор
@@ -91,3 +93,31 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(
             pilot.app.screen.query_one("#sessions-footer-right").render()
         )
         assert f"{WARN_GLYPH} 1" in footer_right
+
+
+@pytest.mark.asyncio
+async def test_runtime_notice_from_thread_does_not_wait_ui(
+    tmp_path, monkeypatch
+):
+    """Уведомление с потока агента не ждёт отрисовки UI: вызов
+    возвращается сразу, счётчики обновляет цикл UI позже."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    ).run_test() as pilot:
+        await pilot.pause()
+        calls = []
+        monkeypatch.setattr(
+            pilot.app, "refresh_notices_indicators", lambda: calls.append(1)
+        )
+        thread = threading.Thread(
+            target=pilot.app._on_runtime_notice, daemon=True
+        )
+        thread.start()
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        await pilot.pause()
+        assert calls == [1]

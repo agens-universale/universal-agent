@@ -1708,7 +1708,7 @@ class TuiApp(App):
         После стопа — короткое ожидание потока хода (`STOP_SETTLE_SEC`):
         ядро закрывает ход записью итога, иначе он остался бы без неё. Ждём
         в потоке пула, не на loop: поток хода ходит на UI-поток мостом
-        `call_from_thread` (дельта стрима, подтверждение), и
+        `call_from_thread` (подтверждение), и
         заблокированный loop держал бы его до таймаута.
 
         Затем логгер прогона (см. `AgentRunner.release`) и подписка на
@@ -1896,7 +1896,7 @@ class TuiApp(App):
 
         self._stream_pump = StreamPump(
             self._stream_sink,
-            signal=lambda: self.call_from_thread(self._stream_signal),
+            signal=self._post_stream_signal,
             throttle_s=STREAM_REFRESH_MS / 1000,
         )
         # Своя `asyncio.run` на сборку — как и у хода ниже. Раньше здесь
@@ -1971,9 +1971,18 @@ class TuiApp(App):
         register_runtime_notices_listener(self._on_runtime_notice)
         return AgentExecutor(ctx)
 
+    def _post_stream_signal(self) -> None:
+        """Сигнал стрима с потока агента: неблокирующе, сообщением в очередь
+        UI (`call_later` → `post_message` → `call_soon_threadsafe`). Мост
+        `call_from_thread` держал бы поток агента — и приём ответа модели, —
+        пока UI не отрисует кадр. Ошибку позднего сигнала гасит `StreamPump`.
+        """
+        self.call_later(self._stream_signal)
+
     def _stream_signal(self) -> None:
-        """Вызывается на UI-потоке (StreamPump → call_from_thread); событийная
-        перерисовка контента стрима на активном экране (no-op без метода)."""
+        """Вызывается на UI-потоке (StreamPump → `_post_stream_signal`);
+        событийная перерисовка контента стрима на активном экране (no-op без
+        метода)."""
         fn = getattr(self.screen, "_refresh_stream_content", None)
         if callable(fn):
             fn()
@@ -2341,8 +2350,14 @@ class TuiApp(App):
             fn()
 
     def _on_runtime_notice(self) -> None:
-        """Callback из worker-потока: обновить счётчики уведомлений."""
-        self.call_from_thread(self.refresh_notices_indicators)
+        """Callback с любого потока (поток агента, воркер, UI): обновить
+        счётчики уведомлений. Неблокирующе (`call_later`): мост
+        `call_from_thread` держал бы поток агента до отрисовки, а с потока UI
+        бросал — и счётчики не обновлялись."""
+        try:
+            self.call_later(self.refresh_notices_indicators)
+        except RuntimeError:
+            pass  # приложения уже нет (выход) — обновлять нечего
 
     def action_new(self) -> None:
         if not self._on_main():
