@@ -340,6 +340,40 @@ async def test_close_during_ensure(mcp_home, tmp_path, mcp_reaper, mcp_owner):
     assert isinstance(ensure.exception(), McpServiceClosed)
 
 
+async def test_stop_signal_wakes_ensure_while_consumer_still_open(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=5)
+    settings = _settings({"a": stdio_cfg(control)})
+    service = mcp_reaper.track(McpService(connect_on_start=True))
+    consumer = service.open_consumer("c")
+    ensure = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), settings)
+    )
+    await wait_for(lambda: launches(control), _CEILING_SEC)
+    real_close = McpConsumer.aclose
+
+    async def stalled_close(self) -> None:
+        # Закрытие потребителя не снимает попытку: сверку может
+        # разбудить только сигнал остановки сервиса.
+        await asyncio.sleep(_CEILING_SEC)
+
+    monkeypatch.setattr(McpConsumer, "aclose", stalled_close)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    closing = asyncio.create_task(service.aclose(budget=0.5))
+    done, _ = await asyncio.wait({ensure}, timeout=_CEILING_SEC)
+    woke = loop.time() - started
+    await asyncio.wait_for(closing, _CEILING_SEC)
+    await asyncio.wait_for(real_close(consumer), _CEILING_SEC)
+
+    assert done
+    assert woke < 1
+    assert isinstance(ensure.exception(), McpServiceClosed)
+
+
 async def test_turn_hooks_are_noops_after_close(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
@@ -534,6 +568,36 @@ async def test_budget_expiry_is_a_warning_and_close_is_not_restarted(
     await _kill_deaf(pid)
 
 
+async def test_return_is_bounded_by_budget_and_grace(
+    mcp_home, tmp_path, caplog, mcp_reaper, mcp_owner
+):
+    controls = [tmp_path / f"d{i}.json" for i in range(3)]
+    servers = {f"d{i}": _deaf(c) for i, c in enumerate(controls)}
+    service = mcp_reaper.track(McpService(connect_on_start=True))
+    consumer = await _ready(service, _settings(servers))
+    pids = [pid for control in controls for pid in launches(control)]
+    assert len(pids) == 3
+    # d0 уходит из набора: закрытие глухого числится за потребителем, и
+    # срок бюджета снимет его, пока он ждёт это закрытие; хвост закрытия
+    # двух оставшихся сессий идёт потом уже без отмен.
+    rest = {k: v for k, v in servers.items() if k != "d0"}
+    await _ensure(consumer, _settings(rest))
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    with caplog.at_level(logging.WARNING, logger=service_module.__name__):
+        await _close(service, budget=0.5)
+    elapsed = loop.time() - started
+
+    grace = service_module._CLOSE_GRACE_SEC
+    assert elapsed < 0.5 + grace + 1
+    assert service.closed
+    assert "не уложилось в 0.5 с" in caplog.text
+    await _kill_deaf(*pids)
+    # Доигравшее в фоне закрытие сообщает исход по завершении.
+    assert "потребитель c закрылся не до конца: снято" in caplog.text
+
+
 async def test_reaper_closes_tracked_service_with_short_budget(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
@@ -548,7 +612,8 @@ async def test_reaper_closes_tracked_service_with_short_budget(
     await mcp_reaper.reap()
 
     budget = mcp_fixtures._SERVICE_BUDGET_SEC
-    assert loop.time() - started < budget + _SLACK_SEC
+    # Полный бюджет сервиса дождался бы эскалации глухого (5 с).
+    assert loop.time() - started < budget + 1.5
     assert service.closed
     assert not alive(pid)
     await _kill_deaf(pid)

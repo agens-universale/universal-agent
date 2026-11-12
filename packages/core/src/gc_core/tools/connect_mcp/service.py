@@ -18,6 +18,7 @@ import contextvars
 import logging
 import threading
 import time
+from functools import partial
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -52,6 +53,15 @@ from gc_core.tools.connect_mcp.service_records import (
 from gc_core.tools.connect_mcp.stream_client import is_connection_closed
 
 logger = logging.getLogger(__name__)
+
+#: Отсрочка после срока бюджета закрытия сервиса: снятые сроком закрытия
+#: потребителей ждутся не дольше неё. Снятие прерывает ожидание попыток,
+#: вызовов и закрытий; хвост, начатый отменой (закрытие сессий во всех
+#: реестрах, у постоянного stdio — до 7 с на сессию плюс close-тул), идёт
+#: дальше без новых отмен, и что не уложилось в отсрочку, доигрывает в
+#: фоне. Худший возврат ``aclose`` — бюджет плюс отсрочка, от числа
+#: серверов и сессий не зависит.
+_CLOSE_GRACE_SEC = 3.0
 
 # У подключения срок — любой: и срок вызова, и срок соединения.
 _TIMEOUTS = (*CALL_TIMEOUTS, httpx.TimeoutException)
@@ -122,6 +132,21 @@ def classify_failure(exc: BaseException, server_cfg: dict) -> tuple[str, str]:
     message = without_secrets(str(leaf), server_cfg)
     reason = _failure_text(leaf, server_cfg, message)
     return _failure_code(leaf), without_secrets(reason, server_cfg)
+
+
+def _report_close(consumer: McpConsumer, task: asyncio.Task) -> None:
+    """Исход закрытия потребителя — в лог; исключение задачи забирается."""
+    if task.cancelled():
+        outcome = "снято"
+    elif task.exception() is not None:
+        outcome = type(task.exception()).__name__
+    else:
+        return
+    logger.warning(
+        "Сервис MCP: потребитель %s закрылся не до конца: %s",
+        consumer.label,
+        outcome,
+    )
 
 
 class McpService:
@@ -257,18 +282,21 @@ class McpService:
         делают, вызовы получают ошибку тула «сервис MCP остановлен»,
         ждущая подключений сверка просыпается.
 
-        Первый вызов заводит задачу закрытия, повторные и одновременные
-        ждут её же; отмена вызывающего — его отмена, закрытие идёт дальше.
-        Срок бюджета — предупреждение в лог, не исключение: что не
-        закрылось, остаётся аварийному гашению. Прерванная задача
-        закрытия (снятие всех задач цикла) повторным вызовом заводится
-        заново: незакрытые потребители всё ещё числятся за сервисом.
+        Первый вызов заводит задачу закрытия, и бюджет задаёт он;
+        повторные и одновременные вызовы ждут ту же задачу, их бюджет не
+        действует, после истёкшего бюджета повторный вызов возвращается
+        сразу. Отмена вызывающего — его отмена, закрытие идёт дальше.
+        Возврат — не позже ``budget + _CLOSE_GRACE_SEC``: по сроку бюджета
+        предупреждение в лог (не исключение), незакрытые потребители
+        снимаются, а их хвост закрытия сессий доигрывает в фоне;
+        добивает процессы аварийное гашение. Задача закрытия живёт, пока
+        живёт цикл сервиса: закрыть сервис надо до закрытия цикла.
         """
         with self._lock:
             self._bind_loop()
             self._stopped = True
             task = self._close_task
-            if task is None or task.cancelled():
+            if task is None:
                 # Пустой контекст: стоп хода и владелец сессий вызывающего
                 # в закрытие не попадают — владельца ставит потребитель.
                 task = asyncio.get_running_loop().create_task(
@@ -283,32 +311,31 @@ class McpService:
         """Закрыть потребителей, числящихся за сервисом, в общий бюджет.
 
         Остановка уже стоит под замком, поэтому снимок полон: нового
-        потребителя после неё не открыть. Исход каждого закрытия — в
-        лог; исключение одного, в том числе ``CancelledError`` из
-        отменившегося закрытия его сессии, наружу не идёт: закрытие
-        сервиса не выдаёт чужую отмену за свою.
+        потребителя после неё не открыть. По сроку — предупреждение,
+        незакрытые снимаются один раз и ждутся не дольше
+        ``_CLOSE_GRACE_SEC``. Исход каждого закрытия — в лог (у
+        доигрывающих в фоне — по завершении); наружу исключения не идут.
         """
         with self._lock:
             consumers = list(self._consumers)
-        closing = asyncio.gather(
-            *(consumer.aclose() for consumer in consumers),
-            return_exceptions=True,
-        )
-        try:
-            outcomes = await asyncio.wait_for(closing, budget)
-        except TimeoutError:
+        if not consumers:
+            return
+        loop = asyncio.get_running_loop()
+        tasks = {loop.create_task(c.aclose()): c for c in consumers}
+        _, pending = await asyncio.wait(tasks, timeout=budget)
+        if pending:
             logger.warning(
                 "Сервис MCP: закрытие потребителей не уложилось в %s с",
                 budget,
             )
-            return
-        for consumer, outcome in zip(consumers, outcomes):
-            if isinstance(outcome, BaseException):
-                logger.warning(
-                    "Сервис MCP: потребитель %s закрылся не до конца: %s",
-                    consumer.label,
-                    type(outcome).__name__,
-                )
+            for task in pending:
+                task.cancel()
+            _, pending = await asyncio.wait(pending, timeout=_CLOSE_GRACE_SEC)
+        for task, consumer in tasks.items():
+            if task in pending:
+                task.add_done_callback(partial(_report_close, consumer))
+            else:
+                _report_close(consumer, task)
 
     def entry(
         self, server_key: str, server_cfg: dict, *, discovery_timeout: float
