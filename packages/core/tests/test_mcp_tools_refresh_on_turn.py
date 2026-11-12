@@ -149,6 +149,11 @@ async def _turn(executor: AgentExecutor, thread_id: str, **kwargs):
     )
 
 
+async def _start_turn(consumer) -> bool:
+    """Вход в ход потребителя: он ничего не ждёт — потолок 1 с."""
+    return await asyncio.wait_for(consumer.astart_turn(), 1)
+
+
 def _tool_names(payload: dict) -> set[str]:
     """Имена тулов в запросе к модели."""
     return {spec["function"]["name"] for spec in payload.get("tools", [])}
@@ -366,18 +371,18 @@ async def test_slow_relist_keeps_live_session(
         )
         clock.advance(_TTL_SEC + 1)
 
-        assert await consumer.astart_turn() is False
+        assert await _start_turn(consumer) is False
         await wait_for(lambda: not _conn(consumer)._refreshes, _CEILING_SEC)
         slow_state = consumer.status_of(entry).state
         kept = _conn(consumer).has_session(entry)
         # Неудачное перечитывание повторится только через срок свежести.
-        await consumer.astart_turn()
+        await _start_turn(consumer)
         no_retry = not _conn(consumer)._refreshes
         monkeypatch.setattr(
             stream_client, "_alist_tools_on_session", real_list
         )
         clock.advance(_TTL_SEC + 1)
-        await consumer.astart_turn()
+        await _start_turn(consumer)
         await wait_for(
             lambda: len(_requests(control, "tools/list")) == 2, _CEILING_SEC
         )
@@ -413,7 +418,7 @@ async def test_relist_failure_is_a_link_failure(
     clock.advance(_TTL_SEC + 1)
 
     with caplog.at_level(logging.WARNING, logger=connections_module.__name__):
-        assert await consumer.astart_turn() is False
+        assert await _start_turn(consumer) is False
         await wait_for(
             lambda: consumer.status_of(entry).state == STATE_FAILED,
             _CEILING_SEC,
@@ -424,7 +429,7 @@ async def test_relist_failure_is_a_link_failure(
     assert "перечитывание списка тулов" in caplog.text
     # Отказ связи виден на следующем входе в ход; ленивый потребитель
     # сам не переподключается.
-    assert await consumer.astart_turn() is True
+    assert await _start_turn(consumer) is True
     assert len(calls) == 2
 
 
@@ -447,7 +452,7 @@ async def _gated_relist(monkeypatch, reaper, clock, release):
         consumer.aensure(consumer.next_build(), settings), _CEILING_SEC
     )
     clock.advance(_TTL_SEC + 1)
-    await consumer.astart_turn()
+    await _start_turn(consumer)
     await wait_for(lambda: len(calls) == 2)
     return consumer, consumer.servers()["srv"]
 
@@ -507,7 +512,7 @@ async def test_close_cancels_relist(
     clock.advance(_TTL_SEC + 1)
 
     with bind_user_stop(UserStop()):
-        await consumer.astart_turn()
+        await _start_turn(consumer)
     await wait_for(lambda: len(seen) == 2)
     running = list(_conn(consumer)._refreshes.values())
     await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
@@ -598,7 +603,7 @@ async def test_turn_start_during_retry_series_adds_no_attempt(
     await wait_for(lambda: pauses == [1], _CEILING_SEC)
     clock.advance(30)
 
-    assert await consumer.astart_turn() is False
+    assert await _start_turn(consumer) is False
     assert len(attempts) == 1
     assert not _conn(consumer)._connects
 
