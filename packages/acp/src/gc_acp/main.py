@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, TextIO
 
 from gc_core.aio.agent import AsyncAgent
@@ -35,6 +37,7 @@ from gc_core.onboarding import explain_broken_config
 from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.settings import LoadedSettings
 from gc_core.stores import files_only_rejection
+from gc_core.tools.connect_mcp.exit_signals import kill_mcp_on_sigterm
 from gc_core.tools.connect_mcp.service import McpService
 
 from gc_acp.facade import AcpFacade
@@ -198,11 +201,29 @@ def build_facade(loaded: LoadedSettings, protocol_out: TextIO) -> AcpFacade:
 
 async def serve(loaded: LoadedSettings, protocol_out: TextIO) -> None:
     facade = build_facade(loaded, protocol_out)
+    with _sigterm_kills_mcp(getattr(facade, "mcp_service", None)):
+        try:
+            async for line in stdin_lines():
+                await facade.handle_line(line)
+        finally:
+            await facade.shutdown()
+
+
+@contextmanager
+def _sigterm_kills_mcp(service: McpService | None) -> Iterator[None]:
+    """Пока блок открыт, SIGTERM гасит процессы MCP аварийным путём
+    (спека §5.12); на выходе — безусловное гашение: прерванная остановка
+    фасада могла оставить процессы, а после штатной журнал удалён и
+    гасить нечего. Фасад без сервиса MCP — ничего не ставится."""
+    if service is None:
+        yield
+        return
+    restore_sigterm = kill_mcp_on_sigterm(service)
     try:
-        async for line in stdin_lines():
-            await facade.handle_line(line)
+        yield
     finally:
-        await facade.shutdown()
+        service.kill_processes_now()
+        restore_sigterm()
 
 
 async def _create_agent(

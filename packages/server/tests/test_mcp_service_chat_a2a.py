@@ -119,6 +119,9 @@ class _FakeService:
         if self._error is not None:
             raise self._error
 
+    def kill_processes_now(self) -> None:
+        self._events.append("service.kill")
+
 
 def _install_fake_service(monkeypatch, service) -> None:
     for module in (chat_surface_mod, a2a_surface_mod):
@@ -262,6 +265,7 @@ async def test_stop_turns_then_service_then_agents(
     assert events == [
         "turns.stop",
         "service.aclose",
+        "service.kill",
         "turns.stop",
         "agent0.aclose",
     ]
@@ -279,7 +283,7 @@ async def test_service_close_failure_does_not_break_stop(
     with caplog.at_level(logging.ERROR, logger="gc_server.surface"):
         await asyncio.wait_for(surface.astop(), _CEILING_SEC)
 
-    assert events == ["service.aclose"]
+    assert events == ["service.aclose", "service.kill"]
     assert "сервис не закрылся" in caplog.text
 
 
@@ -299,7 +303,7 @@ async def test_service_closes_when_facade_stop_fails(
     with pytest.raises(RuntimeError, match="фасад не остановился"):
         await asyncio.wait_for(surface.astop(), _CEILING_SEC)
 
-    assert events == ["service.aclose"]
+    assert events == ["service.aclose", "service.kill"]
 
 
 @_POSIX

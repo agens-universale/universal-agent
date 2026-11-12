@@ -10,9 +10,9 @@ CPU. Штатный выход Textual отсюда невозможен — о�
 сброс логов.
 
 Оба пути сюда — из отдельного потока-сторожа, главный поток не нужен:
-- SIGHUP: номер сигнала пишет в wakeup fd C-обработчик интерпретатора — из любого
-  потока, даже когда главный стоит в ожидании лока и Python-обработчик там не
-  выполнится;
+- сигнал (SIGHUP; у gc-ua ещё SIGTERM — спека §5.12): номер сигнала пишет в
+  wakeup fd C-обработчик интерпретатора — из любого потока, даже когда главный
+  стоит в ожидании лока и Python-обработчик там не выполнится;
 - сигнал не дошёл (лидер сессии его игнорирует, обёртка не пробрасывает): раз в
   POLL_S проверяем, жив ли терминал, в который рисует Textual (stderr).
 """
@@ -29,8 +29,14 @@ import threading
 import time
 from typing import Callable
 
+# Выход по мёртвому терминалу — EXIT_CODE, по сигналу сторожа — 128 + номер.
 EXIT_CODE = 128 + 1  # как у процесса, убитого SIGHUP
 POLL_S = 1.0  # период проверки терминала
+# Сигнал сторожа по умолчанию — обрыв терминала. На Windows SIGHUP нет: сторож
+# там не ставится (`install`), и сигналов у него нет.
+HANGUP_SIGNALS: tuple[int, ...] = (
+    (signal.SIGHUP,) if hasattr(signal, "SIGHUP") else ()
+)
 # Уборка идёт шагами, и каждый ограничен graceful-таймаутом супервизора (5 с)
 # независимо от числа демонов: все MCP-демоны разом, затем голос. Параллельно
 # хуки atexit закрывают stdio-MCP-серверы (браузер) — до ~15 с на сессию. Бюджет
@@ -70,18 +76,22 @@ class TerminalGuard:
         cleanup: Callable[[], None],
         *,
         force_kill: Callable[[], None] | None = None,
+        signals: tuple[int, ...] = HANGUP_SIGNALS,
     ) -> None:
         """`force_kill` — последний рубеж: если уборка не завершилась (на аварийном
         выходе — зависла, упала или не стартовала; на штатном — упала), он добивает
-        то, что она гасила. Однократный. Обязан не блокировать: сигнал и возврат."""
+        то, что она гасила. Однократный. Обязан не блокировать: сигнал и
+        возврат. `signals` — сигналы, по которым сторож выходит с уборкой
+        (код 128 + номер сигнала)."""
         self._cleanup = cleanup
         self._force_kill = force_kill
+        self._signals = tuple(signals)
         self._cleaned = False
         self._cleanup_done = False
         self._closed = False
         self._watcher: threading.Thread | None = None
         self._wake_r = self._wake_w = -1
-        self._previous_hup = None
+        self._previous_handlers: dict[int, object] = {}
         self._previous_wakeup = -1
         self.trigger: str | None = (
             None  # "signal" | "tty" — какой путь сработал
@@ -98,7 +108,10 @@ class TerminalGuard:
         # пишущий номер сигнала в wakeup fd. Локов в нём нет — дедлока не будет.
         # Унаследованный SIG_IGN (nohup) перекрываем осознанно: TUI без терминала
         # бесполезен.
-        self._previous_hup = signal.signal(signal.SIGHUP, lambda *_: None)
+        self._previous_handlers = {
+            signum: signal.signal(signum, lambda *_: None)
+            for signum in self._signals
+        }
         self._previous_wakeup = signal.set_wakeup_fd(
             self._wake_w, warn_on_full_buffer=False
         )
@@ -120,17 +133,20 @@ class TerminalGuard:
             if self._closed:
                 return
             # В wakeup fd пишутся все сигналы с Python-обработчиком (SIGWINCH,
-            # SIGTSTP, SIGCONT у Textual) — нас касается только SIGHUP.
-            if signal.SIGHUP in data:
+            # SIGTSTP, SIGCONT у Textual) — нас касаются только свои.
+            caught = next((s for s in self._signals if s in data), None)
+            if caught is not None:
                 self.trigger = "signal"
+                code = 128 + caught
             elif watch_tty and not _tty_alive(2):
                 self.trigger = "tty"
+                code = EXIT_CODE
             else:
                 continue
-            self._emergency_exit()
+            self._emergency_exit(code)
             return
 
-    def _emergency_exit(self) -> None:
+    def _emergency_exit(self, code: int = EXIT_CODE) -> None:
         """Своя уборка и хуки atexit — в двух потоках разом, с общим дедлайном:
         зависшая уборка не съедает время хуков. `_run_exitfuncs` — приватный, но
         тот же вызов, что делает интерпретатор на штатном выходе; публичного нет.
@@ -154,7 +170,7 @@ class TerminalGuard:
                 worker.join(max(0.0, deadline - time.monotonic()))
         finally:
             self._force_kill_if_unfinished()
-            os._exit(EXIT_CODE)
+            os._exit(code)
 
     def _force_kill_if_unfinished(self) -> None:
         """Последний рубеж — однократно и только если уборка не завершилась."""
@@ -183,8 +199,8 @@ class TerminalGuard:
 
     def close(self) -> None:
         """Штатный выход: снять сторожа, убраться, вернуть сигналы как были.
-        Обработчик возвращается ПОСЛЕ уборки — SIGHUP посреди неё её не оборвёт;
-        и даже если уборка упала."""
+        Обработчики возвращаются ПОСЛЕ уборки — сигнал посреди неё её не
+        оборвёт; и даже если уборка упала."""
         if self._watcher is None:
             self._finish_cleanup()
             return
@@ -198,12 +214,10 @@ class TerminalGuard:
         try:
             self._finish_cleanup()
         finally:
-            signal.signal(
-                signal.SIGHUP,
-                signal.SIG_DFL
-                if self._previous_hup is None
-                else self._previous_hup,
-            )
+            for signum, previous in self._previous_handlers.items():
+                signal.signal(
+                    signum, signal.SIG_DFL if previous is None else previous
+                )
             signal.set_wakeup_fd(self._previous_wakeup)
             os.close(self._wake_r)
             os.close(self._wake_w)

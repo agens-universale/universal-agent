@@ -172,6 +172,11 @@ class AcpFacade:
         self._pending = PendingOutbound()
         self._loop: asyncio.AbstractEventLoop | None = None
 
+    @property
+    def mcp_service(self) -> Any:
+        """Сервис MCP процесса; ``None`` — фасад без сервиса."""
+        return self._mcp_service
+
     async def handle_line(self, line: str) -> None:
         self._loop = asyncio.get_running_loop()
         incoming = parse_line(line)

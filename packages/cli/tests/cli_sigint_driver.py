@@ -81,6 +81,9 @@ class _Service:
         log(f"service.aclose {budget:.2f}")
         await asyncio.sleep(min(budget, 30))
 
+    def kill_processes_now(self) -> None:
+        log("service.kill")
+
 
 class _Executor:
     last_terminal_outcome = None

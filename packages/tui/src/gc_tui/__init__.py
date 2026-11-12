@@ -10,6 +10,7 @@ import argparse
 import importlib
 import importlib.util
 import os
+import signal
 import sys
 from typing import Optional, Sequence
 
@@ -429,8 +430,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Процессы серверов MCP окна — самыми первыми (спека §5.12): гашение по
         # журналу без цикла и замков, до 2 с, не бросает. На штатном выходе
         # `on_unmount` их уже закрыл, и гасить нечего; на аварийном (SIGHUP,
-        # мёртвый терминал) цикл агента может стоять, а `on_unmount` — идти
-        # параллельно: гашение с ним совместимо.
+        # SIGTERM, мёртвый терминал) цикл агента может стоять, а `on_unmount` —
+        # идти параллельно: гашение с ним совместимо.
         mcp_service.kill_processes_now()
         # Процессы индекса путей (git ls-files) — следом: поток сборки индекса — демон
         # и умрёт вместе с процессом, а сам git пережил бы программу, дочитывая
@@ -464,11 +465,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Textual навсегда встал на записи в него (см. gc_tui.services.terminal_guard).
     # Не успеет аварийная уборка в бюджет — сторож добьёт MCP-демонов этого запуска
     # перед выходом. Голос сюда не входит: сервис общий для нескольких TUI.
-    from gc_tui.services.terminal_guard import TerminalGuard
+    # SIGTERM — тем же путём, что обрыв терминала (спека §5.12): уборка и
+    # выход кодом 143; терминал, как и раньше при SIGTERM, не
+    # восстанавливается.
+    from gc_tui.services.terminal_guard import HANGUP_SIGNALS, TerminalGuard
 
     guard = TerminalGuard(
         _shutdown_runtime,
         force_kill=kill_mcp_daemons_now if auto_mcp else None,
+        signals=(*HANGUP_SIGNALS, signal.SIGTERM),
     )
     try:
         guard.install()

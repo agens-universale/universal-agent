@@ -78,6 +78,9 @@ class _FakeService:
         if self._fake.fail_close:
             raise RuntimeError("закрытие сервиса упало")
 
+    def kill_processes_now(self) -> None:
+        self._fake.events.append("service.kill")
+
 
 class _FakeMcp:
     """Записывающий двойник ``McpService``: настоящие имена методов."""
@@ -199,6 +202,7 @@ async def test_run_passes_consumer_and_closes_service(fake):
         "turn",
         "consumer.aclose",
         "service.aclose",
+        "service.kill",
         "aclose_clients",
     ]
 
@@ -240,6 +244,7 @@ async def test_failed_turn_closes_service(fake):
         "turn",
         "consumer.aclose",
         "service.aclose",
+        "service.kill",
         "aclose_clients",
     ]
 
@@ -332,6 +337,7 @@ async def test_slow_consumer_close_is_bounded(fake, monkeypatch):
             "turn",
             "consumer.aclose",
             "service.aclose",
+            "service.kill",
             "aclose_clients",
         ]
         assert 0.0 <= fake.budget < 0.05
@@ -358,6 +364,7 @@ async def test_init_passes_consumer_and_closes_service(
         "turn",
         "consumer.aclose",
         "service.aclose",
+        "service.kill",
         "aclose_clients",
     ]
 
@@ -628,5 +635,7 @@ def test_second_press_exits_without_waiting_sessions(scenario, tmp_path):
     assert any(line.endswith(" stop_run") for line in lines)
     assert _at(lines, "KeyboardInterrupt") - _at(lines, "SIGINT") < 4.0
     assert any(line.endswith(" service.aclose 0.00") for line in lines)
+    # Прерванное закрытие — и всё же гашение процессов (спека §5.12).
+    assert any(line.endswith(" service.kill") for line in lines)
     assert any(line.endswith(" aclose_clients") for line in lines)
     assert "Task was destroyed" not in err

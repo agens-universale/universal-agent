@@ -352,10 +352,14 @@ async def test_stop_closes_service(harness):
 class _FailingService:
     def __init__(self) -> None:
         self.calls = 0
+        self.kills = 0
 
     async def aclose(self) -> None:
         self.calls += 1
         raise RuntimeError("сервис не закрылся")
+
+    def kill_processes_now(self) -> None:
+        self.kills += 1
 
 
 async def test_service_close_failure_does_not_break_stop(harness, caplog):
@@ -368,6 +372,7 @@ async def test_service_close_failure_does_not_break_stop(harness, caplog):
 
     assert pruner.cancelled()
     assert surface._mcp_service.calls == 1
+    assert surface._mcp_service.kills == 1
     assert "сервис не закрылся" in caplog.text
 
 

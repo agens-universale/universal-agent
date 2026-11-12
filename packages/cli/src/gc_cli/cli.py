@@ -50,6 +50,7 @@ from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
 from gc_core.tools.connect_mcp.consumer import McpConsumer
 from gc_core.tools.connect_mcp.consumer_status import STATE_FAILED
+from gc_core.tools.connect_mcp.exit_signals import kill_mcp_on_sigterm
 from gc_core.tools.connect_mcp.registry import unavailable_line
 from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.turn.propose_plan import ProposePlan
@@ -663,17 +664,27 @@ async def _mcp_service_scope() -> AsyncIterator[McpConsumer]:
     тела выходит как есть, отказ закрытия его не подменяет. Прерванный
     прогон (отмена, ``KeyboardInterrupt``) закрывает MCP без бюджета:
     выход не ждёт глухих серверов дольше отсрочки сервиса.
+
+    SIGTERM на всё время области гасит процессы MCP аварийным путём
+    (спека §5.12). После закрытия — безусловное гашение: закрытие,
+    прерванное отменой или вторым Ctrl+C, могло оставить процессы, а
+    после штатного журнал удалён и гасить нечего.
     """
     service = McpService(connect_on_start=True, wait_all=True)
-    consumer = service.open_consumer("cli")
-    budget = _MCP_CLOSE_BUDGET_SEC
+    restore_sigterm = kill_mcp_on_sigterm(service)
     try:
-        yield consumer
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        budget = 0.0
-        raise
+        consumer = service.open_consumer("cli")
+        budget = _MCP_CLOSE_BUDGET_SEC
+        try:
+            yield consumer
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            budget = 0.0
+            raise
+        finally:
+            await _aclose_mcp(service, consumer, budget)
     finally:
-        await _aclose_mcp(service, consumer, budget)
+        service.kill_processes_now()
+        restore_sigterm()
 
 
 async def _aclose_mcp(
