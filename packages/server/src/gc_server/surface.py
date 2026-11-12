@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -19,6 +20,8 @@ from gc_core.thread_store import sanitize_system_id
 
 from gc_server.config import RESERVED_SYSTEMS
 
+logger = logging.getLogger(__name__)
+
 
 class Surface(Protocol):
     name: str
@@ -28,6 +31,19 @@ class Surface(Protocol):
     async def astart(self) -> None: ...
 
     async def astop(self) -> None: ...
+
+
+async def aclose_mcp_service(surface: str, service: Any) -> None:
+    """Закрыть сервис MCP поверхности — последний шаг её остановки.
+
+    Зовётся на цикле процесса после остановки фасадов: сервис закрывает
+    потребителей агентов, чей ``aclose`` не случился. Повторный вызов
+    безвреден. Отказ — в лог: остановку процесса он не срывает.
+    """
+    try:
+        await service.aclose()
+    except Exception:
+        logger.exception("%s: закрытие сервиса MCP", surface)
 
 
 def server_version() -> str:

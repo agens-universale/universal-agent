@@ -43,7 +43,7 @@ class CompletionsFacade:
         settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         section: ChatConfig | None = None,
         threads: Threads | None = None,
@@ -52,7 +52,7 @@ class CompletionsFacade:
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._threads = threads or Threads.from_settings(settings)
         self.auth_token = section.auth_token or ""
@@ -90,7 +90,7 @@ class CompletionsFacade:
             return await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=self._tools_cache,
+                mcp_service=self._mcp_service,
                 os_backend=self._os_backend,
             )
 

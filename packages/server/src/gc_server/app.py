@@ -131,24 +131,25 @@ class ServerRuntime:
         surface: str | None = None,
         ask_human_suspends: bool = False,
     ) -> Callable[..., Any]:
-        """Фабрика агентов фасадов chat и a2a: создание — по одному (MCP-
-        дискавери не размножается), хранилища — процесса (свой агент
-        поверхности ``surface``, если задан). ``ask_human_suspends`` —
-        вопрос модели завершает ход (A2A)."""
+        """Фабрика агентов фасадов chat и a2a: создание — по одному,
+        хранилища — процесса (свой агент поверхности ``surface``, если
+        задан). ``mcp_service`` — сервис MCP поверхности: агент открывает
+        у него своего потребителя и закрывает его в ``aclose``.
+        ``ask_human_suspends`` — вопрос модели завершает ход (A2A)."""
         force_legacy = cli_forces_legacy_model(settings)
 
         async def factory(
             agent_settings: LoadedSettings,
             *,
             auth_connector: Any,
-            tools_cache: Any,
+            mcp_service: Any,
             os_backend: Any,
         ) -> AsyncAgent:
             async with self._create_lock:
                 return await AsyncAgent.create(
                     agent_settings,
                     auth_connector=auth_connector,
-                    tools_cache=tools_cache,
+                    mcp_service=mcp_service,
                     os_backend=os_backend,
                     force_legacy=force_legacy,
                     ask_human_suspends=ask_human_suspends,
