@@ -34,7 +34,6 @@ class ServerStatus:
     reason: str = ""
     retry: int = 0
     from_catalog: bool = False
-    checked_at: float | None = None
     tools: tuple = ()
 
 
@@ -73,13 +72,12 @@ def shared_hold_since(entry: ServerEntry) -> float | None:
     return max(failure.at, entry.interrupted_at)
 
 
-def _failed(failure: Failure, entry: ServerEntry, retry: int = 0):
+def _failed(failure: Failure, retry: int = 0):
     return ServerStatus(
         STATE_FAILED,
         reason_code=failure.code,
         reason=failure.reason,
         retry=retry,
-        checked_at=entry.checked_at,
     )
 
 
@@ -101,18 +99,15 @@ def server_status(
     часы сервиса; ``closed`` — потребитель закрыт.
     """
     if connected:
-        return ServerStatus(
-            STATE_CONNECTED, checked_at=entry.checked_at, tools=entry.tools
-        )
+        return ServerStatus(STATE_CONNECTED, tools=entry.tools)
     if attempting:
         return ServerStatus(
             STATE_CONNECTING,
             from_catalog=entry.tools_known,
-            checked_at=entry.checked_at,
             tools=entry.tools,
         )
     if own is not None and not (entry.tools_known and _is_interrupted(own)):
-        return _failed(own, entry, retry)
+        return _failed(own, retry)
     return _idle_status(entry, now, closed)
 
 
@@ -129,16 +124,15 @@ def _idle_status(entry: ServerEntry, now: float, closed: bool) -> ServerStatus:
         return ServerStatus(
             STATE_CACHED,
             from_catalog=True,
-            checked_at=entry.checked_at,
             tools=entry.tools,
         )
     held = shared_hold_since(entry)
     if held is not None and now - held < ATTEMPT_INTERVAL_SEC:
-        return _failed(shared_failure(entry), entry)
+        return _failed(shared_failure(entry))
     if closed:
-        return _failed(Failure(now, "other", INTERRUPTED_REASON), entry)
+        return _failed(Failure(now, "other", INTERRUPTED_REASON))
     # Первая попытка начнётся в той же сверке.
-    return ServerStatus(STATE_CONNECTING, checked_at=entry.checked_at)
+    return ServerStatus(STATE_CONNECTING)
 
 
 __all__ = [
