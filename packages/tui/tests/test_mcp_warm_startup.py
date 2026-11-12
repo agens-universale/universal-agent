@@ -50,4 +50,6 @@ async def test_poll_renders_indicator_without_active_task(tmp_path):
         app._mcp_progress = prog
         scr._poll_active()
         await pilot.pause()
-        assert scr._mcp_status_row is not None
+        header = scr.query_one("#brand-block")
+        text = header.render().laid_out(header.content_region.width).plain
+        assert text.splitlines()[-1] == "• подключаю MCP 0/1"

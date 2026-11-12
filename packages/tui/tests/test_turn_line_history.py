@@ -1610,12 +1610,16 @@ async def test_live_and_reopen_turn_line_order_equal(tmp_path):
 async def test_idle_gap_is_one_row(tmp_path, failed):
     """Между низом строки итога (у ошибки с влезающей причиной — та же
     одна строка) и рамкой поля ввода — ровно одна пустая строка: нижний
-    зазор ленты, бара нет."""
+    зазор ленты, бара нет. Лента переполнена: зазор меряется у её низа,
+    а не под короткой лентой, которая до поля ввода не достаёт."""
     _write_thread(
         tmp_path, tui={"status": "failed" if failed else "completed"}
     )
     thread = _Thread(tmp_path)
-    thread.messages(_reply("u1"), _answer("a1"))
+    earlier = [
+        m for i in range(5) for m in (_reply(f"p{i}"), _answer(f"q{i}"))
+    ]
+    thread.messages(*earlier, _reply("u1"), _answer("a1"))
     error = {"type": "ReadError", "message": "ReadError: boom"}
     if failed:
         thread.record(1, "u1", status="error", error=error)
@@ -1626,6 +1630,8 @@ async def test_idle_gap_is_one_row(tmp_path, failed):
         await pilot.pause()
         line = _fresh_line(scr)
         assert line.region.height == 1
+        trace = scr.query_one("#trace")
+        assert trace.virtual_size.height > trace.size.height
         input_row = scr.query_one("#input-row")
         assert input_row.region.y - line.region.bottom == 1
 
