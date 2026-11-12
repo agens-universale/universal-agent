@@ -9,17 +9,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 
 import pytest
 from gc_core.mcp_session_owner import use_owner
 from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp.client import _MCP_SESSIONS
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CACHED,
     STATE_CONNECTED,
     STATE_CONNECTING,
     STATE_FAILED,
 )
+from gc_core.tools.connect_mcp.server_identity import session_key
 from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.connect_mcp.service_records import McpServiceClosed
 from gc_testkit.mcp import (
@@ -80,6 +83,21 @@ def _state(consumer, key: str) -> str:
 
 def _with_args(cfg: dict, *extra: str) -> dict:
     return {**cfg, "args": [*cfg["args"], *extra]}
+
+
+def _gate_close(consumer, key: str):
+    """Закрытие сессии сервера ``key`` ждёт, пока тест откроет ворота."""
+    gate, entered = asyncio.Event(), asyncio.Event()
+    real = consumer._aclose_session
+
+    async def gated(entry):
+        if entry.key == key:
+            entered.set()
+            await gate.wait()
+        await real(entry)
+
+    consumer._aclose_session = gated
+    return gate, entered
 
 
 async def test_changing_one_of_three_touches_only_it(
@@ -534,3 +552,91 @@ async def test_call_in_flight_on_removed_server_ends_with_error(
     assert not isinstance(error, AssertionError)
     await _settle(consumer)
     assert pid in exits(control)
+
+
+async def test_rest_close_is_tracked_by_key(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Закрытие остатка упавшей попытки числится за ключом сессии: сервер,
+    убранный и сразу возвращённый, ждёт его до новой сессии."""
+    control = tmp_path / "a.json"
+    set_behavior(control, fail_start=True)
+    settings = _settings({"a": stdio_cfg(control)})
+    consumer = _open(mcp_reaper, McpService(connect_on_start=True))
+    gate, entered = _gate_close(consumer, "a")
+    building = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), settings)
+    )
+    await asyncio.wait_for(entered.wait(), _CEILING_SEC)
+    entry = consumer.servers()["a"]
+    key = session_key(entry.key, entry.fingerprint)
+    assert consumer._closing_keys.get(key)
+
+    await _ensure(consumer, _settings({}))
+    await asyncio.wait_for(building, _CEILING_SEC)
+    set_behavior(control)
+    # Отказ попытки не записан (её сняли посреди закрытия остатка):
+    # возвращённый сервер без тулов сборка ждёт, а попытка ждёт закрытие.
+    readding = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), settings)
+    )
+    await wait_for(lambda: bool(consumer._connects))
+    gate.set()
+    await asyncio.wait_for(readding, _CEILING_SEC)
+    await _settle(consumer)
+    await wait_for(lambda: consumer.status_of(entry).state == STATE_CONNECTED)
+
+    _, new_pid = launches(control)
+    assert alive(new_pid)
+    assert consumer.has_session(entry)
+
+
+async def test_swallowed_cancel_does_not_leave_session_key(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Попытка, до которой отмена не дошла, успела записать сессию: после
+    ухода сервера ключа нет, и возвращённый сервер подключается заново."""
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    consumer = _open(mcp_reaper, McpService(connect_on_start=False))
+    real = consumer._alist_and_record
+
+    async def swallowing(entry):
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.Event().wait()
+        with consumer._lock:
+            consumer._sessions.add(session_key(entry.key, entry.fingerprint))
+
+    consumer._alist_and_record = swallowing
+    building = asyncio.create_task(
+        consumer.aensure(consumer.next_build(), settings)
+    )
+    await wait_for(lambda: bool(consumer._connects))
+    await _ensure(consumer, _settings({}))
+    await asyncio.wait_for(building, _CEILING_SEC)
+    await _settle(consumer)
+
+    assert consumer._sessions == set()
+    consumer._alist_and_record = real
+    await _ensure(consumer, settings)
+    assert _state(consumer, "a") == STATE_CONNECTED
+    assert len(launches(control)) == 1
+
+
+async def test_old_close_keeps_legacy_session_of_changed_server(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Идентификатор legacy-http ключуется именем: закрытие старой записи
+    не снимает его у изменённого сервера с тем же ключом."""
+    old = stdio_cfg(tmp_path / "a.json")
+    new = _with_args(old, "--changed")
+    for cfg in (old, new):
+        seed_catalog(_settings({"a": cfg}), "a", ["echo"])
+    consumer = _open(mcp_reaper, McpService(connect_on_start=False))
+    await _ensure(consumer, _settings({"a": old}))
+    _MCP_SESSIONS[(consumer.owner, "a")] = "sid-new"
+
+    await _ensure(consumer, _settings({"a": new}))
+    await _settle(consumer)
+
+    assert _MCP_SESSIONS.get((consumer.owner, "a")) == "sid-new"

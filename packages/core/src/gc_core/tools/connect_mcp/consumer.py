@@ -124,8 +124,8 @@ class McpConsumer:
     ``_series`` — серия повторов; ``_failures`` — своя последняя неудачная
     или прерванная попытка; ``_retry`` — номер повтора серии; ``_closing`` —
     закрытие остатков сессий после отказа или отмены попытки и сессий
-    серверов, ушедших из набора; ``_closing_keys`` — закрытие ушедшего
-    сервера по ключу: новое подключение того же ключа его дожидается.
+    серверов, ушедших из набора; ``_closing_keys`` — те же закрытия по
+    ключу сессии: новое подключение ключа дожидается всех его закрытий.
     ``_servers`` — набор (записи серверов последней начатой сборки),
     ``_build`` — последний выданный номер сборки, ``_pinned`` —
     закреплённый срез ``{ключ: (отпечаток, статус)}``.
@@ -147,7 +147,7 @@ class McpConsumer:
         self._failures: dict[str, Failure] = {}
         self._retry: dict[str, int] = {}
         self._closing: set[asyncio.Task] = set()
-        self._closing_keys: dict[str, asyncio.Task] = {}
+        self._closing_keys: dict[str, set[asyncio.Task]] = {}
         self._build = 0
         self._servers: dict[str, ServerEntry] = {}
         self._pinned: dict[str, tuple[str, ServerStatus]] = {}
@@ -232,10 +232,10 @@ class McpConsumer:
             if running is not None and not running.done():
                 return running
             started = self._service._clock()
-            # Закрытие прежней сессии того же ключа (сервер убрали из
-            # набора и вернули) должно кончиться до новой сессии: иначе
-            # оно закрыло бы её, а сервер с одним экземпляром отказал бы.
-            closing = self._closing_keys.get(key)
+            # Закрытия прежней сессии того же ключа (сервер убрали из
+            # набора и вернули) должны кончиться до новой сессии: иначе
+            # они закрыли бы её, а сервер с одним экземпляром отказал бы.
+            closing = set(self._closing_keys.get(key, ()))
             task = asyncio.get_running_loop().create_task(
                 self._aconnect(entry, started, closing),
                 context=contextvars.Context(),
@@ -248,13 +248,13 @@ class McpConsumer:
         self,
         entry: ServerEntry,
         started: float,
-        closing: asyncio.Task | None,
+        closing: set[asyncio.Task],
     ) -> bool:
         key = _session_key_of(entry)
         with use_owner(self.owner), use_call_slots(self._slots):
             try:
-                if closing is not None:
-                    await asyncio.wait({closing})
+                if closing:
+                    await asyncio.wait(closing)
                 await self._alist_and_record(entry)
                 return True
             except asyncio.CancelledError:
@@ -310,25 +310,24 @@ class McpConsumer:
         task = asyncio.get_running_loop().create_task(
             self._aclose_session(entry), context=contextvars.Context()
         )
-        self._track_closing(task)
+        self._track_closing(task, _session_key_of(entry))
         await asyncio.shield(task)
 
-    def _track_closing(
-        self, task: asyncio.Task, key: str | None = None
-    ) -> None:
-        """Закрытие числится за потребителем (его ждёт ``aclose``); с
-        ``key`` — ещё и за ключом сессии ушедшего сервера."""
+    def _track_closing(self, task: asyncio.Task, key: str) -> None:
+        """Закрытие числится за потребителем (его ждёт ``aclose``) и за
+        ключом сессии (его ждёт новое подключение этого ключа)."""
         with self._lock:
             self._closing.add(task)
-            if key is not None:
-                self._closing_keys[key] = task
+            self._closing_keys.setdefault(key, set()).add(task)
         task.add_done_callback(partial(self._forget_closing, key))
 
-    def _forget_closing(self, key: str | None, task: asyncio.Task) -> None:
+    def _forget_closing(self, key: str, task: asyncio.Task) -> None:
         with self._lock:
             self._closing.discard(task)
-            if key is not None and self._closing_keys.get(key) is task:
-                del self._closing_keys[key]
+            pending = self._closing_keys.get(key, set())
+            pending.discard(task)
+            if not pending:
+                self._closing_keys.pop(key, None)
 
     async def _aclose_session(self, entry: ServerEntry) -> None:
         """Сессия сервера у потребителя — во всех трёх реестрах."""
@@ -346,15 +345,22 @@ class McpConsumer:
                         self.label,
                         _describe(exc, entry),
                     )
-            forget_session(entry.key)
+            # Идентификатор legacy-http ключуется именем сервера: у
+            # изменённого сервера (тот же ключ, другой отпечаток) он уже
+            # принадлежит новой записи набора.
+            with self._lock:
+                current = self._servers.get(entry.key)
+            if current is None or current is entry:
+                forget_session(entry.key)
 
     def _on_connect_done(
         self, entry: ServerEntry, started: float, task: asyncio.Task
     ) -> None:
         key = _session_key_of(entry)
         with self._lock:
-            # Попытку сервера, ушедшего из набора, сверка уже сняла с
-            # учёта: её отмена исходом не считается.
+            # Отмена закрытием потребителя — «подключение прервано» (идёт
+            # в правило 30 с); попытку, снятую сверкой, ``_leave`` уже
+            # убрал из ``_connects``: её отмена отказом не считается (§5.3).
             own = self._connects.get(key) is task
             if own:
                 del self._connects[key]
@@ -523,16 +529,15 @@ class McpConsumer:
         with self._lock:
             work = {self._connects.pop(key, None), self._series.pop(key, None)}
             work.discard(None)
-            earlier = self._closing_keys.get(key)
+            earlier = set(self._closing_keys.get(key, ()))
             self._retry.pop(key, None)
             self._sessions.discard(key)
             self._ok.discard(key)
         for task in work:
             task.cancel()
-        if earlier is not None:
-            work.add(earlier)
         closing = asyncio.get_running_loop().create_task(
-            self._aclose_left(entry, work), context=contextvars.Context()
+            self._aclose_left(entry, work | earlier),
+            context=contextvars.Context(),
         )
         self._track_closing(closing, key)
 
@@ -541,6 +546,9 @@ class McpConsumer:
     ) -> None:
         if work:
             await asyncio.wait(work)
+        # Отмена могла не дойти до попытки (готовый результат
+        # ``wait_for`` на 3.11): тогда она успела записать сессию.
+        self._drop_connection(_session_key_of(entry))
         await self._aclose_session(entry)
 
     def _connect_for_build(self, entry: ServerEntry) -> asyncio.Task | None:
