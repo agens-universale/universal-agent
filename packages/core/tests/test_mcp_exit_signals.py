@@ -172,7 +172,8 @@ async def test_second_sigterm_exits_at_once(mcp_home, tmp_path, mcp_reaper):
         assert host.poll() is None  # первое гашение ещё ждёт сервер
         host.send_signal(signal.SIGTERM)
 
-        assert await _exit_status(host, 1.5) == -signal.SIGTERM
+        # Окно короче остатка ожидания глухого сервера (до 2 с от первого).
+        assert await _exit_status(host, 1.0) == -signal.SIGTERM
 
 
 @pytest.mark.parametrize("attempt", range(5))
