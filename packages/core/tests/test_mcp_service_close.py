@@ -39,9 +39,10 @@ from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_testkit.mcp import (
     FakeClock,
     alive,
+    closed_port_cfg,
+    count_attempts,
     events,
     exits,
-    free_port,
     launches,
     set_behavior,
     stdio_cfg,
@@ -83,13 +84,6 @@ def _deaf(control) -> dict:
     эскалации."""
     set_behavior(control, ignore_term=True, ignore_eof=True)
     return stdio_cfg(control)
-
-
-def _closed_port_cfg() -> dict:
-    return {
-        "transport": "stream_http",
-        "url": f"http://127.0.0.1:{free_port()}",
-    }
 
 
 async def _ensure(consumer, settings) -> None:
@@ -158,19 +152,6 @@ def _count_consumer_closes(monkeypatch) -> list[str]:
 
     monkeypatch.setattr(McpConsumer, "aclose", counting)
     return closes
-
-
-def _count_attempts(monkeypatch) -> list[str]:
-    """Каждое обращение потребителя к серверу; транспорт настоящий."""
-    calls: list[str] = []
-    real = connections_module.alist_raw_tools
-
-    async def counting(server_key, server_cfg, *, timeout):
-        calls.append(server_key)
-        return await real(server_key, server_cfg, timeout=timeout)
-
-    monkeypatch.setattr(connections_module, "alist_raw_tools", counting)
-    return calls
 
 
 class _ParkedSleep:
@@ -302,8 +283,8 @@ async def test_close_cancels_background_retries(
 ):
     clock = FakeClock()
     sleep = _ParkedSleep(clock)
-    attempts = _count_attempts(monkeypatch)
-    settings = _settings({"srv": _closed_port_cfg()})
+    attempts = count_attempts(monkeypatch)
+    settings = _settings({"srv": closed_port_cfg()})
     service = mcp_reaper.track(
         McpService(connect_on_start=True, clock=clock.now, sleep=sleep)
     )

@@ -47,8 +47,9 @@ from gc_core.user_stop import UserStop, bind_user_stop, current_user_stop
 from gc_core.utils.logging_module import release_run_logger
 from gc_testkit.mcp import (
     FakeClock,
+    closed_port_cfg,
+    connections_of,
     events,
-    free_port,
     launches,
     set_behavior,
     stdio_cfg,
@@ -110,24 +111,12 @@ def _finish(n: int) -> dict:
     return assistant_tool_call("turn_finish", _FINISH_ARGS, f"fin-{n}")
 
 
-def _closed_port_cfg() -> dict:
-    return {
-        "transport": "stream_http",
-        "url": f"http://127.0.0.1:{free_port()}",
-    }
-
-
 def _consumer(reaper, clock: FakeClock, *, on_start: bool = True):
     """Потребитель сервиса с подставными часами; закроет уборка."""
     service = McpService(
         connect_on_start=on_start, clock=clock.now, sleep=clock.sleep
     )
     return reaper.track(service.open_consumer("окно"))
-
-
-def _conn(consumer):
-    """Соединения потребителя — владелец его состояния."""
-    return consumer._connections
 
 
 @contextlib.asynccontextmanager
@@ -252,7 +241,7 @@ async def test_changed_tool_list_is_visible_on_next_turn(
         set_behavior(control, tools=["echo"])
         entry = consumer.servers()["srv"]
         assert await asyncio.wait_for(
-            _conn(consumer).start_connect(entry), _CEILING_SEC
+            connections_of(consumer).start_connect(entry), _CEILING_SEC
         )
         await _turn(executor, "t2")
 
@@ -336,7 +325,7 @@ async def test_stale_network_entry_is_relisted_over_session(
                 lambda: len(_requests(control, "tools/list")) == 2,
                 _CEILING_SEC,
             )
-            await wait_for(lambda: not _conn(consumer)._refreshes)
+            await wait_for(lambda: not connections_of(consumer)._refreshes)
             entry = consumer.servers()["srv"]
             checked_at = entry.checked_at
             state = consumer.status_of(entry).state
@@ -378,12 +367,14 @@ async def test_slow_relist_keeps_live_session(
         clock.advance(_TTL_SEC + 1)
 
         assert await _start_turn(consumer) is False
-        await wait_for(lambda: not _conn(consumer)._refreshes, _CEILING_SEC)
+        await wait_for(
+            lambda: not connections_of(consumer)._refreshes, _CEILING_SEC
+        )
         slow_state = consumer.status_of(entry).state
-        kept = _conn(consumer).has_session(entry)
+        kept = connections_of(consumer).has_session(entry)
         # Неудачное перечитывание повторится только через срок свежести.
         await _start_turn(consumer)
-        no_retry = not _conn(consumer)._refreshes
+        no_retry = not connections_of(consumer)._refreshes
         monkeypatch.setattr(
             stream_client, "_alist_tools_on_session", real_list
         )
@@ -414,7 +405,7 @@ async def test_relist_failure_is_a_link_failure(
         return [{"name": "echo"}]
 
     monkeypatch.setattr(connections_module, "alist_raw_tools", fake_list)
-    settings = _settings({"srv": _closed_port_cfg()})
+    settings = _settings({"srv": closed_port_cfg()})
     consumer = _consumer(mcp_reaper, clock, on_start=False)
     await asyncio.wait_for(
         consumer.aensure(consumer.next_build(), settings), _CEILING_SEC
@@ -429,7 +420,7 @@ async def test_relist_failure_is_a_link_failure(
             lambda: consumer.status_of(entry).state == STATE_FAILED,
             _CEILING_SEC,
         )
-        await wait_for(lambda: not _conn(consumer)._refreshes)
+        await wait_for(lambda: not connections_of(consumer)._refreshes)
 
     assert len(calls) == 2
     assert "перечитывание списка тулов" in caplog.text
@@ -459,7 +450,7 @@ async def test_bad_list_on_relist_is_protocol_failure(
     monkeypatch.setattr(
         registry_module, "resolve_mcp_client", lambda *a, **k: _Client()
     )
-    settings = _settings({"srv": _closed_port_cfg()})
+    settings = _settings({"srv": closed_port_cfg()})
     consumer = _consumer(mcp_reaper, clock, on_start=False)
     await asyncio.wait_for(
         consumer.aensure(consumer.next_build(), settings), _CEILING_SEC
@@ -473,7 +464,7 @@ async def test_bad_list_on_relist_is_protocol_failure(
         lambda: consumer.status_of(entry).state == STATE_FAILED,
         _CEILING_SEC,
     )
-    await wait_for(lambda: not _conn(consumer)._refreshes)
+    await wait_for(lambda: not connections_of(consumer)._refreshes)
 
     assert answers == []
     assert consumer.status_of(entry).reason_code == "protocol"
@@ -495,7 +486,7 @@ async def _gated_relist(monkeypatch, reaper, clock, release):
 
     monkeypatch.setattr(connections_module, "alist_raw_tools", fake_list)
     consumer = _consumer(reaper, clock, on_start=False)
-    settings = _settings({"srv": _closed_port_cfg()})
+    settings = _settings({"srv": closed_port_cfg()})
     await asyncio.wait_for(
         consumer.aensure(consumer.next_build(), settings), _CEILING_SEC
     )
@@ -514,11 +505,11 @@ async def test_relist_over_dropped_connection_is_not_a_failure(
     )
 
     # Соединение сняли за время списка (сбой вызова, сверка).
-    await asyncio.wait_for(_conn(consumer).adrop(entry), _CEILING_SEC)
+    await asyncio.wait_for(connections_of(consumer).adrop(entry), _CEILING_SEC)
     release.set()
-    await wait_for(lambda: not _conn(consumer)._refreshes)
+    await wait_for(lambda: not connections_of(consumer)._refreshes)
 
-    assert _conn(consumer).own_failure(entry) is None
+    assert connections_of(consumer).own_failure(entry) is None
     assert entry.last_failure is None
 
 
@@ -528,7 +519,7 @@ async def test_server_leaving_set_cancels_relist(
     consumer, entry = await _gated_relist(
         monkeypatch, mcp_reaper, FakeClock(), asyncio.Event()
     )
-    [running] = _conn(consumer)._refreshes.values()
+    [running] = connections_of(consumer)._refreshes.values()
 
     await asyncio.wait_for(
         consumer.aensure(consumer.next_build(), _settings({})), _CEILING_SEC
@@ -552,7 +543,7 @@ async def test_close_cancels_relist(
         return [{"name": "echo"}]
 
     monkeypatch.setattr(connections_module, "alist_raw_tools", fake_list)
-    settings = _settings({"srv": _closed_port_cfg()})
+    settings = _settings({"srv": closed_port_cfg()})
     consumer = _consumer(mcp_reaper, clock, on_start=False)
     await asyncio.wait_for(
         consumer.aensure(consumer.next_build(), settings), _CEILING_SEC
@@ -562,7 +553,7 @@ async def test_close_cancels_relist(
     with bind_user_stop(UserStop()):
         await _start_turn(consumer)
     await wait_for(lambda: len(seen) == 2)
-    running = list(_conn(consumer)._refreshes.values())
+    running = list(connections_of(consumer)._refreshes.values())
     await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
     assert len(running) == 1
@@ -591,7 +582,7 @@ async def test_resume_after_question_rereads_the_set(
         set_behavior(control, tools=["echo"])
         entry = consumer.servers()["srv"]
         assert await asyncio.wait_for(
-            _conn(consumer).start_connect(entry), _CEILING_SEC
+            connections_of(consumer).start_connect(entry), _CEILING_SEC
         )
         await asyncio.wait_for(
             executor.arun([], answer="B", thread_id="t1", system="cli"),
@@ -624,7 +615,9 @@ async def test_failed_server_gets_attempt_on_turn_start(
         clock.advance(30)
         await _turn(executor, "t3")
         await wait_for(lambda: len(launches(control)) == 2, _CEILING_SEC)
-        await wait_for(lambda: not _conn(consumer)._connects, _CEILING_SEC)
+        await wait_for(
+            lambda: not connections_of(consumer)._connects, _CEILING_SEC
+        )
 
     assert before == 1
 
@@ -640,7 +633,7 @@ async def test_turn_start_during_retry_series_adds_no_attempt(
         await asyncio.Event().wait()
 
     attempts = _count_lists(monkeypatch)
-    settings = _settings({"srv": _closed_port_cfg()})
+    settings = _settings({"srv": closed_port_cfg()})
     service = McpService(
         connect_on_start=True, clock=clock.now, sleep=parked_sleep
     )
@@ -653,7 +646,7 @@ async def test_turn_start_during_retry_series_adds_no_attempt(
 
     assert await _start_turn(consumer) is False
     assert len(attempts) == 1
-    assert not _conn(consumer)._connects
+    assert not connections_of(consumer)._connects
 
 
 @pytest.mark.parametrize("resettable", [True, False])
@@ -753,7 +746,7 @@ async def test_failed_rebuild_is_retried_on_next_turn(
         set_behavior(control, tools=["echo"])
         entry = consumer.servers()["srv"]
         assert await asyncio.wait_for(
-            _conn(consumer).start_connect(entry), _CEILING_SEC
+            connections_of(consumer).start_connect(entry), _CEILING_SEC
         )
         await _turn(executor, "t1")
         await _turn(executor, "t2")

@@ -42,6 +42,7 @@ from gc_core.tools.mcp_snapshot import (
 from gc_testkit.mcp import (
     FakeClock,
     IsolatedBackend,
+    connections_of,
     launches,
     seed_catalog,
     set_behavior,
@@ -58,11 +59,6 @@ pytestmark = pytest.mark.skipif(
 _CEILING_SEC = 30.0
 _ECHO = mcp_tool_full_name("a", "echo")
 _NAP = mcp_tool_full_name("a", "nap")
-
-
-def _conn(consumer):
-    """Соединения потребителя — владелец его состояния."""
-    return consumer._connections
 
 
 def _settings(servers: dict, **extra):
@@ -236,7 +232,7 @@ async def test_view_is_pinned_until_next_pin(
     monkeypatch.setattr(connections_module, "alist_raw_tools", refused)
     entry = consumer.servers()["a"]
     connected = await asyncio.wait_for(
-        _conn(consumer).start_connect(entry), _CEILING_SEC
+        connections_of(consumer).start_connect(entry), _CEILING_SEC
     )
     second = await _view(consumer, settings)
     changed = consumer.pin()
@@ -367,7 +363,7 @@ async def test_overlay_matches_build_snapshot(
     snap0, status0 = _build_snapshot(await _view(consumer, both), both)
     entry = consumer.servers()["a"]
     assert await asyncio.wait_for(
-        _conn(consumer).start_connect(entry), _CEILING_SEC
+        connections_of(consumer).start_connect(entry), _CEILING_SEC
     )
 
     snap, status = overlay_service_statuses(

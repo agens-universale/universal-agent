@@ -37,6 +37,7 @@ from gc_testkit.mcp import (
     FakeClock,
     alive,
     children,
+    connections_of,
     events,
     launches,
     seed_catalog,
@@ -98,11 +99,6 @@ def _settings(servers: dict, trace: str = ""):
             **runtime,
         }
     )
-
-
-def _conn(consumer):
-    """Соединения потребителя — владелец его состояния."""
-    return consumer._connections
 
 
 def _consumer(reaper, clock: FakeClock, *, on_start: bool = True):
@@ -358,12 +354,12 @@ async def test_next_turn_reconnects_by_policy_without_30s_rule(
     # Часы не сдвигались: отказ закрыл бы подключение на 30 с.
     assert status.state == STATE_CACHED
     assert status.tools == entry.tools
-    assert _conn(consumer).own_failure(entry) is None
+    assert connections_of(consumer).own_failure(entry) is None
     assert entry.last_failure is None
-    assert _conn(consumer).may_connect(entry)
+    assert connections_of(consumer).may_connect(entry)
 
     await asyncio.wait_for(consumer.astart_turn(), 1)
-    _connected, attempt = _conn(consumer).attempt_of(entry)
+    _connected, attempt = connections_of(consumer).attempt_of(entry)
     # «На старте» вход в ход назначает попытку, «при первом вызове» — нет.
     assert (attempt is not None) is on_start
     out = await _echo(consumer, settings)
@@ -386,9 +382,9 @@ async def test_turn_end_during_connect_keeps_attempt(
     await _ensure(consumer, settings)
     entry = consumer.servers()["srv"]
     assert launches(control) == []
-    waiting = _conn(consumer).start_connect(entry)
+    waiting = connections_of(consumer).start_connect(entry)
     await wait_for(lambda: bool(launches(control)), _CEILING_SEC)
-    assert _conn(consumer).attempt_of(entry)[0] is False
+    assert connections_of(consumer).attempt_of(entry)[0] is False
 
     await _end_turn(consumer)
 
@@ -396,7 +392,7 @@ async def test_turn_end_during_connect_keeps_attempt(
     # не делает.
     assert await asyncio.wait_for(waiting, _CEILING_SEC)
     assert consumer.status_of(entry).state == STATE_CONNECTED
-    assert _conn(consumer).own_failure(entry) is None
+    assert connections_of(consumer).own_failure(entry) is None
     assert entry.last_failure is None
 
 
@@ -428,7 +424,7 @@ async def test_call_in_flight_at_turn_end_is_not_a_failure(
         call.result()
     assert caught.value.error.message == SESSION_LOST_TEXT
     assert consumer.status_of(entry).state == STATE_CACHED
-    assert _conn(consumer).own_failure(entry) is None
+    assert connections_of(consumer).own_failure(entry) is None
     assert entry.last_failure is None
 
 
@@ -472,7 +468,7 @@ async def test_closing_consumer_turn_end_does_nothing(
     async def adrop(entry) -> None:
         drops.append(entry)
 
-    monkeypatch.setattr(_conn(consumer), "adrop", adrop)
+    monkeypatch.setattr(connections_of(consumer), "adrop", adrop)
     monkeypatch.setattr(
         consumer_module,
         "gc",
@@ -482,7 +478,7 @@ async def test_closing_consumer_turn_end_does_nothing(
     # работе (флаг ставится первым), а сессии ещё не закрыты — их закроет
     # он сам.
     if closing == "consumer":
-        _conn(consumer)._closed = True
+        connections_of(consumer)._closed = True
     else:
         consumer._service._stopped = True
 
@@ -538,7 +534,7 @@ async def test_one_off_trace_server_keeps_connection(
             await _end_turn(consumer)
             assert consumer.status_of(entry).state == STATE_CONNECTED
             await asyncio.wait_for(consumer.astart_turn(), 1)
-            assert _conn(consumer).attempt_of(entry) == (True, None)
+            assert connections_of(consumer).attempt_of(entry) == (True, None)
             out = await _call(
                 consumer, settings, mcp_tool_full_name("net", "action")
             )

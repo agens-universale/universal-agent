@@ -4,8 +4,8 @@
 Поведение stdio-сервера задаёт JSON-файл «управления» (``set_behavior``);
 оба сервера дописывают журнал ``<control>.mcp-journal`` — по нему тест видит
 запуски, потомков, выходы и запросы (``events``, ``launches``, ``children``,
-``exits``). Фикстуры — в
-:mod:`gc_testkit.mcp.fixtures`.
+``exits``). Потребитель — ``connections_of``, ``count_attempts``,
+``closed_port_cfg``. Фикстуры — в :mod:`gc_testkit.mcp.fixtures`.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ from typing import Any
 
 from gc_core.backends.local import LocalFsBackend
 from gc_core.config_modules.field_meta import plain_dump
+from gc_core.tools.connect_mcp import (
+    consumer_connections as _connections_module,
+)
 from gc_core.tools.connect_mcp.catalog import write_catalog
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
@@ -211,6 +214,15 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+def closed_port_cfg() -> dict:
+    """Определение ``stream_http``-сервера на свободном порту, который
+    никто не слушает: подключение к нему отказывает сразу."""
+    return {
+        "transport": "stream_http",
+        "url": f"http://127.0.0.1:{free_port()}",
+    }
+
+
 def _accepts(port: int) -> bool:
     with socket.socket() as sock:
         sock.settimeout(_POLL_SEC)
@@ -281,6 +293,25 @@ class FakeClock:
         self._now += sec
 
 
+def connections_of(consumer: Any) -> Any:
+    """Соединения потребителя MCP — владелец его состояния."""
+    return consumer._connections
+
+
+def count_attempts(monkeypatch: Any) -> list[str]:
+    """Ключ сервера на каждое обращение потребителя к серверу за
+    списком тулов, по порядку; транспорт настоящий."""
+    calls: list[str] = []
+    real = _connections_module.alist_raw_tools
+
+    async def counting(server_key, server_cfg, *, timeout):
+        calls.append(server_key)
+        return await real(server_key, server_cfg, timeout=timeout)
+
+    monkeypatch.setattr(_connections_module, "alist_raw_tools", counting)
+    return calls
+
+
 #: Ответ ``echo`` изолированного бэкенда (поле ``text``).
 BACKEND_ECHO_TEXT = "из бэкенда"
 _BACKEND_ECHO_TOOL = {
@@ -346,6 +377,9 @@ __all__ = [
     "alive",
     "call_tool",
     "children",
+    "closed_port_cfg",
+    "connections_of",
+    "count_attempts",
     "events",
     "exits",
     "free_port",
