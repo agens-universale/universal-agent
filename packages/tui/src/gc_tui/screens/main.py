@@ -5903,6 +5903,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # не опрашиваем каждые 250 мс до конца сессии.
         if self._brand.finished(progress):
             return
+        # Серверы удачной сборки подключаются в фоне: окончательные статусы
+        # потребителя окна — в поколение на каждом тике (спека §5.7).
+        self.app.settle_mcp_progress(progress)
         servers, outcome = progress.state()
         self._brand.feed(progress, servers, outcome)
 

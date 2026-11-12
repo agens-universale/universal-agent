@@ -377,12 +377,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # и совет «запустить без профиля, ничего не потеряв» переставал работать
     # ровно там, где человек начинал чинить. У чинилки флага нет: она читает и
     # пишет ПОЛЬЗОВАТЕЛЬСКИЙ файл, и `--profile` там не в счёт (см. выше).
+    # Сервис MCP окна (спека §5.1): серверы подключаются на старте в фоне.
+    # Импорт здесь, а не в шапке модуля: `gc_tui` обязан оставаться лёгким.
+    from gc_core.tools.connect_mcp.service import McpService
+
     app = _app_mod.TuiApp(
         threads_dir=threads_dir,
         system="cli",
         settings=settings,
         profile_override=None if args.init_config else args.profile,
         model_override=None if args.init_config else args.model,
+        mcp_service=McpService(connect_on_start=True),
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)
