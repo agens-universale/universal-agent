@@ -871,7 +871,9 @@ class AgentExecutor:
             if await start_turn():
                 await arefresh_context_tools(self._ctx)
         except Exception:
-            source.reset_pin()
+            reset_pin = getattr(source, "reset_pin", None)
+            if reset_pin is not None:
+                reset_pin()
             logger = getattr(self._ctx, "logger", None)
             if logger is not None:
                 logger.warning("mcp_tools_refresh_failed", exc_info=True)

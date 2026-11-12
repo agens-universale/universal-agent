@@ -614,9 +614,10 @@ async def test_turn_start_during_retry_series_adds_no_attempt(
     assert not _conn(consumer)._connects
 
 
+@pytest.mark.parametrize("resettable", [True, False])
 @pytest.mark.parametrize("broken", ["start_turn", "rebuild"])
 async def test_refresh_failure_does_not_break_turn(
-    tmp_path, monkeypatch, broken
+    tmp_path, monkeypatch, broken, resettable
 ):
     settings = _cfg(tmp_path, monkeypatch, {})
     monkeypatch.chdir(tmp_path)
@@ -639,9 +640,11 @@ async def test_refresh_failure_does_not_break_turn(
         handler.emit = records.append
         ctx.logger.addHandler(handler)
         resets: list[bool] = []
-        ctx.tools_cache = SimpleNamespace(
-            astart_turn=start_turn, reset_pin=lambda: resets.append(True)
-        )
+        # Источник без сброса закрепления — тоже источник начала хода.
+        source = SimpleNamespace(astart_turn=start_turn)
+        if resettable:
+            source.reset_pin = lambda: resets.append(True)
+        ctx.tools_cache = source
         try:
             result = await _turn(AgentExecutor(ctx), "t1")
         finally:
@@ -651,7 +654,7 @@ async def test_refresh_failure_does_not_break_turn(
     assert result
     [warning] = [r for r in records if r.msg == "mcp_tools_refresh_failed"]
     assert warning.exc_info is not None
-    assert resets == [True]
+    assert resets == ([True] if resettable else [])
 
 
 @pytest.mark.parametrize("cache", [False, True])
@@ -686,7 +689,9 @@ async def test_failed_rebuild_is_retried_on_next_turn(
     control = tmp_path / "srv.json"
     settings = _cfg(tmp_path, monkeypatch, {"srv": stdio_cfg(control)})
     monkeypatch.chdir(tmp_path)
-    backend = install(monkeypatch, ScriptedBackend([_finish(1), _finish(2)]))
+    backend = install(
+        monkeypatch, ScriptedBackend([_finish(1), _finish(2), _finish(3)])
+    )
     real_rebuild = agent_executor.arefresh_context_tools
     rebuilds: list = []
 
@@ -710,12 +715,15 @@ async def test_failed_rebuild_is_retried_on_next_turn(
         )
         await _turn(executor, "t1")
         await _turn(executor, "t2")
+        await _turn(executor, "t3")
 
     backend.assert_clean()
-    first, second = (_tool_names(call) for call in backend.calls)
-    # Сбой пересборки: ход на прежнем наборе, следующий вход повторяет.
+    first, second, third = (_tool_names(call) for call in backend.calls)
+    # Сбой пересборки: ход на прежнем наборе, следующий вход повторяет;
+    # удачная пересборка гасит сброс — третий вход набор не пересобирает.
     assert _NAP in first
     assert _NAP not in second
+    assert _NAP not in third
     assert len(rebuilds) == 2
 
 
@@ -814,6 +822,10 @@ def test_base_backend_unwraps_only_real_wrappers():
     mock = MagicMock()
 
     assert base_backend(TrackingFsBackend(raw, SimpleNamespace())) is raw
+    nested = TrackingFsBackend(
+        TrackingFsBackend(raw, SimpleNamespace()), SimpleNamespace()
+    )
+    assert base_backend(nested) is raw
     assert base_backend(raw) is raw
     assert base_backend(mock) is mock
     assert base_backend(None) is None
