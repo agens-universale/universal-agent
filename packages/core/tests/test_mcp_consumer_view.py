@@ -517,3 +517,77 @@ async def test_connecting_entry_offers_catalog_tools(
     assert view.status["a"]["status"] == STATE_CONNECTING
     assert view.status["a"]["from_catalog"] is True
     assert _tools_of(view, "a") == [_ECHO]
+
+
+_BAD_TOOLS = [{"name": "echo", "description": {"text": "x"}}, {"name": "nap"}]
+
+
+def _write_raw_catalog(settings, server_key: str, tools: list) -> None:
+    """Каталог с сырым списком как есть (записан до проверки списка)."""
+    from gc_core.config_modules.field_meta import plain_dump
+    from gc_core.tools.connect_mcp.catalog import write_catalog
+    from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+
+    model = effective_mcp_servers(settings)[server_key]
+    write_catalog(server_key, plain_dump(model, by_alias=True), tools)
+
+
+async def test_bad_catalog_list_fails_only_that_server(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Каталог с негодным описанием тула не роняет срез: этот сервер —
+    отказ ``protocol`` без тулов, соседний отдаёт свои тулы и в сборке."""
+    from gc_core.tools.connect_mcp.agent_tools import (
+        aget_mcp_tools_data_for_config,
+    )
+
+    settings = _settings(
+        {
+            "a": stdio_cfg(tmp_path / "a.json"),
+            "b": stdio_cfg(tmp_path / "b.json"),
+        }
+    )
+    seed_catalog(settings, "a", ["echo"])
+    _write_raw_catalog(settings, "b", _BAD_TOOLS)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, settings)
+    tools_data, status = await asyncio.wait_for(
+        aget_mcp_tools_data_for_config(settings, tools_cache=consumer),
+        _CEILING_SEC,
+    )
+
+    assert _tools_of(view, "a") == [_ECHO]
+    assert _tools_of(view, "b") == []
+    assert view.status["b"]["status"] == STATE_FAILED
+    assert view.status["b"]["reason_code"] == "protocol"
+    assert "«echo»" in view.status["b"]["reason"]
+    assert view.status["a"]["status"] == STATE_CACHED
+    assert _ECHO in tools_data
+    assert status["b"]["status"] == STATE_FAILED
+
+
+def test_overlay_isolates_bad_list(tmp_path):
+    """Наложение статусов (снимок окна) с негодным списком сервера не
+    бросает: этот сервер — отказ ``protocol``, соседний — с тулами."""
+    from gc_core.tools.connect_mcp.consumer_status import ServerStatus
+
+    settings = _settings(
+        {
+            "a": stdio_cfg(tmp_path / "a.json"),
+            "b": stdio_cfg(tmp_path / "b.json"),
+        }
+    )
+    statuses = {
+        "a": ServerStatus(STATE_CONNECTED, tools=({"name": "echo"},)),
+        "b": ServerStatus(STATE_CONNECTED, tools=tuple(_BAD_TOOLS)),
+    }
+
+    snapshot, status = overlay_service_statuses({}, {}, settings, statuses)
+
+    assert [t["name"] for t in snapshot["a"]["tools"]] == [_ECHO]
+    assert snapshot["b"]["tools"] == []
+    assert snapshot["b"]["status"] == STATE_FAILED
+    assert status["b"]["reason_code"] == "protocol"
+    assert status["a"]["status"] == STATE_CONNECTED

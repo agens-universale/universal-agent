@@ -439,6 +439,48 @@ async def test_relist_failure_is_a_link_failure(
     assert len(calls) == 2
 
 
+async def test_bad_list_on_relist_is_protocol_failure(
+    mcp_home, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Перечитывание принесло список с негодным описанием тула: отказ
+    сервера с кодом ``protocol``; запись и каталог хранят прежний список."""
+    from gc_core.tools.connect_mcp.catalog import read_catalog
+
+    clock = FakeClock()
+    answers = [
+        [{"name": "echo"}],
+        [{"name": "echo", "description": {"text": "x"}}],
+    ]
+
+    class _Client:
+        async def alist_tools(self, *, timeout, strict=False):
+            return answers.pop(0)
+
+    monkeypatch.setattr(
+        registry_module, "resolve_mcp_client", lambda *a, **k: _Client()
+    )
+    settings = _settings({"srv": _closed_port_cfg()})
+    consumer = _consumer(mcp_reaper, clock, on_start=False)
+    await asyncio.wait_for(
+        consumer.aensure(consumer.next_build(), settings), _CEILING_SEC
+    )
+    entry = consumer.servers()["srv"]
+    assert consumer.status_of(entry).state == STATE_CONNECTED
+    clock.advance(_TTL_SEC + 1)
+
+    await _start_turn(consumer)
+    await wait_for(
+        lambda: consumer.status_of(entry).state == STATE_FAILED,
+        _CEILING_SEC,
+    )
+    await wait_for(lambda: not _conn(consumer)._refreshes)
+
+    assert answers == []
+    assert consumer.status_of(entry).reason_code == "protocol"
+    assert entry.tools == ({"name": "echo"},)
+    assert read_catalog("srv", entry.cfg) == [{"name": "echo"}]
+
+
 async def _gated_relist(monkeypatch, reaper, clock, release):
     """Ленивый потребитель, подключённый сервер; перечитывание списка ждёт
     ``release`` и затем бросает. Отдаёт потребителя и запись сервера."""

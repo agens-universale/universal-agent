@@ -13,7 +13,7 @@ from gc_core.tools.connect_mcp.consumer_status import (
     ServerStatus,
 )
 from gc_core.tools.connect_mcp.consumer_view import (
-    server_entries,
+    server_offer,
     status_record,
 )
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
@@ -77,9 +77,9 @@ def overlay_service_statuses(
     registry: Dict[str, Dict[str, Any]] = {}
     fresh_status: Dict[str, Dict[str, Any]] = {}
     for key in keys:
-        entries = server_entries(key, servers[key], statuses[key])
+        entries, status = server_offer(key, servers[key], statuses[key])
         registry.update(entries)
-        fresh_status[key] = status_record(statuses[key], len(entries))
+        fresh_status[key] = status_record(status, len(entries))
     tools_data, _ = _assemble_mcp_tools_data(
         registry, fresh_status, settings, {key: servers[key] for key in keys}
     )

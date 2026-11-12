@@ -1233,3 +1233,54 @@ async def test_cancel_before_first_step_keeps_live_session(
             "srv", _conn(consumer).wrapper_cfg(entry), "echo", {"text": "hi"}
         )
     assert out["pid"] == pid
+
+
+async def test_bad_tool_list_fails_only_that_server(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Постоянная сессия stdio со списком, где описание тула не строка:
+    отказ этого сервера с кодом ``protocol``, список не попадает ни в
+    запись, ни в каталог; соседний сервер подключается."""
+    from gc_core.tools.connect_mcp.catalog import read_catalog
+
+    bad, good = tmp_path / "bad.json", tmp_path / "good.json"
+    set_behavior(bad, bad_description=["echo"])
+    settings = _settings({"bad": stdio_cfg(bad), "good": stdio_cfg(good)})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    b, g = _entry(service, settings, "bad"), _entry(service, settings, "good")
+    assert b.cfg["persistent_session"] is True
+
+    await _connect(consumer, b)
+    await _connect(consumer, g)
+
+    status = consumer.status_of(b)
+    assert (status.state, status.reason_code) == (STATE_FAILED, "protocol")
+    assert "«echo»" in status.reason
+    assert not b.tools_known
+    assert read_catalog("bad", b.cfg) is None
+    assert consumer.status_of(g).state == STATE_CONNECTED
+    assert read_catalog("good", g.cfg) is not None
+    [pid] = launches(bad)
+    await wait_for(lambda: not alive(pid))
+
+
+async def test_bad_tool_outside_whitelist_is_not_a_failure(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Граница — как у прежнего обнаружения: негодный тул, которого
+    whitelist определения не пропускает, отказом сервера не считается."""
+    control = tmp_path / "srv.json"
+    set_behavior(control, bad_description=["nap"])
+    cfg = {
+        **stdio_cfg(control),
+        "whitelist": {"enabled": True, "tools": ["echo"]},
+    }
+    settings = _settings({"srv": cfg})
+    service = McpService(connect_on_start=True)
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _entry(service, settings)
+
+    await _connect(consumer, entry)
+
+    assert consumer.status_of(entry).state == STATE_CONNECTED

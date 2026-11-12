@@ -9,6 +9,8 @@
 * ``tools`` — имена тулов ``tools/list`` (по умолчанию ``echo``, ``nap``);
   пустой список допустим;
 * ``no_tools_key`` — ответ ``tools/list`` без ключа ``tools``;
+* ``bad_description`` — имена тулов, у которых ``description`` не строка, а
+  объект (негодное описание тула);
 * ``notifications`` — число уведомлений перед каждым ответом;
 * ``noise`` — строки не-JSON перед каждым ответом (то есть и между ними);
 * ``exit_on`` — получив запрос этого метода, выйти с кодом 1, не ответив;
@@ -138,10 +140,13 @@ def tools_of(cfg: dict) -> list:
     return list(cfg.get("tools", DEFAULT_TOOLS))
 
 
-def describe(name: str) -> dict:
+def describe(name: str, cfg: dict) -> dict:
+    text = f"тестовый тул {name}"
     return {
         "name": name,
-        "description": f"тестовый тул {name}",
+        "description": (
+            {"text": text} if name in cfg.get("bad_description", ()) else text
+        ),
         "inputSchema": {
             "type": "object",
             "properties": SCHEMAS.get(name, {}),
@@ -199,7 +204,7 @@ def answer(message: dict, cfg: dict, cancel: threading.Event):
     if method == "tools/list":
         if cfg.get("no_tools_key"):
             return ok(rid, {})
-        return ok(rid, {"tools": [describe(n) for n in tools_of(cfg)]})
+        return ok(rid, {"tools": [describe(n, cfg) for n in tools_of(cfg)]})
     if method == "tools/call":
         return call(rid, params, cfg, cancel)
     return ok(rid, {})

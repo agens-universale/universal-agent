@@ -10,19 +10,23 @@
 определениями вызывающего; состояние и замок — у потребителя.
 """
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
 from typing import Callable
 
+from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_FAILED,
     ServerStatus,
 )
 from gc_core.tools.connect_mcp.registry import (
     ToolsCache,
-    build_registry_entries,
+    build_checked_entries,
 )
 from gc_core.tools.connect_mcp.server_identity import connection_fingerprint
 from gc_core.tools.connect_mcp.service_records import ServerEntry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -41,19 +45,38 @@ class McpToolsView:
     caller: Callable
 
 
-def server_entries(
+def server_offer(
     server_key: str, server_cfg: dict, status: ServerStatus
-) -> dict[str, dict]:
-    """Записи реестра тулов, которые сервер предлагает модели.
+) -> tuple[dict[str, dict], ServerStatus]:
+    """Записи реестра тулов, которые сервер предлагает модели, и его
+    статус в срезе.
 
     У ``failed`` тулов нет; у остальных — тулы записи сервиса, оформленные
-    по определению вызывающего (whitelist, описание, имена).
+    по определению вызывающего (whitelist, описание, имена). Список,
+    который оформление не принимает (каталог, записанный до проверки
+    списка), — отказ этого сервера с кодом ``protocol``: остальные серверы
+    среза его не замечают.
     """
     if status.state == STATE_FAILED or not status.tools:
-        return {}
-    return build_registry_entries(
-        server_key, server_cfg, list(status.tools), quiet=True
-    )
+        return {}, status
+    try:
+        entries = build_checked_entries(
+            server_key, server_cfg, list(status.tools), quiet=True
+        )
+    except McpProtocolError as exc:
+        logger.warning(
+            "MCP %s: тулы сервера не предложены: %s", server_key, exc
+        )
+        failed = replace(
+            status,
+            state=STATE_FAILED,
+            reason_code="protocol",
+            reason=str(exc),
+            from_catalog=False,
+            tools=(),
+        )
+        return {}, failed
+    return entries, status
 
 
 def status_record(status: ServerStatus, tool_count: int) -> dict:
@@ -91,7 +114,7 @@ def add_server(
     wrapper_cfg: dict,
 ) -> None:
     """Добавить в срез сервер сервиса: записи, статус, определение."""
-    entries = server_entries(server_key, server_cfg, status)
+    entries, status = server_offer(server_key, server_cfg, status)
     view.registry.update(entries)
     view.status[server_key] = status_record(status, len(entries))
     view.servers_cfg[server_key] = wrapper_cfg
@@ -128,6 +151,6 @@ __all__ = [
     "add_server",
     "backend_config",
     "callers_pins",
-    "server_entries",
+    "server_offer",
     "status_record",
 ]

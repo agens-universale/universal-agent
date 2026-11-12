@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 from gc_core.constants.tool_names import shorten_tool_name
+from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 
 
@@ -286,13 +287,16 @@ async def alist_raw_tools(
 ) -> list[Dict[str, Any]]:
     """Сырой ответ ``tools/list`` сервера — до whitelist и оформления.
 
-    Его хранит каталог на диске. Строгий разбор: ответ без списка тулов —
-    ``McpProtocolError``, а не пустой список. Негодное определение —
-    ``ValueError``; ошибки связи — как у клиента.
+    Его хранит каталог на диске. Строгий разбор: ответ без списка тулов
+    или со списком, который оформление тулов не принимает, —
+    ``McpProtocolError``, а не пустой список и не запись в каталог.
+    Негодное определение — ``ValueError``; ошибки связи — как у клиента.
     """
     _check_server_cfg(server_cfg)
     client = resolve_mcp_client(server_name, server_cfg)
-    return await client.alist_tools(timeout=timeout, strict=True)
+    tools = await client.alist_tools(timeout=timeout, strict=True)
+    build_checked_entries(server_name, server_cfg, tools, quiet=True)
+    return tools
 
 
 def build_registry_entries(
@@ -318,6 +322,43 @@ def build_registry_entries(
         quiet=quiet,
     )
     return _entries_of(server_name, server_cfg, tools)
+
+
+def build_checked_entries(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list[Dict[str, Any]],
+    *,
+    quiet: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """``build_registry_entries``, где сбой оформления — отказ сервера.
+
+    Граница та же, что у прежнего обнаружения (``_adiscover_one``): тулы,
+    которые оформление пропускает (не словарь, без имени), отказом не
+    считаются; список, на котором оформление падает, — ``McpProtocolError``
+    с именем первого негодного тула.
+    """
+    try:
+        return build_registry_entries(
+            server_name, server_cfg, tools_raw, quiet=quiet
+        )
+    except Exception as exc:
+        name = _first_bad_tool(server_name, server_cfg, tools_raw)
+        raise McpProtocolError(
+            f"сервер вернул негодное описание тула «{name}»"
+        ) from exc
+
+
+def _first_bad_tool(
+    server_name: str, server_cfg: Dict[str, Any], tools_raw: list
+) -> str:
+    """Имя первого тула, на котором падает оформление; не нашёлся — «?»."""
+    for tool in tools_raw:
+        try:
+            build_registry_entries(server_name, server_cfg, [tool], quiet=True)
+        except Exception:
+            return str(tool.get("name")) if isinstance(tool, dict) else "?"
+    return "?"
 
 
 def unavailable_line(server_name: str, reason: str) -> str:
@@ -638,6 +679,7 @@ __all__ = [
     "ToolsCache",
     "_abuild_tools_registry",
     "alist_raw_tools",
+    "build_checked_entries",
     "build_registry_entries",
     "unavailable_line",
 ]
