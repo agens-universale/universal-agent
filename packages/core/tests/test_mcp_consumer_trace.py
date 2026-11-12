@@ -13,10 +13,16 @@ import asyncio
 import json
 import os
 import time
+from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context
+from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp import (
+    consumer_connections as connections_module,
+)
+from gc_core.tools.connect_mcp import consumer_executor as executor_module
 from gc_core.tools.connect_mcp.consumer_call import SESSION_LOST_TEXT
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CACHED,
@@ -36,6 +42,7 @@ from gc_testkit.mcp import (
     seed_catalog,
     set_behavior,
     stdio_cfg,
+    stream_server,
     wait_for,
 )
 from gc_testkit.mcp.fixtures import mcp_home, mcp_owner, mcp_reaper
@@ -131,9 +138,14 @@ def _wrapper(view, name: str) -> MCPToolWrapper:
 
 async def _echo(consumer, settings, name: str = _ECHO) -> dict:
     """Вызов ``echo`` через срез потребителя; ответ тестового сервера."""
+    return await _call(consumer, settings, name, text="hi")
+
+
+async def _call(consumer, settings, name: str, **arguments) -> dict:
+    """Вызов тула через срез потребителя; ответ тестового сервера."""
     view = await asyncio.wait_for(consumer.aview(settings), _CEILING_SEC)
     envelope = await asyncio.wait_for(
-        _wrapper(view, name).acall(text="hi"), _CEILING_SEC
+        _wrapper(view, name).acall(**arguments), _CEILING_SEC
     )
     result = json.loads(envelope)["result"]
     if isinstance(result, str):
@@ -299,10 +311,15 @@ async def test_turn_end_takes_trace_of_latest_build(
     [pid] = launches(control)
 
     # Тот же сервер (trace в отпечаток не входит), новая сборка — с trace.
-    await _ensure(consumer, _settings(servers, _TRACE))
+    traced = _settings(servers, _TRACE)
+    await _ensure(consumer, traced)
     await _end_turn(consumer)
 
     assert not alive(pid)
+    # Новая сессия несёт trace текущей сборки.
+    out = await _echo(consumer, traced)
+    assert out["trace"] == _TRACE
+    assert launches(control) == [pid, out["pid"]]
 
 
 async def test_stale_build_does_not_change_trace(
@@ -393,13 +410,18 @@ async def test_call_in_flight_at_turn_end_is_not_a_failure(
     entry = consumer.servers()["srv"]
     view = await asyncio.wait_for(consumer.aview(settings), _CEILING_SEC)
     call = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=20))
-    await wait_for(
-        lambda: any(e.startswith("req tools/call") for e in events(control)),
-        _CEILING_SEC,
-    )
-
-    await _end_turn(consumer)
-    done, _ = await asyncio.wait({call}, timeout=_CEILING_SEC)
+    try:
+        await wait_for(
+            lambda: any(
+                e.startswith("req tools/call") for e in events(control)
+            ),
+            _CEILING_SEC,
+        )
+        await _end_turn(consumer)
+        done, _ = await asyncio.wait({call}, timeout=_CEILING_SEC)
+    finally:
+        call.cancel()
+        await asyncio.wait({call}, timeout=_CEILING_SEC)
 
     assert done
     with pytest.raises(McpToolCallError) as caught:
@@ -435,17 +457,87 @@ async def test_turn_end_is_bounded_on_deaf_server(
     await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)
 
 
-async def test_closed_consumer_turn_end_does_nothing(
-    mcp_home, tmp_path, mcp_reaper, mcp_owner
+async def test_closing_consumer_turn_end_does_nothing(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
 ):
     control = tmp_path / "srv.json"
     settings = _settings({"srv": _traced(control)}, _TRACE)
     consumer = _consumer(mcp_reaper, FakeClock())
     await _ensure(consumer, settings)
-    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
     [pid] = launches(control)
+    drops: list = []
+    collects: list = []
+
+    async def adrop(entry) -> None:
+        drops.append(entry)
+
+    monkeypatch.setattr(_conn(consumer), "adrop", adrop)
+    monkeypatch.setattr(
+        consumer_module,
+        "gc",
+        SimpleNamespace(collect=lambda: collects.append(1)),
+    )
+    # Окно закрытия: ``aclose`` уже отказал в работе (``closed`` ставится
+    # первым), а сессии ещё не закрыты — их закроет он сам.
+    _conn(consumer).closed = True
 
     await _end_turn(consumer)
 
-    assert not alive(pid)
-    assert launches(control) == [pid]
+    assert drops == []
+    assert collects == []
+    assert alive(pid)
+
+
+def _spy_lists(monkeypatch) -> list[str]:
+    """Каждое обращение потребителя за списком; транспорт настоящий."""
+    calls: list[str] = []
+    real = connections_module.alist_raw_tools
+
+    async def counting(server_key, server_cfg, *, timeout):
+        calls.append(server_key)
+        return await real(server_key, server_cfg, timeout=timeout)
+
+    monkeypatch.setattr(connections_module, "alist_raw_tools", counting)
+    return calls
+
+
+def _spy_trace_sent(monkeypatch) -> list:
+    """Заголовок trace каждого вызова транспорта; вызов настоящий."""
+    sent: list = []
+    real = executor_module.acall_mcp_tool
+
+    async def spying(**kwargs):
+        cfg = kwargs["servers_cfg"]["net"]
+        sent.append((cfg.get("headers") or {}).get("trace_id"))
+        return await real(**kwargs)
+
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", spying)
+    return sent
+
+
+async def test_one_off_trace_server_keeps_connection(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    lists = _spy_lists(monkeypatch)
+    sent = _spy_trace_sent(monkeypatch)
+    async with stream_server(tmp_path, "stream_http") as (network, control):
+        # Сетевой сервер без постоянной сессии: trace — в каждом запросе.
+        server = {**network, "trace_header_enabled": True}
+        settings = _settings({"net": server}, _TRACE)
+        consumer = _consumer(mcp_reaper, FakeClock())
+        await _ensure(consumer, settings)
+        entry = consumer.servers()["net"]
+        assert lists == ["net"]
+
+        for _turn in range(3):
+            await _end_turn(consumer)
+            assert consumer.status_of(entry).state == STATE_CONNECTED
+            await asyncio.wait_for(consumer.astart_turn(), 1)
+            assert _conn(consumer).attempt_of(entry) == (True, None)
+            out = await _call(
+                consumer, settings, mcp_tool_full_name("net", "action")
+            )
+
+        assert lists == ["net"]
+        assert sent == [_TRACE] * 3
+        assert launches(control) == [out["pid"]]
