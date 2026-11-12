@@ -5,7 +5,7 @@ C1 — 4 метода RunSummaryCoordinator (run_summary_coordinator.py) пос�
       компакции; на no-op (early-return без компакции) collect не вызывается.
 C2 — AgentExecutor.run finally после close_all (agent_executor.py).
 C3 — processing_responses.aprocess_tool_calls перед return tools_outputs;
-      условный по флагу gc.force_collect (default on CLI/TUI, off server).
+      условный по режиму (on только CLI, off TUI и server).
 """
 
 import importlib
@@ -307,11 +307,21 @@ class TestC3ProcessingResponses:
         )
         assert len(gc_calls) == 1, "default on для CLI"
 
-    def test_collect_default_on_for_tui(self, monkeypatch):
+    def test_collect_for_cli_explicit_not_tui(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(
-            monkeypatch, config={}, is_tui=True
+            monkeypatch, config={}, is_cli_mode=True, is_tui=False
         )
-        assert len(gc_calls) == 1, "default on для TUI"
+        assert len(gc_calls) == 1
+
+    def test_no_collect_for_tui(self, monkeypatch):
+        for kwargs in (
+            {"is_tui": True},
+            {"is_tui": True, "is_cli_mode": True},
+        ):
+            gc_calls = self._run_process_tool_calls(
+                monkeypatch, config={}, **kwargs
+            )
+            assert gc_calls == [], kwargs
 
     def test_no_collect_default_off_for_server(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(monkeypatch, config={})

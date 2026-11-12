@@ -1566,8 +1566,8 @@ class SubagentRunner:
             child_ctx.model_router = router.with_choice_providers(
                 effective_provider, live
             )
-        # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
-        # иначе child process_tool_calls видит оба флага False и collect выключается.
+        # Режим родителя (C3 collect: только CLI, не TUI) — наследуем оба флага,
+        # иначе ребёнок TUI видел бы только is_cli_mode и собирал мусор.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
         child_ctx.is_cli_mode = bool(getattr(self._ctx, "is_cli_mode", False))
         # Хранилище агента у ребёнка то же: промпты, инструкции и скиллы

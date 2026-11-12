@@ -2757,8 +2757,8 @@ async def _afinalize_tool_batch(
         )
 
     # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
-    # мусор между шагами. Default on для CLI/TUI, off для server; явный
-    # gc.force_collect в конфиге перекрывает default.
+    # мусор между шагами. Только CLI: в TUI полная сборка стопает UI-цикл,
+    # в server gc.collect глобален для процесса.
     if gc_force_collect_enabled(
         ctx,
         is_tui=bool(getattr(ctx, "is_tui", False)),
