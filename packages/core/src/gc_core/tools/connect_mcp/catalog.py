@@ -43,10 +43,10 @@ def _catalog_path(server_key: str, server_cfg: dict) -> Path:
 
 def read_catalog(server_key: str, server_cfg: dict) -> list[dict] | None:
     """Сырой список тулов для этого определения; нет каталога — ``None``."""
-    path = _catalog_path(server_key, server_cfg)
     try:
+        path = _catalog_path(server_key, server_cfg)
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, TypeError, ValueError):
         return None
     if not isinstance(data, dict) or data.get("format") != CATALOG_FORMAT:
         return None

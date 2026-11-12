@@ -93,6 +93,15 @@ def test_corrupt_and_foreign_format_are_missing(mcp_home):
     assert read_catalog("srv", cfg) is None
 
 
+def test_unserializable_definition_reads_as_missing(mcp_home):
+    """Определение, которое не сериализуется в отпечаток, — как
+    отсутствие каталога: чтение не бросает, как и запись."""
+    cfg = {**_http_cfg(), "extra": object()}
+
+    write_catalog("srv", cfg, _TOOLS)
+    assert read_catalog("srv", cfg) is None
+
+
 def test_sixth_fingerprint_evicts_oldest(mcp_home):
     stamp = 1_700_000_000
     seen: set[str] = set()
