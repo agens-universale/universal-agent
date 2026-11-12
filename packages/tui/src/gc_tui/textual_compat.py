@@ -4,15 +4,15 @@
 версии `PATCHED_TEXTUAL`: на иной патч не ставится, протяжка ниже ленты
 не работает, в журнал уходит предупреждение, страж
 `test_textual_compat.py` падает с напоминанием пересмотреть модуль.
-Исключение — `mounted`, `paint_after_mount` и ширины по раскладке
-(`laid_out_width`, `laid_out_scrollable_width`): только публичный API, к
+Исключение — `mounted` и `paint_after_mount`: только публичный API, к
 версии не привязаны.
 
 Видимость и геометрия Textual 8.2.8: перерисовка виджета за экраном или
 чтение его `size` / `region` после прокрутки пересобирает полную карту
 экрана (`Compositor.full_map`). `is_visible` смотрит готовую карту
-видимых последнего кадра; ширины по раскладке берутся из размера, который
-раскладка записала виджету, — без поиска в карте.
+видимых последнего кадра; ширины по раскладке (`laid_out_width`) — из
+размера, который раскладка записала виджету, если он в последней
+раскладке, — без поиска в карте.
 
 Ошибка Textual 8.2.8 (апстрим #6639): `SelectStart.pointer_start_offset`
 прибавляет сдвиг прокрутки контейнера вместо вычитания — при прокрутке во
@@ -174,11 +174,23 @@ def is_visible(widget: Widget | None) -> bool:
 
 def laid_out_width(widget: Widget) -> int:
     """Ширина контента (без отступов и рамки) по последней раскладке —
-    то же, что `widget.size.width` у разложенного виджета, но без поиска
-    в карте экрана. Ещё не раскладывался — 0. Скрытый (`display: none`)
-    хранит ширину своей последней раскладки."""
-    gutter = widget.styles.gutter.width
-    return max(0, widget.outer_size.width - gutter)
+    то же, что `widget.size.width`, но без поиска в карте экрана (он у
+    невидимого после прокрутки пересобирает карту). Не в последней полной
+    раскладке (ещё не раскладывался, скрыт `display: none`, без экрана) —
+    0, как у `size`: размер, записанный виджету раньше, у скрытого
+    устаревает — полная раскладка его не обновляет, и после смены ширины
+    терминала он врёт. Признак — карта последней полной раскладки
+    компоновщика как есть (прокрутка её не меняет), без пересборки. Только для `PATCHED_TEXTUAL`: на иной
+    версии или без поля — `widget.size.width`."""
+    if not textual_is_patched_version():
+        return widget.size.width
+    try:
+        laid = widget in widget.screen._compositor._full_map
+    except (NoScreen, AttributeError):
+        return widget.size.width
+    if not laid:
+        return 0
+    return max(0, widget.outer_size.width - widget.styles.gutter.width)
 
 
 def laid_out_scrollable_width(widget: Widget) -> int:

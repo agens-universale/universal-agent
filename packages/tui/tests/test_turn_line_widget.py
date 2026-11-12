@@ -340,3 +340,17 @@ async def test_offscreen_status_width_no_full_map():
         with count_arranges() as control:
             line.is_on_screen  # карту пересобирает
         assert (counts.full_map, control.full_map) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_hidden_line_after_resize_not_old_width():
+    """Скрытая строка не в раскладке: ширина её прошлой раскладки
+    устарела (терминал сузился) — берётся ширина экрана, как раньше."""
+    line = build_turn_line(word="completed")
+    async with _ScrolledLineApp(line).run_test(size=(120, 20)) as pilot:
+        await pilot.pause()
+        line.display = False
+        await pilot.pause()
+        await pilot.resize_terminal(60, 20)
+        await pilot.pause()
+        assert line._status_width() == 60

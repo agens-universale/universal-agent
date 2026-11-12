@@ -694,6 +694,28 @@ async def test_laid_out_widths_offscreen_no_full_map():
         assert (counts.full_map, control.full_map) == (0, 1)
 
 
+@pytest.mark.asyncio
+async def test_hidden_widget_laid_out_width_is_zero():
+    """Скрытый не в раскладке: его записанный размер устарел — 0, как у
+    `size`."""
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = pilot.app.query_one("#first", Static)
+        first.display = False
+        await pilot.pause()
+        assert first.outer_size.width > 0
+        assert textual_compat.laid_out_width(first) == first.size.width == 0
+
+
+@pytest.mark.asyncio
+async def test_other_version_laid_out_width_is_size(monkeypatch):
+    monkeypatch.setattr(
+        textual_compat, "textual_is_patched_version", lambda: False
+    )
+    async with _Scrolled().run_test(size=(60, 20)) as pilot:
+        first = pilot.app.query_one("#first", Static)
+        assert textual_compat.laid_out_width(first) == first.size.width > 0
+
+
 def test_arrange_counter_refuses_renamed_caller(monkeypatch):
     """Счётчик раскладок считает по именам вызывающих Textual: пропажа
     имени — ошибка, а не молчаливые нули."""

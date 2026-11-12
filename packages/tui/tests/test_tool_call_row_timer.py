@@ -340,3 +340,25 @@ async def test_unlaid_row_width_is_trace_width():
         await pilot.pause()
         assert row.outer_size.width == 0
         assert row._row_width() == host.scrollable_content_region.width
+
+
+@pytest.mark.asyncio
+async def test_refit_after_hidden_resize_uses_current_width():
+    """Строку скрыли, терминал сузился, строку показали: первый `refit`
+    подгоняет под текущую ширину ленты, а не под раскладку до скрытия."""
+    row = ToolCallRow(call_id="c1", label="Run", target="x" * 200)
+    app = _Scrolled(row)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause()
+        row.display = False
+        await pilot.pause()
+        await pilot.resize_terminal(60, 20)
+        await pilot.pause()
+        row.display = True
+        row.refit()
+        fitted = row._content_static.content.plain
+        host = app.query_one("#host", VerticalScroll)
+        await pilot.pause()
+        assert row._content_width() == row._content_static.size.width
+        assert row._row_width() == host.scrollable_content_region.width
+        assert row._content_static.content.plain == fitted

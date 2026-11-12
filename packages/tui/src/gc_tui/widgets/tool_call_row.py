@@ -432,7 +432,7 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         монтирования) пересобирается по ширине ленты сейчас — при сборке
         ширины могло ещё не быть, и первый показ нарисовал бы объект
         несокращённым."""
-        if self.size.width == 0:
+        if textual_compat.laid_out_width(self) == 0:
             self._update()
 
     def set_mode(
