@@ -40,7 +40,6 @@ class ServerEntry:
     key: str
     cfg: dict
     fingerprint: str
-    discovery_timeout: float
     tools: tuple = ()
     from_catalog: bool = False
     checked_at: float | None = None

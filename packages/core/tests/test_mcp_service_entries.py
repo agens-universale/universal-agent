@@ -65,8 +65,8 @@ async def test_new_entry_takes_tools_from_catalog(mcp_home, tmp_path):
     seed_catalog(settings, "a", ["echo", "nap"])
     service = McpService(connect_on_start=True)
 
-    a = service.entry("a", _definition(settings, "a"), discovery_timeout=5)
-    b = service.entry("b", _definition(settings, "b"), discovery_timeout=5)
+    a = service.entry("a", _definition(settings, "a"))
+    b = service.entry("b", _definition(settings, "b"))
 
     assert a.tools == ({"name": "echo"}, {"name": "nap"})
     assert a.from_catalog is True
@@ -88,7 +88,7 @@ async def test_definition_keeps_aliases(mcp_home):
     )
     service = McpService(connect_on_start=True)
 
-    entry = service.entry("a", _definition(settings, "a"), discovery_timeout=5)
+    entry = service.entry("a", _definition(settings, "a"))
 
     assert entry.cfg["verify-ssl"] is False
     assert "client-cert" in entry.cfg
@@ -100,28 +100,21 @@ async def test_definition_keeps_aliases(mcp_home):
 
 async def test_same_definition_shares_entry(mcp_home, tmp_path):
     service = McpService(connect_on_start=True)
-    first = service.entry(
-        "a", _stdio_definition(tmp_path), discovery_timeout=5
-    )
+    first = service.entry("a", _stdio_definition(tmp_path))
 
-    same = service.entry("a", _stdio_definition(tmp_path), discovery_timeout=7)
+    same = service.entry("a", _stdio_definition(tmp_path))
     listed = service.entry(
         "a",
         _stdio_definition(
             tmp_path, whitelist={"enabled": True, "tools": ["echo"]}
         ),
-        discovery_timeout=7,
     )
-    other_args = service.entry(
-        "a", _stdio_definition(tmp_path, args=["-V"]), discovery_timeout=7
-    )
+    other_args = service.entry("a", _stdio_definition(tmp_path, args=["-V"]))
 
     assert same is first
     assert listed is first
     assert other_args is not first
     assert other_args.fingerprint != first.fingerprint
-    # Срок подключения — из настроек последнего обращения.
-    assert first.discovery_timeout == 7
     assert first.cfg["persistent_session"] is True
 
 
@@ -129,7 +122,7 @@ async def test_success_writes_catalog_only_on_change(mcp_home, tmp_path):
     clock = FakeClock()
     service = McpService(connect_on_start=True, clock=clock.now)
     cfg = _stdio_definition(tmp_path)
-    entry = service.entry("a", cfg, discovery_timeout=5)
+    entry = service.entry("a", cfg)
     tools = [{"name": "echo"}]
     changed = [{"name": "echo"}, {"name": "nap"}]
 
@@ -156,7 +149,7 @@ async def test_first_success_with_empty_list_is_cataloged(mcp_home, tmp_path):
     """Пустой список — известный ответ сервера, а не «тулов не знаем»."""
     service = McpService(connect_on_start=True)
     cfg = _stdio_definition(tmp_path)
-    entry = service.entry("a", cfg, discovery_timeout=5)
+    entry = service.entry("a", cfg)
 
     service.record_success(entry, [])
 
@@ -171,7 +164,7 @@ async def test_success_after_catalog_with_same_list_keeps_file(
     seed_catalog(settings, "a", ["echo"])
     service = McpService(connect_on_start=True)
     cfg = _definition(settings, "a")
-    entry = service.entry("a", cfg, discovery_timeout=5)
+    entry = service.entry("a", cfg)
     next((mcp_home / "cache").rglob("*.json")).unlink()
 
     service.record_success(entry, [{"name": "echo"}])
@@ -239,7 +232,7 @@ async def test_failure_keeps_tools_and_classifies(mcp_home, exc, code):
     cfg = _secret_definition(
         token=_TOKEN, headers={"X-Key": _HEADER}, env={"API_KEY": _ENV}
     )
-    entry = service.entry("a", cfg, discovery_timeout=5)
+    entry = service.entry("a", cfg)
     service.record_success(entry, [{"name": "echo"}])
     clock.advance(4)
 
@@ -405,10 +398,10 @@ def test_failure_is_frozen():
 async def test_service_on_another_loop_is_rejected(mcp_home, tmp_path):
     service = McpService(connect_on_start=True)
     cfg = _stdio_definition(tmp_path)
-    service.entry("a", cfg, discovery_timeout=5)
+    service.entry("a", cfg)
 
     async def touch() -> None:
-        service.entry("a", cfg, discovery_timeout=5)
+        service.entry("a", cfg)
 
     def on_other_loop() -> BaseException | None:
         try:
@@ -424,7 +417,7 @@ async def test_service_on_another_loop_is_rejected(mcp_home, tmp_path):
     assert isinstance(error, RuntimeError)
     assert "другом цикле" in str(error)
     # Свой цикл по-прежнему обслуживается.
-    service.entry("a", cfg, discovery_timeout=5)
+    service.entry("a", cfg)
 
 
 async def test_open_consumer_on_another_loop_is_rejected(mcp_home):
@@ -463,9 +456,7 @@ async def test_open_consumer_on_stopped_service_refused_from_any_loop(
     """Остановка сервиса проверяется раньше цикла: с чужого цикла и из
     потока без цикла — ``McpServiceClosed``, а не ошибка цикла."""
     service = McpService(connect_on_start=True)
-    service.entry(
-        "a", {"transport": "stdio", "command": "x"}, discovery_timeout=5
-    )
+    service.entry("a", {"transport": "stdio", "command": "x"})
     service._stopped = True
     service._stopped_event.set()
 

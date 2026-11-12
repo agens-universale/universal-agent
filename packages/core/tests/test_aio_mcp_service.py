@@ -271,7 +271,7 @@ async def test_service_on_another_loop_is_rejected(
     settings = _cfg(tmp_path, monkeypatch, {"srv": stdio_cfg(control)})
     service = McpService(connect_on_start=True)
     # Обращение с цикла теста привязывает сервис к нему.
-    service.entry("srv", stdio_cfg(control), discovery_timeout=30)
+    service.entry("srv", stdio_cfg(control))
 
     def on_other_loop() -> BaseException | None:
         try:

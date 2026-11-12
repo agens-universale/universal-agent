@@ -217,7 +217,7 @@ class McpConsumer:
             return
         timeout = settings_of(settings).mcp.meta.discovery_timeout_sec
         entries = {
-            key: self._service.entry(key, cfg, discovery_timeout=timeout)
+            key: self._service.entry(key, cfg)
             for key, cfg in _agent_side_definitions(
                 settings, os_backend
             ).items()

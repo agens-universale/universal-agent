@@ -124,10 +124,6 @@ class McpService:
         self._close_task: asyncio.Task | None = None
 
     @property
-    def os_backend(self) -> Any:
-        return self._os_backend
-
-    @property
     def connect_on_start(self) -> bool:
         return self._connect_on_start
 
@@ -272,23 +268,19 @@ class McpService:
             else:
                 _report_close(consumer, task)
 
-    def entry(
-        self, server_key: str, server_cfg: dict, *, discovery_timeout: float
-    ) -> ServerEntry:
+    def entry(self, server_key: str, server_cfg: dict) -> ServerEntry:
         """Запись сервера по ``(ключ, отпечаток)``; новая берёт тулы из
         каталога, если он есть. ``server_cfg`` — определение без trace."""
         self._bind_loop()
         fingerprint = connection_fingerprint(server_cfg)
         found = self._entries.get((server_key, fingerprint))
         if found is not None:
-            found.discovery_timeout = discovery_timeout
             return found
         cfg = with_service_defaults(server_cfg)
         created = ServerEntry(
             key=server_key,
             cfg=cfg,
             fingerprint=fingerprint,
-            discovery_timeout=discovery_timeout,
         )
         cataloged = read_catalog(server_key, cfg)
         if cataloged is not None:

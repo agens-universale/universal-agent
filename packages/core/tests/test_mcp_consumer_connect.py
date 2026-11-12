@@ -97,8 +97,7 @@ def _consumer(reaper, service: McpService, settings, label: str = "c"):
 def _entry(service: McpService, settings, key: str = "srv"):
     """Запись сервера по определению без trace, как её заводит сверка."""
     cfg = plain_dump(effective_mcp_servers(settings)[key], by_alias=True)
-    timeout = settings_of(settings).mcp.meta.discovery_timeout_sec
-    return service.entry(key, cfg, discovery_timeout=timeout)
+    return service.entry(key, cfg)
 
 
 def _in_set(consumer, entry):
@@ -683,7 +682,6 @@ def _entry_failed_at(
         key="srv",
         cfg={},
         fingerprint="fp",
-        discovery_timeout=1,
         checked_at=checked,
         last_failure=Failure(failed, "other", "сервер не стартует"),
         interrupted_at=interrupted,
