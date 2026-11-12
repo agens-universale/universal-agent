@@ -659,6 +659,34 @@ class McpConnections:
         не зависает. Закрытие дожидается снятых задач и прежних закрытий
         этого сервера: так закрытия одного сервера идут по порядку.
         """
+        self._withdraw(entry)
+
+    def fail_unready(self, entry: ServerEntry) -> None:
+        """Подключение не уложилось в срок сборки, которая ждёт все
+        серверы (политика ``wait_all``): отказ ``timeout`` — в запись и
+        свой, попытка снимается, сессия закрывается в фоне, как у
+        ушедшего сервера.
+
+        Отказ ставится под тем же замком, что снимает попытку: статус
+        переходит из ``connecting`` сразу в ``failed``, тулы каталога в
+        срез не попадают. Снятая попытка в правило 30 с «прерванной» не
+        идёт и серию повторов не заводит — отказ уже записан. Попытки нет
+        (исход уже есть) или потребитель закрыт — ничего.
+        """
+        key = session_key_of(entry)
+        with self._lock:
+            task = self._connects.get(key)
+            if self.closed or task is None or task.done():
+                return
+        failure = self._service.record_failure(entry, TimeoutError())
+        self._withdraw(entry, failure)
+
+    def _withdraw(
+        self, entry: ServerEntry, failure: Failure | None = None
+    ) -> None:
+        """Снять попытку, серию и перечитывание сервера, его соединение —
+        под замком (с отказом ``failure``, если он есть), сессию закрыть в
+        фоне после снятых задач и прежних закрытий этого сервера."""
         key = session_key_of(entry)
         with self._lock:
             work = {
@@ -671,6 +699,8 @@ class McpConnections:
             self._retry.pop(key, None)
             self._relisted.pop(key, None)
             self._forget_connection(key)
+            if failure is not None:
+                self._failures[key] = failure
         for task in work:
             task.cancel()
         closing = asyncio.get_running_loop().create_task(

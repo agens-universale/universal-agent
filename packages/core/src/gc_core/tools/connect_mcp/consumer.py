@@ -205,6 +205,8 @@ class McpConsumer:
         подключения серверов без тулов и без отказа в этом процессе (при
         ``wait_all`` — все свои подключения), не дольше
         ``discovery_timeout_sec``; отмена ожидания набор не откатывает.
+        При ``wait_all`` не подключившийся к сроку сервер получает отказ
+        ``timeout``: его попытка снимается, сессия закрывается.
         После остановки сервиса или закрытия — ``McpServiceClosed``.
         """
         self._service._bind_loop()
@@ -235,9 +237,20 @@ class McpConsumer:
         await self._await_build(waits, timeout)
         self._refuse_if_closed()
         # Обогнанная сборка не закрепляет срез: иначе вход в ход не увидел
-        # бы изменения, случившегося после возврата новой сборки.
+        # бы изменения, случившегося после возврата новой сборки. И не
+        # снимает попытки: их ждёт сборка, которая её обогнала.
         if self._connections.is_latest(build):
+            self._fail_unready(entries)
             self.pin()
+
+    def _fail_unready(self, entries: dict[str, ServerEntry]) -> None:
+        """При ``wait_all`` после ожидания сборки ни один сервер набора не
+        остаётся ``connecting``: не подключившийся к сроку — отказ
+        ``timeout`` (модель видит только живые тулы, решение В5)."""
+        if not self._service.wait_all:
+            return
+        for entry in entries.values():
+            self._connections.fail_unready(entry)
 
     def _refuse_if_closed(self) -> None:
         if self._connections.refused():

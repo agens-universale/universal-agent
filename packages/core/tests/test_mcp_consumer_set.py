@@ -262,6 +262,64 @@ async def test_wait_all_waits_even_with_catalog(
     assert _state(consumer, "a") == STATE_CONNECTED
 
 
+@pytest.mark.parametrize("cataloged", [True, False])
+async def test_wait_all_timeout_is_failure(
+    cataloged, mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """``wait_all``: сервер, не подключившийся к сроку сборки, — отказ
+    ``timeout`` с текстом срока обнаружения; тулы каталога не в срезе;
+    процесс сервера не остаётся; живой сервер рядом — на месте."""
+    slow, live = tmp_path / "a.json", tmp_path / "b.json"
+    set_behavior(slow, start_delay=6)
+    settings = _settings(
+        {"a": stdio_cfg(slow), "b": stdio_cfg(live)}, discovery=1
+    )
+    if cataloged:
+        seed_catalog(settings, "a", ["echo", "nap"])
+    service = McpService(connect_on_start=True, wait_all=True)
+    consumer = _open(mcp_reaper, service)
+
+    await _ensure(consumer, settings)
+
+    status = consumer.status_of(consumer.servers()["a"])
+    assert (status.state, status.reason_code, status.reason) == (
+        STATE_FAILED,
+        "timeout",
+        "таймаут подключения",
+    )
+    assert _conn(consumer).attempt_of(consumer.servers()["a"]) == (
+        False,
+        None,
+    )
+    view = await asyncio.wait_for(consumer.aview(settings), _CEILING_SEC)
+    assert sorted(view.registry) == ["mcp_b_echo", "mcp_b_nap"]
+    assert view.status["a"]["status"] == STATE_FAILED
+    assert view.status["b"]["status"] == STATE_CONNECTED
+    await _settle(consumer)
+    (pid,) = launches(slow)
+    await wait_for(lambda: not alive(pid), _CEILING_SEC)
+
+
+async def test_on_start_without_wait_all_keeps_connecting(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Без ``wait_all`` срок сборки — не отказ: сервер остаётся
+    ``connecting``, его попытка идёт дальше."""
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=6)
+    settings = _settings({"a": stdio_cfg(control)}, discovery=1)
+    consumer = _open(mcp_reaper, McpService(connect_on_start=True))
+
+    await _ensure(consumer, settings)
+
+    entry = consumer.servers()["a"]
+    assert _state(consumer, "a") == STATE_CONNECTING
+    connected, attempt = _conn(consumer).attempt_of(entry)
+    assert not connected
+    assert attempt is not None
+    assert not attempt.done()
+
+
 async def test_lazy_with_catalog_launches_nothing(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):

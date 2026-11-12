@@ -320,6 +320,11 @@ def build_registry_entries(
     return _entries_of(server_name, server_cfg, tools)
 
 
+def unavailable_line(server_name: str, reason: str) -> str:
+    """Строка консоли о сервере, пропущенном из-за отказа подключения."""
+    return f"[MCP] {server_name}: недоступен — {reason} (пропущен)"
+
+
 async def _adiscover_one(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -365,7 +370,7 @@ async def _adiscover_one(
             exc, server_cfg if isinstance(server_cfg, dict) else {}
         )
         logger.warning("MCP discovery failed for %s: %s", server_name, exc)
-        print(f"[MCP] {server_name}: недоступен — {reason} (пропущен)")
+        print(unavailable_line(server_name, reason))
         return [], {
             "status": "failed",
             "reason": reason,
@@ -634,4 +639,5 @@ __all__ = [
     "_abuild_tools_registry",
     "alist_raw_tools",
     "build_registry_entries",
+    "unavailable_line",
 ]
