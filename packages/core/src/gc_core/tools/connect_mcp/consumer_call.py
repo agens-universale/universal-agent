@@ -7,22 +7,27 @@
 
 Ошибка тула — ``McpToolCallError``: её не повторяет автоповтор, а модель
 получает текст, а не сырое исключение транспорта.
+
+Классификация исхода — по первому листу группы: перечислено то, что
+уходит как есть, и срок; всё остальное — отказ связи с сервером.
 """
 
 import asyncio
 
-import httpx
-from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData
 
+from gc_core.execution.contracts import ToolOutcomeUnknown
 from gc_core.execution.tool_call_context import current_tool_call
 from gc_core.tools.connect_mcp.call_errors import (
+    CALL_TIMEOUTS,
     McpCallTimedOut,
-    McpServerGone,
 )
 from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.service_records import Failure
-from gc_core.tools.connect_mcp.stream_client import McpToolCallError
+from gc_core.tools.connect_mcp.stream_client import (
+    McpToolCallError,
+    is_connection_closed,
+)
 from gc_core.user_stop import UserStopInterrupt, current_user_stop
 
 #: Код JSON-RPC ошибки тула, которую отдаёт исполнитель.
@@ -34,8 +39,12 @@ SESSION_LOST_TEXT = "сессия сервера закрыта во время 
 #: Подключиться нельзя или не удалось; через двоеточие — причина.
 UNAVAILABLE_TEXT = "сервер недоступен"
 
-_TIMEOUTS = (McpCallTimedOut, TimeoutError, httpx.TimeoutException)
-_TRANSPORT = (OSError, httpx.TransportError, McpError, McpServerGone)
+# Уходят к вызывающему как есть: ошибка разбора имени и аргументов
+# (``ValueError``, в том числе ``pydantic.ValidationError`` и
+# ``McpExecuteOnError``), стоп хода, «исход неизвестен» durable
+# (``ToolOutcomeUnknown`` и ``McpSessionLostError``). Ошибка тула сервера —
+# тоже, если это не разрыв соединения (``passes_through``).
+_PASS_THROUGH = (ValueError, UserStopInterrupt, ToolOutcomeUnknown)
 
 
 def tool_error(message: str) -> McpToolCallError:
@@ -71,32 +80,35 @@ def refusal_text(own: Failure | None, shared: Failure | None) -> str:
     return f"{UNAVAILABLE_TEXT}: {latest.reason}"
 
 
-def is_timeout(exc: BaseException) -> bool:
+def is_timeout(leaf: BaseException) -> bool:
     """Истёк срок вызова: сессия и статус остаются (§5.8 п.4)."""
-    return isinstance(exc, _TIMEOUTS)
+    return isinstance(leaf, CALL_TIMEOUTS)
 
 
-def timeout_error(exc: BaseException, timeout: float) -> McpToolCallError:
+def timeout_error(leaf: BaseException, timeout: float) -> McpToolCallError:
     """Ошибка тула по истёкшему сроку вызова."""
-    if not isinstance(exc, McpCallTimedOut):
-        exc = McpCallTimedOut(timeout)
-    return tool_error(str(exc))
+    if not isinstance(leaf, McpCallTimedOut):
+        leaf = McpCallTimedOut(timeout)
+    return tool_error(str(leaf))
 
 
-def is_transport_failure(exc: BaseException) -> bool:
-    """Связь с сервером потеряна: ошибка соединения, смерть процесса,
-    ошибка протокола. Не срок, не ошибка тула; группа — из таких же."""
-    if isinstance(exc, BaseExceptionGroup):
-        return all(is_transport_failure(e) for e in exc.exceptions)
-    if isinstance(exc, (*_TIMEOUTS, McpToolCallError)):
-        return False
-    return isinstance(exc, _TRANSPORT)
+def passes_through(leaf: BaseException) -> bool:
+    """Исход уходит к вызывающему как есть: ответ сервера ошибкой тула
+    (кроме разрыва соединения), ошибка аргументов, стоп, durable."""
+    if isinstance(leaf, McpToolCallError):
+        return not is_connection_closed(leaf)
+    return isinstance(leaf, _PASS_THROUGH)
 
 
 async def await_attempt(
-    waiting: asyncio.Future, *, timeout: float, server_key: str
+    waiting: asyncio.Future,
+    *,
+    deadline: float,
+    timeout: float,
+    server_key: str,
 ) -> bool:
-    """Исход своей попытки подключения — не дольше ``timeout``.
+    """Исход своей попытки подключения — не позже ``deadline`` (время
+    цикла); ``timeout`` — полный потолок, для текста ошибки.
 
     ``waiting`` — отдельное ожидание из ``start_connect``: его отмена
     попытку не прерывает. Стоп хода снимает ожидание так же, как сам
@@ -105,7 +117,7 @@ async def await_attempt(
     """
     stop = current_user_stop()
     if stop is None:
-        return await _settle(waiting, timeout)
+        return await _settle(waiting, deadline, timeout)
     if stop.requested:
         raise UserStopInterrupt(kind="mcp", started=False)
     tool, call_id = current_tool_call()
@@ -120,11 +132,14 @@ async def await_attempt(
         mcp_server=server_key,
         release=release,
     ):
-        return await _settle(waiting, timeout)
+        return await _settle(waiting, deadline, timeout)
 
 
-async def _settle(waiting: asyncio.Future, timeout: float) -> bool:
-    done, _ = await asyncio.wait({waiting}, timeout=timeout)
+async def _settle(
+    waiting: asyncio.Future, deadline: float, timeout: float
+) -> bool:
+    remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+    done, _ = await asyncio.wait({waiting}, timeout=remaining)
     if not done:
         waiting.cancel()
         raise tool_error(
@@ -143,7 +158,7 @@ __all__ = [
     "await_attempt",
     "call_target",
     "is_timeout",
-    "is_transport_failure",
+    "passes_through",
     "refusal_text",
     "timeout_error",
     "tool_error",

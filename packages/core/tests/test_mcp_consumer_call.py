@@ -13,7 +13,11 @@ import asyncio
 import json
 import os
 import signal
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import anyio
+import httpx
 import pytest
 from gc_core.config_modules.field_meta import plain_dump
 from gc_core.execution.tool_call_context import bind_tool_call
@@ -27,9 +31,13 @@ from gc_core.tools.connect_mcp.consumer_call import (
 )
 from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CONNECTED,
+    STATE_CONNECTING,
     STATE_FAILED,
 )
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+from gc_core.tools.connect_mcp.persistent_stdio import (
+    PersistentStdioRegistry,
+)
 from gc_core.tools.connect_mcp.registry import mcp_tool_full_name
 from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.service import McpService
@@ -168,6 +176,28 @@ async def _settled(task: asyncio.Task):
     return task
 
 
+def _count_session_binds(monkeypatch) -> list[str]:
+    """Каждое обращение вызова к реестру постоянных stdio-сессий."""
+    binds: list[str] = []
+    real = PersistentStdioRegistry.get_or_create
+
+    def counting(self, server_key, server_cfg):
+        binds.append(server_key)
+        return real(self, server_key, server_cfg)
+
+    monkeypatch.setattr(PersistentStdioRegistry, "get_or_create", counting)
+    return binds
+
+
+def _raise_on_call(monkeypatch, make_exc) -> None:
+    """Вызов транспорта кончается исключением ``make_exc()``."""
+
+    async def raising(**kwargs):
+        raise make_exc()
+
+    monkeypatch.setattr(consumer_module, "acall_mcp_tool", raising)
+
+
 def _stop_gate() -> UserStop:
     gate = UserStop()
     gate.prepare_run(asyncio.get_running_loop(), None)
@@ -261,12 +291,11 @@ async def test_stop_cancels_the_wait(
 
     task = _call_under_stop(gate, view, _ECHO, text="hi")
     await wait_for(lambda: bool(consumer._connects), _CEILING_SEC)
-    loop = asyncio.get_running_loop()
-    asked = loop.time()
     gate.request()
     await _settled(task)
 
-    assert loop.time() - asked < 2
+    # Стоп снял ожидание, пока попытка ещё шла (сервер отвечает через 3 с).
+    assert _status(consumer).state == STATE_CONNECTING
     with pytest.raises(UserStopInterrupt):
         task.result()
     await wait_for(
@@ -332,14 +361,14 @@ async def test_vanished_tool_returns_server_error(
     [pid] = launches(control)
     set_behavior(control, tools=["echo"])
 
-    try:
-        envelope = await asyncio.wait_for(
-            _wrapper(view, _NAP).acall(seconds=0), _CEILING_SEC
-        )
-    except McpToolCallError:
-        pass
-    else:
-        assert "error" in json.dumps(json.loads(envelope)["result"])
+    envelope = await asyncio.wait_for(
+        _wrapper(view, _NAP).acall(seconds=0), _CEILING_SEC
+    )
+    # Постоянный stdio отдаёт ответ JSON-RPC с ошибкой как есть.
+    assert json.loads(envelope)["result"]["error"] == {
+        "code": -32602,
+        "message": "unknown tool nap",
+    }
 
     assert _status(consumer).state == STATE_CONNECTED
     assert launches(control) == [pid]
@@ -505,6 +534,11 @@ async def test_call_timeout_keeps_session(
     text = await _refused(view, _NAP, timeout=1, seconds=30)
 
     assert text == "сервер не ответил за 1 с"
+    # Серверу ушла отмена запроса (§5.8 п.4), сессия осталась.
+    await wait_for(
+        lambda: any(e.startswith("cancelled ") for e in events(control)),
+        _CEILING_SEC,
+    )
     assert _status(consumer).state == STATE_CONNECTED
     assert (await _call(view, _ECHO, text="hi"))["pid"] == pid
 
@@ -678,7 +712,7 @@ async def test_connect_wait_is_bounded_by_discovery_timeout(
 
 
 async def test_sibling_cancel_close_is_not_a_failure(
-    mcp_home, tmp_path, mcp_reaper, mcp_owner
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
 ):
     # Второй вызов стоит за первым на той же сессии; отмена первого без
     # стопа закрывает сессию — это не отказ сервера.
@@ -687,11 +721,13 @@ async def test_sibling_cancel_close_is_not_a_failure(
     service = McpService(connect_on_start=True)
     consumer = await _ready(mcp_reaper, service, settings)
     view = await _view(consumer, settings)
+    binds = _count_session_binds(monkeypatch)
 
     nap = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
     await wait_for(lambda: _in_flight(control), _CEILING_SEC)
     echo = asyncio.create_task(_wrapper(view, _ECHO).acall(text="hi"))
-    await asyncio.sleep(0.3)
+    # Второй вызов взял ту же сессию и встаёт на её замок.
+    await wait_for(lambda: len(binds) == 2, _CEILING_SEC)
     nap.cancel()
     await _settled(nap)
     await _settled(echo)
@@ -724,3 +760,306 @@ async def test_call_runs_under_consumer_owner_and_slots(
     await _call(view, _ECHO, text="hi")
 
     assert seen == [(consumer.owner, consumer._slots)]
+
+
+_OUTCOMES = {
+    "not-running": (
+        lambda: RuntimeError("persistent stdio MCP process is not running"),
+        "failure",
+    ),
+    "mixed-group": (
+        lambda: ExceptionGroup(
+            "g", [httpx.ConnectError("refused"), RuntimeError("x")]
+        ),
+        "failure",
+    ),
+    "closed-resource": (lambda: anyio.ClosedResourceError(), "failure"),
+    "connect-timeout": (lambda: httpx.ConnectTimeout("slow"), "failure"),
+    "timeout-group": (
+        lambda: ExceptionGroup(
+            "g", [httpx.ReadTimeout("read"), RuntimeError("x")]
+        ),
+        "timeout",
+    ),
+    "value-group": (
+        lambda: ExceptionGroup("g", [ValueError("bad")]),
+        "pass",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_OUTCOMES))
+async def test_unlisted_exception_is_connection_failure(
+    case, mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Как есть уходят только перечисленные исходы; всё прочее — отказ
+    # связи с причиной без сырого текста группы.
+    make_exc, kind = _OUTCOMES[case]
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+    _raise_on_call(monkeypatch, make_exc)
+
+    if kind == "pass":
+        with pytest.raises(ValueError, match="bad"):
+            await _call(view, _ECHO, text="hi")
+        assert _status(consumer).state == STATE_CONNECTED
+        return
+    text = await _refused(view, _ECHO, text="hi")
+
+    assert "TaskGroup" not in text and "unhandled" not in text
+    if kind == "timeout":
+        assert text == "сервер не ответил за 20 с"
+        assert _status(consumer).state == STATE_CONNECTED
+        assert entry.last_failure is None
+        return
+    assert text == entry.last_failure.reason
+    assert _status(consumer).state == STATE_FAILED
+    assert not consumer.has_session(entry)
+
+
+def _http_handler(state: dict):
+    """Легаси-http сервер: подключение удаётся, ``tools/call`` по флагу
+    отвечает 401."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("content-length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            method = body.get("method")
+            if method == "tools/call" and state["fail"]:
+                self.send_response(401)
+                self.end_headers()
+                return
+            if "id" not in body:
+                self.send_response(202)
+                self.end_headers()
+                return
+            self._reply(body["id"], _http_result(method))
+
+        def _reply(self, rid, result) -> None:
+            data = json.dumps(
+                {"jsonrpc": "2.0", "id": rid, "result": result}
+            ).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("mcp-session-id", "s1")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    return Handler
+
+
+def _http_result(method: str) -> dict:
+    if method == "initialize":
+        return {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "t", "version": "1"},
+        }
+    if method == "tools/list":
+        return {"tools": [_BACKEND_ECHO]}
+    return {"content": [{"type": "text", "text": json.dumps({"ok": 1})}]}
+
+
+async def test_legacy_http_401_on_call_is_failure_without_secret(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    state = {"fail": False}
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _http_handler(state))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        url = f"http://127.0.0.1:{port}/mcp?apikey=URLSECRET123"
+        settings = _settings({"a": {"transport": "http", "url": url}})
+        # «При первом вызове»: без фоновых повторов статус отказа виден.
+        service = McpService(connect_on_start=False)
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+        assert await _call(view, _ECHO, text="hi") == {"ok": 1}
+        state["fail"] = True
+
+        text = await _refused(view, _ECHO, text="hi")
+
+        entry = _entry(consumer)
+        assert "URLSECRET123" not in text
+        assert text == entry.last_failure.reason
+        assert entry.last_failure.code == "auth"
+        assert _status(consumer).state == STATE_FAILED
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
+async def test_stream_stdio_death_mid_call_is_own_failure(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    settings = _settings(
+        {"a": {**stdio_cfg(control), "transport": "stream_stdio"}}
+    )
+    service = McpService(connect_on_start=True, clock=clock.now)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+    [pid] = launches(control)
+
+    nap = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    os.kill(pid, signal.SIGKILL)
+    await _settled(nap)
+
+    with pytest.raises(McpToolCallError) as caught:
+        nap.result()
+    assert caught.value.error.message == entry.last_failure.reason
+    assert _status(consumer).state == STATE_FAILED
+    assert not consumer.has_session(entry)
+
+    # В пределах 30 с правило не пускает: процесс заново не поднимается.
+    text = await _refused(view, _ECHO, text="hi")
+    assert text == f"сервер недоступен: {entry.last_failure.reason}"
+    assert launches(control) == [pid]
+
+
+async def test_old_call_failure_keeps_session_of_returned_server(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Сервер убрали и вернули с тем же отпечатком, новая сессия уже
+    # открыта — и только потом приходит сбой вызова старой сессии.
+    real = consumer_module.acall_mcp_tool
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def late_failure(**kwargs):
+        try:
+            return await real(**kwargs)
+        except Exception:
+            held.set()
+            await release.wait()
+            raise
+
+    monkeypatch.setattr(consumer_module, "acall_mcp_tool", late_failure)
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+    [old] = launches(control)
+
+    nap = asyncio.create_task(_wrapper(view, _NAP).acall(seconds=30))
+    await wait_for(lambda: _in_flight(control), _CEILING_SEC)
+    await _ensure(consumer, _settings({}))
+    await asyncio.wait_for(held.wait(), _CEILING_SEC)
+    await _ensure(consumer, settings)
+    await wait_for(lambda: consumer.has_session(entry), _CEILING_SEC)
+    new = launches(control)[-1]
+    release.set()
+    await _settled(nap)
+
+    with pytest.raises(McpToolCallError) as caught:
+        nap.result()
+    assert caught.value.error.message == SESSION_LOST_TEXT
+    assert new != old and alive(new)
+    assert entry.last_failure is None
+    assert _status(consumer).state == STATE_CONNECTED
+    assert (await _call(view, _ECHO, text="hi"))["pid"] == new
+
+
+async def test_foreign_cancel_of_call_is_not_service_stop(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Задачу вызова снял транспорт (область anyio), а не закрытие
+    # потребителя: это потеря соединения, а не «сервис остановлен».
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+    _raise_on_call(monkeypatch, asyncio.CancelledError)
+
+    text = await _refused(view, _ECHO, text="hi")
+
+    assert text != SERVICE_CLOSED_TEXT
+    assert text == entry.last_failure.reason
+    assert _status(consumer).state == STATE_FAILED
+
+
+async def test_server_returned_while_call_waits_connect(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    # Попытку снял уход сервера, сервер тут же вернули: вызов ждёт новую
+    # попытку в пределах того же потолка, а не отвечает «недоступен».
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=3.0)
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+
+    call = asyncio.create_task(_wrapper(view, _ECHO).acall(text="hi"))
+    await wait_for(lambda: bool(consumer._connects), _CEILING_SEC)
+    set_behavior(control)
+    await _ensure(consumer, _settings({}))
+    await _ensure(consumer, settings)
+    await _settled(call)
+
+    assert _payload(call.result())["text"] == "hi"
+    assert _status(consumer).state == STATE_CONNECTED
+
+
+async def test_two_calls_to_unconnected_server_launch_once(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=1.0)
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+
+    first, second = await asyncio.wait_for(
+        asyncio.gather(
+            _wrapper(view, _ECHO).acall(text="1"),
+            _wrapper(view, _ECHO).acall(text="2"),
+        ),
+        _CEILING_SEC,
+    )
+
+    pids = {_payload(first)["pid"], _payload(second)["pid"]}
+    assert pids == set(launches(control))
+    assert len(launches(control)) == 1
+
+
+async def test_close_while_call_waits_connect(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=5.0)
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+
+    call = asyncio.create_task(_wrapper(view, _ECHO).acall(text="hi"))
+    await wait_for(lambda: bool(launches(control)), _CEILING_SEC)
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+    await _settled(call)
+
+    with pytest.raises(McpToolCallError) as caught:
+        call.result()
+    assert caught.value.error.message == SERVICE_CLOSED_TEXT
+    pids = launches(control)
+    await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)

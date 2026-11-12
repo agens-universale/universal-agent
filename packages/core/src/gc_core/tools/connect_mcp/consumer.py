@@ -36,6 +36,7 @@ from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.abandonable import use_call_slots
 from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
+from gc_core.tools.connect_mcp.call_errors import first_leaf
 from gc_core.tools.connect_mcp.client import (
     forget_owner_sessions,
     forget_session,
@@ -46,7 +47,7 @@ from gc_core.tools.connect_mcp.consumer_call import (
     await_attempt,
     call_target,
     is_timeout,
-    is_transport_failure,
+    passes_through,
     refusal_text,
     timeout_error,
     tool_error,
@@ -168,6 +169,10 @@ class McpConsumer:
     ``_backend_cache`` — кэш тулов серверов, исполняемых внутри бэкенда
     сборки (§5.10), пока бэкенд сборки — тот же объект. ``_inflight`` —
     идущие вызовы тулов (их снимает закрытие потребителя).
+    ``_generations`` — поколение соединения по ключу сессии: растёт при
+    каждом снятии соединения (сбой, отмена, уход сервера). Вызов
+    запоминает его на старте: изменилось к сбою — сессию закрыл сам
+    потребитель, и сбой не отказ сервера.
     """
 
     def __init__(self, service: "McpService", label: str) -> None:
@@ -191,6 +196,7 @@ class McpConsumer:
         self._pinned: dict[str, tuple[ServerEntry, ServerStatus]] = {}
         self._backend_cache: ToolsCache | None = None
         self._inflight: set[asyncio.Task] = set()
+        self._generations: dict[str, int] = {}
         # Хвост закрытия (сессии владельца) идёт по одному вызову за раз.
         self._closing_sessions = asyncio.Lock()
 
@@ -344,8 +350,13 @@ class McpConsumer:
 
     def _drop_connection(self, key: str) -> None:
         with self._lock:
-            self._sessions.discard(key)
-            self._ok.discard(key)
+            self._forget_connection(key)
+
+    def _forget_connection(self, key: str) -> None:
+        """Снять соединение и сменить его поколение. Звать под ``_lock``."""
+        self._sessions.discard(key)
+        self._ok.discard(key)
+        self._generations[key] = self._generations.get(key, 0) + 1
 
     async def _aclose_rest(self, entry: ServerEntry) -> None:
         """Закрыть остаток сессии; повторная отмена закрытие не обрывает."""
@@ -636,8 +647,7 @@ class McpConsumer:
             work.discard(None)
             earlier = set(self._closing_servers.get(entry.key, ()))
             self._retry.pop(key, None)
-            self._sessions.discard(key)
-            self._ok.discard(key)
+            self._forget_connection(key)
         for task in work:
             task.cancel()
         closing = asyncio.get_running_loop().create_task(
@@ -781,26 +791,34 @@ class McpConsumer:
         настроек потребителя и снимается стопом хода.
         """
         key = _session_key_of(entry)
+        timeout = settings_of(self._settings).mcp.meta.discovery_timeout_sec
+        deadline = asyncio.get_running_loop().time() + timeout
+        while self._needs_connect(entry, cfg):
+            await await_attempt(
+                self.start_connect(entry),
+                deadline=deadline,
+                timeout=timeout,
+                server_key=entry.key,
+            )
+            # Попытку могли снять закрытие или сверка: сервер ушёл —
+            # ошибка; его вернули — следующий круг ждёт новую попытку.
+            self._call_entry(entry.key, key)
+
+    def _needs_connect(self, entry: ServerEntry, cfg: dict) -> bool:
+        """Вызову нужно дождаться подключения; правило 30 с не пускает —
+        ошибка тула с причиной. После неудачной попытки её отказ свежий,
+        поэтому круг ожиданий кончается этой ошибкой."""
+        key = _session_key_of(entry)
         with self._lock:
             connected = self._connected(key)
             attempting = self._attempting(key)
         if connected:
-            return
-        if not attempting:
-            if not self.may_connect(entry):
-                raise tool_error(self._refusal(entry))
-            if not cfg.get("persistent_session"):
-                return
-        meta = settings_of(self._settings).mcp.meta
-        ok = await await_attempt(
-            self.start_connect(entry),
-            timeout=meta.discovery_timeout_sec,
-            server_key=entry.key,
-        )
-        # Попытку могли снять сверка (сервер ушёл) или закрытие.
-        self._call_entry(entry.key, key)
-        if not ok:
+            return False
+        if attempting:
+            return True
+        if not self.may_connect(entry):
             raise tool_error(self._refusal(entry))
+        return bool(cfg.get("persistent_session"))
 
     def _refusal(self, entry: ServerEntry) -> str:
         with self._lock:
@@ -821,6 +839,7 @@ class McpConsumer:
             task = asyncio.get_running_loop().create_task(call())
         with self._lock:
             self._inflight.add(task)
+            generation = self._generations.get(_session_key_of(entry), 0)
         task.add_done_callback(self._forget_call)
         try:
             try:
@@ -829,13 +848,19 @@ class McpConsumer:
                 task.cancel()
                 await self._aabandon_call(entry, cfg)
                 raise
-            return await self._call_outcome(entry, cfg, task, timeout)
+            return await self._call_outcome(
+                entry, cfg, task, timeout, generation
+            )
         finally:
             self._leave_if_gone(entry)
 
     def _forget_call(self, task: asyncio.Task) -> None:
+        """Снять вызов с учёта и забрать его исключение: после отмены
+        вызывающего исход задачи никто не ждёт."""
         with self._lock:
             self._inflight.discard(task)
+        if not task.cancelled():
+            task.exception()
 
     async def _aabandon_call(self, entry: ServerEntry, cfg: dict) -> None:
         """Шаг 6: брошенный без стопа вызов постоянного stdio закрывает
@@ -849,15 +874,28 @@ class McpConsumer:
         await self._aclose_rest(entry)
 
     async def _call_outcome(
-        self, entry: ServerEntry, cfg: dict, task: asyncio.Task, timeout: float
+        self,
+        entry: ServerEntry,
+        cfg: dict,
+        task: asyncio.Task,
+        timeout: float,
+        generation: int,
     ) -> Any:
         """Шаги 4–5, 7: исход вызова; ответ после закрытия — «сервис MCP
-        остановлен»."""
-        exc = None if task.cancelled() else task.exception()
-        if task.cancelled() or self._is_closed():
-            raise tool_error(SERVICE_CLOSED_TEXT) from exc
+        остановлен». Задачу, отменённую не закрытием (её снял транспорт),
+        — как потерю соединения."""
+        if self._is_closed():
+            if not task.cancelled():
+                task.exception()
+            raise tool_error(SERVICE_CLOSED_TEXT)
+        if task.cancelled():
+            lost = ConnectionError(SESSION_LOST_TEXT)
+            raise await self._atransport_failure(entry, cfg, lost, generation)
+        exc = task.exception()
         if exc is not None:
-            await self._araise_call_failure(entry, cfg, exc, timeout)
+            await self._araise_call_failure(
+                entry, cfg, exc, timeout, generation
+            )
         key = _session_key_of(entry)
         with self._lock:
             self._failures.pop(key, None)
@@ -868,30 +906,49 @@ class McpConsumer:
         return task.result()
 
     async def _araise_call_failure(
-        self, entry: ServerEntry, cfg: dict, exc: Exception, timeout: float
+        self,
+        entry: ServerEntry,
+        cfg: dict,
+        exc: BaseException,
+        timeout: float,
+        generation: int,
     ) -> NoReturn:
-        """Срок — ошибка тула без смены статуса; транспортный сбой — отказ
-        потребителя; остальное (ошибка тула сервера, аргументов, стоп)
-        уходит как есть."""
-        if is_timeout(exc):
-            raise timeout_error(exc, timeout) from exc
-        if not is_transport_failure(exc):
-            raise exc
-        raise await self._atransport_failure(entry, cfg, exc) from exc
+        """По первому листу группы: срок — ошибка тула без смены статуса;
+        ошибка тула сервера, аргументов, стоп и durable — как есть; всё
+        остальное — отказ связи с сервером."""
+        leaf = first_leaf(exc)
+        if is_timeout(leaf):
+            raise timeout_error(leaf, timeout) from exc
+        if passes_through(leaf) or not isinstance(leaf, Exception):
+            raise leaf
+        raise await self._atransport_failure(
+            entry, cfg, exc, generation
+        ) from exc
 
     async def _atransport_failure(
-        self, entry: ServerEntry, cfg: dict, exc: Exception
+        self,
+        entry: ServerEntry,
+        cfg: dict,
+        exc: BaseException,
+        generation: int,
     ) -> Exception:
-        """Шаг 7: ошибка тула по транспортному сбою вызова.
+        """Шаг 7: ошибка тула по отказу связи у вызова.
 
-        Сессию закрыли сверка или сам потребитель — отказ не пишется. Иначе
-        сессия потребителя закрывается, отказ — в запись и свой; сетевой
-        сервер у потребителя «на старте» переподключается в фоне.
+        ``generation`` — поколение соединения на старте вызова. Сервер ушёл
+        из набора — «сервер отключён»; поколение постоянной сессии сменилось
+        (её закрыл сам потребитель) — «сессия сервера закрыта во время
+        вызова»; отказ в обоих случаях не пишется. Иначе сессия потребителя
+        закрывается, отказ — в запись и свой (текст — ``classify_failure``,
+        без секретов); сетевой сервер у потребителя «на старте»
+        переподключается в фоне.
         """
         key = _session_key_of(entry)
         with self._lock:
             gone = self._servers.get(entry.key) is not entry
-            lost = cfg.get("persistent_session") and key not in self._sessions
+            lost = (
+                cfg.get("persistent_session")
+                and self._generations.get(key, 0) != generation
+            )
         if gone:
             return tool_error(SERVER_GONE_TEXT)
         if lost:
@@ -902,9 +959,10 @@ class McpConsumer:
             return tool_error(SERVICE_CLOSED_TEXT)
         failure = self._service.record_failure(entry, exc)
         logger.warning(
-            "MCP %s: вызов потребителя %s потерял связь: %s",
+            "MCP %s: вызов потребителя %s потерял связь (%s): %s",
             entry.key,
             self.label,
+            type(first_leaf(exc)).__name__,
             failure.reason,
         )
         with self._lock:
