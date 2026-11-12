@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import logging
 import threading
 import uuid
 from dataclasses import dataclass
@@ -45,7 +46,7 @@ from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
-from gc_tui.services.agent_loop import AgentLoop
+from gc_tui.services.agent_loop import AgentLoop, thread_has_running_loop
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.profile_lock import profile_switch_refusal
@@ -172,6 +173,8 @@ def _run_auto_check_safely(
     except Exception:
         pass
 
+
+_log = logging.getLogger(__name__)
 
 #: Статусы потребителя, которые шапка принимает окончательными (§5.7):
 #: `connecting` и `cached` — сервер ещё подключается.
@@ -1987,7 +1990,9 @@ class TuiApp(App):
             published = True
 
         try:
-            executor = self._assemble_executor(progress, publish)
+            executor, loaded, mcp_status = self._assemble_executor(
+                progress, publish
+            )
         except BaseException:
             progress.finish(False)
             # Упала до публикации — прогресс ещё не на app; ставим, иначе
@@ -1996,18 +2001,43 @@ class TuiApp(App):
             if not published:
                 self._mcp_progress = progress
             raise
-        progress.mark_built(
-            list(progress.state()[0]), self._statuses_outside_consumer()
-        )
-        self.settle_mcp_progress(progress)
+        self._mark_generation_built(progress, loaded, mcp_status)
         return executor
+
+    def _mark_generation_built(self, progress, loaded, mcp_status) -> None:
+        """Удачная сборка — в поколение шапки: серверы, статусы сборки
+        серверов вне набора потребителя (§5.10) и настройки сборки. Сбой
+        этого шага удачную сборку отказом не делает: поколение получает
+        итог «собрано», причина — в лог."""
+        try:
+            own = self._service_statuses()
+            outside = {
+                name: status
+                for name, status in mcp_status.items()
+                if name not in own
+            }
+            progress.mark_built(list(progress.state()[0]), outside, loaded)
+            self.settle_mcp_progress(progress)
+        except Exception as exc:
+            _log.warning(
+                "MCP: шапка не получила статусы сборки: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            progress.finish(True)
 
     def _window_consumer(self):
         """Потребитель MCP «окно»: открывается первой сборкой, дальше тот же.
 
         Зовётся только из рабочего потока сборки (поток без цикла): с цикла
         Textual открытие привязало бы сервис к циклу интерфейса, и сверки
-        на цикле агента упали бы (контракт `McpService.open_consumer`)."""
+        на цикле агента упали бы (контракт `McpService.open_consumer`).
+        С потока, где идёт цикл, — отказ до открытия."""
+        if thread_has_running_loop():
+            raise RuntimeError(
+                "потребитель MCP окна открывается только из рабочего потока "
+                "сборки, не с цикла событий"
+            )
         with self._mcp_consumer_lock:
             if self._mcp_consumer is None:
                 self._mcp_consumer = self._mcp_service.open_consumer("window")
@@ -2020,14 +2050,22 @@ class TuiApp(App):
             return {}
         return self._mcp_service.status(consumer)
 
-    def _statuses_outside_consumer(self) -> dict:
-        """Статусы сборки серверов вне набора потребителя (§5.10)."""
-        own = self._service_statuses()
-        return {
-            name: status
-            for name, status in (self._mcp_status or {}).items()
-            if name not in own
-        }
+    def _overlay_service_statuses(self, statuses: dict, settings) -> None:
+        """Наложить статусы сервиса на снимок и статусы окна
+        (`overlay_service_statuses`). Сбой — предупреждение в лог, копии
+        окна остаются прежними: снимок окна не роняет ни сборку, ни тик."""
+        try:
+            snapshot, mcp_status = overlay_service_statuses(
+                self._mcp_snapshot, self._mcp_status, settings, statuses
+            )
+        except Exception as exc:
+            _log.warning(
+                "MCP: статусы сервиса не наложены на снимок окна: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return
+        self._mcp_snapshot, self._mcp_status = snapshot, mcp_status
 
     def settle_mcp_progress(self, progress) -> None:
         """Перенести окончательные статусы потребителя в поколение шапки.
@@ -2038,11 +2076,12 @@ class TuiApp(App):
         серверы вне сервиса — со статусом сборки. Поколение закрывается,
         когда ни один сервер не остался `connecting` или `cached`; тогда
         же снимок и статусы окна получают окончательные статусы сервиса —
-        тосты итога видят их."""
+        тосты итога видят их — по настройкам сборки поколения и только у
+        поколения, которое стоит на приложении."""
         built = progress.built()
         if built is None or progress.state()[1] is not None:
             return
-        names, outside = built
+        names, outside, settings = built
         statuses = self._service_statuses()
         for name in names:
             status = statuses.get(name)
@@ -2063,18 +2102,15 @@ class TuiApp(App):
             if name in statuses
         ):
             return
-        self._mcp_snapshot, self._mcp_status = overlay_service_statuses(
-            self._mcp_snapshot,
-            self._mcp_status,
-            self.effective_settings(),
-            statuses,
-        )
+        if self._mcp_progress is progress:
+            self._overlay_service_statuses(statuses, settings)
         progress.finish(True)
 
     def _assemble_executor(self, progress, publish):
         """Сборка executor; прогресс MCP встаёт на app (`publish`) после
         `begin`, чтобы шапка не приняла пустой список серверов за «MCP нет».
-        Статусы серверов в прогресс пишет не сборка, а `settle_mcp_progress`."""
+        Статусы серверов в прогресс пишет не сборка, а `settle_mcp_progress`.
+        Отдаёт исполнитель, настройки сборки и статусы MCP её контекста."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import (
             cli_forces_legacy_model,
@@ -2139,21 +2175,24 @@ class TuiApp(App):
         ctx.subagent_progress_sink = self._subagent_progress_sink
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
+        # Пишет только сборка, чей прогресс стоит на приложении: обогнанная
+        # сборка, закончившая позже, копии новой не перетирает.
         from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 
-        self._mcp_snapshot = build_mcp_tools_snapshot(
-            loaded, ctx.tools_data, ctx.mcp_status
-        )
-        self._mcp_status = ctx.mcp_status
-        self._registered_tool_names = getattr(
-            ctx, "registered_tool_names", None
-        )
+        if self._mcp_progress is progress:
+            self._mcp_snapshot = build_mcp_tools_snapshot(
+                loaded, ctx.tools_data, ctx.mcp_status
+            )
+            self._mcp_status = ctx.mcp_status
+            self._registered_tool_names = getattr(
+                ctx, "registered_tool_names", None
+            )
         # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
         runner = self.active_runner
         if runner is not None and hasattr(runner, "make_tui_confirm"):
             ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         register_runtime_notices_listener(self._on_runtime_notice)
-        return AgentExecutor(ctx)
+        return AgentExecutor(ctx), loaded, ctx.mcp_status
 
     def _post_stream_signal(self) -> None:
         """Сигнал стрима с цикла агента: неблокирующе, сообщением в очередь

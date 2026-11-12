@@ -19,15 +19,17 @@ import time
 
 import pytest
 from gc_core.tools.connect_mcp.consumer_status import (
+    STATE_CACHED,
     STATE_CONNECTED,
     STATE_CONNECTING,
     STATE_FAILED,
     ServerStatus,
 )
 from gc_testkit import as_coro
-from gc_testkit.mcp import exits, launches, stdio_cfg
+from gc_testkit.mcp import exits, launches, set_behavior, stdio_cfg, wait_for
 from gc_testkit.mcp.fixtures import mcp_home, mcp_owner, mcp_reaper
 from gc_testkit.tui_support import tui_settings
+from gc_tui.services.agent_loop import thread_has_running_loop
 
 pytest.importorskip("textual")
 
@@ -51,6 +53,9 @@ class _Service:
         self.closes = 0
 
     def open_consumer(self, label: str) -> _Consumer:
+        # Контракт открытия (`McpService.open_consumer`): из потока без
+        # цикла — его стерегут все тесты окна.
+        assert not thread_has_running_loop(), "открытие с цикла событий"
         consumer = _Consumer(label)
         self.opened.append(consumer)
         return consumer
@@ -82,14 +87,18 @@ class _Executor:
 
 
 class _Builds:
-    """Подмена `acreate_run_context`: записывает аргументы каждой сборки."""
+    """Подмена `acreate_run_context`: записывает аргументы каждой сборки;
+    ``during`` — что сделать посреди сборки (на цикле агента)."""
 
-    def __init__(self, mcp_status: dict | None = None) -> None:
+    def __init__(self, mcp_status: dict | None = None, during=None) -> None:
         self.kwargs: list[dict] = []
         self.mcp_status = mcp_status
+        self.during = during
 
     async def __call__(self, _settings, **kwargs):
         self.kwargs.append(kwargs)
+        if self.during is not None:
+            self.during()
         return _Ctx(self.mcp_status)
 
 
@@ -198,8 +207,8 @@ async def test_stop_and_send_undo_keep_consumer(tmp_path, monkeypatch):
     builds = _Builds()
     _patch_build(monkeypatch, builds)
     service = _Service()
-    app = _app(tmp_path, _SRV, service, mounted=True)
-    app._executor_factory = None
+    # Прогрев на монтировании собирает сам — тем же путём, что в окне.
+    app = _app(tmp_path, _SRV, service)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         first = app.get_runner()
@@ -431,6 +440,175 @@ def test_build_without_servers_finishes_true(tmp_path, monkeypatch):
     assert app._mcp_progress.state()[1] is True
 
 
+def test_cached_server_keeps_generation_open(tmp_path, monkeypatch):
+    """`cached` — сервер ещё не подключился: шапка ждёт (§5.7)."""
+    _patch_build(monkeypatch, _Builds())
+    cached = ServerStatus(
+        STATE_CACHED, from_catalog=True, tools=({"name": "echo"},)
+    )
+    app = _app(tmp_path, _SRV, _Service({"srv": cached}))
+
+    app._build_real_executor()
+
+    reported, outcome = app._mcp_progress.state()
+    assert reported["srv"] is None
+    assert outcome is None
+
+
+def test_window_consumer_refused_on_running_loop(tmp_path):
+    """С потока, где идёт цикл, потребитель окна не открывается: сервис
+    не привязывается к чужому циклу."""
+    service = _Service()
+    app = _app(tmp_path, _SRV, service)
+
+    async def _open_on_loop():
+        app._window_consumer()
+
+    with pytest.raises(RuntimeError, match="рабочего потока сборки"):
+        asyncio.run(_open_on_loop())
+    assert service.opened == []
+    assert app._mcp_consumer is None
+
+
+@pytest.mark.asyncio
+async def test_bad_tool_list_does_not_break_build_or_tick(
+    tmp_path, monkeypatch
+):
+    """Сервер `connected` с негодным описанием тула: сборка отдаёт
+    исполнитель, поколение закрыто «собрано», тик шапки не бросает."""
+    _patch_build(monkeypatch, _Builds())
+    bad = ServerStatus(
+        STATE_CONNECTED,
+        tools=({"name": "echo", "description": {"text": "x"}},),
+    )
+    service = _Service({"srv": ServerStatus(STATE_CONNECTING)})
+    app = _app(tmp_path, _SRV, service, mounted=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        executor = await asyncio.wait_for(
+            asyncio.to_thread(app._build_real_executor), _CEILING_SEC
+        )
+        service.statuses["srv"] = bad
+        app.screen._feed_start_header()
+        await pilot.pause()
+
+        assert isinstance(executor, _Executor)
+        assert app._mcp_progress.state()[1] is True
+        assert app._mcp_status["srv"]["status"] == STATE_FAILED
+        assert app._mcp_status["srv"]["reason_code"] == "protocol"
+
+
+@pytest.mark.asyncio
+async def test_overlay_failure_on_tick_keeps_window_copies(
+    tmp_path, monkeypatch, caplog
+):
+    """Сбой наложения статусов на тике шапки — предупреждение в лог, тик
+    не бросает, поколение закрыто «собрано», копии окна — те, что дала
+    сборка."""
+    import logging
+
+    def _broken(*_a, **_k):
+        raise TypeError("негодный тул")
+
+    _patch_build(monkeypatch, _Builds())
+    service = _Service({"srv": ServerStatus(STATE_CONNECTING)})
+    app = _app(tmp_path, _SRV, service, mounted=True)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(
+            asyncio.to_thread(app._build_real_executor), _CEILING_SEC
+        )
+        snapshot, status = app._mcp_snapshot, app._mcp_status
+        monkeypatch.setattr("gc_tui.app.overlay_service_statuses", _broken)
+        service.statuses["srv"] = _connected("echo")
+        with caplog.at_level(logging.WARNING, logger="gc_tui.app"):
+            app.screen._feed_start_header()
+        await pilot.pause()
+
+        assert app._mcp_progress.state()[1] is True
+        assert app._mcp_snapshot is snapshot
+        assert app._mcp_status is status
+        assert "не наложены на снимок окна" in caplog.text
+
+
+def test_failed_header_step_keeps_successful_build(
+    tmp_path, monkeypatch, caplog
+):
+    """Сбой шага шапки после собранного исполнителя (снимок статусов
+    бросил) не делает сборку отказом: исполнитель отдан, итог «собрано»."""
+    import logging
+
+    service = _Service()
+
+    def _broken_status(_consumer):
+        raise RuntimeError("статус недоступен")
+
+    service.status = _broken_status
+    _patch_build(monkeypatch, _Builds())
+    app = _app(tmp_path, _SRV, service)
+
+    with caplog.at_level(logging.WARNING, logger="gc_tui.app"):
+        executor = app._build_real_executor()
+
+    assert isinstance(executor, _Executor)
+    assert app._mcp_progress.state()[1] is True
+    assert "статус недоступен" in caplog.text
+
+
+def test_overlay_uses_build_settings(tmp_path, monkeypatch):
+    """Поколение накладывает статусы по настройкам своей сборки: смена
+    настроек окна до закрытия поколения на снимок не влияет."""
+    _patch_build(monkeypatch, _Builds())
+    service = _Service({"srv": ServerStatus(STATE_CONNECTING)})
+    app = _app(tmp_path, _SRV, service)
+    app._build_real_executor()
+    other = tui_settings({"agent.model": "M"})
+    monkeypatch.setattr(app, "effective_settings", lambda: other)
+
+    service.statuses["srv"] = _connected("echo")
+    app.settle_mcp_progress(app._mcp_progress)
+
+    assert app._mcp_progress.state()[1] is True
+    assert app._mcp_snapshot["srv"]["status"] == STATE_CONNECTED
+    assert len(app._mcp_snapshot["srv"]["tools"]) == 1
+
+
+def test_overtaken_build_keeps_newer_copies(tmp_path, monkeypatch):
+    """Сборка, которую обогнала более новая (её прогресс уже на
+    приложении), копии окна не пишет; статусы внешних серверов своего
+    поколения берёт из своего контекста."""
+    from gc_tui.services.mcp_progress import McpProgress
+
+    ext_status = {"status": "connected", "reason": None, "tool_count": 1}
+    newer = McpProgress()
+    seen: list = []
+
+    def _overtake():
+        seen.append(app._mcp_progress)
+        app._mcp_progress = newer
+
+    _patch_build(
+        monkeypatch, _Builds(mcp_status={"ext": ext_status}, during=_overtake)
+    )
+    servers = {
+        "srv": {"transport": "stdio", "command": "srv-mcp"},
+        "ext": {"transport": "stdio", "command": "ext-mcp"},
+    }
+    service = _Service({"srv": _connected("echo")})
+    app = _app(tmp_path, {"mcp.servers": servers}, service)
+    newer_status = {"srv": {"status": "connected"}}
+    newer_snapshot = {"srv": {"status": "connected", "tools": []}}
+    app._mcp_status = newer_status
+    app._mcp_snapshot = newer_snapshot
+
+    app._build_real_executor()
+
+    (own,) = seen
+    assert app._mcp_progress is newer
+    assert app._mcp_status is newer_status
+    assert app._mcp_snapshot is newer_snapshot
+    assert own.state()[1] is True
+    assert own.state()[0]["ext"] == ext_status
+
+
 # ---- настоящий сервис: пересборка не перезапускает сервер ----
 
 
@@ -440,25 +618,28 @@ _posix_only = pytest.mark.skipif(
 
 
 class _RealBuilds:
-    """Настоящая сборка контекста; записывает потребителя. ``cancel_next``
-    снимает задачу сборки на цикле агента после сверки потребителя — как
-    отмена сборки на выходе: в рабочий поток приходит отмена."""
+    """Настоящая сборка контекста; записывает потребителя.
+    ``cancel_when`` — условие, по которому сборку снимают посреди работы
+    (как отмену задачи на цикле агента): в рабочий поток приходит отмена."""
 
     def __init__(self, real) -> None:
         self.real = real
         self.consumers: list = []
-        self.cancel_next = False
+        self.cancel_when = None
         self.contexts: list = []
 
     async def __call__(self, settings, **kwargs):
         self.consumers.append(kwargs.get("mcp_consumer"))
-        ctx = await self.real(settings, **kwargs)
-        self.contexts.append(ctx)
-        if self.cancel_next:
-            self.cancel_next = False
-            asyncio.current_task().cancel()
-            await asyncio.sleep(0)
-        return ctx
+        if self.cancel_when is None:
+            ctx = await self.real(settings, **kwargs)
+            self.contexts.append(ctx)
+            return ctx
+        when, self.cancel_when = self.cancel_when, None
+        task = asyncio.ensure_future(self.real(settings, **kwargs))
+        await wait_for(when, _CEILING_SEC)
+        assert not task.done()
+        task.cancel()
+        return await task
 
 
 def _real_service_app(tmp_path, control, service):
@@ -494,22 +675,33 @@ def _shutdown(app, service, builds) -> None:
 async def test_rebuild_and_failed_builds_keep_server_process(
     tmp_path, monkeypatch, mcp_home, mcp_reaper, mcp_owner
 ):
-    """Пересборка (`invalidate_runner`, та же смена серверов) идёт с тем же
-    потребителем и тем же процессом сервера; упавшая и отменённая сборки
-    потребителя не закрывают — следующая сборка работает на том же
-    процессе."""
+    """Сборка, отменённая посреди ожидания сверки, потребителя не
+    закрывает и подключение не прерывает; пересборка (`invalidate_runner`,
+    тот же набор серверов) идёт с тем же потребителем и тем же процессом
+    сервера; упавшая сборка потребителя не закрывает — следующая сборка
+    работает на том же процессе."""
     from gc_core import agent_executor, run_context
     from gc_core.tools.connect_mcp.service import McpService
 
     control = tmp_path / "srv.json"
+    # Каталога нет: сборка ждёт первое подключение сервера.
+    set_behavior(control, start_delay=1)
     builds = _RealBuilds(run_context.acreate_run_context)
     monkeypatch.setattr("gc_core.run_context.acreate_run_context", builds)
     service = McpService(connect_on_start=True)
     app = _real_service_app(tmp_path, control, service)
     try:
+        builds.cancel_when = lambda: bool(launches(control))
+        with pytest.raises(
+            (asyncio.CancelledError, concurrent.futures.CancelledError)
+        ):
+            await _build_off_loop(app)
+        assert app._mcp_progress.state()[1] is False
+        (pid,) = launches(control)
+
         await _build_off_loop(app)
         assert app._mcp_progress.state()[1] is True
-        (pid,) = launches(control)
+        assert app._mcp_status["srv"]["status"] == STATE_CONNECTED
 
         app.invalidate_runner()
         await _build_off_loop(app)
@@ -520,13 +712,6 @@ async def test_rebuild_and_failed_builds_keep_server_process(
             await _build_off_loop(app)
         assert app._mcp_progress.state()[1] is False
         monkeypatch.setattr(agent_executor, "AgentExecutor", executor_cls)
-
-        builds.cancel_next = True
-        with pytest.raises(
-            (asyncio.CancelledError, concurrent.futures.CancelledError)
-        ):
-            await _build_off_loop(app)
-        assert app._mcp_progress.state()[1] is False
 
         await _build_off_loop(app)
         assert app._mcp_progress.state()[1] is True

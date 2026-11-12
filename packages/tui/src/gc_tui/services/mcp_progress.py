@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterable
-from typing import Optional
+from typing import Any, Optional
 
 
 class McpProgress:
@@ -17,7 +17,7 @@ class McpProgress:
         self._lock = threading.Lock()
         self._servers: dict[str, Optional[dict]] = {}
         self._outcome: Optional[bool] = None
-        self._built: Optional[tuple[frozenset[str], dict]] = None
+        self._built: Optional[tuple[frozenset[str], dict, Any]] = None
 
     def begin(self, server_names) -> None:
         with self._lock:
@@ -25,14 +25,17 @@ class McpProgress:
             self._outcome = None
             self._built = None
 
-    def mark_built(self, servers: Iterable[str], external: dict) -> None:
-        """Сборка удалась: серверы поколения и статусы, которые дала сборка
-        серверам вне сервиса. Поколение закрывается позже, когда серверы
-        определятся (спека §5.7)."""
+    def mark_built(
+        self, servers: Iterable[str], external: dict, settings: Any
+    ) -> None:
+        """Сборка удалась: серверы поколения, статусы, которые дала сборка
+        серверам вне сервиса, и настройки сборки (по ним снимок окна
+        получает статусы сервиса). Поколение закрывается позже, когда
+        серверы определятся (спека §5.7)."""
         with self._lock:
-            self._built = (frozenset(servers), dict(external))
+            self._built = (frozenset(servers), dict(external), settings)
 
-    def built(self) -> tuple[frozenset[str], dict] | None:
+    def built(self) -> tuple[frozenset[str], dict, Any] | None:
         """Итог удачной сборки (`mark_built`) или None — сборка не удалась
         или ещё идёт."""
         with self._lock:
