@@ -490,6 +490,51 @@ async def test_hung_server_does_not_launch_on_every_completions_request(
 
 
 @_POSIX
+async def test_aborted_request_does_not_block_healthy_server(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Каталог есть, сервер здоров, но стартует медленно: запрос оборван
+    (агент закрыт), пока первый вызов ждал подключения. Следующий запрос
+    подключается сразу, и его вызов проходит."""
+    control = tmp_path / "srv.json"
+    previous = _chat(tmp_path, control)
+    mcp_reaper.track(previous._mcp_service)
+    mcp_reaper.track(
+        await asyncio.wait_for(
+            previous.completions._agent_for("t", str(tmp_path)),
+            _CEILING_SEC,
+        )
+    )
+    await asyncio.wait_for(previous.astop(), _CEILING_SEC)
+    set_behavior(control, start_delay=2)
+    surface = _chat(tmp_path, control)
+    service = mcp_reaper.track(surface._mcp_service)
+
+    async def build():
+        return mcp_reaper.track(
+            await asyncio.wait_for(
+                surface.completions._agent_for("t", str(tmp_path)),
+                _CEILING_SEC,
+            )
+        )
+
+    aborted = await build()
+    call = asyncio.ensure_future(_echo_pid(aborted))
+    await wait_for(lambda: len(launches(control)) == 2, _CEILING_SEC)
+    await asyncio.wait_for(aborted.aclose(), _CEILING_SEC)
+    await asyncio.wait({call}, timeout=_CEILING_SEC)
+    # Исход оборванного вызова неважен; забираем его, чтобы не висел.
+    assert call.cancelled() or call.exception() or call.result()
+    (entry,) = service._entries.values()
+    assert entry.interrupted_at is not None
+
+    pid = await _echo_pid(await build())
+
+    assert launches(control)[-1] == pid
+    assert alive(pid)
+
+
+@_POSIX
 async def test_completions_open_failure_closes_agent(
     mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
 ):

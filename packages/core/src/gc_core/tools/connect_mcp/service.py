@@ -375,8 +375,9 @@ class McpService:
 
     def record_interruption(self, entry: ServerEntry, started: float) -> None:
         """Попытку, начатую в ``started``, прервало закрытие её
-        потребителя: правило 30 с записи считается и от этого времени.
-        Статус и отказ записи не меняются: это не отказ сервера."""
+        потребителя. Пишется всегда; правило 30 с учитывает отметку, только
+        пока запись в отказе (``shared_hold_since``). Статус и отказ записи
+        не меняются: это не отказ сервера."""
         self._bind_loop()
         if entry.interrupted_at is None or started > entry.interrupted_at:
             entry.interrupted_at = started

@@ -44,8 +44,7 @@ from gc_core.tools.connect_mcp.consumer_status import (
     INTERRUPTED_REASON,
     ServerStatus,
     server_status,
-    shared_failure,
-    shared_interruption,
+    shared_hold_since,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
@@ -225,19 +224,18 @@ class McpConnections:
         """Правило 30 с: своей попытки нет, с последнего отказа — 30 с.
 
         Последний отказ — более позднее из своей неудачной или прерванной
-        попытки, отказа записи и попытки записи, прерванной закрытием
-        чужого потребителя (последние два — если они позже удачи записи).
+        попытки и времени, с которого держит запись (``shared_hold_since``:
+        у записи в отказе — её отказ или поздняя попытка, прерванная
+        закрытием чужого потребителя).
         """
         key = session_key_of(entry)
         with self._lock:
             if self._attempting(key):
                 return False
             own = self._failures.get(key)
-        failures = (own, shared_failure(entry))
-        since = [f.at for f in failures if f is not None]
-        interrupted = shared_interruption(entry)
-        if interrupted is not None:
-            since.append(interrupted)
+        own_at = None if own is None else own.at
+        held = shared_hold_since(entry)
+        since = [t for t in (own_at, held) if t is not None]
         if not since:
             return True
         elapsed = self._service._clock() - max(since)
@@ -415,9 +413,9 @@ class McpConnections:
         key = session_key_of(entry)
         with self._lock:
             # Отмена закрытием потребителя — «подключение прервано» (идёт
-            # в правило 30 с, своё и записи); попытку, снятую сверкой,
-            # ``leave`` уже убрал из ``_connects``: её отмена отказом не
-            # считается (§5.3).
+            # в своё правило 30 с, в правило записи — пока она в отказе);
+            # попытку, снятую сверкой, ``leave`` уже убрал из
+            # ``_connects``: её отмена отказом не считается (§5.3).
             own = self._connects.get(key) is task
             if own:
                 del self._connects[key]

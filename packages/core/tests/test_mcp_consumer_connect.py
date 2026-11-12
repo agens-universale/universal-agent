@@ -568,23 +568,36 @@ async def test_interrupted_attempt_counts_from_its_start(
     assert entry.last_failure is None
 
 
-async def test_consumer_close_mid_attempt_holds_shared_interval(
+async def _failed_entry(reaper, service, settings, control, clock):
+    """Запись в отказе: попытка упала на старте в момент 0, затем 30 с;
+    сервер дальше стартует медленно (2 с), но поднимается."""
+    set_behavior(control, fail_start=True)
+    entry = _entry(service, settings)
+    await _connect(_consumer(reaper, service, settings, "failed"), entry)
+    assert entry.last_failure is not None
+    set_behavior(control, start_delay=2)
+    clock.advance(30)
+    return entry
+
+
+async def test_close_mid_attempt_of_failed_server_holds_interval(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
-    """Попытка, прерванная закрытием потребителя, держит правило 30 с у
-    записи: потребитель на запрос иначе поднимал бы сервер каждый раз.
-    Это не отказ: ни отказа записи, ни чужой причины у статуса."""
+    """Запись в отказе: попытка, прерванная закрытием потребителя, держит
+    правило 30 с от своего начала — потребитель на запрос иначе поднимал
+    бы отказавший сервер каждый раз. Это не отказ: отказ записи прежний,
+    чужой причины у статуса нет."""
     clock = FakeClock()
     control = tmp_path / "s.json"
-    set_behavior(control, start_delay=5)
     settings = _settings({"srv": stdio_cfg(control)})
     service = McpService(
         connect_on_start=False, clock=clock.now, sleep=clock.sleep
     )
+    entry = await _failed_entry(mcp_reaper, service, settings, control, clock)
+    failure = entry.last_failure
     closed = _consumer(mcp_reaper, service, settings, "a")
-    entry = _entry(service, settings)
     _conn(closed).start_connect(entry)
-    await wait_for(lambda: launches(control))
+    await wait_for(lambda: len(launches(control)) == 2)
     clock.advance(5)
     await asyncio.wait_for(closed.aclose(), _CEILING_SEC)
     fresh = _consumer(mcp_reaper, service, settings, "b")
@@ -596,8 +609,36 @@ async def test_consumer_close_mid_attempt_holds_shared_interval(
     seen.append(_conn(fresh).may_connect(entry))
 
     assert seen == [False, False, True]
-    assert entry.last_failure is None
+    assert entry.last_failure is failure
     assert fresh.status_of(entry).reason != _INTERRUPTED
+
+
+@pytest.mark.parametrize("connect_on_start", [False, True])
+async def test_close_mid_attempt_of_healthy_server_does_not_hold(
+    connect_on_start, mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Отказов не было (как закрытая во время подключения сессия ACP или
+    оборванный запрос): новый потребитель подключается сразу."""
+    clock = FakeClock()
+    control = tmp_path / "s.json"
+    set_behavior(control, start_delay=5)
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(
+        connect_on_start=connect_on_start, clock=clock.now, sleep=clock.sleep
+    )
+    closed = _consumer(mcp_reaper, service, settings, "a")
+    entry = _entry(service, settings)
+    _conn(closed).start_connect(entry)
+    await wait_for(lambda: launches(control))
+    clock.advance(1)
+    await asyncio.wait_for(closed.aclose(), _CEILING_SEC)
+    set_behavior(control)
+    fresh = _consumer(mcp_reaper, service, settings, "b")
+
+    assert entry.interrupted_at == 0
+    assert _conn(fresh).may_connect(entry) is True
+    await _connect(fresh, entry)
+    assert fresh.status_of(entry).state == STATE_CONNECTED
 
 
 async def test_success_after_interruption_lifts_shared_interval(
@@ -605,17 +646,16 @@ async def test_success_after_interruption_lifts_shared_interval(
 ):
     clock = FakeClock()
     control = tmp_path / "s.json"
-    set_behavior(control, start_delay=2)
     settings = _settings({"srv": stdio_cfg(control)})
     service = McpService(
         connect_on_start=False, clock=clock.now, sleep=clock.sleep
     )
+    entry = await _failed_entry(mcp_reaper, service, settings, control, clock)
     closed = _consumer(mcp_reaper, service, settings, "a")
     other = _consumer(mcp_reaper, service, settings, "b")
-    entry = _entry(service, settings)
     _conn(closed).start_connect(entry)
     connecting = _conn(other).start_connect(entry)
-    await wait_for(lambda: len(launches(control)) == 2)
+    await wait_for(lambda: len(launches(control)) == 3)
     clock.advance(1)
     await asyncio.wait_for(closed.aclose(), _CEILING_SEC)
     held = _conn(_consumer(mcp_reaper, service, settings, "c")).may_connect(
