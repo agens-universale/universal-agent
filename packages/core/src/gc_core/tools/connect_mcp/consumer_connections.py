@@ -784,7 +784,8 @@ class McpConnections:
         Каждый вызов проходит весь путь: шаги идемпотентны, поэтому
         повторный вызов (в том числе после прерванного) доделывает
         остаток, а не выходит сразу. ``finish`` — последний шаг хвоста
-        закрытия, под его замком.
+        закрытия, под его замком, только если сессии закрылись без
+        исключения и прерывания.
         """
         self._service._bind_loop()
         with self._lock:
@@ -807,7 +808,9 @@ class McpConnections:
 
     async def _aclose_sessions(self, finish: Callable[[], None]) -> None:
         """Сессии владельца во всех реестрах; шаги не зависят друг от
-        друга — прерывание одного не отменяет остальных."""
+        друга — прерывание одного не отменяет остальных. ``finish`` —
+        только после всех шагов без исключения: иначе снятый с учёта
+        потребитель с незакрытыми сессиями не закрыл бы и сервис."""
         async with self._closing_sessions:
             with self._lock:
                 self._sessions.clear()
@@ -822,7 +825,7 @@ class McpConnections:
                         )
                     finally:
                         forget_owner_sessions()
-                        finish()
+            finish()
 
 
 __all__ = ["RETRY_PAUSES_SEC", "McpConnections", "session_key_of"]

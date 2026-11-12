@@ -8,10 +8,14 @@
 подключения обновляет запись через ``record_success`` / ``record_failure``.
 
 Сервис работает на одном цикле событий: он привязывается к циклу первого
-обращения, обращение с другого цикла — ошибка.
+обращения, обращение с другого цикла — ошибка. Закрывает сервис хост
+(``aclose``): сервис перестаёт принимать работу и закрывает всех своих
+потребителей в общий бюджет.
 """
 
 import asyncio
+import contextvars
+import logging
 import threading
 import time
 from typing import Any, Awaitable, Callable
@@ -46,6 +50,8 @@ from gc_core.tools.connect_mcp.service_records import (
     ServerEntry,
 )
 from gc_core.tools.connect_mcp.stream_client import is_connection_closed
+
+logger = logging.getLogger(__name__)
 
 # У подключения срок — любой: и срок вызова, и срок соединения.
 _TIMEOUTS = (*CALL_TIMEOUTS, httpx.TimeoutException)
@@ -130,7 +136,8 @@ class McpService:
     ``_stopped`` при выдаче потребителя, читают под ``_lock``: потребителя
     открывают с любого потока. ``_backend_cache`` — кэш тулов серверов,
     исполняемых внутри бэкенда сервиса (§5.10); заводится при первом
-    запросе.
+    запросе. ``_close_task`` — задача закрытия: её ждут все вызовы
+    ``aclose``.
     """
 
     def __init__(
@@ -154,6 +161,7 @@ class McpService:
         self._lock = threading.Lock()
         self._consumers: set[McpConsumer] = set()
         self._backend_cache: ToolsCache | None = None
+        self._close_task: asyncio.Task | None = None
 
     @property
     def os_backend(self) -> Any:
@@ -174,8 +182,12 @@ class McpService:
     def _bind_loop(self) -> None:
         """Привязать сервис к текущему циклу; чужой цикл — ``RuntimeError``.
 
-        Проверка и установка цикла идут без замка: они рассчитаны на
-        обращения с одного потока — потока цикла хоста.
+        ``_loop`` пишут с цикла хоста (записи, сверка, ход, закрытие
+        потребителя) без замка, а ``open_consumer`` и ``aclose`` сервиса —
+        под ``_lock``: открыть потребителя могут и из другого потока.
+        Поток без цикла сервис не привязывает, поэтому по контракту
+        открытия (из потока без цикла или с цикла сервиса) привязывает
+        сервис только цикл хоста.
         """
         loop = asyncio.get_running_loop()
         if self._loop is None:
@@ -233,6 +245,70 @@ class McpService:
         """Закрытый потребитель больше не числится за сервисом."""
         with self._lock:
             self._consumers.discard(consumer)
+
+    async def aclose(self, budget: float = 10.0) -> None:
+        """Закрыть сервис: отказать в работе и закрыть всех потребителей
+        параллельно, в общий бюджет ``budget`` секунд (спека §5.12).
+
+        Звать с цикла сервиса; с чужого цикла — ``RuntimeError`` до
+        остановки. Непривязанный сервис закрывается с любого цикла.
+        Остановка ставится сразу: ``open_consumer`` и ``aensure`` отвечают
+        ``McpServiceClosed``, ``astart_turn`` и ``aend_turn`` ничего не
+        делают, вызовы получают ошибку тула «сервис MCP остановлен»,
+        ждущая подключений сверка просыпается.
+
+        Первый вызов заводит задачу закрытия, повторные и одновременные
+        ждут её же; отмена вызывающего — его отмена, закрытие идёт дальше.
+        Срок бюджета — предупреждение в лог, не исключение: что не
+        закрылось, остаётся аварийному гашению. Прерванная задача
+        закрытия (снятие всех задач цикла) повторным вызовом заводится
+        заново: незакрытые потребители всё ещё числятся за сервисом.
+        """
+        with self._lock:
+            self._bind_loop()
+            self._stopped = True
+            task = self._close_task
+            if task is None or task.cancelled():
+                # Пустой контекст: стоп хода и владелец сессий вызывающего
+                # в закрытие не попадают — владельца ставит потребитель.
+                task = asyncio.get_running_loop().create_task(
+                    self._aclose_consumers(budget),
+                    context=contextvars.Context(),
+                )
+                self._close_task = task
+        self._stopped_event.set()
+        await asyncio.shield(task)
+
+    async def _aclose_consumers(self, budget: float) -> None:
+        """Закрыть потребителей, числящихся за сервисом, в общий бюджет.
+
+        Остановка уже стоит под замком, поэтому снимок полон: нового
+        потребителя после неё не открыть. Исход каждого закрытия — в
+        лог; исключение одного, в том числе ``CancelledError`` из
+        отменившегося закрытия его сессии, наружу не идёт: закрытие
+        сервиса не выдаёт чужую отмену за свою.
+        """
+        with self._lock:
+            consumers = list(self._consumers)
+        closing = asyncio.gather(
+            *(consumer.aclose() for consumer in consumers),
+            return_exceptions=True,
+        )
+        try:
+            outcomes = await asyncio.wait_for(closing, budget)
+        except TimeoutError:
+            logger.warning(
+                "Сервис MCP: закрытие потребителей не уложилось в %s с",
+                budget,
+            )
+            return
+        for consumer, outcome in zip(consumers, outcomes):
+            if isinstance(outcome, BaseException):
+                logger.warning(
+                    "Сервис MCP: потребитель %s закрылся не до конца: %s",
+                    consumer.label,
+                    type(outcome).__name__,
+                )
 
     def entry(
         self, server_key: str, server_cfg: dict, *, discovery_timeout: float

@@ -5,8 +5,9 @@
 * ``mcp_owner`` — свой владелец сессий на тест: реестры сессий процессные, и
   сессия прошлого теста под тем же именем досталась бы следующему. В конце
   закрывает все сессии владельца в трёх реестрах.
-* ``mcp_reaper`` — после теста закрывает объекты, переданные в ``track``, и
-  добивает каждый процесс из журналов тестовых серверов под ``tmp_path``.
+* ``mcp_reaper`` — после теста закрывает объекты, переданные в ``track``
+  (сервис MCP — с коротким бюджетом ``_SERVICE_BUDGET_SEC``), и добивает
+  каждый процесс из журналов тестовых серверов под ``tmp_path``.
 
 ``mcp_owner`` и ``mcp_reaper`` асинхронные: сессии закрываются на цикле
 теста, где их открывали. Каждое закрытие — с потолком ``_CLOSE_SEC``:
@@ -29,6 +30,7 @@ from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.connect_mcp import client as mcp_client
 from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from gc_core.tools.connect_mcp.service import McpService
 
 from gc_testkit.mcp import JOURNAL_SUFFIX, alive, children, launches, wait_for
 
@@ -37,6 +39,10 @@ from gc_testkit.mcp import JOURNAL_SUFFIX, alive, children, launches, wait_for
 _CLOSE_SEC = 15.0
 #: Сколько ждать, пока добитые процессы исчезнут.
 _REAP_SEC = 5.0
+#: Бюджет закрытия сервиса MCP при уборке. Что в него не уложилось (сервер,
+#: глухой к SIGTERM), уборка добивает сама, поэтому полный бюджет закрытия
+#: сервиса на каждом тесте не ждём.
+_SERVICE_BUDGET_SEC = 2.0
 
 
 @pytest.fixture
@@ -94,6 +100,9 @@ def _kill(pid: int) -> None:
 
 
 async def _close(obj: Any) -> None:
+    if isinstance(obj, McpService):
+        await obj.aclose(budget=_SERVICE_BUDGET_SEC)
+        return
     closing = getattr(obj, "aclose", None)
     if closing is not None:
         await closing()

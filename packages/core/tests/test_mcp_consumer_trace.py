@@ -457,8 +457,9 @@ async def test_turn_end_is_bounded_on_deaf_server(
     await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)
 
 
+@pytest.mark.parametrize("closing", ["consumer", "service"])
 async def test_closing_consumer_turn_end_does_nothing(
-    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner, closing
 ):
     control = tmp_path / "srv.json"
     settings = _settings({"srv": _traced(control)}, _TRACE)
@@ -477,9 +478,13 @@ async def test_closing_consumer_turn_end_does_nothing(
         "gc",
         SimpleNamespace(collect=lambda: collects.append(1)),
     )
-    # Окно закрытия: ``aclose`` уже отказал в работе (``closed`` ставится
-    # первым), а сессии ещё не закрыты — их закроет он сам.
-    _conn(consumer).closed = True
+    # Окно закрытия: ``aclose`` потребителя или сервиса уже отказал в
+    # работе (флаг ставится первым), а сессии ещё не закрыты — их закроет
+    # он сам.
+    if closing == "consumer":
+        _conn(consumer).closed = True
+    else:
+        consumer._service._stopped = True
 
     await _end_turn(consumer)
 

@@ -391,15 +391,15 @@ async def test_agent_close_after_service_stop_and_twice(
     service = McpService(connect_on_start=True)
     agent = await _create(mcp_reaper, settings, mcp_service=service)
     (pid,) = launches(control)
-    # Остановка сервиса (как её помечает его закрытие).
-    service._stopped = True
-    service._stopped_event.set()
+    # Закрытие сервиса закрывает и потребителя агента.
+    await asyncio.wait_for(service.aclose(), _CEILING_SEC)
+    assert pid in exits(control)
 
     await asyncio.wait_for(agent.aclose(), _CEILING_SEC)
     await asyncio.wait_for(agent.aclose(), _CEILING_SEC)
 
     assert agent._mcp_consumer.closed
-    await wait_for(lambda: pid in exits(control), _CEILING_SEC)
+    assert not service._consumers
 
 
 async def test_agent_without_service_unchanged(
