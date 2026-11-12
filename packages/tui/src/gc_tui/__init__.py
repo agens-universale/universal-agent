@@ -381,13 +381,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Импорт здесь, а не в шапке модуля: `gc_tui` обязан оставаться лёгким.
     from gc_core.tools.connect_mcp.service import McpService
 
+    mcp_service = McpService(connect_on_start=True)
     app = _app_mod.TuiApp(
         threads_dir=threads_dir,
         system="cli",
         settings=settings,
         profile_override=None if args.init_config else args.profile,
         model_override=None if args.init_config else args.model,
-        mcp_service=McpService(connect_on_start=True),
+        mcp_service=mcp_service,
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)
@@ -425,7 +426,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # об апгрейде на следующем запуске.
 
     def _shutdown_runtime() -> None:
-        # Процессы индекса путей (git ls-files) — первыми: поток сборки индекса — демон
+        # Процессы серверов MCP окна — самыми первыми (спека §5.12): гашение по
+        # журналу без цикла и замков, до 2 с, не бросает. На штатном выходе
+        # `on_unmount` их уже закрыл, и гасить нечего; на аварийном (SIGHUP,
+        # мёртвый терминал) цикл агента может стоять, а `on_unmount` — идти
+        # параллельно: гашение с ним совместимо.
+        mcp_service.kill_processes_now()
+        # Процессы индекса путей (git ls-files) — следом: поток сборки индекса — демон
         # и умрёт вместе с процессом, а сам git пережил бы программу, дочитывая
         # репозиторий без хозяина. Быстро и не бросает: ошибки гашения глотаются внутри.
         from gc_tui.services import file_index

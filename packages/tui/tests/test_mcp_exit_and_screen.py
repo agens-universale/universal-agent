@@ -70,6 +70,10 @@ class _Service:
         if self.on_close is not None:
             await self.on_close()
 
+    def kill_processes_now(self) -> None:
+        self.closed = True
+        self.events.append("mcp_kill")
+
 
 def _opened(service: _Service) -> _Consumer:
     """Потребитель окна, будто его открыла сборка (тест идёт на цикле,
@@ -185,10 +189,18 @@ async def test_unmount_closes_service_between_runner_and_loop(tmp_path):
 
     await asyncio.wait_for(app.on_unmount(), _CEILING_SEC)
 
-    assert events == ["stop", "wait", "release", "mcp_close", "loop_shutdown"]
-    # Потолок выше худшего возврата `aclose` (бюджет 10 с + отсрочка 3 с).
+    assert events == [
+        "stop",
+        "wait",
+        "release",
+        "mcp_close",
+        "loop_shutdown",
+        "mcp_kill",
+    ]
+    # Потолок выше худшего возврата `aclose` (бюджет 10 с + отсрочка 3 с
+    # + добивание по журналу 2 с).
     (timeout,) = loop.timeouts
-    assert timeout > 13.0
+    assert timeout > 15.0
 
 
 async def test_unmount_without_consumer_does_not_start_loop(tmp_path):
@@ -334,7 +346,8 @@ async def test_exit_with_deaf_server_is_bounded_by_ceiling(
         started = time.monotonic()
 
     assert time.monotonic() - started < ceiling + _LOOP_SHUTDOWN_SEC
-    await wait_for(lambda: not alive(pid), _CEILING_SEC)
+    # Сервер добит аварийным гашением на выходе, а не позже.
+    await wait_for(lambda: not alive(pid), 1.0)
     assert not app.agent_loop.thread.is_alive()
 
 

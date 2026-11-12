@@ -9,11 +9,14 @@
 
 Сервис работает на одном цикле событий: он привязывается к циклу первого
 обращения, обращение с другого цикла — ошибка. Закрывает сервис хост
-(``aclose``): сервис перестаёт принимать работу и закрывает всех своих
-потребителей в общий бюджет.
+(``aclose``): сервис перестаёт принимать работу, закрывает всех своих
+потребителей в общий бюджет и добивает по журналу процессов то, что не
+уложилось. Аварийный выход — ``kill_processes_now``: синхронно, без цикла и
+замков, из любого потока (спека §5.12).
 """
 
 import asyncio
+import contextlib
 import contextvars
 import logging
 import os
@@ -30,7 +33,10 @@ from gc_core.tools.connect_mcp.failure_reason import (
     classify_failure,
     is_server_gone,
 )
-from gc_core.tools.connect_mcp.process_journal import ProcessJournal
+from gc_core.tools.connect_mcp.process_journal import (
+    ProcessJournal,
+    sweep_orphans,
+)
 from gc_core.tools.connect_mcp.registry import (
     ToolsCache,
     build_checked_entries,
@@ -60,6 +66,8 @@ logger = logging.getLogger(__name__)
 CLOSE_GRACE_SEC = 3.0
 #: Бюджет ``aclose`` по умолчанию: в него укладывается close-тул сервера.
 CLOSE_BUDGET_SEC = 10.0
+#: Гашение по журналу: сколько ждать после SIGTERM группам до SIGKILL.
+KILL_WAIT_SEC = 2.0
 #: Сбой ``exec`` пускателя — исключение, которым кончился бы запуск без
 #: пускателя; прочие сбои — ``OSError``. Причина отказа та же, что без него.
 _LAUNCH_ERRORS = {"command_not_found": FileNotFoundError}
@@ -118,6 +126,26 @@ def _report_close(consumer: McpConsumer, task: asyncio.Task) -> None:
     )
 
 
+def _kill_and_remove(journal: ProcessJournal) -> None:
+    journal.kill_all(wait_sec=KILL_WAIT_SEC)
+    journal.remove()
+
+
+async def _asweep_orphans() -> None:
+    """Уборка сирот в рабочем потоке; сбой — в лог (§5.12, линия 3)."""
+    try:
+        swept = await asyncio.to_thread(sweep_orphans)
+    except Exception as exc:
+        logger.warning(
+            "Сервис MCP: уборка сирот не удалась: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        return
+    if swept:
+        logger.info("Сервис MCP: погашено групп сирот: %s", swept)
+
+
 class McpService:
     """Общие записи серверов хоста; политика подключения — для потребителей.
 
@@ -132,7 +160,9 @@ class McpService:
     исполняемых внутри бэкенда сервиса (§5.10); заводится при первом
     запросе. ``_close_task`` — задача закрытия: её ждут все вызовы
     ``aclose``. ``_journal`` — журнал процессов серверов (§5.12);
-    заводится при первой подстановке пускателя.
+    заводится при первой подстановке пускателя (или закрытием сервиса —
+    удалённым: срез закрытого потребителя каталога не заведёт).
+    ``_sweep_task`` — уборка сирот, начатая первой сверкой.
     """
 
     def __init__(
@@ -158,6 +188,7 @@ class McpService:
         self._backend_cache: ToolsCache | None = None
         self._close_task: asyncio.Task | None = None
         self._journal: ProcessJournal | None = None
+        self._sweep_task: asyncio.Task | None = None
 
     @property
     def connect_on_start(self) -> bool:
@@ -262,6 +293,47 @@ class McpService:
         if journal is not None:
             await asyncio.to_thread(journal.prune)
 
+    def _begin_orphan_sweep(self) -> None:
+        """Первая сверка сервиса: уборка сирот мёртвых хостов в фоне
+        (§5.12, линия 3). Звать с цикла сервиса."""
+        if self._sweep_task is None:
+            self._sweep_task = asyncio.get_running_loop().create_task(
+                _asweep_orphans(), context=contextvars.Context()
+            )
+
+    def kill_processes_now(self) -> None:
+        """Аварийное гашение (спека §5.12, линия 1); с любого потока, из
+        обработчика сигнала, синхронно.
+
+        Сначала запрет: вызовы, сверки и новые подключения получают
+        «сервис MCP остановлен» (иначе идущий ход поднял бы сервер
+        заново); цикл сервиса, если он жив, снимает фоновую работу и
+        идущие вызовы потребителей. Затем по журналу — SIGTERM группам,
+        до ``KILL_WAIT_SEC`` ожидания, SIGKILL каждой; журнал читается
+        ещё раз. Замков сервиса и потребителей не берёт, цикла не ждёт;
+        повторный вызов и вызов одновременно с ``aclose`` безопасны.
+        Сессии потребителей не закрывает — их закрывает ``aclose``.
+        """
+        self._stopped = True
+        loop = self._loop
+        if loop is not None:
+            # Цикл уже закрыт — будить и снимать на нём некого.
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(self._halt)
+        journal = self._journal
+        if journal is not None:
+            journal.kill_all(wait_sec=KILL_WAIT_SEC)
+
+    def _halt(self) -> None:
+        """На цикле сервиса после аварийного гашения: разбудить ждущих
+        остановку и снять работу потребителей — повтор вызова или попытка
+        после гашения подняли бы сервер заново."""
+        self._stopped_event.set()
+        with self._lock:
+            consumers = list(self._consumers)
+        for consumer in consumers:
+            consumer.halt_work()
+
     def _launch_failure(
         self, entry: ServerEntry, exc: BaseException
     ) -> OSError | None:
@@ -299,11 +371,15 @@ class McpService:
         повторные и одновременные вызовы ждут ту же задачу, их бюджет не
         действует, после истёкшего бюджета повторный вызов возвращается
         сразу. Отмена вызывающего — его отмена, закрытие идёт дальше.
-        Возврат — не позже ``budget + CLOSE_GRACE_SEC``: по сроку бюджета
-        предупреждение в лог (не исключение), незакрытые потребители
-        снимаются, а их хвост закрытия сессий доигрывает в фоне;
-        добивает процессы аварийное гашение. Задача закрытия живёт, пока
-        живёт цикл сервиса: закрыть сервис надо до закрытия цикла.
+        По сроку бюджета — предупреждение в лог (не исключение),
+        незакрытые потребители снимаются, а их хвост закрытия сессий
+        доигрывает в фоне. Сразу после закрытия потребителей (в срок или
+        по отсрочке) оставшиеся процессы журнала гасятся, как при
+        аварийном гашении, и каталог журнала удаляется; уборка сирот
+        ждётся в остаток бюджета. Возврат — не позже ``budget +
+        CLOSE_GRACE_SEC + KILL_WAIT_SEC``; хосту не нужно знать, истёк ли
+        бюджет: добивать после возврата нечего. Задача закрытия живёт,
+        пока живёт цикл сервиса: закрыть сервис надо до закрытия цикла.
         """
         with self._lock:
             self._bind_loop()
@@ -313,12 +389,41 @@ class McpService:
                 # Пустой контекст: стоп хода и владелец сессий вызывающего
                 # в закрытие не попадают — владельца ставит потребитель.
                 task = asyncio.get_running_loop().create_task(
-                    self._aclose_consumers(budget),
+                    self._aclose_all(budget),
                     context=contextvars.Context(),
                 )
                 self._close_task = task
         self._stopped_event.set()
         await asyncio.shield(task)
+
+    async def _aclose_all(self, budget: float) -> None:
+        """Задача закрытия: потребители в бюджет, добивание по журналу,
+        уборка сирот — в остаток бюджета."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + budget
+        await self._aclose_consumers(budget)
+        await self._aclose_journal()
+        sweep = self._sweep_task
+        if sweep is not None:
+            await asyncio.wait(
+                {sweep}, timeout=max(0.0, deadline - loop.time())
+            )
+
+    async def _aclose_journal(self) -> None:
+        """Погасить процессы журнала, оставшиеся после закрытия
+        потребителей, и удалить журнал (в рабочем потоке).
+
+        Журнал читается заново: брошенный поток попытки или вызова мог
+        запустить процесс уже после закрытия сессий. Журнала не было —
+        заводится удалённый: подстановка пускателя после закрытия
+        (срез закрытого потребителя) каталога не заводит.
+        """
+        journal = self._journal
+        if journal is None:
+            self._journal = journal = ProcessJournal()
+            journal.remove()
+            return
+        await asyncio.to_thread(_kill_and_remove, journal)
 
     async def _aclose_consumers(self, budget: float) -> None:
         """Закрыть потребителей, числящихся за сервисом, в общий бюджет.
@@ -409,4 +514,9 @@ class McpService:
         return failure
 
 
-__all__ = ["CLOSE_BUDGET_SEC", "CLOSE_GRACE_SEC", "McpService"]
+__all__ = [
+    "CLOSE_BUDGET_SEC",
+    "CLOSE_GRACE_SEC",
+    "KILL_WAIT_SEC",
+    "McpService",
+]

@@ -40,6 +40,7 @@ from gc_core.tools.connect_mcp.consumer_status import shared_failure
 from gc_core.tools.connect_mcp.persistent_stdio import is_persistent_stdio
 from gc_core.tools.connect_mcp.service_records import (
     SERVICE_CLOSED_TEXT,
+    McpServiceClosed,
     ServerEntry,
 )
 from gc_core.user_stop import UserStopInterrupt
@@ -114,7 +115,7 @@ class McpCallExecutor:
         deadline = asyncio.get_running_loop().time() + timeout
         while self._needs_connect(entry, cfg):
             await await_attempt(
-                self._connections.start_connect(entry),
+                self._start_connect(entry),
                 deadline=deadline,
                 timeout=timeout,
                 server_key=entry.key,
@@ -122,6 +123,14 @@ class McpCallExecutor:
             # Попытку могли снять закрытие или сверка: сервер ушёл —
             # ошибка; его вернули — следующий круг ждёт новую попытку.
             self._call_entry(entry.key, key)
+
+    def _start_connect(self, entry: ServerEntry) -> asyncio.Future:
+        """Ожидание своей попытки; сервис остановили из другого потока
+        после проверки набора — ошибка тула «сервис MCP остановлен»."""
+        try:
+            return self._connections.start_connect(entry)
+        except McpServiceClosed:
+            raise tool_error(SERVICE_CLOSED_TEXT) from None
 
     def _needs_connect(self, entry: ServerEntry, cfg: dict) -> bool:
         """Вызову нужно дождаться подключения; правило 30 с не пускает —

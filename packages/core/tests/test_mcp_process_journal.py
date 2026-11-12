@@ -809,3 +809,6 @@ def test_remove_drops_the_directory(mcp_home):
     assert not jdir.exists()
     assert journal.records() == []
     journal.remove()
+    # Удалённый журнал каталога заново не заводит: команда — как есть.
+    assert journal.launch_argv("srv", ["-x"], "k") == ("srv", ["-x"])
+    assert list(journal_root().iterdir()) == []

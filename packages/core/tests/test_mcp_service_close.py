@@ -571,9 +571,12 @@ async def test_return_is_bounded_by_budget_and_grace(
     elapsed = loop.time() - started
 
     grace = service_module.CLOSE_GRACE_SEC
-    assert elapsed < 0.5 + grace + 1
+    kill = service_module.KILL_WAIT_SEC
+    assert elapsed < 0.5 + grace + kill + 1
     assert service.closed
     assert "не уложилось в 0.5 с" in caplog.text
+    # Не уложившееся в бюджет добито по журналу до возврата.
+    await wait_for(lambda: not any(alive(pid) for pid in pids), 2)
     await _kill_deaf(*pids)
     # Доигравшее в фоне закрытие сообщает исход по завершении.
     assert "потребитель c закрылся не до конца: снято" in caplog.text
@@ -593,8 +596,9 @@ async def test_reaper_closes_tracked_service_with_short_budget(
     await mcp_reaper.reap()
 
     budget = mcp_fixtures._SERVICE_BUDGET_SEC
-    # Полный бюджет сервиса дождался бы эскалации глухого (5 с).
-    assert loop.time() - started < budget + 1.5
+    # Полный бюджет сервиса (10 с) ждал бы закрытия глухого; короткий
+    # бюджет плюс добивание по журналу — нет.
+    assert loop.time() - started < budget + service_module.KILL_WAIT_SEC + 2
     assert service.closed
     assert not alive(pid)
     await _kill_deaf(pid)

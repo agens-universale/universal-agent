@@ -32,13 +32,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from gc_core.mcp_session_owner import use_owner
 from gc_core.settings import settings_of
-from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.abandonable import use_call_slots
 from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config
-from gc_core.tools.connect_mcp.client import (
-    forget_owner_sessions,
-    forget_session,
-)
 from gc_core.tools.connect_mcp.consumer_status import (
     ATTEMPT_INTERVAL_SEC,
     INTERRUPTED_REASON,
@@ -46,8 +41,9 @@ from gc_core.tools.connect_mcp.consumer_status import (
     server_status,
     shared_hold_since,
 )
-from gc_core.tools.connect_mcp.persistent_stdio import (
-    PersistentStdioRegistry,
+from gc_core.tools.connect_mcp.owner_cleanup import (
+    aclose_key_everywhere,
+    aclose_owner_everywhere,
 )
 from gc_core.tools.connect_mcp.registry import alist_raw_tools
 from gc_core.tools.connect_mcp.secret_mask import without_secrets
@@ -272,13 +268,21 @@ class McpConnections:
         return waiting
 
     def start_attempt(self, entry: ServerEntry) -> asyncio.Task:
-        """Задача попытки (идущая или новая); после ``aclose`` —
-        ``McpServiceClosed``. Ждать её — только через ``asyncio.wait``."""
+        """Задача попытки (идущая или новая); после закрытия потребителя
+        или остановки сервиса — ``McpServiceClosed``. Ждать её — только
+        через ``asyncio.wait``."""
+        task = self._attempt(entry)
+        if task is None:
+            raise McpServiceClosed(SERVICE_CLOSED_TEXT)
+        return task
+
+    def _attempt(self, entry: ServerEntry) -> asyncio.Task | None:
+        """Задача попытки (идущая или новая); отказ в работе — ``None``."""
         self._service._bind_loop()
         key = session_key_of(entry)
         with self._lock:
-            if self.closed:
-                raise McpServiceClosed(SERVICE_CLOSED_TEXT)
+            if self.refused():
+                return None
             running = self._connects.get(key)
             if running is not None and not running.done():
                 return running
@@ -307,6 +311,10 @@ class McpConnections:
             try:
                 if closing:
                     await asyncio.wait(closing)
+                # Сервис могли остановить, пока ждали закрытий: процесса
+                # после остановки не запускаем.
+                if self.refused():
+                    return False
                 await self._alist_and_record(entry)
                 return True
             except asyncio.CancelledError:
@@ -389,28 +397,28 @@ class McpConnections:
     async def _aclose_session(self, entry: ServerEntry) -> None:
         """Сессия сервера у потребителя — во всех трёх реестрах; затем
         журнал процессов сервиса снимает записи вышедших."""
-        key = session_key_of(entry)
-        registry = PersistentStdioRegistry.instance()
-        manager = stream_client._SESSION_MANAGER
-        with use_owner(self.owner):
-            for close in (registry.aclose_one, manager.ainvalidate):
-                try:
-                    await close(key)
-                except Exception as exc:
-                    logger.warning(
-                        "MCP %s: сессия потребителя %s не закрылась: %s",
-                        entry.key,
-                        self.label,
-                        _describe(exc, entry),
-                    )
-            # Идентификатор legacy-http ключуется именем сервера: у
-            # изменённого сервера (тот же ключ, другой отпечаток) он уже
-            # принадлежит новой записи набора.
-            with self._lock:
-                current = self._servers.get(entry.key)
-            if current is None or current is entry:
-                forget_session(entry.key)
+        errors = await aclose_key_everywhere(
+            self.owner,
+            session_key_of(entry),
+            entry.key,
+            legacy_is_ours=partial(self._legacy_is_ours, entry),
+        )
+        for exc in errors:
+            logger.warning(
+                "MCP %s: сессия потребителя %s не закрылась: %s",
+                entry.key,
+                self.label,
+                _describe(exc, entry),
+            )
         await self._service.aprune_journal()
+
+    def _legacy_is_ours(self, entry: ServerEntry) -> bool:
+        """Идентификатор legacy-http ключуется именем сервера: у
+        изменённого сервера (тот же ключ, другой отпечаток) он уже
+        принадлежит новой записи набора."""
+        with self._lock:
+            current = self._servers.get(entry.key)
+        return current is None or current is entry
 
     def _on_connect_done(
         self, entry: ServerEntry, started: float, task: asyncio.Task
@@ -464,7 +472,7 @@ class McpConnections:
     def _start_series(self, entry: ServerEntry) -> None:
         key = session_key_of(entry)
         with self._lock:
-            if self.closed or key in self._series:
+            if self.refused() or key in self._series:
                 return
             task = asyncio.get_running_loop().create_task(
                 self._aretry(entry), context=contextvars.Context()
@@ -477,7 +485,7 @@ class McpConnections:
         key = session_key_of(entry)
         for attempt, pause in enumerate(RETRY_PAUSES_SEC, start=1):
             with self._lock:
-                if self.closed:
+                if self.refused():
                     return
                 self._retry[key] = attempt
             await self._service._sleep(pause)
@@ -486,12 +494,14 @@ class McpConnections:
                 # попытка поверх живой сессии её бы и закрыла при отказе.
                 # Сервер мог и уйти из набора: серию заводит колбэк
                 # попытки, и сверка могла пройти раньше него.
-                if self.closed or self._connected(key):
+                if self.refused() or self._connected(key):
                     return
                 if self._servers.get(entry.key) is not entry:
                     return
             # Ждём без отмены попытки: снятие серии её не прерывает.
-            task = self.start_attempt(entry)
+            task = self._attempt(entry)
+            if task is None:
+                return
             await asyncio.wait({task})
             if _succeeded(task):
                 return
@@ -512,11 +522,11 @@ class McpConnections:
         ``tools_ttl()`` назад, перечитывает список в фоне. Неподключённый
         сервер у потребителя «на старте» без своей попытки и без серии
         повторов получает попытку по правилу 30 с. Закрытый потребитель
-        ничего не начинает.
+        и остановленный сервис ничего не начинают.
         """
         key = session_key_of(entry)
         with self._lock:
-            if self.closed:
+            if self.refused():
                 return
             connected = self._connected(key)
             idle = not self._attempting(key) and key not in self._series
@@ -526,7 +536,7 @@ class McpConnections:
         elif connected or not idle or not self._service.connect_on_start:
             return
         elif self.may_connect(entry):
-            self.start_attempt(entry)
+            self._attempt(entry)
 
     def _new_relist(self, entry: ServerEntry, key: str) -> asyncio.Task | None:
         """Задача перечитывания списка, если оно назрело. Звать под
@@ -814,8 +824,26 @@ class McpConnections:
         with self._lock:
             self._failures[session_key_of(entry)] = failure
         if self._retries(entry):
-            self.start_attempt(entry)
+            self._attempt(entry)
         return failure
+
+    def _work(self) -> list[asyncio.Task]:
+        """Попытки, серии, перечитывания списка и идущие вызовы. Звать под
+        ``_lock``."""
+        return [
+            *self._connects.values(),
+            *self._series.values(),
+            *self._refreshes.values(),
+            *self._inflight,
+        ]
+
+    def halt_work(self) -> None:
+        """Снять попытки, серии, перечитывания и идущие вызовы, ничего не
+        ждать; сессии не трогаются. Звать с цикла сервиса."""
+        with self._lock:
+            work = self._work()
+        for task in work:
+            task.cancel()
 
     async def aclose(self, finish: Callable[[], None]) -> None:
         """Отказать в новой работе, снять попытки, серии, перечитывания
@@ -837,12 +865,7 @@ class McpConnections:
         cancels = asyncio.current_task().cancelling()
         with self._lock:
             self._closed = True
-            work = [
-                *self._connects.values(),
-                *self._series.values(),
-                *self._refreshes.values(),
-                *self._inflight,
-            ]
+            work = self._work()
         try:
             for task in work:
                 task.cancel()
@@ -879,16 +902,7 @@ class McpConnections:
             with self._lock:
                 self._sessions.clear()
                 self._ok.clear()
-            with use_owner(self.owner):
-                try:
-                    await PersistentStdioRegistry.instance().aclose_all()
-                finally:
-                    try:
-                        await stream_client._SESSION_MANAGER.aclose_all(
-                            in_owner_task=False
-                        )
-                    finally:
-                        forget_owner_sessions()
+            await aclose_owner_everywhere(self.owner)
             finish()
         await self._service.aprune_journal()
 

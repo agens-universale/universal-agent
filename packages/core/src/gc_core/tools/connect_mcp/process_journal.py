@@ -91,8 +91,8 @@ class ProcessJournal:
     """Журнал процессов одного сервиса.
 
     Каталог и ``owner.json`` создаются при первом ``launch_argv``; не
-    вышло — журнал больше не пробует (``_failed``), запуски идут без
-    учёта. ``kill_all`` и ``prune`` замков не берут: список читается с
+    вышло или журнал удалён (``remove``) — новых каталогов журнал больше
+    не заводит (``_spent``), запуски идут без учёта. ``kill_all`` и ``prune`` замков не берут: список читается с
     диска, поэтому их можно звать из обработчика сигнала и из чужого
     потока, одновременно друг с другом.
     """
@@ -100,7 +100,7 @@ class ProcessJournal:
     def __init__(self, root: Path | None = None) -> None:
         self._root = root if root is not None else journal_root()
         self._dir: Path | None = None
-        self._failed = False
+        self._spent = False
         self._lock = threading.Lock()
 
     def launch_argv(
@@ -169,17 +169,20 @@ class ProcessJournal:
         _terminate_groups(late, deadline)
 
     def remove(self) -> None:
-        """Удалить каталог журнала; следующий запуск заведёт новый."""
+        """Удалить каталог журнала; нового журнал не заводит: запуски
+        после удаления идут без учёта (сервис уже остановлен), а каталог,
+        заведённый заново, пережил бы своего хозяина."""
         with self._lock:
             directory, self._dir = self._dir, None
+            self._spent = True
         if directory is not None:
             shutil.rmtree(directory, ignore_errors=True)
 
     def _ensure_dir(self) -> Path | None:
         with self._lock:
-            if self._dir is None and not self._failed:
+            if self._dir is None and not self._spent:
                 self._dir = _create_dir(self._root)
-                self._failed = self._dir is None
+                self._spent = self._dir is None
             return self._dir
 
 

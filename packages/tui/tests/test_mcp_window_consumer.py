@@ -69,6 +69,9 @@ class _Service:
         self.closes += 1
         self.closed = True
 
+    def kill_processes_now(self) -> None:
+        self.closed = True
+
 
 class _Ctx:
     os_backend = None

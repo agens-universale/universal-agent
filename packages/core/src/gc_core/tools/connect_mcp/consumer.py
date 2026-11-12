@@ -209,9 +209,11 @@ class McpConsumer:
         ``timeout``: его попытка снимается, сессия закрывается.
         После остановки сервиса или закрытия — ``McpServiceClosed``.
         Перед ожиданием журнал процессов сервиса снимает записи вышедших.
+        Первая сверка сервиса начинает в фоне уборку сирот (§5.12).
         """
         self._service._bind_loop()
         self._refuse_if_closed()
+        self._service._begin_orphan_sweep()
         # Быстрый путь: устаревшая сборка не трогает записи и каталог.
         # Решающая проверка — в ``replace_set``, под замком замены.
         if self._connections.is_stale(build):
@@ -355,6 +357,11 @@ class McpConsumer:
             if entry.cfg.get("trace_header_enabled")
             and self._connections.has_session(entry)
         ]
+
+    def halt_work(self) -> None:
+        """Снять фоновую работу и идущие вызовы, не закрывая сессий —
+        аварийное гашение сервиса (§5.12). Звать с цикла сервиса."""
+        self._connections.halt_work()
 
     async def aclose(self) -> None:
         """Отказать в новой работе, снять попытки, серии, перечитывания
