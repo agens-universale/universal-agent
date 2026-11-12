@@ -441,9 +441,6 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
       ``tools_cache``: источник тулов, владелец сессий и уборка хода —
       его; сессии потребителя сборка не закрывает ни при каком исходе.
     """
-    # Номер сборки — первым действием: набор потребителя меняет только
-    # сверка самой поздней сборки.
-    consumer_build = _take_consumer_build(mcp_consumer, tools_cache)
     # Хранилище встраивающего проверяем ДО всего остального. Проверка стояла в
     # `_finish_run_context`, то есть после MCP-дискавери и создания логгера: на
     # негодном сторе исключение прилетало, когда stdio-сессии уже подняты под
@@ -465,6 +462,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # Хранилище агента — там же и по той же причине: до дискавери.
     if agent_store is not None:
         check_agent_store(agent_store)
+    # Номер сборки — после синхронных проверок, до первого await и до
+    # подготовки бэкенда: набор потребителя меняет только сверка самой
+    # поздней сборки.
+    consumer_build = _take_consumer_build(mcp_consumer, tools_cache)
 
     source = _coerce_settings(settings, runtime)
     if agent_store is not None:
@@ -601,6 +602,8 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
 def _take_consumer_build(mcp_consumer: Any, tools_cache: Any) -> int | None:
     """Номер сборки у потребителя; без потребителя — ``None``.
 
+    Берётся после синхронных проверок входа: упавшая на них сборка не
+    сжигает номер и не делает сверку соседней сборки устаревшей.
     Потребитель и ``tools_cache`` — два источника тулов на одном шве:
     вместе они не задаются.
     """

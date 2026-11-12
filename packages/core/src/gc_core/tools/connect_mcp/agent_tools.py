@@ -678,7 +678,7 @@ async def aget_mcp_tools_data_for_config(
     settings: Any,
     on_progress=None,
     *,
-    tools_cache: Optional[ToolsCache] = None,
+    tools_cache: Any = None,
     os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """MCP-тулы в формате tools_data, без потока на дискавери.

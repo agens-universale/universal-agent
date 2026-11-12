@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -18,6 +19,8 @@ from types import SimpleNamespace
 import pytest
 from gc_core import run_context
 from gc_core.agent_executor import AgentExecutor
+from gc_core.config_modules.mcp import McpServerConfig
+from gc_core.plugins.snapshot import PluginSnapshot
 from gc_core.run_context import acreate_run_context
 from gc_core.tools.connect_mcp import agent_tools
 from gc_core.tools.connect_mcp.consumer_status import STATE_CONNECTING
@@ -238,13 +241,48 @@ async def test_cancelled_build_keeps_consumer_sessions(
 
 
 async def test_consumer_with_tools_cache_is_rejected(
-    mcp_home, tmp_path, monkeypatch
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
 ):
     settings = _cfg(tmp_path, monkeypatch, {})
-    consumer = McpService(connect_on_start=True).open_consumer("окно")
+    consumer = _open_consumer(mcp_reaper)
 
     with pytest.raises(ValueError, match="вместе не задаются"):
         await _build(settings, mcp_consumer=consumer, tools_cache=ToolsCache())
+
+    # Отклонённая сборка номер не сожгла.
+    assert consumer.next_build() == 1
+
+
+async def test_store_check_failure_does_not_take_build_number(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    settings = _cfg(tmp_path, monkeypatch, {})
+    consumer = _open_consumer(mcp_reaper)
+
+    with pytest.raises(TypeError, match="agent_store"):
+        await _build(settings, mcp_consumer=consumer, agent_store=object())
+
+    assert consumer.next_build() == 1
+
+
+async def test_consumer_set_follows_build_runtime(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Сверка идёт настройками этой сборки: сервер плагина из явного
+    ``runtime=`` попадает и в набор потребителя, и в тулы контекста."""
+    settings = _cfg(tmp_path, monkeypatch, {})
+    server = McpServerConfig.model_validate(stdio_cfg(tmp_path / "srv.json"))
+    runtime = dataclasses.replace(
+        settings.runtime,
+        plugins=PluginSnapshot(mcp_servers={"srv": server}),
+    )
+    consumer = _open_consumer(mcp_reaper)
+
+    ctx = await _build(settings, runtime=runtime, mcp_consumer=consumer)
+    release_run_logger(ctx.logger)
+
+    assert _ECHO in ctx.tools_data
+    assert list(consumer.servers()) == ["srv"]
 
 
 async def test_view_failure_does_not_break_build(
