@@ -8,12 +8,13 @@
 
 import hashlib
 import json
-from typing import Any, Dict
+from typing import Any
 
 SESSION_KEY_FIELD = "_gc_session_key"
 PROCESS_TRANSPORTS = frozenset({"stdio", "stream_stdio"})
 
-# Поля, которые не влияют ни на соединение, ни на список тулов.
+# Поля, которые не влияют ни на соединение, ни на ответ tools/list:
+# whitelist отбирает тулы из уже полученного списка.
 _PRESENTATION_FIELDS = frozenset(
     {
         "description",
@@ -27,11 +28,11 @@ _PRESENTATION_FIELDS = frozenset(
 _KEY_ONLY_FIELDS = ("headers", "env")
 
 
-def is_process_transport(server_cfg: Dict[str, Any]) -> bool:
+def is_process_transport(server_cfg: dict[str, Any]) -> bool:
     return server_cfg.get("transport") in PROCESS_TRANSPORTS
 
 
-def with_service_defaults(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def with_service_defaults(server_cfg: dict[str, Any]) -> dict[str, Any]:
     """Копия определения с раскрытым умолчанием ``persistent_session``.
 
     Не заданный флаг (``None``) — постоянная сессия у процессных
@@ -43,22 +44,22 @@ def with_service_defaults(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-def _digest(cfg: Dict[str, Any]) -> str:
+def _digest(cfg: dict[str, Any]) -> str:
     payload = json.dumps(cfg, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
-def _connection_part(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _connection_part(server_cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = with_service_defaults(server_cfg)
     return {k: v for k, v in cfg.items() if k not in _PRESENTATION_FIELDS}
 
 
-def connection_fingerprint(server_cfg: Dict[str, Any]) -> str:
+def connection_fingerprint(server_cfg: dict[str, Any]) -> str:
     """Всё, что меняет соединение с сервером, включая секреты."""
     return _digest(_connection_part(server_cfg))
 
 
-def catalog_fingerprint(server_cfg: Dict[str, Any]) -> str:
+def catalog_fingerprint(server_cfg: dict[str, Any]) -> str:
     """Отпечаток без секретов: годится в имя каталога тулов на диске.
 
     Смена значения ``token``, ``headers`` или ``env`` его не меняет;
