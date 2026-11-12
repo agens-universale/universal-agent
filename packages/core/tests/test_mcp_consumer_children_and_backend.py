@@ -17,12 +17,16 @@ import json
 import os
 
 import pytest
+from gc_core import run_context as run_context_module
+from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.agent_executor import AgentExecutor
+from gc_core.backends.local import LocalFsBackend
 from gc_core.mcp_session_owner import use_owner
 from gc_core.run_context import acreate_run_context
 from gc_core.tools import abuild_tools_data
 from gc_core.tools.connect_mcp import catalog
 from gc_core.tools.connect_mcp.registry import mcp_tool_full_name
+from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.utils.logging_module import release_run_logger
@@ -126,12 +130,16 @@ def _server_answer(reply: str) -> dict:
     return json.loads(content["text"])
 
 
-async def _echo_pid(tools_data: dict, ctx) -> int:
-    """Вызов ``echo`` обёрткой из набора под владельцем родителя: pid."""
-    wrapper = tools_data[_ECHO]["tool_fabric"]()
-    with use_owner(ctx.mcp_session_owner):
+def _wrapper(tools_data: dict, tool: str = _ECHO):
+    """Обёртка тула из набора — та, что вызовет цикл агента."""
+    return tools_data[tool]["tool_fabric"]()
+
+
+async def _echo_pid(tools_data: dict, owner: str, tool: str = _ECHO) -> int:
+    """Вызов ``echo`` обёрткой из набора под владельцем ``owner``: pid."""
+    with use_owner(owner):
         envelope = await asyncio.wait_for(
-            wrapper.acall(text="эхо"), _CEILING_SEC
+            _wrapper(tools_data, tool).acall(text="эхо"), _CEILING_SEC
         )
     return _server_answer(envelope)["pid"]
 
@@ -144,16 +152,21 @@ async def test_child_uses_parent_session_without_discovery(
     consumer = _open_consumer(mcp_reaper)
 
     async with _context(settings, mcp_consumer=consumer) as ctx:
-        parent_pid = await _echo_pid(ctx.tools_data, ctx)
+        owner = ctx.mcp_session_owner
+        parent_pid = await _echo_pid(ctx.tools_data, owner)
         runner = _runner(ctx)
         await _child_tools(runner, ctx)
         child = await _child_tools(runner, ctx)
-        child_pid = await _echo_pid(child, ctx)
+        child_pid = await _echo_pid(child, owner)
+        # Владелец вокруг вызова не решает: вызов идёт по сессии
+        # потребителя родителя, а не по сессии текущего владельца.
+        foreign_pid = await _echo_pid(child, "чужой")
 
     assert child_pid == parent_pid
+    assert foreign_pid == parent_pid
     assert len(launches(control)) == 1
     # Обёртка ребёнка вызывает исполнителем потребителя родителя.
-    assert child[_ECHO]["tool_fabric"]()._caller == consumer._executor.acall
+    assert _wrapper(child)._caller == consumer._executor.acall
 
 
 async def test_child_tool_lists_agree(
@@ -294,6 +307,7 @@ async def test_subagent_turn_end_keeps_parent_sessions(
     consumer = _open_consumer(mcp_reaper)
 
     async with _context(settings, mcp_consumer=consumer) as ctx:
+        servers = consumer.servers()
         await _turn(AgentExecutor(ctx), "t1")
 
     backend.assert_clean()
@@ -309,15 +323,16 @@ async def test_subagent_turn_end_keeps_parent_sessions(
     assert _calls(control) == 3
     assert exits(control) == []
     assert alive(pid)
-    # Сборки ребёнка номеров сборки не брали: набор не сверялся.
-    assert consumer.next_build() == 2
+    # Набор потребителя ходом ребёнка не сверялся: записи те же.
+    assert consumer.servers() == servers
+    assert consumer.servers()["srv"] is servers["srv"]
 
 
 async def test_child_builds_keep_parent_pin_and_signal(
     mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
 ):
-    """Сборки тулов ребёнка идут срезом без сверки: номер сборки и
-    закреплённый срез родителя не сдвигаются, вход в ход родителя после
+    """Сборки тулов ребёнка идут срезом без сверки: набор и закреплённый
+    срез родителя не сдвигаются, вход в ход родителя после
     них не получает ложного сигнала и не теряет настоящий."""
     settings = _cfg(
         tmp_path, monkeypatch, {"srv": stdio_cfg(tmp_path / "srv.json")}
@@ -326,22 +341,25 @@ async def test_child_builds_keep_parent_pin_and_signal(
 
     async with _context(settings, mcp_consumer=consumer) as ctx:
         runner = _runner(ctx)
+        servers = consumer.servers()
         await _child_tools(runner, ctx)
         quiet = await asyncio.wait_for(consumer.astart_turn(), 1)
         pinned = dict(consumer._pinned)
-        entry = consumer.servers()["srv"]
+        entry = servers["srv"]
         consumer._service.record_success(entry, [{"name": "extra"}])
         child = await _child_tools(runner, ctx)
+        servers_after_child = consumer.servers()
         pinned_after_child = dict(consumer._pinned)
         changed = await asyncio.wait_for(consumer.astart_turn(), 1)
 
     assert quiet is False
     assert _ECHO in child
     assert _EXTRA not in child
+    # Набор не сверялся: те же записи; закреплённый срез тот же.
+    assert servers_after_child == servers
+    assert servers_after_child["srv"] is entry
     assert pinned_after_child == pinned
     assert changed is True
-    # Сборка контекста взяла номер 1; сборки ребёнка номеров не брали.
-    assert consumer.next_build() == 2
 
 
 def _backend_server(control) -> dict:
@@ -425,3 +443,84 @@ async def test_backend_part_survives_refresh_without_discovery(
     assert _EXTRA not in first
     # Набор пересобран: новый тул агентного сервера и прежняя часть бэкенда.
     assert {_ECHO, _EXTRA, _BK_ECHO} <= second
+
+
+async def test_child_wrapper_definitions_match_parent(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Обёртка ребёнка несёт те же определения сервера, что у родителя:
+    ключ сессии с отпечатком, постоянную сессию, trace сборки."""
+    server = {**stdio_cfg(tmp_path / "srv.json"), "trace_header_enabled": True}
+    settings = _cfg(tmp_path, monkeypatch, {"srv": server}, trace_id="след-1")
+    consumer = _open_consumer(mcp_reaper)
+
+    async with _context(settings, mcp_consumer=consumer) as ctx:
+        child = await _child_tools(_runner(ctx), ctx)
+        parent_wrapper = _wrapper(ctx.tools_data)
+        child_wrapper = _wrapper(child)
+
+    parent_cfg = parent_wrapper._servers_cfg["srv"]
+    assert child_wrapper._servers_cfg["srv"] == parent_cfg
+    assert parent_cfg[SESSION_KEY_FIELD]
+    assert parent_cfg["persistent_session"] is True
+    assert parent_cfg["env"]["TRACE_ID"] == "след-1"
+    assert child_wrapper._timeout == parent_wrapper._timeout
+    assert child_wrapper._os_backend is parent_wrapper._os_backend
+
+
+async def test_child_ctx_takes_backend_part_from_consumer_cache(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Сборка контекста ребёнка раннером в смешанном наборе, бэкенд
+    родителя под обёрткой записи правок: часть бэкенда — из кэша
+    потребителя, нового обнаружения через бэкенд нет."""
+    control = tmp_path / "srv.json"
+    bk_control = tmp_path / "bk.json"
+    settings = _cfg(
+        tmp_path,
+        monkeypatch,
+        {"srv": stdio_cfg(control), "bk": _backend_server(bk_control)},
+    )
+    raw = IsolatedBackend()
+    monkeypatch.setattr(
+        run_context_module, "resolve_os_backend", lambda *_a, **_k: raw
+    )
+    monkeypatch.chdir(tmp_path)
+    consumer = _open_consumer(mcp_reaper)
+
+    # TUI: запись правок включена — контекст оборачивает бэкенд.
+    async with _context(settings, mcp_consumer=consumer, is_tui=True) as ctx:
+        child_ctx = await asyncio.wait_for(
+            _runner(ctx)._build_child_ctx(_WORKER), _CEILING_SEC
+        )
+        release_run_logger(child_ctx.logger)
+
+    assert isinstance(child_ctx.os_backend, TrackingFsBackend)
+    assert {_ECHO, _BK_ECHO} <= _mcp_names(child_ctx.tools_data)
+    assert raw.methods == ["tools/list"]
+    assert len(launches(control)) == 1
+    assert launches(bk_control) == []
+
+
+async def test_backend_server_on_plain_backend_goes_through_service(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """``execute_on: os_backend`` на неизолированном бэкенде исполняется
+    на стороне агента — через сервис на общих основаниях (спека §5.10)."""
+    control = tmp_path / "bk.json"
+    settings = _cfg(tmp_path, monkeypatch, {"bk": _backend_server(control)})
+    consumer = _open_consumer(mcp_reaper)
+
+    async with _context(
+        settings, mcp_consumer=consumer, os_backend=LocalFsBackend()
+    ) as ctx:
+        owner = ctx.mcp_session_owner
+        first = await _echo_pid(ctx.tools_data, owner, _BK_ECHO)
+        second = await _echo_pid(ctx.tools_data, owner, _BK_ECHO)
+        wrapper = _wrapper(ctx.tools_data, _BK_ECHO)
+
+    assert list(consumer.servers()) == ["bk"]
+    assert launches(control) == [first]
+    assert second == first
+    assert SESSION_KEY_FIELD in wrapper._servers_cfg["bk"]
+    assert wrapper._caller == consumer._executor.acall
