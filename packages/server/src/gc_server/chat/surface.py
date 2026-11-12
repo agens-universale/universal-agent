@@ -138,7 +138,9 @@ class ChatSurface:
         return None
 
     async def astop(self) -> None:
+        # Порядок — у ``aclose_mcp_service``: ходы, сервис, агенты.
         try:
-            await self.responses.shutdown()
+            await self.responses.stop_turns()
         finally:
             await aclose_mcp_service(self.name, self._mcp_service)
+        await self.responses.shutdown()

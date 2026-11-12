@@ -128,12 +128,16 @@ class ResponsesFacade:
     def turn_busy(self, thread_id: str) -> bool:
         return thread_id in self._busy
 
-    async def shutdown(self) -> None:
+    async def stop_turns(self) -> None:
+        """Снять идущие ходы и дождаться их конца; повтор безвреден."""
         runs = list(self._live.values())
         for run in runs:
             await run.request_stop()
         for run in runs:
             await run.done.wait()
+
+    async def shutdown(self) -> None:
+        await self.stop_turns()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()

@@ -257,9 +257,11 @@ class A2aSurface:
         recovery, self._recovery = self._recovery, None
         if recovery is not None:
             recovery.cancel()
+        # Порядок — у ``aclose_mcp_service``: ходы, сервис, агенты.
         try:
-            await self.executor.shutdown()
-            if self._own_push_client and self._push_client is not None:
-                await self._push_client.aclose()
+            await self.executor.stop_turns()
         finally:
             await aclose_mcp_service(self.name, self._mcp_service)
+        await self.executor.shutdown()
+        if self._own_push_client and self._push_client is not None:
+            await self._push_client.aclose()

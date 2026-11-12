@@ -2,7 +2,7 @@
 
 Поверхность создаёт сервис с подключением «при первом вызове», агенты
 фасадов открывают у него своих потребителей через фабрику процесса,
-остановка поверхности закрывает сервис после фасадов. Процессы тестового
+остановка поверхности снимает ходы, закрывает сервис, затем агентов. Процессы тестового
 stdio-сервера настоящие; модель не нужна: тул вызывается обёрткой из
 набора агента — той, что вызвал бы цикл.
 """
@@ -14,11 +14,13 @@ import functools
 import json
 import logging
 import os
+import time
 
 import pytest
 import yaml
 from gc_core.aio.agent import AsyncAgent
 from gc_core.run_context import arefresh_context_tools
+from gc_core.tools.connect_mcp import service as service_module
 from gc_core.tools.connect_mcp.registry import ToolsCache, mcp_tool_full_name
 from gc_core.tools.connect_mcp.service import McpService
 from gc_server import app as app_mod
@@ -44,6 +46,8 @@ from server_harness import runtime
 
 #: Потолок одного ожидания в тесте: зависание не повесит прогон.
 _CEILING_SEC = 30.0
+#: Бюджет закрытия сервиса по умолчанию (``McpService.aclose``).
+_SERVICE_BUDGET_SEC = 10.0
 _ECHO = mcp_tool_full_name("srv", "echo")
 _POSIX = pytest.mark.skipif(os.name != "posix", reason="процессы POSIX")
 
@@ -234,19 +238,35 @@ async def test_surface_stop_closes_service_and_is_repeatable(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", ["chat", "a2a"])
-async def test_stop_closes_service_after_facades(name, tmp_path, monkeypatch):
+async def test_stop_turns_then_service_then_agents(
+    name, tmp_path, monkeypatch
+):
     monkeypatch.setattr(responses_mod, "bind_ask_human", lambda _a: None)
     events: list[str] = []
     _install_fake_service(monkeypatch, _FakeService(events))
     surface = _SURFACES[name](tmp_path, tmp_path / "srv.json")
     factory = _Recorder(events)
     agent_for = _agent_for(surface, name)
-    agent_for.__self__._agent_factory = factory
+    facade = agent_for.__self__
+    facade._agent_factory = factory
     await agent_for("t", str(tmp_path))
+    stop_turns = facade.stop_turns
+
+    async def recording_stop_turns() -> None:
+        events.append("turns.stop")
+        await stop_turns()
+
+    monkeypatch.setattr(facade, "stop_turns", recording_stop_turns)
 
     await asyncio.wait_for(surface.astop(), _CEILING_SEC)
 
-    assert events == ["agent0.aclose", "service.aclose"]
+    # ``shutdown`` снимает ходы ещё раз (уже вхолостую), затем агентов.
+    assert events == [
+        "turns.stop",
+        "service.aclose",
+        "turns.stop",
+        "agent0.aclose",
+    ]
 
 
 @pytest.mark.parametrize("name", ["chat", "a2a"])
@@ -277,11 +297,39 @@ async def test_service_closes_when_facade_stop_fails(
     async def broken() -> None:
         raise RuntimeError("фасад не остановился")
 
-    monkeypatch.setattr(facade, "shutdown", broken)
+    monkeypatch.setattr(facade, "stop_turns", broken)
     with pytest.raises(RuntimeError, match="фасад не остановился"):
         await asyncio.wait_for(surface.astop(), _CEILING_SEC)
 
     assert events == ["service.aclose"]
+
+
+@_POSIX
+@pytest.mark.parametrize("name", ["chat", "a2a"])
+async def test_stop_closes_deaf_servers_within_one_budget(
+    name, mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Сессии агентов с серверами, глухими к завершению, закрываются за
+    один бюджет сервиса (плюс отсрочка), а не за сумму по агентам."""
+    control = tmp_path / "srv.json"
+    set_behavior(control, ignore_term=True, ignore_eof=True)
+    surface = _SURFACES[name](tmp_path, control)
+    mcp_reaper.track(surface._mcp_service)
+    agent_for = _agent_for(surface, name)
+    agents = 4
+    for index in range(agents):
+        agent = await asyncio.wait_for(
+            agent_for(f"t{index}", str(tmp_path)), _CEILING_SEC
+        )
+        await _echo_pid(agent)
+    assert len(launches(control)) == agents
+
+    started = time.monotonic()
+    await asyncio.wait_for(surface.astop(), _CEILING_SEC * 2)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < _SERVICE_BUDGET_SEC + service_module._CLOSE_GRACE_SEC
+    assert not any(alive(pid) for pid in launches(control))
 
 
 @_POSIX

@@ -350,15 +350,23 @@ class GcAgentExecutor(AgentExecutor):
             except Exception:
                 logger.warning("a2a: уборка после отмены", exc_info=True)
 
-    async def shutdown(self) -> None:
-        # Остановка сервера — прерывание: задачи остаются как есть, их
-        # подберёт восстановление другого инстанса. Ждущие очереди диалог
-        # больше не занимают.
+    async def stop_turns(self) -> None:
+        """Снять идущие ходы; повтор безвреден.
+
+        Остановка сервера — прерывание: задачи остаются как есть, их
+        подберёт восстановление другого инстанса. Ждущие очереди диалог
+        больше не занимают.
+        """
+        if self._stopping:
+            return
         self._stopping = True
         self._waiting.clear()
         for turn in list(self._turns.values()):
             turn.interrupted = True
             await turn.cancel()
+
+    async def shutdown(self) -> None:
+        await self.stop_turns()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
