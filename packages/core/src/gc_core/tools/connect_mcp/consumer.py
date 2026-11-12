@@ -29,6 +29,7 @@ from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.abandonable import use_call_slots
 from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config
+from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.client import (
     forget_owner_sessions,
     forget_session,
@@ -40,12 +41,19 @@ from gc_core.tools.connect_mcp.consumer_status import (
     server_status,
     shared_failure,
 )
+from gc_core.tools.connect_mcp.consumer_view import (
+    McpToolsView,
+    aadd_backend_part,
+    add_server,
+    backend_config,
+    callers_pins,
+)
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.execute_on import runs_in_agent_runtime
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
 )
-from gc_core.tools.connect_mcp.registry import alist_raw_tools
+from gc_core.tools.connect_mcp.registry import ToolsCache, alist_raw_tools
 from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.server_identity import (
     SESSION_KEY_FIELD,
@@ -107,11 +115,17 @@ def _agent_side_definitions(settings: Any, os_backend: Any) -> dict[str, dict]:
     }
 
 
-def _pin_view(pinned: dict[str, tuple[str, ServerStatus]]) -> dict:
+def _pin_view(pinned: dict[str, tuple[ServerEntry, ServerStatus]]) -> dict:
     """То в срезе, что меняет набор тулов: без времени и номера повтора."""
     return {
-        key: (fp, st.state, st.reason_code, st.from_catalog, st.tools)
-        for key, (fp, st) in pinned.items()
+        key: (
+            entry.fingerprint,
+            st.state,
+            st.reason_code,
+            st.from_catalog,
+            st.tools,
+        )
+        for key, (entry, st) in pinned.items()
     }
 
 
@@ -130,8 +144,10 @@ class McpConsumer:
     ещё держит порт или профиль).
     ``_servers`` — набор (записи серверов последней начатой сборки),
     ``_build`` — последний выданный номер сборки, ``_pinned`` —
-    закреплённый срез ``{ключ: (отпечаток, статус)}``.
+    закреплённый срез ``{ключ: (запись, статус)}``.
     ``_settings`` — настройки сборки, по которым строятся определения.
+    ``_backend_cache`` — кэш тулов серверов, исполняемых внутри бэкенда
+    сборки (§5.10), пока бэкенд сборки — тот же объект.
     """
 
     def __init__(self, service: "McpService", label: str) -> None:
@@ -152,7 +168,8 @@ class McpConsumer:
         self._closing_servers: dict[str, set[asyncio.Task]] = {}
         self._build = 0
         self._servers: dict[str, ServerEntry] = {}
-        self._pinned: dict[str, tuple[str, ServerStatus]] = {}
+        self._pinned: dict[str, tuple[ServerEntry, ServerStatus]] = {}
+        self._backend_cache: ToolsCache | None = None
         # Хвост закрытия (сессии владельца) идёт по одному вызову за раз.
         self._closing_sessions = asyncio.Lock()
 
@@ -459,18 +476,59 @@ class McpConsumer:
             return dict(self._servers)
 
     def pin(self) -> bool:
-        """Закрепить срез ``{ключ: (отпечаток, статус)}`` набора.
+        """Закрепить срез ``{ключ: (запись, статус)}`` набора.
 
         Возвращает, отличается ли он от прошлого закреплённого по
         отпечатку, состоянию, коду причины, признаку каталога и тулам;
         время проверки и номер повтора на пересборку не влияют.
         """
         pinned = {
-            key: (entry.fingerprint, self.status_of(entry))
+            key: (entry, self.status_of(entry))
             for key, entry in self.servers().items()
         }
         previous, self._pinned = self._pinned, pinned
         return _pin_view(previous) != _pin_view(pinned)
+
+    async def aview(
+        self, settings: Any, *, os_backend: Any = None
+    ) -> McpToolsView:
+        """Срез тулов для настроек вызывающего (спека §5.2).
+
+        Серверы сервиса — из закреплённого среза, только те, что есть в
+        определениях вызывающего с тем же отпечатком; оформление тулов —
+        по его настройкам. Серверы, исполняемые внутри бэкенда сборки, —
+        как сегодня, через кэш тулов. Сети и ожиданий у серверов сервиса
+        нет; закрытый потребитель отдаёт закреплённый срез.
+        """
+        definitions = _agent_side_definitions(settings, os_backend)
+        config = mcp_cache_config(settings)
+        view = McpToolsView({}, {}, {}, acall_mcp_tool)
+        for key, (entry, status) in callers_pins(
+            self._pinned, definitions
+        ).items():
+            add_server(
+                view,
+                key,
+                config["mcp-servers"][key],
+                status,
+                self.wrapper_cfg(entry),
+            )
+        backend = backend_config(config, definitions)
+        if backend is not None:
+            cache = self._backend_tools_cache(os_backend)
+            await aadd_backend_part(view, cache, backend)
+        return view
+
+    def _backend_tools_cache(self, os_backend: Any) -> ToolsCache:
+        """Кэш бэкенда сервиса, если он есть; иначе свой — с бэкендом
+        сборки, новый, когда бэкенд сборки — другой объект."""
+        shared = self._service.backend_tools_cache()
+        if shared is not None:
+            return shared
+        cache = self._backend_cache
+        if cache is None or cache.os_backend is not os_backend:
+            cache = self._backend_cache = ToolsCache(os_backend=os_backend)
+        return cache
 
     async def aensure(
         self, build: int, settings: Any, *, os_backend: Any = None
@@ -630,6 +688,7 @@ class McpConsumer:
             attempting = self._attempting(key)
             own = self._failures.get(key)
             retry = self._retry.get(key, 0)
+            closed = self.closed
         return server_status(
             entry,
             connected=connected,
@@ -637,6 +696,7 @@ class McpConsumer:
             own=own,
             retry=retry,
             now=self._service._clock(),
+            closed=closed,
         )
 
     async def aclose(self) -> None:

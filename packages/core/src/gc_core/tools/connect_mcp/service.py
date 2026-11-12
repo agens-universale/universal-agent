@@ -27,8 +27,12 @@ from gc_core.tools.connect_mcp.call_errors import (
 from gc_core.tools.connect_mcp.catalog import read_catalog, write_catalog
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.consumer import McpConsumer
+from gc_core.tools.connect_mcp.consumer_status import ServerStatus
 from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
-from gc_core.tools.connect_mcp.registry import _discovery_error_text
+from gc_core.tools.connect_mcp.registry import (
+    ToolsCache,
+    _discovery_error_text,
+)
 from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.server_identity import (
     connection_fingerprint,
@@ -111,7 +115,9 @@ class McpService:
     ожидании, поэтому остановка сервиса, ни разу не видевшего цикла,
     не падает. ``_consumers`` — открытые потребители; его, как и
     ``_stopped`` при выдаче потребителя, читают под ``_lock``: потребителя
-    открывают с любого потока.
+    открывают с любого потока. ``_backend_cache`` — кэш тулов серверов,
+    исполняемых внутри бэкенда сервиса (§5.10); заводится при первом
+    запросе.
     """
 
     def __init__(
@@ -134,6 +140,7 @@ class McpService:
         self._stopped_event = asyncio.Event()
         self._lock = threading.Lock()
         self._consumers: set[McpConsumer] = set()
+        self._backend_cache: ToolsCache | None = None
 
     @property
     def os_backend(self) -> Any:
@@ -174,6 +181,29 @@ class McpService:
             consumer = McpConsumer(self, label)
             self._consumers.add(consumer)
         return consumer
+
+    def status(self, consumer: McpConsumer) -> dict[str, ServerStatus]:
+        """Статусы серверов набора потребителя; с любого потока (§5.7).
+
+        Набор и состояние потребителя по каждому серверу читаются под
+        замком потребителя, под которым их меняет цикл.
+        """
+        return {
+            key: consumer.status_of(entry)
+            for key, entry in consumer.servers().items()
+        }
+
+    def backend_tools_cache(self) -> ToolsCache | None:
+        """Кэш тулов серверов бэкенда сервиса; без бэкенда — ``None``.
+
+        Звать с цикла сервиса. Кэш общий для потребителей: так его
+        сегодня держит поверхность с бэкендом.
+        """
+        if self._os_backend is None:
+            return None
+        if self._backend_cache is None:
+            self._backend_cache = ToolsCache(os_backend=self._os_backend)
+        return self._backend_cache
 
     def _forget_consumer(self, consumer: McpConsumer) -> None:
         """Закрытый потребитель больше не числится за сервисом."""

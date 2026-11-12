@@ -1,0 +1,486 @@
+"""Срез тулов потребителя сервиса MCP и снимок статусов (спека §5.2, §5.7).
+
+Срез отдаёт сборке то же, что прежний путь обнаружения: записи реестра
+тулов, статусы серверов, определения для обёрток и исполнителя вызова. Он
+закреплён (фоновые изменения видны после ``pin()``) и строится только для
+серверов из определений вызывающего с тем же отпечатком.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+
+import pytest
+from gc_core.tools.connect_mcp import consumer as consumer_module
+from gc_core.tools.connect_mcp.agent_tools import (
+    _assemble_mcp_tools_data,
+    mcp_cache_config,
+)
+from gc_core.tools.connect_mcp.consumer_status import (
+    INTERRUPTED_REASON,
+    STATE_CACHED,
+    STATE_CONNECTED,
+    STATE_CONNECTING,
+    STATE_FAILED,
+)
+from gc_core.tools.connect_mcp.registry import (
+    ToolsCache,
+    mcp_tool_full_name,
+)
+from gc_core.tools.connect_mcp.server_identity import (
+    SESSION_KEY_FIELD,
+    session_key,
+)
+from gc_core.tools.connect_mcp.service import McpService
+from gc_core.tools.mcp_snapshot import (
+    build_mcp_tools_snapshot,
+    overlay_service_statuses,
+)
+from gc_testkit.mcp import (
+    FakeClock,
+    launches,
+    seed_catalog,
+    set_behavior,
+    stdio_cfg,
+)
+from gc_testkit.mcp.fixtures import mcp_home, mcp_owner, mcp_reaper
+from gc_testkit.settings import make_settings
+
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="процессы и сигналы POSIX"
+)
+
+#: Потолок одного ожидания в тесте: зависание не повесит прогон.
+_CEILING_SEC = 30.0
+_ECHO = mcp_tool_full_name("a", "echo")
+_NAP = mcp_tool_full_name("a", "nap")
+
+
+def _settings(servers: dict, **extra):
+    return make_settings(
+        {
+            "mcp": {
+                "servers": servers,
+                "meta": {"discovery_timeout_sec": 30},
+            },
+            **extra,
+        }
+    )
+
+
+def _whitelisted(cfg: dict) -> dict:
+    return {**cfg, "whitelist": {"enabled": True, "tools": ["echo"]}}
+
+
+async def _ready(reaper, service, settings, label="c", **kwargs):
+    """Потребитель, сверивший набор с ``settings``."""
+    consumer = reaper.track(service.open_consumer(label))
+    build = consumer.next_build()
+    await asyncio.wait_for(
+        consumer.aensure(build, settings, **kwargs), _CEILING_SEC
+    )
+    return consumer
+
+
+async def _view(consumer, settings, **kwargs):
+    return await asyncio.wait_for(
+        consumer.aview(settings, **kwargs), _CEILING_SEC
+    )
+
+
+def _tools_of(view, key: str) -> list[str]:
+    return sorted(
+        name
+        for name, entry in view.registry.items()
+        if entry["metadata"]["mcp_server_key"] == key
+    )
+
+
+async def test_view_has_entries_statuses_and_keys(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, settings)
+
+    entry = consumer.servers()["a"]
+    assert _ECHO in view.registry
+    assert view.status["a"]["status"] == STATE_CONNECTED
+    assert view.servers_cfg["a"][SESSION_KEY_FIELD] == session_key(
+        "a", entry.fingerprint
+    )
+    assert view.servers_cfg["a"]["persistent_session"] is True
+
+
+async def test_cached_entry_offers_tools(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", ["echo", "nap"])
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, settings)
+
+    assert _tools_of(view, "a") == sorted([_ECHO, _NAP])
+    assert view.status["a"]["status"] == STATE_CACHED
+    assert view.status["a"]["from_catalog"] is True
+    assert launches(control) == []
+
+
+async def test_view_only_for_callers_servers(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    seed_catalog(settings, "a", ["echo"])
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    other = _settings({"b": stdio_cfg(tmp_path / "b.json")})
+
+    view = await _view(consumer, other)
+
+    assert (view.registry, view.status, view.servers_cfg) == ({}, {}, {})
+
+
+async def test_view_skips_server_with_other_fingerprint(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    cfg = stdio_cfg(tmp_path / "a.json")
+    settings = _settings({"a": cfg})
+    seed_catalog(settings, "a", ["echo"])
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    changed = _settings({"a": {**cfg, "args": [*cfg["args"], "--x"]}})
+
+    view = await _view(consumer, changed)
+
+    assert (view.registry, view.status, view.servers_cfg) == ({}, {}, {})
+
+
+async def test_view_applies_callers_whitelist(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    cfg = stdio_cfg(tmp_path / "a.json")
+    settings = _settings({"a": cfg})
+    seed_catalog(settings, "a", ["echo", "nap"])
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, _settings({"a": _whitelisted(cfg)}))
+
+    assert _tools_of(view, "a") == [_ECHO]
+    assert view.status["a"]["tool_count"] == 1
+
+
+async def test_own_failure_hides_tools(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    set_behavior(control, fail_start=True)
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", ["echo"])
+    service = McpService(connect_on_start=True, wait_all=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, settings)
+
+    assert view.registry == {}
+    assert view.status["a"]["status"] == STATE_FAILED
+    assert view.status["a"]["tool_count"] == 0
+    assert view.status["a"]["reason"]
+
+
+async def test_other_consumers_failure_keeps_tools(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=True, wait_all=True)
+    first = await _ready(mcp_reaper, service, settings, "A")
+    set_behavior(control, fail_start=True)
+    second = await _ready(mcp_reaper, service, settings, "B")
+
+    first.pin()
+    view_a = await _view(first, settings)
+    view_b = await _view(second, settings)
+
+    assert _tools_of(view_a, "a") == sorted([_ECHO, _NAP])
+    assert view_a.status["a"]["status"] == STATE_CONNECTED
+    assert view_b.registry == {}
+    assert view_b.status["a"]["status"] == STATE_FAILED
+
+
+async def test_view_is_pinned_until_next_pin(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    first = await _view(consumer, settings)
+
+    async def refused(server_key, server_cfg, *, timeout):
+        raise ConnectionError("сервер не отвечает")
+
+    monkeypatch.setattr(consumer_module, "alist_raw_tools", refused)
+    entry = consumer.servers()["a"]
+    connected = await asyncio.wait_for(
+        consumer.start_connect(entry), _CEILING_SEC
+    )
+    second = await _view(consumer, settings)
+    changed = consumer.pin()
+    third = await _view(consumer, settings)
+
+    assert connected is False
+    assert second == first
+    assert changed is True
+    assert third.registry == {}
+    assert third.status["a"]["status"] == STATE_FAILED
+
+
+async def test_trace_goes_to_wrapper_cfg_not_to_fingerprint(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    server = {**stdio_cfg(tmp_path / "a.json"), "trace_header_enabled": True}
+    seed_catalog(_settings({"a": server}), "a", ["echo"])
+    service = McpService(connect_on_start=False)
+    keys = []
+    for trace in ("t1", "t2"):
+        settings = _settings({"a": server}, trace_id=trace)
+        consumer = await _ready(mcp_reaper, service, settings, trace)
+        view = await _view(consumer, settings)
+        assert view.servers_cfg["a"]["env"]["TRACE_ID"] == trace
+        keys.append(view.servers_cfg["a"][SESSION_KEY_FIELD])
+
+    assert keys[0] == keys[1]
+
+
+class _ExecResult:
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+        self.stderr = ""
+        self.return_code = 0
+        self.timed_out = False
+        self.stdout_hit_capture_cap = False
+        self.stderr_hit_capture_cap = False
+
+
+class _StdioSandbox:
+    """Изолированный бэкенд: stdio-обмен отвечает списком из одного тула."""
+
+    is_sandbox = True
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def exec_argv(
+        self,
+        argv,
+        *,
+        stdin=None,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
+        self.calls.append(list(argv))
+        frames = [
+            {"jsonrpc": "2.0", "id": 1, "result": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": "gc-tools/list",
+                "result": {"tools": [{"name": "echo"}]},
+            },
+        ]
+        return _ExecResult("\n".join(json.dumps(f) for f in frames))
+
+    def exec(self, command, *, cwd=None, timeout=None, env=None):
+        return _ExecResult("/usr/bin/python3")
+
+
+def _backend_settings(control) -> object:
+    return _settings({"a": {**stdio_cfg(control), "execute_on": "os_backend"}})
+
+
+async def test_backend_part_uses_build_backend_and_is_cached(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    settings = _backend_settings(control)
+    first, second = _StdioSandbox(), _StdioSandbox()
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings, os_backend=first)
+
+    views = [
+        await _view(consumer, settings, os_backend=first),
+        await _view(consumer, settings, os_backend=first),
+    ]
+    third = await _view(consumer, settings, os_backend=second)
+
+    assert (len(first.calls), len(second.calls)) == (1, 1)
+    assert all(_tools_of(v, "a") == [_ECHO] for v in [*views, third])
+    assert third.status["a"]["status"] == STATE_CONNECTED
+    assert (
+        third.servers_cfg["a"]
+        == mcp_cache_config(settings)["mcp-servers"]["a"]
+    )
+    assert launches(control) == []
+
+
+async def test_service_backend_cache_serves_backend_part(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    control = tmp_path / "a.json"
+    agent_side = stdio_cfg(tmp_path / "b.json")
+    settings = _settings(
+        {
+            "a": {**stdio_cfg(control), "execute_on": "os_backend"},
+            "b": agent_side,
+        }
+    )
+    seed_catalog(settings, "b", ["echo"])
+    surface = _StdioSandbox()
+    service = McpService(connect_on_start=False, os_backend=surface)
+    first = await _ready(
+        mcp_reaper, service, settings, "A", os_backend=surface
+    )
+    second = await _ready(
+        mcp_reaper, service, settings, "B", os_backend=surface
+    )
+
+    view_a = await _view(first, settings, os_backend=surface)
+    view_b = await _view(second, settings, os_backend=surface)
+
+    assert len(surface.calls) == 1
+    assert view_a.registry == view_b.registry
+    assert set(view_a.status) == {"a", "b"}
+    assert launches(control) == []
+
+
+async def test_status_snapshot_from_another_thread(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    snap = await asyncio.wait_for(
+        asyncio.to_thread(service.status, consumer), _CEILING_SEC
+    )
+
+    assert set(snap) == {"a"}
+    assert snap["a"].state == STATE_CONNECTED
+    assert isinstance(snap["a"].tools, tuple)
+    assert [t["name"] for t in snap["a"].tools] == ["echo", "nap"]
+
+
+def _build_snapshot(view, settings):
+    tools_data, status = _assemble_mcp_tools_data(
+        view.registry, view.status, settings, view.servers_cfg
+    )
+    return build_mcp_tools_snapshot(settings, tools_data, status), status
+
+
+async def test_overlay_matches_build_snapshot(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    cfg = _whitelisted(stdio_cfg(tmp_path / "a.json"))
+    own = _settings({"a": cfg})
+    seed_catalog(own, "a", ["echo", "nap"])
+    both = _settings({"a": cfg, "b": stdio_cfg(tmp_path / "b.json")})
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, own)
+    snap0, status0 = _build_snapshot(await _view(consumer, both), both)
+    entry = consumer.servers()["a"]
+    assert await asyncio.wait_for(consumer.start_connect(entry), _CEILING_SEC)
+
+    snap, status = overlay_service_statuses(
+        snap0, status0, both, service.status(consumer)
+    )
+
+    consumer.pin()
+    expected, _ = _build_snapshot(await _view(consumer, both), both)
+    assert snap0["a"]["status"] == STATE_CACHED
+    assert snap["a"] == expected["a"]
+    assert snap["a"]["status"] == STATE_CONNECTED
+    assert [t["name"] for t in snap["a"]["tools"]] == [_ECHO]
+    assert status["a"]["status"] == STATE_CONNECTED
+    assert snap["b"] == snap0["b"]
+    assert "b" not in status
+
+
+async def test_closed_consumer_view_is_pinned(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    before = await _view(consumer, settings)
+
+    await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+    assert await _view(consumer, settings) == before
+
+
+async def test_closed_consumer_status_is_not_connecting(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Закрытый потребитель не подключается: сервер без тулов и без
+    попыток — «подключение прервано», а не вечное ``connecting``."""
+    control = tmp_path / "a.json"
+    set_behavior(control, fail_start=True)
+    settings = _settings({"a": stdio_cfg(control)})
+    clock = FakeClock()
+    service = McpService(connect_on_start=True, clock=clock.now)
+    failing = await _ready(mcp_reaper, service, settings, "A")
+    idle = await _ready(mcp_reaper, service, settings, "B")
+    assert len(launches(control)) == 1
+
+    await asyncio.wait_for(idle.aclose(), _CEILING_SEC)
+    clock.advance(30)
+
+    status = service.status(idle)["a"]
+    assert (status.state, status.reason) == (STATE_FAILED, INTERRUPTED_REASON)
+    assert service.status(failing)["a"].state == STATE_FAILED
+
+
+async def test_view_matches_legacy_discovery(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Страж совместимости: прежнее обнаружение и срез потребителя дают
+    одинаковые записи реестра и статус одного сервера."""
+    settings = _settings({"a": _whitelisted(stdio_cfg(tmp_path / "a.json"))})
+    legacy = ToolsCache(mcp_cache_config(settings))
+    registry = await asyncio.wait_for(legacy.aget_tools(), _CEILING_SEC)
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, settings)
+
+    old = legacy.get_status()["a"]
+    assert view.registry == registry
+    assert {
+        k: view.status["a"][k] for k in ("status", "reason", "tool_count")
+    } == {k: old[k] for k in ("status", "reason", "tool_count")}
+
+
+async def test_connecting_entry_offers_catalog_tools(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Сервер в ``connecting`` с тулами записи предлагает их модели."""
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=1.0)
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", ["echo"])
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    view = await _view(consumer, settings)
+
+    assert view.status["a"]["status"] == STATE_CONNECTING
+    assert view.status["a"]["from_catalog"] is True
+    assert _tools_of(view, "a") == [_ECHO]

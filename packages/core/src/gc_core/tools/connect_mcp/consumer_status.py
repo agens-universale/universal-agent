@@ -74,13 +74,14 @@ def server_status(
     own: Failure | None,
     retry: int,
     now: float,
+    closed: bool = False,
 ) -> ServerStatus:
     """Статус сервера у потребителя по снимку его состояния.
 
     ``connected`` — сессия есть или удача без постоянной сессии;
     ``attempting`` — идёт своя попытка; ``own`` — своя последняя неудачная
     или прерванная попытка; ``retry`` — номер повтора серии; ``now`` —
-    часы сервиса.
+    часы сервиса; ``closed`` — потребитель закрыт.
     """
     if connected:
         return ServerStatus(
@@ -95,10 +96,10 @@ def server_status(
         )
     if own is not None and not (entry.tools_known and _is_interrupted(own)):
         return _failed(own, entry, retry)
-    return _idle_status(entry, now)
+    return _idle_status(entry, now, closed)
 
 
-def _idle_status(entry: ServerEntry, now: float) -> ServerStatus:
+def _idle_status(entry: ServerEntry, now: float, closed: bool) -> ServerStatus:
     """Своей попытки и своего отказа нет (или попытка прервана при
     известных тулах)."""
     if entry.tools_known:
@@ -108,6 +109,10 @@ def _idle_status(entry: ServerEntry, now: float) -> ServerStatus:
             checked_at=entry.checked_at,
             tools=entry.tools,
         )
+    if closed:
+        # Закрытый потребитель больше не подключается: без тулов — как
+        # попытка, прерванная его закрытием.
+        return _failed(Failure(now, "other", INTERRUPTED_REASON), entry)
     shared = shared_failure(entry)
     if shared is not None and now - shared.at < ATTEMPT_INTERVAL_SEC:
         return _failed(shared, entry)

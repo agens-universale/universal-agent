@@ -471,8 +471,8 @@ async def test_pin_reports_slice_change(
     again = consumer.pin()
 
     assert (unchanged, connected, again) == (False, True, False)
-    fingerprint, status = consumer._pinned["a"]
-    assert fingerprint == entry.fingerprint
+    pinned, status = consumer._pinned["a"]
+    assert pinned is entry
     assert status.state == STATE_CONNECTED
 
 

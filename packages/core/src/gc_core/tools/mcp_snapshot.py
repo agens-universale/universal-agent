@@ -2,7 +2,24 @@
 
 from typing import Any, Dict
 
+from gc_core.tools.connect_mcp.agent_tools import (
+    _assemble_mcp_tools_data,
+    mcp_cache_config,
+)
+from gc_core.tools.connect_mcp.consumer_status import (
+    STATE_CACHED,
+    STATE_CONNECTED,
+    STATE_FAILED,
+    ServerStatus,
+)
+from gc_core.tools.connect_mcp.consumer_view import (
+    server_entries,
+    status_record,
+)
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+
+#: Статусы сервиса, которые заменяют статус сборки в снимке.
+_SETTLED = frozenset({STATE_CACHED, STATE_CONNECTED, STATE_FAILED})
 
 
 def build_mcp_tools_snapshot(
@@ -36,3 +53,38 @@ def build_mcp_tools_snapshot(
             "tools": tools,
         }
     return snapshot
+
+
+def overlay_service_statuses(
+    snapshot: Dict[str, Dict[str, Any]],
+    mcp_status: Dict[str, Dict[str, Any]],
+    settings: Any,
+    statuses: Dict[str, ServerStatus],
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Снимок и статусы сборки с окончательными статусами сервиса (§5.7).
+
+    Серверы ``statuses`` в ``cached``, ``connected`` и ``failed`` получают
+    статус, причину и тулы сервиса — тем же путём, что сборка: записи
+    реестра → ``tools_data`` → снимок. Остальные серверы (``connecting``,
+    вне сервиса) остаются как были. Входные словари не меняются.
+    """
+    servers = mcp_cache_config(settings)["mcp-servers"]
+    keys = [
+        key
+        for key, status in statuses.items()
+        if status.state in _SETTLED and key in servers
+    ]
+    registry: Dict[str, Dict[str, Any]] = {}
+    fresh_status: Dict[str, Dict[str, Any]] = {}
+    for key in keys:
+        entries = server_entries(key, servers[key], statuses[key])
+        registry.update(entries)
+        fresh_status[key] = status_record(statuses[key], len(entries))
+    tools_data, _ = _assemble_mcp_tools_data(
+        registry, fresh_status, settings, {key: servers[key] for key in keys}
+    )
+    fresh = build_mcp_tools_snapshot(settings, tools_data, fresh_status)
+    return (
+        {**snapshot, **{key: fresh[key] for key in keys}},
+        {**mcp_status, **fresh_status},
+    )
