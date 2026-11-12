@@ -640,6 +640,41 @@ def _consumer_cleanup(mcp_consumer: Any) -> Any:
     return None if mcp_consumer is None else mcp_consumer.aend_turn
 
 
+async def arefresh_context_tools(ctx: RunContext) -> None:
+    """Пересобрать набор тулов контекста тем же вызовом, что при сборке
+    (спека §5.6).
+
+    Сети нет: MCP-часть — закреплённый срез источника тулов контекста.
+    Источник — двойник контекста с уже найденными определениями
+    субагентов: дискавери не повторяется. Предупреждения сборки не
+    повторяются (без логгера). Пять полей набора заменяются вместе.
+    """
+    registered: list[str] = []
+    source = SimpleNamespace(
+        settings=ctx.settings,
+        runtime=ctx.runtime,
+        subagent_definitions=ctx.subagent_definitions,
+        subagent_diagnostics=ctx.subagent_diagnostics,
+        agent_store=ctx.agent_store,
+    )
+    with use_owner(ctx.mcp_session_owner):
+        tools = await abuild_tools_data(
+            source,
+            os_backend=ctx.os_backend,
+            skills_registry=ctx.skills_registry,
+            logger=None,
+            tools_cache=ctx.tools_cache,
+            registered_names=registered,
+        )
+    (
+        ctx.tools_data,
+        ctx.tools_spec,
+        ctx.tools_description,
+        ctx.mcp_status,
+    ) = tools
+    ctx.registered_tool_names = set(registered)
+
+
 async def _aclose_owned_mcp_sessions(owner: str) -> None:
     """Закрыть MCP-сессии, поднятые под владельцем несостоявшегося контекста.
 

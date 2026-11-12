@@ -15,10 +15,11 @@
 отказ.
 
 Состояние меняется только на цикле сервиса и под ``_lock``: статус читают
-и с других потоков. Фоновая работа (попытки, серии повторов, закрытие
-сессий) идёт задачами с пустым контекстом переменных — пользовательский
-стоп хода и чужой владелец туда не попадают; владельца и слоты потребитель
-ставит явно. В stdout она не пишет: только лог и статус.
+и с других потоков. Фоновая работа (попытки, серии повторов, перечитывание
+списка тулов, закрытие сессий) идёт задачами с пустым контекстом
+переменных — пользовательский стоп хода и чужой владелец туда не попадают;
+владельца и слоты потребитель ставит явно. В stdout она не пишет: только
+лог и статус.
 """
 
 import asyncio
@@ -92,6 +93,28 @@ def _describe(exc: BaseException, entry: ServerEntry) -> str:
     return f"{type(exc).__name__}: {without_secrets(str(exc), entry.cfg)}"
 
 
+async def _alist_in_time(
+    server_key: str, cfg: dict, timeout: float
+) -> list[dict] | None:
+    """Список тулов в срок ``timeout``; не уложился — ``None``.
+
+    Истёкший срок снимает идущий запрос, но не соединение: постоянная
+    сессия переживает отмену запроса. Внутренний срок списка длиннее
+    внешнего, поэтому ``TimeoutError`` транспорта (сбой) отличим от
+    истёкшего срока.
+    """
+    limit = asyncio.timeout(timeout)
+    try:
+        async with limit:
+            return await alist_raw_tools(
+                server_key, cfg, timeout=timeout + _LIST_SLACK_SEC
+            )
+    except TimeoutError:
+        if limit.expired():
+            return None
+        raise
+
+
 def _succeeded(task: asyncio.Task) -> bool:
     """Попытка завершилась удачей (не отменена, без исключения, истина)."""
     return not task.cancelled() and task.exception() is None and task.result()
@@ -103,13 +126,15 @@ class McpConnections:
     Состояние по серверам ключуется ключом сессии (ключ сервера и
     отпечаток): ``_sessions`` — постоянная сессия есть; ``_ok`` — удача у
     сервера без постоянной сессии; ``_connects`` — идущая попытка;
-    ``_series`` — серия повторов; ``_failures`` — своя последняя неудачная
-    или прерванная попытка; ``_retry`` — номер повтора серии; ``_closing`` —
-    закрытие остатков сессий после отказа или отмены попытки и сессий
-    серверов, ушедших из набора; ``_closing_servers`` — те же закрытия по
-    ключу сервера: новое подключение сервера дожидается всех его закрытий,
-    какого бы отпечатка они ни были (у изменённого сервера старый процесс
-    ещё держит порт или профиль).
+    ``_series`` — серия повторов; ``_refreshes`` — идущее перечитывание
+    списка тулов; ``_relisted`` — начало своего последнего перечитывания
+    (неудачное повторяется не раньше срока свежести); ``_failures`` — своя
+    последняя неудачная или прерванная попытка; ``_retry`` — номер повтора
+    серии; ``_closing`` — закрытие остатков сессий после отказа или отмены
+    попытки и сессий серверов, ушедших из набора; ``_closing_servers`` — те
+    же закрытия по ключу сервера: новое подключение сервера дожидается всех
+    его закрытий, какого бы отпечатка они ни были (у изменённого сервера
+    старый процесс ещё держит порт или профиль).
     ``_servers`` — набор (записи серверов последней начатой сборки),
     ``_build`` — последний выданный номер сборки, ``_settings`` —
     настройки сборки, по которым строятся определения. ``_inflight`` —
@@ -132,6 +157,8 @@ class McpConnections:
         self._ok: set[str] = set()
         self._connects: dict[str, asyncio.Task] = {}
         self._series: dict[str, asyncio.Task] = {}
+        self._refreshes: dict[str, asyncio.Task] = {}
+        self._relisted: dict[str, float] = {}
         self._failures: dict[str, Failure] = {}
         self._retry: dict[str, int] = {}
         self._closing: set[asyncio.Task] = set()
@@ -157,6 +184,10 @@ class McpConnections:
     def discovery_timeout(self) -> float:
         """Срок подключения по настройкам последней сверки."""
         return settings_of(self._settings).mcp.meta.discovery_timeout_sec
+
+    def tools_ttl(self) -> float:
+        """Срок свежести списка тулов по настройкам последней сверки."""
+        return settings_of(self._settings).mcp.meta.tools_cache_ttl
 
     def has_session(self, entry: ServerEntry) -> bool:
         with self._lock:
@@ -463,6 +494,115 @@ class McpConnections:
         if not task.cancelled():
             self._unexpected_failure(entry, task)
 
+    def start_turn(self, entry: ServerEntry) -> None:
+        """Вход в ход по серверу набора (спека §5.5); ничего не ждёт.
+
+        Подключённый сетевой сервер, чей список проверен раньше, чем
+        ``tools_ttl()`` назад, перечитывает список в фоне. Неподключённый
+        сервер у потребителя «на старте» без своей попытки и без серии
+        повторов получает попытку по правилу 30 с. Закрытый потребитель
+        ничего не начинает.
+        """
+        key = session_key_of(entry)
+        with self._lock:
+            if self.closed:
+                return
+            connected = self._connected(key)
+            idle = not self._attempting(key) and key not in self._series
+            relist = self._new_relist(entry, key) if connected else None
+        if relist is not None:
+            relist.add_done_callback(partial(self._on_relist_done, entry))
+        elif connected or not idle or not self._service.connect_on_start:
+            return
+        elif self.may_connect(entry):
+            self.start_attempt(entry)
+
+    def _new_relist(self, entry: ServerEntry, key: str) -> asyncio.Task | None:
+        """Задача перечитывания списка, если оно назрело. Звать под
+        ``_lock``.
+
+        Только у сетевых транспортов: у процессных список приходит от
+        того же процесса с каждым подключением. Назрело — с последней
+        проверки записи и своего последнего перечитывания прошло больше
+        ``tools_ttl()``.
+        """
+        if is_process_transport(entry.cfg) or key in self._refreshes:
+            return None
+        now = self._service._clock()
+        marks = (entry.checked_at, self._relisted.get(key))
+        since = [mark for mark in marks if mark is not None]
+        if since and now - max(since) <= self.tools_ttl():
+            return None
+        self._relisted[key] = now
+        task = asyncio.get_running_loop().create_task(
+            self._arelist(entry, self._generations.get(key, 0)),
+            context=contextvars.Context(),
+        )
+        self._refreshes[key] = task
+        return task
+
+    async def _arelist(self, entry: ServerEntry, generation: int) -> None:
+        """Перечитать список тулов подключённого сервера (свежесть, §5.5).
+
+        Список идёт по живой постоянной сессии, без неё — разовым
+        запросом; удача обновляет запись (тулы, время проверки, каталог),
+        статус не меняется. Истёкший срок — не отказ: запрос снят, сессия
+        и статус остаются, перечитывание повторится через ``tools_ttl()``.
+        Иной сбой — отказ связи (``afail``). Исход не принимается, если
+        соединение за время списка сняли (сверка, сбой вызова, закрытие).
+        """
+        cfg = self.wrapper_cfg(entry)
+        timeout = self.discovery_timeout()
+        with use_owner(self.owner), use_call_slots(self.slots):
+            try:
+                raw = await _alist_in_time(entry.key, cfg, timeout)
+            except Exception as exc:
+                if not self._relist_lost(entry, generation):
+                    await self._afail_relist(entry, exc)
+                return
+        if raw is None:
+            logger.info(
+                "MCP %s: список тулов для потребителя %s не пришёл за %s с; "
+                "сессия остаётся",
+                entry.key,
+                self.label,
+                timeout,
+            )
+        elif not self._relist_lost(entry, generation):
+            self._service.record_success(entry, raw)
+
+    def _relist_lost(self, entry: ServerEntry, generation: int) -> bool:
+        """Под замком: потребитель закрыт, сервер ушёл из набора или
+        соединение снято (поколение сменилось с ``generation``)."""
+        key = session_key_of(entry)
+        with self._lock:
+            return (
+                self.closed
+                or self._servers.get(entry.key) is not entry
+                or self._generations.get(key, 0) != generation
+            )
+
+    async def _afail_relist(
+        self, entry: ServerEntry, exc: BaseException
+    ) -> None:
+        failure = await self.afail(entry, exc)
+        if failure is not None:
+            logger.warning(
+                "MCP %s: перечитывание списка тулов потребителя %s не "
+                "удалось: %s",
+                entry.key,
+                self.label,
+                failure.reason,
+            )
+
+    def _on_relist_done(self, entry: ServerEntry, task: asyncio.Task) -> None:
+        key = session_key_of(entry)
+        with self._lock:
+            if self._refreshes.get(key) is task:
+                del self._refreshes[key]
+        if not task.cancelled():
+            self._unexpected_failure(entry, task)
+
     def next_build(self) -> int:
         """Номер новой сборки; набор меняет только сверка самой поздней."""
         with self._lock:
@@ -512,8 +652,8 @@ class McpConnections:
         return gone
 
     def leave(self, entry: ServerEntry) -> None:
-        """Сервер ушёл из набора: снять его попытку и серию, сессию закрыть
-        в фоне под владельцем потребителя.
+        """Сервер ушёл из набора: снять его попытку, серию и перечитывание,
+        сессию закрыть в фоне под владельцем потребителя.
 
         Начатый по этой сессии вызов получает ошибку закрытой сессии, а
         не зависает. Закрытие дожидается снятых задач и прежних закрытий
@@ -521,10 +661,15 @@ class McpConnections:
         """
         key = session_key_of(entry)
         with self._lock:
-            work = {self._connects.pop(key, None), self._series.pop(key, None)}
+            work = {
+                self._connects.pop(key, None),
+                self._series.pop(key, None),
+                self._refreshes.pop(key, None),
+            }
             work.discard(None)
             earlier = set(self._closing_servers.get(entry.key, ()))
             self._retry.pop(key, None)
+            self._relisted.pop(key, None)
             self._forget_connection(key)
         for task in work:
             task.cancel()
@@ -632,8 +777,9 @@ class McpConnections:
         return failure
 
     async def aclose(self, finish: Callable[[], None]) -> None:
-        """Отказать в новой работе, снять попытки, серии и идущие вызовы,
-        дождаться закрытия остатков, закрыть все сессии потребителя.
+        """Отказать в новой работе, снять попытки, серии, перечитывания
+        списка и идущие вызовы, дождаться закрытия остатков, закрыть все
+        сессии потребителя.
 
         Каждый вызов проходит весь путь: шаги идемпотентны, поэтому
         повторный вызов (в том числе после прерванного) доделывает
@@ -646,6 +792,7 @@ class McpConnections:
             work = [
                 *self._connects.values(),
                 *self._series.values(),
+                *self._refreshes.values(),
                 *self._inflight,
             ]
         try:

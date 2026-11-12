@@ -73,7 +73,7 @@ from gc_core.processing_responses import (
     arun_agent,
     begin_turn_main_trace,
 )
-from gc_core.run_context import RunContext
+from gc_core.run_context import RunContext, arefresh_context_tools
 from gc_core.run_summary_coordinator import (
     RunSummaryCoordinator,
     areset_run_flags,
@@ -853,6 +853,26 @@ class AgentExecutor:
             (logger or logging.getLogger(__name__)).warning(
                 "on_thread_claimed hook failed", exc_info=True
             )
+
+    async def _arefresh_mcp_tools(self) -> None:
+        """Вход в ход у источника тулов с «началом хода» (спека §5.6).
+
+        Источник назначает фоновую работу и сообщает, изменился ли срез;
+        изменился — набор тулов контекста пересобирается до хода. Без
+        такого источника ход прежний; отказ не роняет ход: он идёт на
+        прежнем наборе.
+        """
+        source = getattr(self._ctx, "tools_cache", None)
+        start_turn = getattr(source, "astart_turn", None)
+        if start_turn is None:
+            return
+        try:
+            if await start_turn():
+                await arefresh_context_tools(self._ctx)
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("mcp_tools_refresh_failed", exc_info=True)
 
     async def _amcp_snapshot(
         self, thread_session, thread_id, system_id: str
@@ -1691,6 +1711,7 @@ class AgentExecutor:
         # Снять протухшие runtime-индикаторы одним атомарным store batch,
         # сохраняя прежний путь у пользовательских хранилищ без capability.
         await areset_run_flags(thread_session)
+        await self._arefresh_mcp_tools()
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
         # Начальные значения для координатора; проверка истории перечитывает
