@@ -18,7 +18,11 @@ from textual.widgets import Static
 
 from gc_tui.models import TraceEvent
 from gc_tui.services.diff_render import render_hunks
-from gc_tui.services.json_payload import render_payload, unfold_payload
+from gc_tui.services.json_payload import (
+    broken_call_arguments,
+    render_payload,
+    unfold_payload,
+)
 
 # Паддинг `#trace` — по столбцу с каждой стороны (`styles.tcss`). Нужен там,
 # где ширина берётся из события `Resize`, а не замером контейнера.
@@ -68,7 +72,7 @@ class ToolCallDetailScreen(Screen):
             yield Static(self._header_text(), id="header", markup=False)
             with VerticalScroll(id="trace"):
                 yield _section_header("CALL")
-                yield render_payload(self._call_event.full_payload)
+                yield from self._call_widgets()
                 yield _section_header("OUTPUT")
                 yield self._output_widget()
             yield Static(
@@ -124,6 +128,25 @@ class ToolCallDetailScreen(Screen):
         # Экран вызова — место сырого wire-имени (в ленте — подпись).
         tool = ev.wire_name or ev.tool_name or "<tool>"
         return f"Viewer: {tool}({ev.args_summary}) · #{ev.no}"
+
+    def _call_widgets(self):
+        payload = self._call_event.full_payload
+        raw = broken_call_arguments(payload)
+        if raw is None:
+            # Обрывков в аргументах не достраиваем и вглубь: кто оборвал,
+            # экран не знает.
+            yield render_payload(payload, repair_truncated=False)
+            return
+        rest = {k: v for k, v in payload.items() if k != "arguments"}
+        yield render_payload(rest, repair_truncated=False)
+        yield Static(
+            "⚠ аргументы — не JSON, показаны как сохранены",
+            classes="line-warn",
+            markup=False,
+        )
+        # Строка аргументов отдельным блоком: внутри JSON-каркаса её кавычки
+        # и переносы ушли бы в экранирование.
+        yield render_payload(raw, repair_truncated=False)
 
     def _output_widget(self):
         if self._result_event is None:

@@ -175,6 +175,87 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         self.assertIn("[function_call] turn_finish", text)
         self.assertIn("direct_answer", text)
 
+    def test_trace_digest_omits_reasoning_field(self) -> None:
+        messages = [
+            {
+                "role": "assistant",
+                "content": "visible",
+                "reasoning_content": "SECRET_CHAIN",
+            },
+            {
+                "role": "assistant",
+                "content": "visible2",
+                "reasoning": "ALIAS_CHAIN",
+            },
+        ]
+        digest = build_finish_gate_trace_digest(
+            state=SimpleNamespace(messages=messages),
+            exclude_pending_turn_finish=False,
+        )
+        text = digest.trace_digest_text
+        self.assertNotIn("SECRET_CHAIN", text)
+        self.assertNotIn("ALIAS_CHAIN", text)
+        self.assertNotIn("[reasoning]", text)
+        self.assertIn("visible", text)
+        self.assertIn("visible2", text)
+
+    def test_long_reasoning_does_not_evict_early_tool_receipt(self) -> None:
+        messages: list[dict] = [
+            {
+                "type": "function_call",
+                "call_id": "w1",
+                "name": "fs_write_file",
+                "arguments": {"path": "a.md", "content": "x"},
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "w1",
+                "output": {
+                    "tool": "fs_write_file",
+                    "ok": True,
+                    "r": ("RECEIPT_EARLY"),
+                },
+            },
+        ]
+        messages += [
+            {
+                "role": "assistant",
+                "content": f"step {n}",
+                "reasoning_content": "r" * 8000,
+            }
+            for n in range(30)
+        ]
+        settings = AppConfig(
+            quality_gate=QualityGateConfig(max_dialogue_chars=20000)
+        )
+        digest = build_finish_gate_trace_digest(
+            state=SimpleNamespace(messages=messages),
+            settings=settings,
+            exclude_pending_turn_finish=False,
+        )
+        self.assertIn("RECEIPT_EARLY", digest.trace_digest_text)
+
+    def test_reasoning_only_message_keeps_its_slot(self) -> None:
+        messages = [
+            {"role": "assistant", "content": "", "reasoning_content": "SECRET"}
+        ]
+        digest = build_finish_gate_trace_digest(
+            state=SimpleNamespace(messages=messages),
+            exclude_pending_turn_finish=False,
+        )
+        self.assertNotIn("SECRET", digest.trace_digest_text)
+        self.assertIn("[assistant]", digest.trace_digest_text)
+
+    def test_trace_digest_strips_inline_think(self) -> None:
+        messages = [
+            {"role": "assistant", "content": "<think>HIDDEN</think>visible"}
+        ]
+        digest = build_finish_gate_trace_digest(
+            state=SimpleNamespace(messages=messages),
+            exclude_pending_turn_finish=False,
+        )
+        self.assertNotIn("HIDDEN", digest.trace_digest_text)
+
     def test_build_history_text_matches_summarizer_pipeline(self) -> None:
         messages = [
             {"role": "user", "content": "hello"},

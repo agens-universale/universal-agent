@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import yaml
 from gc_core.config_modules import env_vars
 
@@ -93,3 +95,65 @@ def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
     assert srv["command"] == "/N/npx"
     assert "/C/playwright-mcp" in " ".join(srv["args"])
     assert leftover == []  # без хардкода и оставшихся {…}
+
+
+def _playwright_wired(tmp_path, monkeypatch):
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: _gc(tmp_path))
+    from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import wiring
+
+    recipe = RECIPES / "browser_playwright"
+    wiring.wire_snippet("browser_playwright", recipe, npx="/N/npx", cache="/C")
+    return wiring, recipe
+
+
+def _wired(wiring):
+    return wiring.wired_servers()["browser_playwright"]
+
+
+def test_fresh_wiring_is_not_outdated(tmp_path, monkeypatch):
+    wiring, recipe = _playwright_wired(tmp_path, monkeypatch)
+    assert not wiring.wiring_outdated(
+        _wired(wiring), recipe, npx="/N/npx", cache="/C"
+    )
+
+
+def test_wiring_from_older_node_is_outdated(tmp_path, monkeypatch):
+    # Подключение прошлого релиза: npx из node/v18.0.0, без --browser.
+    wiring, recipe = _playwright_wired(tmp_path, monkeypatch)
+    data = wiring.load_managed()
+    data["mcp"]["servers"]["browser_playwright"]["args"] = [
+        "-y",
+        "@playwright/mcp@0.0.70",
+        "--output-dir",
+        "/C/playwright-mcp",
+    ]
+    wiring.save_managed(data)
+    assert wiring.wiring_outdated(
+        _wired(wiring), recipe, npx="/N/npx", cache="/C"
+    )
+    assert wiring.wiring_outdated(
+        _wired(wiring), recipe, npx="/N24/npx", cache="/C"
+    )
+
+
+def test_unwired_recipe_is_not_outdated(tmp_path, monkeypatch):
+    # Не подключён — сверять нечего; пути Node при этом не считаются
+    # (dep-заглушка не путь: посчитай их cli — упал бы).
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: _gc(tmp_path))
+    from types import SimpleNamespace
+
+    from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import cli
+
+    entry = SimpleNamespace(
+        name="browser_playwright", path=Path("browser_playwright")
+    )
+    assert not cli._wiring_outdated(entry, RECIPES, "dep")
+
+
+def test_recipe_without_snippet_is_not_outdated(tmp_path, monkeypatch):
+    wiring, _ = _playwright_wired(tmp_path, monkeypatch)
+    assert not wiring.wiring_outdated(
+        _wired(wiring), tmp_path / "gone", npx="/N/npx", cache="/C"
+    )

@@ -33,14 +33,44 @@ def augment_process_env(
     return merged
 
 
-def mcp_stdio_env(
-    server_env: Mapping[str, str] | None = None,
+def mcp_process_env(
+    command: str,
+    overrides: Mapping[str, object] | None = None,
 ) -> dict[str, str]:
-    """Env для stdio MCP: mcp-env PATH + per-server overrides из config."""
+    """Env процесса MCP: mcp-env PATH, каталог команды и env из конфига.
+
+    ``command`` — уже разрешённая (`resolve_mcp_command`). Заданная путём,
+    она видит свой каталог первым в PATH: скрипт на ``#!/usr/bin/env node``
+    (npx из Node агента) найдёт интерпретатор рядом с собой, а не системный
+    другой версии. Каталог, который уже есть в PATH (в том числе через
+    ссылку: `/bin` → `/usr/bin`), не переставляется.
+    """
     merged = augment_process_env()
-    if server_env:
-        merged.update({str(k): str(v) for k, v in server_env.items()})
+    if os.path.isabs(command):
+        command_dir = os.path.dirname(command)
+        current = merged.get("PATH", "")
+        if not _dir_in_path(command_dir, current):
+            merged["PATH"] = command_dir + (
+                os.pathsep + current if current else ""
+            )
+    if overrides:
+        merged.update({str(k): str(v) for k, v in overrides.items()})
     return merged
+
+
+def _dir_in_path(directory: str, path_value: str) -> bool:
+    """Сравнение по настоящему пути: ссылка на каталог из PATH, регистр и
+    хвостовой разделитель (Windows) — тот же каталог. Относительные и пустые
+    элементы не в счёт: ребёнок разрешит их от своего cwd, не от агента."""
+
+    def canon(p: str) -> str:
+        return os.path.normcase(os.path.realpath(p))
+
+    target = canon(directory)
+    return any(
+        os.path.isabs(p) and canon(p) == target
+        for p in path_value.split(os.pathsep)
+    )
 
 
 def resolve_mcp_command(command: str) -> str:

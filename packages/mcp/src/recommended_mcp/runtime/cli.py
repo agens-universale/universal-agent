@@ -69,8 +69,9 @@ def _install_one(
     editable: bool = False,
     repo_url=None,
     repo_ref=None,
-) -> bool:
-    """Поставить один рецепт в MCP-venv. True если успех."""
+) -> tuple[str, str]:
+    """Поставить один рецепт в MCP-venv: (status, detail) из
+    run_install_entries, status ∈ {installed, skipped, failed}."""
     from recommended_mcp.runtime.venv import (
         ensure_mcp_venv,
         pip_install_target,
@@ -86,16 +87,34 @@ def _install_one(
             repo_url=repo_url,
             repo_ref=repo_ref,
         )
-    return any(s == "installed" for _, s, _ in results)
+    ((_, status, detail),) = results
+    return status, detail
+
+
+def _wiring_paths(agent_dep_dir) -> tuple[str, str]:
+    """Значения плейсхолдеров {npx}/{cache} сниппета на этой машине."""
+    from gc_core.config_modules.env_vars import gc_paths
+
+    npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
+    return npx, str(gc_paths()["cache"])
+
+
+def _wiring_outdated(entry, root: Path, agent_dep_dir) -> bool:
+    """Подключённый рецепт расходится со своим сниппетом на этой машине."""
+    from recommended_mcp.runtime import wiring
+
+    wired = wiring.wired_servers().get(entry.name)
+    if wired is None:
+        return False
+    npx, cache = _wiring_paths(agent_dep_dir)
+    recipe_dir = (root / entry.path).resolve()
+    return wiring.wiring_outdated(wired, recipe_dir, npx=npx, cache=cache)
 
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
-    from gc_core.config_modules.env_vars import gc_paths
-
     from recommended_mcp.runtime import wiring
 
-    npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
-    cache = str(gc_paths()["cache"])
+    npx, cache = _wiring_paths(agent_dep_dir)
     recipe_dir = (root / entry.path).resolve()
     try:
         leftover = wiring.wire_snippet(
@@ -127,37 +146,64 @@ def _cmd_install(
                 file=sys.stderr,
             )
             return 2
-        if _install_one(entry, root, dep, editable, repo_url, repo_ref):
-            _wire_one(entry, root, dep)
-            print(f"[done] {name} установлен и подключён")
-        else:
-            print(
-                f"[warn] {name} не установлен — не подключаю", file=sys.stderr
-            )
+        return _install_named(entry, root, dep, editable, repo_url, repo_ref)
+    return _install_all(entries, root, dep, editable, repo_url, repo_ref)
+
+
+def _install_named(entry, root, dep, editable, repo_url, repo_ref) -> int:
+    """Код возврата: 0 — поставлен и подключён; 1 — нет (TUI по нему
+    пишет [ok]/[fail])."""
+    status, detail = _install_one(
+        entry, root, dep, editable, repo_url, repo_ref
+    )
+    if status == "installed":
+        _wire_one(entry, root, dep)
+        print(f"[done] {entry.name} установлен и подключён")
         return 0
+    if status == "skipped":
+        print(f"[skip] {entry.name}: {detail}", file=sys.stderr)
+    else:
+        print(
+            f"[warn] {entry.name} не установлен — не подключаю",
+            file=sys.stderr,
+        )
+    return 1
+
+
+def _install_all(entries, root, dep, editable, repo_url, repo_ref) -> int:
+    """Код возврата 1 — что-то упало; пропуск по ОС сбоем не считается."""
     installed_names: list[str] = []
+    skipped: list[str] = []
     failed_names: list[str] = []
     for entry in entries:
         if getattr(entry, "optional", False):
             continue
-        if _install_one(entry, root, dep, editable, repo_url, repo_ref):
+        status, detail = _install_one(
+            entry, root, dep, editable, repo_url, repo_ref
+        )
+        if status == "installed":
             _wire_one(entry, root, dep)
             installed_names.append(entry.name)
+        elif status == "skipped":
+            skipped.append(f"{entry.name} ({detail})")
         else:
             failed_names.append(entry.name)
     print(
         f"[summary] установлено+подключено: {', '.join(installed_names) or '—'}"
     )
+    if skipped:
+        print(f"[summary] пропущено: {', '.join(skipped)}")
     if failed_names:
         print(f"[summary] не установлено: {', '.join(failed_names)}")
     print("[done] install complete")
-    return 0
+    return 1 if failed_names else 0
 
 
 def installable_names(config: Optional[str] = None) -> list:
-    """Имена MCP из курируемого манифеста (для онбординг-визарда)."""
+    """Имена MCP из курируемого манифеста, которые ставятся на этой ОС
+    (онбординг, /settings): рецепт чужой ОС установка пропустит."""
     entries, _ = _load_manifest_entries(config)
-    return [e.name for e in entries]
+    return [e.name for e in entries if _inst().platform_skip_reason(e) is None]
 
 
 def descriptions(config: Optional[str] = None) -> dict:
@@ -260,6 +306,13 @@ def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
             print(f"[warn] {name} нет в манифесте — деинсталл пропущен")
 
 
+# Кэш браузеров Playwright по умолчанию; на Linux — ~/.cache/ms-playwright.
+_PLAYWRIGHT_BROWSERS = {
+    "win32": r"%LOCALAPPDATA%\ms-playwright",
+    "darwin": "~/Library/Caches/ms-playwright",
+}
+
+
 def _remove_all(keep_package: bool) -> None:
     from recommended_mcp.runtime import wiring
 
@@ -289,8 +342,10 @@ def _remove_all(keep_package: bool) -> None:
                 print(
                     f"[warn] не удалось удалить {d}: {exc} (закрой gc-ua, если daemon держит файлы, и повтори)"
                 )
+    cache = _PLAYWRIGHT_BROWSERS.get(sys.platform, "~/.cache/ms-playwright")
     print(
-        "[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — убрать вручную: playwright uninstall"
+        f"[note] Chromium (общий кэш Playwright, вне ~/.gc) не трогаем — "
+        f"убрать вручную каталог (обычно {cache})"
     )
     print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
 
@@ -378,6 +433,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 1
 
 
+# Обновление без номера версии: подключение отстало от рецепта.
+_WIRING_UPDATE = "обновление"
+
+
 def _available_update(entry, installed_version):
     """Версия из рецепта, если ≠ установленной. Локально, без сети.
 
@@ -412,17 +471,31 @@ def installed_state(
     name: str, config: Optional[str] = None, *, manifest=None
 ) -> dict:
     """{'installed': bool|None, 'version': str|None, 'update': str|None}.
-    Медленно (subprocess-опрос venv). installed=None — проверить не удалось.
+    update — версия из рецепта, если она новее установленной, либо
+    «обновление» без номера, если подключение отстало от рецепта; None —
+    обновлять нечего. Медленно (subprocess-опрос venv). installed=None —
+    проверить не удалось.
     manifest=(entries, root) — уже загруженный манифест (кэш вызывающего); иначе грузим."""
     entries, root = (
         manifest if manifest is not None else _load_manifest_entries(config)
     )
-    from recommended_mcp.runtime.venv import query_installed_version
-
     entry = _inst().find_entry(entries, name)
     if entry is None:
         return {"installed": None, "version": None, "update": None}
-    status = _installed_status(entry, root, _agent_dep_dir())
+    dep = _agent_dep_dir()
+    state = _package_state(entry, root, dep)
+    # npx-рецепт версию не сообщает, а Node агента и аргументы сниппета
+    # меняются с релизом: отставшее подключение — тоже повод переустановить.
+    if state["update"] is None and _wiring_outdated(entry, root, dep):
+        state["update"] = _WIRING_UPDATE
+    return state
+
+
+def _package_state(entry, root, agent_dep_dir) -> dict:
+    """installed_state без сверки подключения: пакет и его версия."""
+    from recommended_mcp.runtime.venv import query_installed_version
+
+    status = _installed_status(entry, root, agent_dep_dir)
     if status == "?":
         return {"installed": None, "version": None, "update": None}
     if status != "yes":

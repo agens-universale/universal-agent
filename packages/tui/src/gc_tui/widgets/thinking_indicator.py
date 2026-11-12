@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import random
 import time
-from itertools import groupby
-from operator import itemgetter
 
 from rich.text import Text
 from textual.timer import Timer
@@ -41,6 +39,7 @@ from gc_tui.services.duration_format import (
     format_duration,
     format_timer,
 )
+from gc_tui.services.shimmer import shimmer_pass, shimmer_text
 from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.turn_outcome import OUTCOMES
 
@@ -109,33 +108,10 @@ FRAME_HOLD = 2
 # остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
 _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 
-# Блик по слову: светлое пятно бежит по буквам слева направо, буква за тик;
-# центр — пик SHIMMER_SHADES, к краям спадает до основного амбера. Проход
-# начинается и кончается за краями слова. Стартует он во вспышку глифа (пик
-# рампы GLOW_SHADES): глиф «запускает» блик, ритм у них общий.
-_SHIMMER_SPREAD = len(SHIMMER_SHADES) - 1
+# Блик по слову (gc_tui.services.shimmer) идёт по рампе SHIMMER_SHADES и
+# стартует во вспышку глифа (пик рампы GLOW_SHADES): глиф «запускает» блик,
+# ритм у них общий.
 _GLOW_PEAK = len(GLOW_SHADES) // 2
-
-
-def shimmer_pass(word: str) -> int:
-    """Шагов прохода блика по слову — от входа слева до ухода за правый край."""
-    return len(word) + 2 * _SHIMMER_SPREAD
-
-
-def shimmer_text(word: str, step: int) -> Text:
-    """Слово с бликом на шаге прохода `step`; шаг 0 и шаги после прохода —
-    блик за краями слова, слово ровным амбером."""
-    center = step - _SHIMMER_SPREAD
-    shades = [
-        SHIMMER_SHADES[max(0, _SHIMMER_SPREAD - abs(i - center))]
-        for i in range(len(word))
-    ]
-    # Соседние буквы одного оттенка — одним куском: вне блика слово
-    # рисуется так же, как без него.
-    text = Text()
-    for shade, run in groupby(zip(word, shades), key=itemgetter(1)):
-        text.append("".join(char for char, _ in run), style=shade)
-    return text
 
 
 _STATE_THINKING = "thinking"
@@ -275,7 +251,8 @@ class ThinkingIndicator(Static):
         word = self._shimmer_word()
         if self._shimmer_step is not None:
             self._shimmer_step += 1
-            if word is None or self._shimmer_step > shimmer_pass(word):
+            last = shimmer_pass(word, SHIMMER_SHADES) if word else 0
+            if word is None or self._shimmer_step > last:
                 self._shimmer_step = None
         glow_peak = self._frame % len(GLOW_SHADES) == _GLOW_PEAK
         if word is not None and self._shimmer_step is None and glow_peak:
@@ -291,7 +268,7 @@ class ThinkingIndicator(Static):
 
     def _shimmer(self) -> Text:
         word = self._shimmer_word() or ""
-        return shimmer_text(word, self._shimmer_step or 0)
+        return shimmer_text(word, self._shimmer_step or 0, SHIMMER_SHADES)
 
     def _anim(self) -> tuple[str, str]:
         """(глиф, цвет) текущего кадра. Глиф держится FRAME_HOLD тиков, цвет

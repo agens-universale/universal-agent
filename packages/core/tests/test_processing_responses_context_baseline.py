@@ -413,7 +413,7 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(
         "arequest_backend_chat_completions",
         _fake_request_backend,
     )
-    monkeypatch.setattr(request_policy.asyncio, "sleep", _anoop)
+    monkeypatch.setattr("asyncio.sleep", _anoop)
 
     response, payload = run_coro(
         request_policy.arequest_chat_completions_with_policy(
@@ -486,7 +486,7 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(
         "arequest_backend_chat_completions",
         _fake_request_backend,
     )
-    monkeypatch.setattr(request_policy.asyncio, "sleep", _anoop)
+    monkeypatch.setattr("asyncio.sleep", _anoop)
 
     with pytest.raises(httpx.ConnectError):
         run_coro(

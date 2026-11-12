@@ -16,14 +16,13 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
 
-from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.durable_scope import (
     call_tool_with_progress,
     require_no_reconnect,
 )
 from gc_core.tools.connect_mcp.session_task import SessionTask
-from gc_core.tools.connect_mcp.transport import _resolve_command
+from gc_core.tools.connect_mcp.transport import _stdio_command
 from gc_core.utils.async_http import build_ssl_context
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 from gc_core.utils.url_addr import is_loopback
@@ -1128,6 +1127,15 @@ async def acall_tool_stream_http(
         return await _stateless()
 
 
+def _stdio_server_params(server_cfg: Dict[str, Any]) -> StdioServerParameters:
+    """Параметры SDK-клиента — из того же разбора, что у своих запусков
+    (`_stdio_command`): один сервер стартует с одним окружением."""
+    cmd, cwd, env = _stdio_command(server_cfg)
+    return StdioServerParameters(
+        command=cmd[0], args=cmd[1:], env=env, cwd=cwd or None
+    )
+
+
 async def _list_tools_stream_stdio_async(
     server_cfg: Dict[str, Any],
     timeout: float,
@@ -1135,17 +1143,7 @@ async def _list_tools_stream_stdio_async(
     """
     Асинхронный список тулов через stdio транспорт MCP (через SDK).
     """
-    command = server_cfg.get("command")
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-
-    params = StdioServerParameters(
-        command=_resolve_command(str(command)),
-        args=[str(a) for a in args],
-        env=mcp_stdio_env(server_cfg.get("env") or None),
-        cwd=server_cfg.get("cwd") or None,
-    )
+    params = _stdio_server_params(server_cfg)
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
@@ -1196,17 +1194,7 @@ async def _call_tool_stream_stdio_async(
     """
     Асинхронный вызов конкретного MCP-тула через stdio транспорт (через SDK).
     """
-    command = server_cfg.get("command")
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-
-    params = StdioServerParameters(
-        command=_resolve_command(str(command)),
-        args=[str(a) for a in args],
-        env=mcp_stdio_env(server_cfg.get("env") or None),
-        cwd=server_cfg.get("cwd") or None,
-    )
+    params = _stdio_server_params(server_cfg)
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
@@ -1250,16 +1238,7 @@ async def _call_tool_stream_stdio_persistent(
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
     async def _open_session() -> ClientSession:
-        command = server_cfg.get("command")
-        args = server_cfg.get("args") or []
-        if not isinstance(args, list):
-            args = [args]
-        params = StdioServerParameters(
-            command=_resolve_command(str(command)),
-            args=[str(a) for a in args],
-            env=mcp_stdio_env(server_cfg.get("env") or None),
-            cwd=server_cfg.get("cwd") or None,
-        )
+        params = _stdio_server_params(server_cfg)
         transport_cm = stdio_client(params)
         new_session, cm_stack = await _enter_session(transport_cm)
         _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)

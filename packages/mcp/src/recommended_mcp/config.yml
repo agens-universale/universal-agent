@@ -65,10 +65,12 @@ mcps:
         # Прогреваем npm-кэш (иначе первый запуск агента тянет пакет по сети).
         - [npm, "install", "-g", "@playwright/mcp@0.0.70"]
         # Предварительно качаем chromium — иначе скачается на первом tool_call.
-        # Флаг -y нужен чтобы npx не блокировался на «Ok to proceed?» при
-        # установке npm-пакета playwright (без него full-auto установка
-        # на свежей Windows зависает в ожидании ввода).
-        - [npx, "-y", "playwright", "install", "--with-deps", "chromium"]
+        # Ставит его playwright из самого @playwright/mcp (той же версии, что
+        # в сниппете): отдельный `npx playwright` тянет последнюю версию —
+        # чужая ревизия Chromium и свои требования к Node.
+        # Флаг -y нужен чтобы npx не блокировался на «Ok to proceed?»
+        # (без него full-auto установка на свежей Windows зависает).
+        - [npx, "-y", "@playwright/mcp@0.0.70", "install-browser", "--with-deps", "chromium"]
     # run-блок отсутствует: агент спавнит сервер через stdio on-demand,
     # с persistent_session: true процесс/браузер живут весь цикл агента.
     # для докера использовать

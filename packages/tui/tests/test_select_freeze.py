@@ -327,6 +327,35 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_header_tick_gated_by_selecting(tmp_path):
+    """F4: тик стартовой шапки (загрузка MCP) стоит, пока выделяют мышью."""
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "mcp.servers": {"a": {"transport": "stdio", "command": "a"}},
+            }
+        ),
+    )
+    app._executor_factory = lambda: object()  # без сборки: шапка в загрузке
+    async with app.run_test() as pilot:
+        header = pilot.app.screen.query_one("#brand-block")
+        frame = header._frame
+        # freeze ON → кадр не двигается
+        pilot.app.screen._selecting = True
+        header._tick()
+        assert header._frame == frame
+        # freeze OFF → тик идёт
+        pilot.app.screen._selecting = False
+        header._tick()
+        assert header._frame == frame + 1
+
+
+@pytest.mark.asyncio
 async def test_refresh_stream_content_gated_by_selecting(
     tmp_path, monkeypatch
 ):
@@ -401,9 +430,10 @@ async def test_refresh_stream_content_gated_by_selecting(
 
 @pytest.mark.asyncio
 async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
-    """F6: freeze глушит только stick/scroll/stream/wipe, но НЕ весь poll.
-    Footer/title/orphan/MCP-indicator продолжают обновляться — UI не тупеет
-    целиком на 5с timeout. Это регрессия на прежний полный `return`."""
+    """F6: freeze глушит только stick/scroll/stream/wipe и стартовую шапку,
+    но НЕ весь poll. Footer/title/orphan продолжают обновляться — UI не
+    тупеет целиком на 5с timeout. Это регрессия на прежний полный `return`.
+    Шапку держит F2: смена фазы меняет её высоту и сдвинула бы выделение."""
     from gc_tui.app import TuiApp
 
     app = TuiApp(
@@ -431,7 +461,7 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
         )
         monkeypatch.setattr(
             scr,
-            "_update_mcp_indicator",
+            "_feed_start_header",
             lambda: calls.__setitem__("mcp", calls["mcp"] + 1),
         )
         # Без активной сессии poll доходит до ветки `_active_task_id is None`,
@@ -443,9 +473,9 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
         scr._poll_active()
         assert calls["footer"] >= 1
         assert calls["title"] >= 1
-        # orphan/MCP тоже должны выполняться (до ранней ветки None)
+        # orphan тоже должен выполняться (до ранней ветки None)
         assert calls["orphan"] >= 1
-        assert calls["mcp"] >= 1
+        assert calls["mcp"] == 0
 
 
 @pytest.mark.asyncio

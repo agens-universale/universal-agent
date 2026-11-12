@@ -123,7 +123,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(
         use_server_subagents=False,
     )
 
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.DEBUG, logger=logger.name):
         try:
             run_coro(
                 processing_module._arequest_backend_canonical(
@@ -137,9 +137,19 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(
         except KeyError as exc:
             assert str(exc) == "'choices'"
 
-    log_text = caplog.text
-    assert "Failed to convert chat/completions payload." in log_text
-    assert "context=" in log_text
-    assert "payload=" in log_text
-    assert '"id": "chat_1"' in log_text
-    assert '"object": "chat.completion"' in log_text
+    # Ошибка — с контекстом и id ответа; сам ответ модели — только на
+    # debug: строкой его маскировка секретов по имени ключа не видит.
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    debug = [r.getMessage() for r in caplog.records if r.levelname == "DEBUG"]
+    assert any(
+        "Failed to convert chat/completions payload." in m
+        and "context=" in m
+        and "id=chat_1" in m
+        for m in errors
+    )
+    assert not any('"object": "chat.completion"' in m for m in errors)
+    assert any(
+        m.startswith("chat/completions payload=")
+        and '"object": "chat.completion"' in m
+        for m in debug
+    )
