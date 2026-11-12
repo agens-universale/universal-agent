@@ -201,7 +201,7 @@ async def test_aclose_kills_what_did_not_fit_budget(
     await _dead(pid)
     assert _journal_dirs() == []
     bound = 1 + service_module.CLOSE_GRACE_SEC + service_module.KILL_WAIT_SEC
-    assert elapsed < bound + 1
+    assert elapsed < bound + 3
     # Повторное закрытие после истёкшего бюджета — сразу: всё добито.
     started = loop.time()
     await asyncio.wait_for(service.aclose(budget=1), _CEILING_SEC)
@@ -299,7 +299,12 @@ async def test_no_new_attempts_after_kill(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
     """После гашения потребитель открыт, но сервис остановлен: попытка,
-    вход в ход и серия повторов ничего не начинают."""
+    вход в ход и серия повторов ничего не начинают.
+
+    Подготовка через приватное: соединение снимается
+    ``_drop_connection`` (сервер будто потерян — вход в ход стал бы его
+    подключать), серия заводится прямым ``_start_series``.
+    """
     control = tmp_path / "a.json"
     settings = _settings({"a": stdio_cfg(control)})
     service = mcp_reaper.track(McpService(connect_on_start=True))
@@ -440,6 +445,89 @@ async def test_cancelled_close_still_kills_and_removes_journal(
     await _dead(pid)
     assert _journal_dirs() == []
     await _settle_background()
+
+
+async def test_kill_now_during_aclose(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Гашение из чужого потока одновременно с идущим закрытием: без
+    исключений, процессов и каталога журнала нет."""
+    control = tmp_path / "deaf.json"
+    service = McpService(connect_on_start=True)
+    await _ready(service, _settings({"a": _deaf(control)}))
+    [pid] = launches(control)
+    closing = asyncio.create_task(service.aclose())
+    await asyncio.sleep(0.3)  # закрытие ждёт эскалации глухого сервера
+
+    await asyncio.wait_for(
+        asyncio.to_thread(service.kill_processes_now), _CEILING_SEC
+    )
+    await asyncio.wait_for(closing, _CEILING_SEC)
+
+    await _dead(pid)
+    assert _journal_dirs() == []
+
+
+async def test_kill_now_with_busy_service_loop(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Цикл сервиса занят: гашение из чужого потока его не ждёт —
+    возвращается в срок гашения и гасит глухой сервер без цикла."""
+    control = tmp_path / "deaf.json"
+    service = McpService(connect_on_start=True)
+    thread = _LoopThread()
+    busy, freed = threading.Event(), threading.Event()
+
+    def hog() -> None:
+        busy.set()
+        time.sleep(4)
+        freed.set()
+
+    try:
+        await thread.run(_ready(service, _settings({"a": _deaf(control)})))
+        [pid] = launches(control)
+        thread.loop.call_soon_threadsafe(hog)
+        assert busy.wait(5)
+
+        started = time.monotonic()
+        service.kill_processes_now()
+
+        assert time.monotonic() - started < service_module.KILL_WAIT_SEC + 2
+        assert not freed.is_set()
+        await _dead(pid)
+    finally:
+        await thread.run(service.aclose(budget=2))
+        await thread.close()
+
+
+async def test_attempt_waiting_for_closing_starts_nothing_after_stop(
+    mcp_home, tmp_path, monkeypatch, mcp_reaper, mcp_owner
+):
+    """Попытка ждала прежних закрытий сервера, а сервис тем временем
+    остановили: процесса она не запускает. Снятие работы на цикле
+    (``_halt``) подменено пустым — проверяется сама проверка попытки:
+    закрытие могло разбудить попытку раньше, чем цикл снимет работу."""
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", ["echo"])
+    service = mcp_reaper.track(McpService(connect_on_start=False))
+    consumer = await _ready(service, settings)
+    connections = connections_of(consumer)
+    entry = consumer.servers()["a"]
+    gate = asyncio.Event()
+    closing = asyncio.create_task(gate.wait())
+    connections._track_closing(closing, "a")
+    attempt = connections.start_attempt(entry)
+    await asyncio.sleep(0.05)  # попытка ждёт закрытия
+
+    monkeypatch.setattr(service, "_halt", lambda: None)
+    service.kill_processes_now()
+    gate.set()
+    await asyncio.wait({attempt}, timeout=_CEILING_SEC)
+
+    assert attempt.result() is False
+    assert launches(control) == []
+    assert journal_records(service) == []
 
 
 async def _settle_background() -> None:

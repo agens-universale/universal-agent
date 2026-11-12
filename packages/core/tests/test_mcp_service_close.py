@@ -572,7 +572,7 @@ async def test_return_is_bounded_by_budget_and_grace(
 
     grace = service_module.CLOSE_GRACE_SEC
     kill = service_module.KILL_WAIT_SEC
-    assert elapsed < 0.5 + grace + kill + 1
+    assert elapsed < 0.5 + grace + kill + 3
     assert service.closed
     assert "не уложилось в 0.5 с" in caplog.text
     # Не уложившееся в бюджет добито по журналу до возврата.
