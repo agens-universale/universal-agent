@@ -423,6 +423,36 @@ async def test_service_on_another_loop_is_rejected(mcp_home, tmp_path):
     service.entry("a", cfg, discovery_timeout=5)
 
 
+async def test_open_consumer_on_another_loop_is_rejected(mcp_home):
+    """Потребитель открывается с любого потока; с чужого цикла — отказ
+    до открытия: закрыть такого потребителя там же было бы нельзя."""
+    service = McpService(connect_on_start=True)
+    # Поток без цикла сервис не привязывает.
+    from_thread = await asyncio.wait_for(
+        asyncio.to_thread(service.open_consumer, "поток"), _CEILING_SEC
+    )
+    assert service._loop is None
+    await asyncio.wait_for(from_thread.aclose(), _CEILING_SEC)
+
+    async def open_there() -> None:
+        service.open_consumer("чужой")
+
+    def on_other_loop() -> BaseException | None:
+        try:
+            asyncio.run(open_there())
+        except BaseException as exc:
+            return exc
+        return None
+
+    error = await asyncio.wait_for(
+        asyncio.to_thread(on_other_loop), _CEILING_SEC
+    )
+
+    assert isinstance(error, RuntimeError)
+    assert "другом цикле" in str(error)
+    assert not service._consumers
+
+
 def test_stop_event_of_unbound_service_can_be_set():
     """Сервис, ни разу не привязанный к циклу, можно пометить остановленным
     (так закроет его aclose), а ожидание остановки потом не ломается."""
