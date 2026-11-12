@@ -18,6 +18,7 @@ from gc_tui.branding import BrandHeader, version_label
 from gc_tui.services.mcp_peephole import McpPeephole
 from gc_tui.services.start_status import status_renderable
 from gc_tui.services.trace_glyphs import BLINK_TICK_S
+from gc_tui.widgets.blink_pulse import miss_frame
 from gc_tui.widgets.column_static import ColumnStatic
 
 
@@ -83,8 +84,17 @@ class StartHeader(ColumnStatic):
         if textual_compat.is_visible(self):
             self._redraw(layout=False)
         else:
-            self._frame_missed = True
+            miss_frame(self)
         self._post_settled()
+
+    def redraw_if_missed(self) -> bool:
+        """Пропустила кадр за экраном и теперь видна — текущий кадр сразу
+        (П6); `True` — перерисовала."""
+        if not self._frame_missed or not textual_compat.is_visible(self):
+            return False
+        self._frame_missed = False
+        self._redraw(layout=False)
+        return True
 
     def _advance(self, *, layout: bool) -> None:
         self._sync_timer()

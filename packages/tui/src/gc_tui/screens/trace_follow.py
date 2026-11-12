@@ -8,9 +8,14 @@
 блока (спека P4 §9.3) — `_toggle_trace_block`. Экран ставит миксин перед
 `Screen`, монтирует `#trace` как `AnchoredScroll`, накладки —
 `trace_overlays()`, и после монтирования зовёт `_watch_trace_follow()`.
-Подпись и ряд плашки экран может переопределить."""
+Подпись и ряд плашки экран может переопределить. Виджеты, пропустившие
+кадр за экраном, экран ведёт слабым множеством и после раскладки
+предлагает им освежиться (П6): вернувшийся на экран сразу показывает
+текущее состояние."""
 
 from __future__ import annotations
+
+import weakref
 
 from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
@@ -52,6 +57,9 @@ class TraceFollowMixin:
         super().__init__(*args, **kwargs)
         self._stick = True  # намерение «липнуть к низу» (_stick_bottom)
         self._last_auto_y = 0  # куда в прошлый раз программно прижали ленту
+        # Пропустившие кадр за экраном (`note_missed_frame`); снятые
+        # уходят сами.
+        self._missed_frames: weakref.WeakSet[Widget] = weakref.WeakSet()
 
     def _watch_trace_follow(self) -> None:
         """Отклик на прокрутку ленты и на выделение — по событию."""
@@ -62,6 +70,27 @@ class TraceFollowMixin:
             init=False,
         )
         textual_compat.watch_selecting(self, self._on_select_freeze)
+        self.screen_layout_refresh_signal.subscribe(
+            self, self._on_layout_refreshed
+        )
+
+    def note_missed_frame(self, widget: Widget) -> None:
+        """`widget` пропустил кадр за экраном: освежить, когда станет
+        виден (`redraw_if_missed`)."""
+        self._missed_frames.add(widget)
+
+    def _on_layout_refreshed(self, _screen) -> None:
+        """После раскладки (в том числе кадра прокрутки) карта видимых
+        свежая: пропустившие кадр и ставшие видимыми перерисовываются и
+        выходят из множества, снятые — тоже. Петли нет: перерисовка
+        того же размера раскладку не запускает, а после перекладки
+        строки в множестве уже нет. Во время выделения (F2) — ничего:
+        лента под ним может ехать, догонит первый кадр после."""
+        if self._ui_frozen_for_select():
+            return
+        for widget in list(self._missed_frames):
+            if not widget.is_attached or widget.redraw_if_missed():
+                self._missed_frames.discard(widget)
 
     def _ui_frozen_for_select(self) -> bool:
         """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""

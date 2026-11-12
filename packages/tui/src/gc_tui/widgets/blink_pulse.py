@@ -2,8 +2,25 @@
 
 from __future__ import annotations
 
+from textual.dom import NoScreen
+from textual.widget import Widget
+
 from gc_tui import textual_compat
 from gc_tui.services.trace_glyphs import BLINK_TICK_S
+
+
+def miss_frame(widget: Widget) -> None:
+    """Перерисовка `widget` пропущена за экраном: отметка
+    `_frame_missed` и запись у экрана с лентой — он освежит виджет, когда
+    тот станет виден (`redraw_if_missed`). Экран без ленты или виджет без
+    экрана — только отметка."""
+    widget._frame_missed = True
+    try:
+        note = getattr(widget.screen, "note_missed_frame", None)
+    except NoScreen:
+        return
+    if note is not None:
+        note(widget)
 
 
 class BlinkPulseMixin:
@@ -13,7 +30,8 @@ class BlinkPulseMixin:
     свойства `_blinking` и `_pulse_widget` (перерисовываемый глиф; до
     `compose` — `None`) и `_redraw_pulse()` — перерисовку глифа без
     layout. Глиф не виден — кадр растёт, но не рисуется (перерисовка
-    невидимого пересобирает карту экрана), тик отмечает `_frame_missed`.
+    невидимого пересобирает карту экрана), тик отмечает пропуск
+    (`miss_frame`).
     """
 
     def _sync_pulse(self) -> None:
@@ -39,6 +57,6 @@ class BlinkPulseMixin:
         self._pulse_frame += 1
         glyph = self._pulse_widget
         if glyph is not None and not textual_compat.is_visible(glyph):
-            self._frame_missed = True
+            miss_frame(self)
             return
         self._redraw_pulse()

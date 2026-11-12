@@ -28,7 +28,7 @@ from gc_tui import textual_compat
 from gc_tui.palette import DIM
 from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.trace_render import THOUGHT_GLYPH, thought_line
-from gc_tui.widgets.blink_pulse import BlinkPulseMixin
+from gc_tui.widgets.blink_pulse import BlinkPulseMixin, miss_frame
 from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.expandable_text import (
     ExpandableTextBody,
@@ -132,8 +132,8 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         — размышление кончилось (`Thought`, мигание стоп). Законченную
         строку стрим не трогает. Строка не видна — снимок сохраняется и
         мигание сверяется, но рисование и чтение ширины пропускаются
-        (они пересобирают карту экрана), тик отмечает `_frame_missed`;
-        следующий снимок стрима всё равно свежий."""
+        (они пересобирают карту экрана), тик отмечает пропуск
+        (`miss_frame`); следующий снимок стрима всё равно свежий."""
         if self._settled:
             return
         if textual_compat.is_visible(self._glyph):
@@ -141,7 +141,21 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
             return
         self._text, self._seconds, self._live = text, seconds, live
         self._sync_pulse()
-        self._frame_missed = True
+        miss_frame(self)
+
+    def redraw_if_missed(self) -> bool:
+        """Пропустила кадр за экраном и глиф теперь виден — текущие кадр,
+        текст и таймер сразу, тело — если раскрыта (П6); `True` —
+        перерисовала."""
+        if not self._frame_missed or not textual_compat.is_visible(
+            self._glyph
+        ):
+            return False
+        self._frame_missed = False
+        if self.expanded:
+            self._sync_body()
+        self._update()
+        return True
 
     def settle(self) -> None:
         """Попытка кончилась (новая попытка, конец хода): строка

@@ -84,7 +84,7 @@ from gc_tui.services.trace_render import (
     fit_lines,
     level_prefix,
 )
-from gc_tui.widgets.blink_pulse import BlinkPulseMixin
+from gc_tui.widgets.blink_pulse import BlinkPulseMixin, miss_frame
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
@@ -632,13 +632,26 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
     def refresh_running_elapsed(self) -> None:
         """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op.
         Колонка текста не видна — тик пропускает рисование (и чтения
-        ширины в `_update`) и отмечает `_frame_missed`."""
+        ширины в `_update`) и отмечает пропуск (`miss_frame`)."""
         if not self._is_live:
             return
         if not textual_compat.is_visible(self._content_static):
-            self._frame_missed = True
+            miss_frame(self)
             return
         self._update()
+
+    def redraw_if_missed(self) -> bool:
+        """Пропустила кадр за экраном и колонка текста теперь видна —
+        текущие кадр мигания и счётчик сразу (П6); `True` — перерисовала.
+        Глиф — до `_update`: его кадр меняется без перекладки."""
+        if not self._frame_missed or not textual_compat.is_visible(
+            self._content_static
+        ):
+            return False
+        self._frame_missed = False
+        self._redraw_pulse()
+        self._update()
+        return True
 
     def pause(self, *, asking: bool = False) -> None:
         """Заморозить elapsed на человеко-ожидании; ``asking`` — ждут
