@@ -1077,8 +1077,15 @@ async def test_close_while_call_waits_connect(
     await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)
 
 
+# Ошибки нашего кода, в том числе явные из поддерева ``RuntimeError``.
+_CODE_ERRORS = (TypeError, NotImplementedError, RecursionError)
+
+
+@pytest.mark.parametrize(
+    "error", _CODE_ERRORS, ids=[e.__name__ for e in _CODE_ERRORS]
+)
 async def test_unexpected_type_is_logged_with_frames(
-    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch, caplog
+    error, mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch, caplog
 ):
     # Ошибка нашего кода на пути вызова: для модели и статуса — как отказ,
     # в логе — ошибка с кадрами трассировки, а не «потерял связь».
@@ -1086,7 +1093,7 @@ async def test_unexpected_type_is_logged_with_frames(
     service = McpService(connect_on_start=True)
     consumer = await _ready(mcp_reaper, service, settings)
     view = await _view(consumer, settings)
-    _raise_on_call(monkeypatch, lambda: TypeError("bad wiring"))
+    _raise_on_call(monkeypatch, lambda: error("bad wiring"))
 
     with caplog.at_level(logging.WARNING, logger=consumer_module.__name__):
         text = await _refused(view, _ECHO, text="hi")
@@ -1098,7 +1105,7 @@ async def test_unexpected_type_is_logged_with_frames(
     ]
     assert record.levelno == logging.ERROR
     message = record.getMessage()
-    assert "TypeError" in message
+    assert error.__name__ in message
     assert "in raising" in message
 
 
@@ -1139,3 +1146,91 @@ async def test_success_after_sibling_drop_keeps_connection_dropped(
 
     assert _payload(echo.result())["text"] == "hi"
     assert not consumer.has_session(entry)
+
+
+async def test_legacy_http_success_after_sibling_failure_confirms(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Сосед записал отказ, пока вызов к легаси-http шёл; вызов ответил —
+    # сервер только что отвечал: связь подтверждена, правило 30 с
+    # следующий вызов не держит.
+    real = consumer_module.acall_mcp_tool
+    held, release = asyncio.Event(), asyncio.Event()
+    calls: list[str] = []
+
+    async def late_success_then_refused(**kwargs):
+        calls.append(kwargs["full_tool_name"])
+        if len(calls) == 2:
+            raise httpx.ConnectError("refused")
+        result = await real(**kwargs)
+        if len(calls) == 1:
+            held.set()
+            await release.wait()
+        return result
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), _http_handler({"fail": False})
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/mcp"
+        settings = _settings({"a": {"transport": "http", "url": url}})
+        service = McpService(connect_on_start=False, clock=FakeClock().now)
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+        entry = _entry(consumer)
+        monkeypatch.setattr(
+            consumer_module, "acall_mcp_tool", late_success_then_refused
+        )
+
+        echo = asyncio.create_task(_wrapper(view, _ECHO).acall(text="1"))
+        await asyncio.wait_for(held.wait(), _CEILING_SEC)
+        await _refused(view, _ECHO, text="2")
+        assert _status(consumer).state == STATE_FAILED
+        release.set()
+        await _settled(echo)
+
+        assert _payload(echo.result()) == {"ok": 1}
+        assert _status(consumer).state == STATE_CONNECTED
+        assert await _call(view, _ECHO, text="3") == {"ok": 1}
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
+async def test_cancel_group_under_stop_is_stop_not_failure(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    # Транспорт отдал группу с отменой первым листом, пока пользователь
+    # просил стоп: это стоп вызова, а не отказ сервера.
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def cancelled_group(**kwargs):
+        held.set()
+        await release.wait()
+        raise BaseExceptionGroup(
+            "g", [asyncio.CancelledError(), httpx.ConnectError("x")]
+        )
+
+    settings = _settings({"a": stdio_cfg(tmp_path / "a.json")})
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    entry = _entry(consumer)
+    monkeypatch.setattr(consumer_module, "acall_mcp_tool", cancelled_group)
+    gate = _stop_gate()
+
+    task = _call_under_stop(gate, view, _ECHO, text="hi")
+    await asyncio.wait_for(held.wait(), _CEILING_SEC)
+    gate.request()
+    release.set()
+    await _settled(task)
+
+    with pytest.raises(UserStopInterrupt):
+        task.result()
+    assert entry.last_failure is None
+    assert _status(consumer).state == STATE_CONNECTED
+    assert consumer.has_session(entry)

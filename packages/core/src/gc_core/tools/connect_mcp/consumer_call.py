@@ -55,6 +55,8 @@ _FATAL = (KeyboardInterrupt, SystemExit)
 # скорее ошибка нашего кода: в лог он идёт ошибкой с кадрами трассировки.
 # ``RuntimeError`` — семейство транспорта: им отвечают постоянный stdio
 # («process is not running») и легаси-http («Failed to initialize …»).
+# Явные ошибки кода из его поддерева — ``_CODE_ERRORS`` — в семейство не
+# входят.
 _TRANSPORT_FAMILIES = (
     OSError,
     RuntimeError,
@@ -64,6 +66,7 @@ _TRANSPORT_FAMILIES = (
     anyio.ClosedResourceError,
     anyio.BrokenResourceError,
 )
+_CODE_ERRORS = (NotImplementedError, RecursionError)
 
 
 def tool_error(message: str) -> McpToolCallError:
@@ -122,7 +125,15 @@ def passes_through(leaf: BaseException) -> bool:
 
 def is_transport_family(leaf: BaseException) -> bool:
     """Лист из семейств, которыми транспорты сообщают об отказе связи."""
+    if isinstance(leaf, _CODE_ERRORS):
+        return False
     return isinstance(leaf, _TRANSPORT_FAMILIES)
+
+
+def stop_requested() -> bool:
+    """Пользователь запросил стоп текущего хода."""
+    stop = current_user_stop()
+    return stop is not None and stop.requested
 
 
 def lost_session() -> ConnectionError:
@@ -192,6 +203,7 @@ __all__ = [
     "lost_session",
     "passes_through",
     "refusal_text",
+    "stop_requested",
     "timeout_error",
     "tool_error",
 ]

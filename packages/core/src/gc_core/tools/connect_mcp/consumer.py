@@ -52,6 +52,7 @@ from gc_core.tools.connect_mcp.consumer_call import (
     lost_session,
     passes_through,
     refusal_text,
+    stop_requested,
     timeout_error,
     tool_error,
 )
@@ -89,7 +90,7 @@ from gc_core.tools.connect_mcp.service_records import (
     McpServiceClosed,
     ServerEntry,
 )
-from gc_core.user_stop import current_user_stop
+from gc_core.user_stop import UserStopInterrupt
 
 if TYPE_CHECKING:
     from gc_core.tools.connect_mcp.service import McpService
@@ -868,10 +869,7 @@ class McpConsumer:
     async def _aabandon_call(self, entry: ServerEntry, cfg: dict) -> None:
         """Шаг 6: брошенный без стопа вызов постоянного stdio закрывает
         сессию (поток иначе держал бы её замок до конца срока, §5.8)."""
-        stop = current_user_stop()
-        if stop is not None and stop.requested:
-            return
-        if not is_persistent_stdio(cfg):
+        if stop_requested() or not is_persistent_stdio(cfg):
             return
         self._drop_connection(_session_key_of(entry))
         await self._aclose_rest(entry)
@@ -906,19 +904,18 @@ class McpConsumer:
     def _confirm_call(
         self, entry: ServerEntry, cfg: dict, generation: int
     ) -> None:
-        """Шаг 5: удачный вызов подтверждает соединение — только если его
-        за время вызова никто не снял (поколение то же): иначе ключ вернул
-        бы снятую сессию, и следующий вызов открыл бы её мимо ожидания
-        закрытий."""
+        """Шаг 5: удачный вызов подтверждает соединение. Постоянную сессию
+        — только если её за время вызова никто не снял (поколение то же):
+        иначе ключ вернул бы снятую сессию, и следующий вызов открыл бы её
+        мимо ожидания закрытий. У сервера без постоянной сессии снимать
+        нечего: его ответ и есть связь."""
         key = _session_key_of(entry)
+        persistent = bool(cfg.get("persistent_session"))
         with self._lock:
-            if self._generations.get(key, 0) != generation:
+            if persistent and self._generations.get(key, 0) != generation:
                 return
             self._failures.pop(key, None)
-            target = (
-                self._sessions if cfg.get("persistent_session") else self._ok
-            )
-            target.add(key)
+            (self._sessions if persistent else self._ok).add(key)
 
     async def _araise_call_failure(
         self,
@@ -929,18 +926,23 @@ class McpConsumer:
         generation: int,
     ) -> NoReturn:
         """По первому листу группы: срок — ошибка тула без смены статуса;
-        ошибка тула сервера, аргументов, стоп и durable — как есть; всё
-        остальное — отказ связи с сервером."""
+        ошибка тула сервера, аргументов, стоп и durable — как есть; отмена
+        под запрошенным стопом — стоп; всё остальное — отказ связи с
+        сервером."""
         leaf = first_leaf(exc)
         if is_timeout(leaf):
             raise timeout_error(leaf, timeout) from exc
         if passes_through(leaf):
             raise leaf
-        # Отмена листом группы — снятие вызова транспортом, как отменённая
-        # задача: ход вызывающего она не отменяет.
-        cause = (
-            lost_session() if isinstance(leaf, asyncio.CancelledError) else exc
-        )
+        cause = exc
+        if isinstance(leaf, asyncio.CancelledError):
+            # Под запрошенным стопом — стоп вызова, начатого до него (как
+            # голая отмена в ``_mcp_call_under_stop``); иначе — снятие
+            # вызова транспортом, как отменённая задача: ход вызывающего
+            # она не отменяет.
+            if stop_requested():
+                raise UserStopInterrupt(kind="mcp", started=True) from exc
+            cause = lost_session()
         raise await self._atransport_failure(
             entry, cfg, cause, generation
         ) from exc
