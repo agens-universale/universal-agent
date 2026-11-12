@@ -42,6 +42,7 @@ from textual.dom import NoScreen
 from textual.geometry import Offset, Size
 from textual.screen import Screen
 from textual.widget import AwaitMount, Widget
+from textual.widgets import Static
 
 PATCHED_TEXTUAL = "8.2.8"
 
@@ -198,6 +199,15 @@ def laid_out_scrollable_width(widget: Widget) -> int:
     последней раскладке — то же, что
     `widget.scrollable_content_region.width`, без поиска в карте."""
     return max(0, laid_out_width(widget) - widget.scrollbar_size_vertical)
+
+
+def static_markup(widget: Static) -> bool:
+    """Разбирает ли `widget` разметку в строковом содержимом (флаг
+    `markup` конструктора, приватное поле Textual). Только для
+    `PATCHED_TEXTUAL`: на иной версии или без поля — «разбирает»."""
+    if not textual_is_patched_version():
+        return True
+    return bool(getattr(widget, "_render_markup", True))
 
 
 def is_being_removed(widget: Widget) -> bool:

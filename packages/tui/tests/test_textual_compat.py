@@ -728,3 +728,13 @@ def test_arrange_counter_refuses_renamed_caller(monkeypatch):
     with pytest.raises(RuntimeError, match="reflow_visible"):
         with arrange_counter.count_arranges():
             pass
+
+
+def test_static_markup_reads_flag():
+    assert textual_compat.static_markup(Static(markup=False)) is False
+    assert textual_compat.static_markup(Static()) is True
+
+
+def test_other_version_static_markup_is_on(monkeypatch):
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    assert textual_compat.static_markup(Static(markup=False)) is True
