@@ -373,6 +373,14 @@ class McpService:
         entry.checked_at = self._clock()
         entry.from_catalog = False
 
+    def record_interruption(self, entry: ServerEntry, started: float) -> None:
+        """Попытку, начатую в ``started``, прервало закрытие её
+        потребителя: правило 30 с записи считается и от этого времени.
+        Статус и отказ записи не меняются: это не отказ сервера."""
+        self._bind_loop()
+        if entry.interrupted_at is None or started > entry.interrupted_at:
+            entry.interrupted_at = started
+
     def record_failure(
         self, entry: ServerEntry, exc: BaseException
     ) -> Failure:

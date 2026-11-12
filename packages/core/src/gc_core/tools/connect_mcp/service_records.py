@@ -31,7 +31,10 @@ class ServerEntry:
 
     ``cfg`` — определение без trace (``plain_dump(model, by_alias=True)``)
     после ``with_service_defaults``; ``tools`` — сырой ответ
-    ``tools/list``, до whitelist и оформления.
+    ``tools/list``, до whitelist и оформления. ``interrupted_at`` —
+    начало последней попытки, прерванной закрытием её потребителя: от
+    него тоже считается правило 30 с (не отказ — статус и причину не
+    меняет).
     """
 
     key: str
@@ -42,6 +45,7 @@ class ServerEntry:
     from_catalog: bool = False
     checked_at: float | None = None
     last_failure: Failure | None = None
+    interrupted_at: float | None = None
 
     @property
     def tools_known(self) -> bool:

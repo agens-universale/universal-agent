@@ -56,6 +56,21 @@ def shared_failure(entry: ServerEntry) -> Failure | None:
     return failure
 
 
+def shared_interruption(entry: ServerEntry) -> float | None:
+    """Начало последней попытки записи, прерванной закрытием
+    потребителя, если оно позже её последней удачи.
+
+    Только для правила 30 с: потребитель на запрос, закрытый посреди
+    попытки, иначе запускал бы сервер на каждый запрос.
+    """
+    mark = entry.interrupted_at
+    if mark is None:
+        return None
+    if entry.checked_at is not None and mark <= entry.checked_at:
+        return None
+    return mark
+
+
 def _failed(failure: Failure, entry: ServerEntry, retry: int = 0):
     return ServerStatus(
         STATE_FAILED,
@@ -133,4 +148,5 @@ __all__ = [
     "ServerStatus",
     "server_status",
     "shared_failure",
+    "shared_interruption",
 ]

@@ -45,6 +45,7 @@ from gc_core.tools.connect_mcp.consumer_status import (
     ServerStatus,
     server_status,
     shared_failure,
+    shared_interruption,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
@@ -224,7 +225,8 @@ class McpConnections:
         """Правило 30 с: своей попытки нет, с последнего отказа — 30 с.
 
         Последний отказ — более позднее из своей неудачной или прерванной
-        попытки и отказа записи (если он позже удачи записи).
+        попытки, отказа записи и попытки записи, прерванной закрытием
+        чужого потребителя (последние два — если они позже удачи записи).
         """
         key = session_key_of(entry)
         with self._lock:
@@ -233,6 +235,9 @@ class McpConnections:
             own = self._failures.get(key)
         failures = (own, shared_failure(entry))
         since = [f.at for f in failures if f is not None]
+        interrupted = shared_interruption(entry)
+        if interrupted is not None:
+            since.append(interrupted)
         if not since:
             return True
         elapsed = self._service._clock() - max(since)
@@ -410,17 +415,20 @@ class McpConnections:
         key = session_key_of(entry)
         with self._lock:
             # Отмена закрытием потребителя — «подключение прервано» (идёт
-            # в правило 30 с); попытку, снятую сверкой, ``leave`` уже
-            # убрал из ``_connects``: её отмена отказом не считается (§5.3).
+            # в правило 30 с, своё и записи); попытку, снятую сверкой,
+            # ``leave`` уже убрал из ``_connects``: её отмена отказом не
+            # считается (§5.3).
             own = self._connects.get(key) is task
             if own:
                 del self._connects[key]
-            if task.cancelled():
-                if own:
-                    self._failures[key] = Failure(
-                        started, "other", INTERRUPTED_REASON
-                    )
-                return
+            if task.cancelled() and own:
+                self._failures[key] = Failure(
+                    started, "other", INTERRUPTED_REASON
+                )
+        if task.cancelled():
+            if own:
+                self._service.record_interruption(entry, started)
+            return
         if self._unexpected_failure(entry, task):
             return
         if task.result() is False and self._retries(entry):

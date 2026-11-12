@@ -568,6 +568,95 @@ async def test_interrupted_attempt_counts_from_its_start(
     assert entry.last_failure is None
 
 
+async def test_consumer_close_mid_attempt_holds_shared_interval(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Попытка, прерванная закрытием потребителя, держит правило 30 с у
+    записи: потребитель на запрос иначе поднимал бы сервер каждый раз.
+    Это не отказ: ни отказа записи, ни чужой причины у статуса."""
+    clock = FakeClock()
+    control = tmp_path / "s.json"
+    set_behavior(control, start_delay=5)
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(
+        connect_on_start=False, clock=clock.now, sleep=clock.sleep
+    )
+    closed = _consumer(mcp_reaper, service, settings, "a")
+    entry = _entry(service, settings)
+    _conn(closed).start_connect(entry)
+    await wait_for(lambda: launches(control))
+    clock.advance(5)
+    await asyncio.wait_for(closed.aclose(), _CEILING_SEC)
+    fresh = _consumer(mcp_reaper, service, settings, "b")
+
+    seen = [_conn(fresh).may_connect(entry)]
+    clock.advance(24)
+    seen.append(_conn(fresh).may_connect(entry))
+    clock.advance(1)
+    seen.append(_conn(fresh).may_connect(entry))
+
+    assert seen == [False, False, True]
+    assert entry.last_failure is None
+    assert fresh.status_of(entry).reason != _INTERRUPTED
+
+
+async def test_success_after_interruption_lifts_shared_interval(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    control = tmp_path / "s.json"
+    set_behavior(control, start_delay=2)
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(
+        connect_on_start=False, clock=clock.now, sleep=clock.sleep
+    )
+    closed = _consumer(mcp_reaper, service, settings, "a")
+    other = _consumer(mcp_reaper, service, settings, "b")
+    entry = _entry(service, settings)
+    _conn(closed).start_connect(entry)
+    connecting = _conn(other).start_connect(entry)
+    await wait_for(lambda: len(launches(control)) == 2)
+    clock.advance(1)
+    await asyncio.wait_for(closed.aclose(), _CEILING_SEC)
+    held = _conn(_consumer(mcp_reaper, service, settings, "c")).may_connect(
+        entry
+    )
+
+    assert await asyncio.wait_for(connecting, _CEILING_SEC) is True
+    fresh = _consumer(mcp_reaper, service, settings, "d")
+
+    assert held is False
+    assert _conn(fresh).may_connect(entry) is True
+
+
+async def test_withdrawal_by_set_does_not_mark_entry(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Сервер убрали из набора посреди попытки — запись не помечается:
+    вернули — подключается сразу."""
+    clock = FakeClock()
+    control = tmp_path / "s.json"
+    set_behavior(control, start_delay=5)
+    settings = _settings({"srv": stdio_cfg(control)})
+    service = McpService(
+        connect_on_start=False, clock=clock.now, sleep=clock.sleep
+    )
+    consumer = _consumer(mcp_reaper, service, settings)
+    entry = _in_set(consumer, _entry(service, settings))
+    _conn(consumer).start_connect(entry)
+    task = _attempt(consumer, entry)
+    await wait_for(lambda: launches(control))
+
+    _conn(consumer).leave(entry)
+    await asyncio.wait({task}, timeout=_CEILING_SEC)
+
+    assert task.cancelled()
+    assert entry.interrupted_at is None
+    assert _conn(consumer).may_connect(entry) is True
+    fresh = _consumer(mcp_reaper, service, settings, "b")
+    assert _conn(fresh).may_connect(entry) is True
+
+
 async def test_success_does_not_block_reconnect(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
