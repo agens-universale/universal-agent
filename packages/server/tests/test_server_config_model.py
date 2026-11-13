@@ -138,6 +138,23 @@ def test_swarm_keeps_its_own_keys(tmp_path):
     assert raw["config_path"] == cfg.config_path
 
 
+def test_swarm_skips_installed_plugins_unless_enabled(tmp_path):
+    """Песочница swarm, как поверхности сервера, установленные на хосте
+    плагины берёт только по явному оверрайду."""
+    plain = load_server_config(_write(tmp_path, {"swarm": {}}))
+    assert plain.swarm_section()["agent_overrides"] == {
+        "plugins.use_installed": False
+    }
+    enabled = load_server_config(
+        _write(
+            tmp_path,
+            {"swarm": {"agent_overrides": {"plugins.use_installed": True}}},
+        )
+    )
+    overrides = enabled.swarm_section()["agent_overrides"]
+    assert overrides["plugins.use_installed"] is True
+
+
 def test_env_placeholders_are_resolved(tmp_path, monkeypatch):
     monkeypatch.setenv("GC_TEST_SERVER_TOKEN", "s3cret")
     cfg = load_server_config(

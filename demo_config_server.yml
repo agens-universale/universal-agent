@@ -36,8 +36,8 @@ agent_overrides:
   agent.max_steps: 100
   # Плагины, установленные на хосте командой gc-plugin install, сервер не
   # подхватывает (docs/server.md, «Плагины»); plugins.paths и
-  # plugins.sources из config.yml действуют.
-  plugins.use_installed: false
+  # plugins.sources из config.yml действуют. Включить установленные:
+  # plugins.use_installed: true
 
 webhook:
   # Документация API (/docs, /redoc, /openapi.json) — только по ключу.

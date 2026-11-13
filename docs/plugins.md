@@ -443,11 +443,11 @@ MCP-инструментами.
 
 ## Сервер
 
-`gc-serve` по умолчанию не подхватывает плагины, установленные на хосте:
-в `demo_config_server.yml` в общих `agent_overrides` стоит
-`plugins.use_installed: false`. Плагины из `plugins.paths` и
-`plugins.sources` в `config.yml` работают. Подробнее и предупреждение для
-уже развёрнутых конфигов — в [server.md](server.md#плагины).
+`gc-serve` не подхватывает плагины, установленные на хосте, — и без
+`config_server.yml`, и со старым конфигом; включаются только явно,
+`plugins.use_installed: true` в `agent_overrides`. Плагины из
+`plugins.paths` и `plugins.sources` в `config.yml` работают. Подробнее — в
+[server.md](server.md#плагины).
 
 ## Что не входит в первую версию
 
