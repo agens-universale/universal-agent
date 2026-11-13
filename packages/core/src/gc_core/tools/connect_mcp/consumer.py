@@ -124,6 +124,17 @@ class McpConsumer:
         """Статус сервера у этого потребителя (спека §5.5)."""
         return self._connections.status_of(entry)
 
+    def statuses_matching(self, settings: Any) -> dict[str, ServerStatus]:
+        """Статусы серверов набора, совпадающих с определениями ``settings``
+        (тот же отпечаток, правило `callers_pins`). До сверки набора прежнее
+        определение под тем же ключом своего статуса не отдаёт (§5.7)."""
+        pairs = {
+            key: (entry, self.status_of(entry))
+            for key, entry in self.servers().items()
+        }
+        kept = callers_pins(pairs, _agent_side_definitions(settings, None))
+        return {key: status for key, (_, status) in kept.items()}
+
     def pin(self) -> bool:
         """Закрепить срез ``{ключ: (запись, статус)}`` набора.
 

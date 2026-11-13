@@ -2231,13 +2231,20 @@ class TuiApp(App):
             self._overlay_service_statuses(statuses, settings)
         progress.finish(True)
 
-    def _report_settled_servers(self, progress) -> None:
-        """Серверы, уже определившиеся у потребителя окна, — в поколение
-        до его публикации: пересборка без изменений не показывает загрузку
-        (спека §5.7). Сбой чтения статусов — предупреждение в лог, сборку
-        он не роняет: поколение ждёт статусов, как на первой сборке."""
+    def _report_settled_servers(self, progress, loaded) -> None:
+        """Серверы, уже определившиеся у потребителя окна с тем же
+        определением, что у сборки ``loaded``, — в поколение до его
+        публикации: пересборка без изменений не показывает загрузку, а
+        изменённый сервер под тем же ключом ждёт своего статуса (спека
+        §5.7). Сбой чтения статусов — предупреждение в лог, сборку он не
+        роняет: поколение ждёт статусов, как на первой сборке."""
+        consumer = self._mcp_consumer
         try:
-            statuses = self._service_statuses()
+            statuses = (
+                {}
+                if consumer is None
+                else self._mcp_service.matching_status(consumer, loaded)
+            )
         except Exception as exc:
             _log.warning(
                 "MCP: статусы сервиса не прочитаны до сборки: %s: %s",
@@ -2268,7 +2275,7 @@ class TuiApp(App):
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress.begin(list(effective_mcp_servers(loaded)))
-        self._report_settled_servers(progress)
+        self._report_settled_servers(progress, loaded)
         publish()
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 

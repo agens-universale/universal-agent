@@ -255,6 +255,14 @@ class McpService:
             for key, entry in consumer.servers().items()
         }
 
+    def matching_status(
+        self, consumer: McpConsumer, settings: Any
+    ) -> dict[str, ServerStatus]:
+        """Статусы серверов набора, чьё определение совпадает с ``settings``;
+        с любого потока. Для отчёта до сверки набора: изменённый сервер под
+        тем же ключом ждёт своего статуса (спека §5.7)."""
+        return consumer.statuses_matching(settings)
+
     def backend_tools_cache(self) -> ToolsCache | None:
         """Кэш тулов серверов бэкенда сервиса; без бэкенда — ``None``.
 

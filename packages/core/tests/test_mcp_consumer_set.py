@@ -884,3 +884,22 @@ async def test_changed_server_waits_for_old_process_close(
     assert journal.index(f"exit {old_pid}") < journal.index(f"start {new_pid}")
     assert _state(consumer, "a") == STATE_CONNECTED
     assert alive(new_pid)
+
+
+async def test_matching_status_skips_changed_definitions(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """До сверки набора статус отдают только серверы с тем же отпечатком
+    определения: прежнее «подключён» сервера с новой командой под тем же
+    ключом не выдаётся за статус нового определения (§5.7)."""
+    a = stdio_cfg(tmp_path / "a.json")
+    b = stdio_cfg(tmp_path / "b.json")
+    service = McpService(connect_on_start=False)
+    consumer = _open(mcp_reaper, service)
+    await _ensure(consumer, _settings({"a": a, "b": b}))
+
+    changed = _settings({"a": a, "b": _with_args(b, "--other")})
+    matching = service.matching_status(consumer, changed)
+
+    assert set(matching) == {"a"}
+    assert matching["a"] == consumer.status_of(consumer.servers()["a"])

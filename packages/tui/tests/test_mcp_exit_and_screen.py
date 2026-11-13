@@ -64,6 +64,9 @@ class _Service:
         assert consumer in self.opened
         return dict(self.statuses)
 
+    def matching_status(self, consumer, _settings) -> dict[str, ServerStatus]:
+        return self.status(consumer)
+
     async def aclose(self, budget: float = 10.0) -> None:
         self.closes += 1
         self.closed = True

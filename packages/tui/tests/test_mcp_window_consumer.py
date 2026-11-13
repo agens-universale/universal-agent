@@ -49,6 +49,8 @@ class _Service:
 
     def __init__(self, statuses: dict | None = None) -> None:
         self.statuses: dict[str, ServerStatus] = dict(statuses or {})
+        #: Серверы, чьё определение в наборе отличается от сборки.
+        self.changed: set[str] = set()
         self.opened: list[_Consumer] = []
         self.closes = 0
         self.closed = False
@@ -64,6 +66,14 @@ class _Service:
     def status(self, consumer) -> dict[str, ServerStatus]:
         assert consumer in self.opened
         return dict(self.statuses)
+
+    def matching_status(self, consumer, _settings) -> dict[str, ServerStatus]:
+        assert consumer in self.opened
+        return {
+            key: status
+            for key, status in self.statuses.items()
+            if key not in self.changed
+        }
 
     async def aclose(self, budget: float = 10.0) -> None:
         self.closes += 1
@@ -357,6 +367,35 @@ def test_rebuild_without_changes_settles_immediately(tmp_path, monkeypatch):
     reported, outcome = app._mcp_progress.state()
     assert outcome is True
     assert reported["srv"]["status"] == STATE_CONNECTED
+
+
+def test_rebuild_with_changed_server_waits_for_its_status(
+    tmp_path, monkeypatch
+):
+    """Сервер с новым определением под тем же ключом прежнего «подключён»
+    в опубликованное поколение не несёт: шапка принимает первый статус
+    сервера окончательным и ждёт его настоящего (§5.7, «8/9»)."""
+    service = _Service({"srv": _connected("echo")})
+    published: list = []
+
+    def _replace_entry() -> None:
+        # Поколение уже опубликовано; сверка набора внутри сборки заводит
+        # запись нового определения.
+        published.append(app._mcp_progress.state())
+        if service.changed:
+            service.statuses["srv"] = ServerStatus(STATE_CONNECTING)
+            service.changed = set()
+
+    _patch_build(monkeypatch, _Builds(during=_replace_entry))
+    app = _app(tmp_path, _SRV, service)
+    app._build_real_executor()  # потребитель окна открыт, srv подключён
+    service.changed = {"srv"}  # /profile сменил определение srv
+
+    app._build_real_executor()
+
+    reported, outcome = published[-1]
+    assert reported["srv"] is None
+    assert outcome is None
 
 
 @pytest.mark.asyncio
