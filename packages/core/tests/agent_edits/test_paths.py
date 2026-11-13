@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 
 import pytest
-
 from gc_core.agent_edits.paths import canonical_path_key
 
 
@@ -128,3 +127,76 @@ def test_a_junction_is_recognised_by_its_reparse_tag(monkeypatch, tmp_path):
 
     assert paths_mod.goes_through_link(str(tmp_path), "j/a.py")
     assert not paths_mod.goes_through_link(str(tmp_path), "cloud/a.py")
+
+
+# --- собственные данные gc -------------------------------------------------
+
+
+def test_own_data_inside_project_is_not_tracked(launch_root):
+    """Каталог данных gc внутри проекта отсекается целиком, файл данных — сам
+    по себе: соседний одноимённого префикса файл остаётся правкой проекта."""
+    own = [str(launch_root / "threads"), str(launch_root / "hist.jsonl")]
+    (launch_root / "threads").mkdir()
+
+    def key(rel):
+        return canonical_path_key(
+            str(launch_root / rel), str(launch_root), own_data=own
+        )
+
+    assert key("threads/edits_cli_th1.jsonl") is None
+    assert key("threads/nested/new.txt") is None
+    assert key("hist.jsonl") is None
+    assert key("hist.jsonl.bak") == "hist.jsonl.bak"
+    assert key("threads_old/a.txt") == "threads_old/a.txt"
+    assert key("src/foo.py") == "src/foo.py"
+
+
+def test_own_data_dir_holding_the_project_does_not_swallow_it(
+    launch_root,
+):
+    """Каталог данных, внутри которого лежит сам проект, не исключается: иначе
+    отслеживание правок умерло бы целиком."""
+    key = canonical_path_key(
+        str(launch_root / "src" / "foo.py"),
+        str(launch_root),
+        own_data=[str(launch_root.parent), str(launch_root)],
+    )
+    assert key == "src/foo.py"
+
+
+def test_own_data_is_normalized_once_per_scan(launch_root, monkeypatch):
+    from gc_core.agent_edits import paths
+
+    normalize = paths.normalize_path_for_policy
+    calls = []
+
+    def counted(path, root):
+        calls.append(str(path))
+        return normalize(path, root)
+
+    monkeypatch.setattr(paths, "normalize_path_for_policy", counted)
+    own = [str(launch_root / "threads"), str(launch_root / "hist.jsonl")]
+    prepared = paths.prepare_own_data(launch_root, own)
+    assert len(calls) == 3
+    calls.clear()
+    for i in range(100):
+        assert not paths.is_own_data(f"src/{i}.py", launch_root, prepared)
+        assert paths.is_own_data(f"threads/{i}.json", launch_root, prepared)
+    assert len(calls) == 200
+    assert not set(own).intersection(calls)
+
+
+def test_new_scan_refreshes_own_data_symlink(launch_root):
+    from gc_core.agent_edits.paths import is_own_data, prepare_own_data
+
+    (launch_root / "first").mkdir()
+    (launch_root / "second").mkdir()
+    link = launch_root / "data-link"
+    link.symlink_to(launch_root / "first")
+    before = prepare_own_data(launch_root, [str(link)])
+    link.unlink()
+    link.symlink_to(launch_root / "second")
+    after = prepare_own_data(launch_root, [str(link)])
+    assert is_own_data("first/a", launch_root, before)
+    assert not is_own_data("first/a", launch_root, after)
+    assert is_own_data("second/a", launch_root, after)

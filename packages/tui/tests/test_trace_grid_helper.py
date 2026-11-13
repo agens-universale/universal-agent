@@ -6,6 +6,8 @@
 """
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("color_trace")
 from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_tui.palette import DIM, ERR, INK, MUTED, OK, REFUSED, RUN_COLOR
 from gc_tui.palette import SUB_INK

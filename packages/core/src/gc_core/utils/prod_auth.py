@@ -11,6 +11,35 @@ class AuthEntryPointError(RuntimeError):
     """Точка входа авторизации ответила не так, как ожидает протокол."""
 
 
+#: Поля ответа выпуска токена, без которых `get_token` не обойдётся.
+_TOKEN_FIELDS = frozenset({"access_token", "expires_in"})
+
+
+def _token_payload(resp) -> dict:
+    """Тело ответа выпуска токена — или понятная ошибка авторизации.
+
+    Раньше тело разбиралось без проверки статуса: HTML-заглушка прокси или
+    пустой ответ давали голое «Expecting value: line 1 column 1 (char 0)»,
+    по которому не понять даже, что сломалась авторизация, а не модель.
+    """
+    where = (
+        f"Auth token endpoint returned HTTP {resp.status_code} "
+        f"(content-type={resp.headers.get('content-type', '')!r}, "
+        f"{len(resp.content)} bytes)"
+    )
+    if not resp.is_success:
+        raise AuthEntryPointError(where)
+    try:
+        payload = resp.json()
+    except ValueError:
+        raise AuthEntryPointError(f"{where}: body is not JSON") from None
+    if not isinstance(payload, dict) or not payload.keys() >= _TOKEN_FIELDS:
+        raise AuthEntryPointError(
+            f"{where}: no access_token/expires_in in body"
+        )
+    return payload
+
+
 class AuthConnector:
     def __init__(
         self,
@@ -112,8 +141,7 @@ class AuthConnector:
             verify=verify,
             proxies=proxies,
         )
-        resp_data = resp.json()
-        return resp_data
+        return _token_payload(resp)
 
     def get_token(self, force: bool = False) -> str:
         now = time.time()

@@ -18,6 +18,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gc_core.thread_paths import INPUT_HISTORY_FILENAME
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text_or_none
 
@@ -42,7 +43,8 @@ class InputHistory:
     MAX_ENTRIES = 1000
     REWRITE_EVERY = 50
 
-    HISTORY_FILENAME = "input_history.jsonl"
+    # Имя — у ядра: трекер правок исключает этот файл из отслеживания.
+    HISTORY_FILENAME = INPUT_HISTORY_FILENAME
 
     def __init__(self, project_dir: Path) -> None:
         self._project_dir = Path(project_dir)

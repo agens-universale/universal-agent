@@ -19,6 +19,7 @@ from gc_core import run_summary_coordinator as rsc
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config_modules.root import AppConfig
 from gc_core.execution import turn_clock
+from gc_core.execution.environment import utc_clock
 from gc_core.execution.turn_clock import TurnClock, current_turn_clock
 from gc_core.persistence.turn_outcome import (
     CANCELLED,
@@ -514,7 +515,7 @@ async def test_record_lands_before_turn_end_compaction(run, monkeypatch):
 async def test_subagent_loop_writes_nothing_and_keeps_parent_clock(run):
     """Цикл ребёнка хука не получает; подхват своей очереди часы
     родителя не перепривязывает и не закрывает."""
-    parent = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    parent = TurnClock.start(mono=run.mono, wall=utc_clock())
     turn_clock.bind_turn_clock(run.ctx, parent)
     child = State(
         verbose=False,
@@ -800,6 +801,31 @@ async def test_backend_error_writes_masked_error(
     assert outcomes[0].duration_sec == 1.5
     path = run.threads / f"data_{_SYS}_{_TID}.jsonl"
     assert key not in path.read_text()
+
+
+@pytest.mark.parametrize("api_mode", ["chat_completions", "responses"])
+async def test_bad_response_persists_human_reason(run, api_mode):
+    from gc_core.utils.backend_errors import BackendBadResponseError
+
+    async def _fail():
+        raise BackendBadResponseError(
+            status_code=200,
+            content_type="text/plain",
+            length=0,
+            api_mode=api_mode,
+        )
+
+    run.script = [_fail]
+    with pytest.raises(BackendBadResponseError):
+        await run.arun()
+
+    (outcome,) = _only_outcomes(run)
+    assert outcome.status == "error"
+    assert outcome.error["type"] == "BackendBadResponseError"
+    reason = outcome.error["message"]
+    assert "Сервер модели вернул пустой или не-JSON ответ" in reason
+    assert "повторите запрос" in reason
+    assert ("stream:false" in reason) == (api_mode == "chat_completions")
 
 
 async def test_cancelled_run_writes_cancelled(run):
@@ -1146,7 +1172,7 @@ async def test_turn_without_calls_has_no_calls_key(tmp_path, monkeypatch):
 async def test_nested_call_lands_in_parent_clock(run, monkeypatch):
     """Ребёнок исполняет вызов на ctx с часами родителя — время в их карте."""
     monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
-    parent = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    parent = TurnClock.start(mono=run.mono, wall=utc_clock())
     turn_clock.bind_turn_clock(run.ctx, parent)
 
     async def _invoke(name, arguments, state, ctx, run_agent_func, call_id):
@@ -1180,7 +1206,7 @@ async def test_running_call_counts_on_turn_clock(run, monkeypatch):
     """Идущий вызов — на часах хода с его старта (живой счёт фронтенда);
     законченный — то же время, что в карте записи итога."""
     monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
-    clock = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    clock = TurnClock.start(mono=run.mono, wall=utc_clock())
     turn_clock.bind_turn_clock(run.ctx, clock)
     seen = []
 

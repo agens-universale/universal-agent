@@ -1,6 +1,6 @@
 """Чтение контекста запуска для журнала правок — общий дом двух каналов.
 
-Эти пять функций нужны и рекордеру (правки инструментами), и шелл-каналу
+Эти функции нужны и рекордеру (правки инструментами), и шелл-каналу
 (правки командами). Раньше они жили в `recorder` под подчёркиванием, и шелл-
 канал тянул их оттуда как приватные — то есть у общего объекта владельцем
 оказался файл, который первым его записал. Правило репозитория требует
@@ -131,3 +131,39 @@ def section_limit(section: Mapping[str, Any], key: str, default: int) -> int:
 
 def protected_extra_from_ctx(ctx: Any) -> list:
     return list(_loaded(ctx).settings.security.protected_paths.extra)
+
+
+def own_data_paths(settings: Any, threads_dir: Any = None) -> list[str]:
+    """Собственные данные gc — пути, которые трекер правок НЕ отслеживает.
+
+    Каталог тредов (из настроек и тот, что прогон держит в ctx, — они могут
+    разойтись), история ввода TUI рядом с каждым из них и логи прогона. Если
+    конфиг кладёт их внутрь проекта (по умолчанию они в состоянии gc, вне
+    его), gc дописывает их во время команды агента — и без этого списка они
+    уходили бы в журнал как правки агента, а откат «Сессии» возвращал бы к
+    началу сессии сам журнал.
+
+    Это НЕ защищённые пути (``security.protected_paths``): запись агента туда
+    подтверждения не требует, список касается только ``agent_edits``.
+    ``settings`` — всё, что принимает ``settings_of``.
+    """
+    from gc_core.settings import settings_of
+    from gc_core.thread_paths import input_history_path
+
+    paths = settings_of(settings).paths
+    result: list[str] = []
+    for raw in (paths.threads_data_path, threads_dir):
+        threads = raw.strip() if isinstance(raw, str) else ""
+        if threads and threads not in result:
+            result += [threads, input_history_path(threads)]
+    logs = paths.logs_dump_dir
+    if isinstance(logs, str) and logs.strip():
+        result.append(logs.strip())
+    return result
+
+
+def own_data_from_ctx(ctx: Any) -> list[str]:
+    """``own_data_paths`` прогона: настройки ctx и его ``threads_dir``."""
+    return own_data_paths(
+        _loaded(ctx).settings, getattr(ctx, "threads_dir", None)
+    )

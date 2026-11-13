@@ -511,7 +511,13 @@ async def test_resubmit_after_stopped_turn_is_accepted_again(
 
     def slow():
         time.sleep(2.0)
-        return [call("r", "fs_read_file", {"path": "a.txt"})]
+        return [
+            call(
+                "r",
+                "fs_read_file",
+                {"add_line_numbers": False, "path": "a.txt"},
+            )
+        ]
 
     script.extend([slow, [finish("first")], [finish("second")]])
     async with runtime(tmp_path, url) as (env, _, _):
@@ -820,18 +826,28 @@ async def test_malformed_tool_json_recovery_and_old_history_replay(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "example.txt").write_text("test")
     url, requests, script = scripted_http
-    bad = call("bad", "fs_read_file", {"path": "example.txt"})
+    bad = call(
+        "bad",
+        "fs_read_file",
+        {"add_line_numbers": False, "path": "example.txt"},
+    )
     bad["function"]["arguments"] = '{"path": '
     script.extend(
         [
-            [call("read", "fs_read_file", {"path": "example.txt"})],
+            [
+                call(
+                    "read",
+                    "fs_read_file",
+                    {"add_line_numbers": False, "path": "example.txt"},
+                )
+            ],
             [bad],
             [finish()],
             [finish()],
         ]
     )
     extra = {
-        "level": "auto",
+        "model": "auto",
         "models": {
             "fast": {"model": "fast-model", "url": url, "token": ""},
             "mid": {"model": "mid-model", "url": url, "token": ""},

@@ -1,9 +1,45 @@
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import pytest
 from gc_core.model_router import CircuitBreaker
 
 
 def test_fresh_breaker_is_closed():
     breaker = CircuitBreaker()
     assert breaker.is_open("flash") is False
+
+
+@pytest.mark.parametrize("restored", [False, True])
+def test_workflow_breaker_and_child_copy_never_create_thread_locks(
+    monkeypatch, restored
+):
+    from gc_core import model_router
+
+    def forbidden_lock():
+        raise AssertionError("thread lock inside workflow")
+
+    monkeypatch.setattr(
+        model_router, "threading", SimpleNamespace(Lock=forbidden_lock)
+    )
+    if restored:
+        breaker = CircuitBreaker.restore(
+            {"flash": "offline"}, lock_factory=nullcontext
+        )
+    else:
+        breaker = CircuitBreaker(lock_factory=nullcontext)
+        breaker.trip("flash", "offline")
+    assert breaker.snapshot() == {"flash": "offline"}
+    breaker.allow_probe()
+    assert breaker.take_probe("flash") is True
+
+    # Копия ребёнка получает своё право на пробу и тот же способ синхронизации.
+    child = breaker.copy()
+    assert child.take_probe("flash") is True
+    child.trip("flash", "still offline")
+    breaker.finish_probe("flash")
+    assert breaker.known_unavailable("flash") is None
+    assert child.open_reason("flash") == "still offline"
 
 
 def test_trip_opens_alias():

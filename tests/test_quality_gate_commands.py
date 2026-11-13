@@ -44,8 +44,8 @@ def test_lint_expands_literal_directories_without_splitting_filenames(
     checker = load_script("lint_paths")
     expected = sorted(
         [
-            str(tracked.relative_to(repository)),
-            str(new.relative_to(repository)),
+            tracked.relative_to(repository).as_posix(),
+            new.relative_to(repository).as_posix(),
         ]
     )
     assert checker.expand_paths([folder.name, str(tracked)]) == expected
@@ -76,7 +76,7 @@ def test_lint_propagates_runner_failure_and_passes_real_files(repository):
             "src",
         ],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 17
     assert json.loads(result.stdout) == [
@@ -110,7 +110,7 @@ def test_lint_shell_wires_directory_expansion(repository, monkeypatch):
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     result = subprocess.run(
         ["bash", str(scripts / "lint.sh"), "src"],
-        text=True,
+        encoding="utf-8",
         capture_output=True,
     )
     assert result.returncode == 19, result.stderr
@@ -126,7 +126,9 @@ def test_lint_shell_wires_directory_expansion(repository, monkeypatch):
 
 @pytest.mark.parametrize("stage", ["pre-commit", "pre-push", "manual"])
 def test_lock_only_change_cannot_skip_consistency_hook(repository, stage):
-    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
+    config = yaml.safe_load(
+        (REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    )
     hook = next(
         h for h in config["repos"][0]["hooks"] if h["id"] == "uv-lock-check"
     )
@@ -149,7 +151,7 @@ def test_lock_only_change_cannot_skip_consistency_hook(repository, stage):
             "uv.lock",
         ],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "exit code: 42" in result.stdout
@@ -192,8 +194,8 @@ def test_complexity_scope_without_snapshot(
 
     # Реальный анализатор и реальные фильтры: нарушение блокирует рабочие
     # пакеты, но TUI/testkit пропускаются как при обходе, так и в git-хуке.
-    pyproject = (REPO / "pyproject.toml").read_text()
-    (repository / "pyproject.toml").write_text(pyproject)
+    pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    (repository / "pyproject.toml").write_text(pyproject, encoding="utf-8")
     settings = tomllib.loads(pyproject)["tool"]["complexipy"]
     for path in settings["paths"]:
         (repository / path).mkdir(parents=True, exist_ok=True)
@@ -208,7 +210,9 @@ def test_complexity_scope_without_snapshot(
     binary = shutil.which("complexipy")
     assert binary is not None
     if via_hook:
-        config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
+        config = yaml.safe_load(
+            (REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+        )
         hook = next(
             h for h in config["repos"][0]["hooks"] if h["id"] == "complexipy"
         )
@@ -233,9 +237,27 @@ def test_complexity_scope_without_snapshot(
         ]
     else:
         command = [binary, "packages", "--failed", "--plain", "--color", "no"]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, encoding="utf-8")
     output = result.stdout + result.stderr
     assert result.returncode == (0 if excluded else 1), output
     if not excluded:
         assert "deep" in output
     assert not (repository / "complexipy-snapshot.json").exists()
+
+
+def test_duplicate_code_scope_matches_prod_scope():
+    """Дубли ищутся по всему прод-коду: та же область, что у мёртвого кода.
+
+    Пакет ``acp`` в список pylint не попал — и дубль ``tool_flow`` между ACP и
+    server жил незамеченным, хотя прочие проверки acp видели.
+    """
+    config = yaml.safe_load(
+        (REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    )
+    hook = next(
+        h for h in config["repos"][0]["hooks"] if h["id"] == "duplicate-code"
+    )
+    # Пути — всё, что после флагов pylint.
+    words = shlex.split(hook["entry"])
+    paths = words[words.index("--score=n") + 1 :]
+    assert sorted(paths) == sorted(load_script("dead_code_check").PROD_PATHS)

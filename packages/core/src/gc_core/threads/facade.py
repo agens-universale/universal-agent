@@ -24,6 +24,7 @@ from gc_core.persistence.turn_outcome import last_shown_turn, turn_anchor
 from gc_core.plan_store import normalize_plan_block
 from gc_core.threads.history import messages_and_keys
 from gc_core.threads.instance import session_owner
+from gc_core.threads.local_io import synchronous_io
 from gc_core.threads.models import (
     CONTROL,
     INBOX,
@@ -495,7 +496,8 @@ def run_sync(awaitable):
     """
     coroutine = awaitable.__await__()
     try:
-        coroutine.send(None)
+        with synchronous_io():
+            coroutine.send(None)
     except StopIteration as done:
         return done.value
     coroutine.close()

@@ -82,6 +82,19 @@ def resolve_threads_dir(settings: Any) -> str:
     return path_cfg
 
 
+#: История ввода TUI (``gc_tui.services.input_history``). Лежит рядом с
+#: каталогом тредов — в его родителе; имя здесь, чтобы и TUI, и трекер правок
+#: (``agent_edits.ctx.own_data_paths``) знали одно и то же место.
+INPUT_HISTORY_FILENAME = "input_history.jsonl"
+
+
+def input_history_path(threads_dir: str) -> str:
+    """Файл истории ввода TUI для этого каталога тредов (см. выше)."""
+    return os.path.join(
+        os.path.dirname(os.path.normpath(threads_dir)), INPUT_HISTORY_FILENAME
+    )
+
+
 def thread_address(ctx: Any) -> Optional[tuple[str, str]]:
     """Адрес треда прогона ``(system_id, thread_id)``; ``None`` — прогон без треда.
 

@@ -3497,7 +3497,8 @@ async def test_configured_url_presets_override_the_default_three(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_on_local_row_asks_confirm_then_removes(tmp_path):
+@pytest.mark.parametrize("key", ["delete", "backspace"])
+async def test_delete_on_local_row_asks_confirm_then_removes(tmp_path, key):
     """Канон удаления списковых экранов (/sessions — Del): подтверждение, потом снос."""
     from gc_tui.app import TuiApp
 
@@ -3505,7 +3506,7 @@ async def test_delete_on_local_row_asks_confirm_then_removes(tmp_path):
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, LOCAL)
         await _open_voice(app, scr, pilot)
-        await pilot.press("delete")
+        await pilot.press(key)
         await pilot.pause()
         assert scr._voice_awaiting_remove and fake.calls == []
         assert "Enter — удалить" in _hint(scr) and "Esc — отмена" in _hint(scr)
@@ -4775,7 +4776,7 @@ async def test_footer_offers_del_only_when_there_is_something_to_delete(
         await _open_local(app, scr2, pilot)
         # Короткая форма — как в MCP-секции: длинная не оставляла места клавише
         # обновления в пределах двух строк футера (см. test_footer_contract).
-        assert "Del — удалить" in _footer(scr2)
+        assert "Del/⌫ — удалить" in _footer(scr2)
 
 
 @pytest.mark.asyncio

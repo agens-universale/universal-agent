@@ -71,7 +71,16 @@ cd packages/core && uv run --project ../.. pytest -q
 - `gc_testkit.plugin` — подключается автоматически через entry point `pytest11`,
   но бутстрап включает только для НАШИХ наборов: гейт сверяет `rootdir`
   собираемого набора с корнем рабочей копии;
-  отдельный `conftest.py` в пакете для этого не нужен.
+  отдельный `conftest.py` в пакете для этого не нужен. Там же, в начале
+  прогона, ставятся забытые хуки pre-commit (`gc_testkit.git_hooks`): если в
+  клоне их нет, выполняется `python -m pre_commit install` текущим
+  интерпретатором — одна строка в выводе. Пропуск: задан `CI`,
+  `GC_SKIP_HOOKS_INSTALL=1`, корень набора — не корень git-клона, это
+  связанный `git worktree` (каталог хуков общий, а хук запомнил бы `.venv`
+  этого worktree), задан `core.hooksPath` (pre-commit туда не ставится), нет
+  `pre_commit`, хуки уже стоят. Прогон ставит `GC_SKIP_HOOKS_INSTALL=1` и
+  себе в окружение — вложенные pytest во временных репозиториях тестов хуков
+  не получают. Закреплено `tests/test_testkit_hooks_install.py`.
 - `gc_testkit.helpers`, `gc_testkit.intent_fixtures`, `gc_testkit.tui_support`,
   `gc_testkit.tui_fixtures`, `gc_testkit.harbor_fakes` — импортируемые хелперы.
 - Хранилища: `memory_thread_store_v2` / `memory_agent_store` — образцы в

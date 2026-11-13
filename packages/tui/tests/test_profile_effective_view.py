@@ -647,7 +647,7 @@ async def test_the_registry_footer_promises_by_row_origin(
             await pilot.press("down")
             await pilot.pause()
         footer = _footer(scr)  # своя
-        assert "Del — удалить" in footer and "Enter — изменить" in footer
+        assert "Del/⌫ — удалить" in footer and "Enter — изменить" in footer
 
 
 async def test_creating_an_entry_named_like_a_base_one_is_refused(

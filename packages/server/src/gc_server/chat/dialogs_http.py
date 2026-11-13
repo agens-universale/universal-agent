@@ -10,6 +10,7 @@ from fastapi.responses import Response
 
 from gc_server.chat.dialogs import (
     delete_path,
+    dialog_exists,
     dialog_folder,
     dialog_list,
     dialog_turns,
@@ -139,7 +140,7 @@ async def read_artifacts(
         return denied
     folder = await dialog_folder(_index(request), thread_id, path)
     if folder is None:
-        return _missing()
+        return await _missing_artifact(request, thread_id)
     return _body(folder)
 
 
@@ -163,7 +164,7 @@ async def create_artifact(thread_id: str, request: Request) -> Response:
     except ApiError as exc:
         return _body(error_payload(exc), exc.status)
     if created is None:
-        return _missing()
+        return await _missing_artifact(request, thread_id)
     return _body({"path": created, "kind": "dir"})
 
 
@@ -177,7 +178,7 @@ async def delete_artifact(
     if running is not None:
         return running
     if not await remove_entry(_index(request), thread_id, path):
-        return _missing()
+        return await _missing_artifact(request, thread_id)
     return _body({"ok": True})
 
 
@@ -189,7 +190,7 @@ async def download_artifact(
         return denied
     found = await file_bytes(_index(request), thread_id, path)
     if found is None:
-        return _missing()
+        return await _missing_artifact(request, thread_id)
     return _download(found)
 
 
@@ -222,6 +223,11 @@ def _running(request: Request, thread_id: str) -> Response | None:
         return None
     exc = ApiError(409, "conflict", "turn already running")
     return _body(error_payload(exc), 409)
+
+
+async def _missing_artifact(request: Request, thread_id: str) -> Response:
+    exists = await dialog_exists(_index(request), thread_id)
+    return _missing(_PATH_NOT_FOUND if exists else _NOT_FOUND)
 
 
 def _missing(message: str = _NOT_FOUND) -> Response:

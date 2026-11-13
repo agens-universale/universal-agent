@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -23,8 +24,9 @@ from typing import Any
 
 from gc_core.thread_store import validate_thread_id
 from gc_core.threads.errors import ThreadConflict
-from gc_core.threads.facade import Threads
+from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.local_io import local_io
 from gc_core.threads.models import (
     JsonObject,
     SideChange,
@@ -33,6 +35,8 @@ from gc_core.threads.models import (
 )
 from gc_core.utils.atomic_io import atomic_replace
 
+logger = logging.getLogger(__name__)
+_PENDING = "pending_response_ids"
 SYSTEM = "responses"
 _STREAM = "chat.responses"
 _FRONTEND = "chat"
@@ -55,6 +59,9 @@ class ResponseRecord:
     status: str
     response: dict
     reservation: str | None = None
+    request_text: str | None = None
+    recovery_attempts: int = 0
+    execution_started: bool = False
 
 
 def thread_key(thread_id: str) -> ThreadKey:
@@ -79,7 +86,9 @@ class ResponseIndex:
             legacy_dir=os.path.join(parent, _LEGACY_DIR),
         )
 
-    async def save(self, record: ResponseRecord) -> None:
+    async def save(
+        self, record: ResponseRecord, *, update_summary: bool = True
+    ) -> None:
         key = thread_key(record.thread_id)
         summary = {
             "latest_response_id": record.response_id,
@@ -96,8 +105,18 @@ class ResponseIndex:
                 record.reservation is None
                 or admission.get("token") == record.reservation
             )
-            if not own and record.status == "in_progress":
-                raise ThreadConflict("бронь диалога потеряна до запуска")
+            if not own:
+                raise ThreadConflict(
+                    "бронь диалога потеряна до сохранения ответа"
+                )
+            pending = await self._pending_ids(key, frontend)
+            pending.discard(record.response_id)
+            if record.status == "in_progress":
+                pending.add(record.response_id)
+            patch = {
+                **(summary if update_summary else {}),
+                _PENDING: sorted(pending),
+            }
             try:
                 await self.threads.store.append_side(
                     key,
@@ -116,7 +135,7 @@ class ResponseIndex:
                             )
                         ],
                         add_aliases=[record.response_id],
-                        patch_frontend=(_FRONTEND, summary) if own else None,
+                        patch_frontend=(_FRONTEND, patch),
                     ),
                 )
                 break
@@ -124,7 +143,50 @@ class ResponseIndex:
                 continue
         else:
             raise ThreadConflict("сводка диалога меняется быстрее записи")
-        self._write_legacy(record)
+        try:
+            await local_io(self._write_legacy, record)
+        except OSError:
+            # Основная транзакция уже завершена. Ошибка зеркала не должна
+            # повторять запись потока или удерживать диалог занятым.
+            logger.exception("responses legacy mirror write failed")
+
+    async def _pending_ids(self, key, frontend) -> set[str]:
+        pending = frontend.get(_FRONTEND, {}).get(_PENDING)
+        if isinstance(pending, list):
+            return set(pending)
+        states = {}
+        for entry in await self.threads.read_frontend(key, _STREAM):
+            states[entry.data.get("response_id")] = entry.data.get("status")
+        return {
+            rid
+            for rid, status in states.items()
+            if rid and status == "in_progress"
+        }
+
+    async def pending_responses(self, thread: ThreadRecord) -> set[str]:
+        """Миграция старой сводки: один раз читаем поток и сохраняем отбор."""
+        pending = (self.summary(thread) or {}).get(_PENDING)
+        if isinstance(pending, list):
+            return set(pending)
+        if isinstance(self.threads.store, FileThreadStore):
+            # Первый запуск на старом архиве включает чтение потоков и
+            # запись индекса: весь проход миграции тоже вне HTTP loop.
+            return await local_io(
+                lambda: run_sync(self._backfill_pending(thread))
+            )
+        return await self._backfill_pending(thread)
+
+    async def _backfill_pending(self, thread: ThreadRecord) -> set[str]:
+        pending = await self._pending_ids(thread.key, thread.frontend)
+        await self.threads.store.append_side(
+            thread.key,
+            SideChange(
+                op_id=f"response-pending-{uuid.uuid4().hex}",
+                expected_frontend=thread.frontend,
+                patch_frontend=(_FRONTEND, {_PENDING: sorted(pending)}),
+            ),
+        )
+        return pending
 
     async def load(self, response_id: str) -> ResponseRecord | None:
         if _RESPONSE_ID.match(response_id) is None:
@@ -137,12 +199,21 @@ class ResponseIndex:
                     return _record(entry.data, response_id)
         return self._legacy(response_id)
 
-    async def thread_records(self, thread_id: str) -> list[ResponseRecord]:
+    async def thread_records(
+        self,
+        thread_id: str,
+        *,
+        legacy_records: list[ResponseRecord] | None = None,
+    ) -> list[ResponseRecord]:
         """Все ответы диалога: develop и v2 (у одного id побеждает v2)."""
         key = thread_key(thread_id)
         found = {
             record.response_id: record
-            for record in self._legacy_all()
+            for record in (
+                self._legacy_all()
+                if legacy_records is None
+                else legacy_records
+            )
             if record.thread_id == key.thread
         }
         for entry in await self.threads.read_frontend(key, _STREAM):
@@ -258,6 +329,22 @@ def _payload(record: ResponseRecord) -> dict:
         "created_at": record.created_at,
         "status": record.status,
         "response": record.response,
+        "execution_started": record.execution_started,
+        **(
+            {"reservation": record.reservation}
+            if record.reservation is not None
+            else {}
+        ),
+        **(
+            {"request_text": record.request_text}
+            if record.request_text is not None
+            else {}
+        ),
+        **(
+            {"recovery_attempts": record.recovery_attempts}
+            if record.recovery_attempts
+            else {}
+        ),
     }
 
 
@@ -297,4 +384,9 @@ def _record(raw: Any, response_id: str) -> ResponseRecord | None:
         created,
         status,
         response,
+        reservation=raw.get("reservation"),
+        request_text=raw.get("request_text"),
+        recovery_attempts=raw.get("recovery_attempts", 0),
+        # До появления маркера нельзя доказать, что действия не начинались.
+        execution_started=raw.get("execution_started") is not False,
     )

@@ -54,6 +54,7 @@ import signal
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
@@ -63,7 +64,9 @@ from gc_core.tools.connect_mcp.transport import (
     _areadline_with_timeout,
     _cancelled_notification,
     _readline_with_timeout,
+    _stderr_log,
     _stdio_command,
+    _wait_startup_exit_error,
     forget_stdio_reader,
 )
 from gc_core.user_stop import UserStopInterrupt, current_user_stop
@@ -78,6 +81,7 @@ _CANCEL_DRAIN_BUDGET_SEC = 3.0
 
 def _spawn_detached_stdio_process(
     server_cfg: Dict[str, Any],
+    stderr: Any = subprocess.DEVNULL,
 ) -> subprocess.Popen:
     """
     Запуск stdio MCP-сервера как лидера собственной сессии/process group.
@@ -88,13 +92,16 @@ def _spawn_detached_stdio_process(
     и продолжают жить после завершения агента. Вывод целиком (parent + все
     дети) лечится только групповым сигналом, для которого нужен отдельный
     process group — его и создаём здесь.
+
+    ``stderr`` сессия передаёт из ``_stderr_log`` — лог сервера в каталоге
+    состояния gc; ``DEVNULL`` по умолчанию остался для прямых вызовов.
     """
     cmd, cwd, env = _stdio_command(server_cfg)
 
     popen_kwargs: Dict[str, Any] = dict(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr,
         cwd=cwd,
         env=env,
         text=True,
@@ -281,8 +288,12 @@ class PersistentStdioSession:
     пока ``call`` ждёт ответ.
     """
 
-    def __init__(self, server_cfg: Dict[str, Any]) -> None:
+    def __init__(
+        self, server_cfg: Dict[str, Any], server_name: Optional[str] = None
+    ) -> None:
         self._server_cfg = server_cfg
+        # Только для имени лога stderr (``transport._stderr_log_path``).
+        self._server_name = server_name
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         # Запись в stdin отдельно от ``_lock``: отмена приходит с loop, пока
@@ -330,16 +341,42 @@ class PersistentStdioSession:
             except Exception:
                 pass
 
-        self._proc = _spawn_detached_stdio_process(self._server_cfg)
+        with _stderr_log(self._server_cfg, self._server_name) as (
+            stderr,
+            log_path,
+        ):
+            self._proc = _spawn_detached_stdio_process(
+                self._server_cfg, stderr
+            )
         self._next_id = 2
         with self._inflight_guard:
             self._inflight_id = None
             self._ignored_ids.clear()
             self._notified_ids.clear()
             self._sending_ids.clear()
-        self._write_line(_INIT_PAYLOAD)
-        # Ответ на initialize читаем, но его содержимое нам не нужно.
-        self._read_matching(_INIT_PAYLOAD["id"], timeout)
+        self._handshake(timeout, log_path)
+
+    def _handshake(self, timeout: float, log_path: Optional[Path]) -> None:
+        """initialize + initialized; умерший при старте сервер — с причиной.
+
+        Без ответа на initialize от мёртвого процесса раньше было «нет
+        соединения» (обрыв трубы на следующей записи) — без причины. Теперь
+        последняя строка его stderr: «сервер завершился при старте: …».
+        """
+        proc = self._proc
+        try:
+            self._write_line(_INIT_PAYLOAD)
+            # Содержимое ответа на initialize нам не нужно — только факт.
+            answered = self._read_matching(_INIT_PAYLOAD["id"], timeout)
+        except OSError as exc:
+            exited = _wait_startup_exit_error(proc, log_path)
+            if exited is not None:
+                raise exited from exc
+            raise
+        if not answered:
+            exited = _wait_startup_exit_error(proc, log_path)
+            if exited is not None:
+                raise exited
         self._write_line(_INITIALIZED_PAYLOAD)
 
     def call(
@@ -768,7 +805,7 @@ class PersistentStdioRegistry:
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
-                session = PersistentStdioSession(server_cfg)
+                session = PersistentStdioSession(server_cfg, server_key)
                 self._sessions[key] = session
             return session
 
