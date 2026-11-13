@@ -128,14 +128,15 @@ class ServerCard(ColumnStatic):
         if status == "connected":
             t.append("✓ ", style=_OK)
             t.append(self._name)  # имя — обычный $ink
-            label = f"{_label(status)} · {_tools_count(n_tools)}"
-            t.append(f"    {label}", style=_OK)
+            t.append(f"    {_label(status)}", style=_OK)
+            t.append(f" · {_tools_count(n_tools)}", style=_DIM)
             return
         if status in _WAITING:
             t.append("• ", style=_NOTE_INK)
             t.append(self._name)
-            tail = f" · {_tools_count(n_tools)}" if n_tools else ""
-            t.append(f"    {_label(status)}{tail}", style=_NOTE_INK)
+            t.append(f"    {_label(status)}", style=_NOTE_INK)
+            if n_tools:
+                t.append(f" · {_tools_count(n_tools)}", style=_DIM)
             return
         t.append("✗ ", style=_ERR)
         t.append(self._name)
@@ -227,10 +228,9 @@ class McpScreen(Screen):
         return None
 
     def _summary_renderable(self) -> Text:
-        """Итог: подключены и не подключены — всегда; ждущие — только если
-        есть; тулы, предложенные модели (у ждущих — тулы каталога). Не
-        подключён — всё, что не подключено и не ждёт (в том числе
-        неизвестный статус старых снимков)."""
+        """Итог: ненулевые группы состояний и тулы, предложенные модели
+        (у ждущих — тулы каталога). Не подключён — всё, что не подключено
+        и не ждёт (в том числе неизвестный статус старых снимков)."""
         counts = dict.fromkeys(_STATE_LABELS, 0)
         n_tools = 0
         for info in self._snapshot.values():
@@ -241,22 +241,17 @@ class McpScreen(Screen):
                 n_tools += len(info.get("tools") or [])
             else:
                 counts["failed"] += 1
-        n_conn, n_fail = counts["connected"], counts["failed"]
+        styles = {"connected": _OK, "failed": _ERR}
         t = Text()
         t.append("─" * 40 + "\n", style=_DEEP_DIM)
         t.append("итого: ", style=_DIM)
-        t.append(f"{n_conn} {_label('connected', n_conn)}", style=_OK)
-        for status in _WAITING:
+        for status in ("connected", *_WAITING, "failed"):
             n = counts[status]
             if n:
+                style = styles.get(status, _NOTE_INK)
+                t.append(f"{n} {_label(status, n)}", style=style)
                 t.append(" · ", style=_DIM)
-                t.append(f"{n} {_label(status, n)}", style=_NOTE_INK)
-        t.append(" · ", style=_DIM)
-        t.append(
-            f"{n_fail} {_label('failed', n_fail)}",
-            style=_ERR if n_fail else _DIM,
-        )
-        t.append(f" · {_tools_count(n_tools)}", style=_DIM)
+        t.append(_tools_count(n_tools), style=_DIM)
         return t
 
     def compose(self) -> ComposeResult:

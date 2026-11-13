@@ -584,9 +584,25 @@ def test_mcp_screen_shows_connecting_and_cached():
     assert "navigate" in text and "read" in text
     assert "✗" not in text
     summary = text.splitlines()[-1]
-    assert summary == (
-        "итого: 0 подключены · 1 подключается · 1 из кэша"
-        " · 0 не подключены · 2 тула"
+    assert summary == "итого: 1 подключается · 1 из кэша · 2 тула"
+
+
+def test_mcp_screen_summary_hides_zero_groups():
+    """Нулевые группы в итоге не показываются, число тулов — всегда."""
+    from gc_tui.screens.mcp import McpScreen
+
+    def _server(status: str) -> dict:
+        tools = [{"name": "t", "description": ""}]
+        return {"status": status, "reason": None, "tools": tools}
+
+    ok = {"a": _server(STATE_CONNECTED), "b": _server(STATE_CONNECTED)}
+    down = {"a": _server(STATE_FAILED)}
+
+    assert mcp_text(McpScreen(tools_snapshot=ok)).splitlines()[-1] == (
+        "итого: 2 подключены · 2 тула"
+    )
+    assert mcp_text(McpScreen(tools_snapshot=down)).splitlines()[-1] == (
+        "итого: 1 не подключён · 0 тулов"
     )
 
 
@@ -672,3 +688,30 @@ def test_mcp_screen_waiting_states_use_note_ink():
 
     assert NOTE_INK in styles
     assert head.plain.startswith("▸ • browser")
+
+
+@pytest.mark.parametrize(
+    ("status", "label", "label_style"),
+    [
+        (STATE_CONNECTED, "подключён", "OK"),
+        (STATE_CONNECTING, "подключается", "NOTE_INK"),
+    ],
+)
+def test_mcp_card_tools_count_is_dim(status, label, label_style):
+    """Цвет состояния несёт только слово; число тулов — приглушённое."""
+    from gc_tui import palette
+    from gc_tui.screens.mcp import ServerCard
+
+    info = {
+        "status": status,
+        "reason": None,
+        "tools": [{"name": "mcp_srv_a", "description": ""}] * 2,
+    }
+    head = ServerCard("srv", info)._renderable().rows[0]
+    styled = {
+        head.plain[span.start : span.end].strip(): str(span.style)
+        for span in head.spans
+    }
+
+    assert styled[label] == getattr(palette, label_style)
+    assert styled["· 2 тула"] == palette.DIM
