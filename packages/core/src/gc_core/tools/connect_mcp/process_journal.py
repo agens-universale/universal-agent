@@ -110,7 +110,7 @@ class ProcessJournal:
         return self._dir
 
     def launch_argv(
-        self, command: str, args: list[str], server_key: str
+        self, command: str, args: list[str], launch_key: str
     ) -> tuple[str, list[str]]:
         """Команда запуска сервера через пускатель.
 
@@ -121,7 +121,7 @@ class ProcessJournal:
         directory = self._ensure_dir()
         if directory is None:
             return command, args
-        launcher = [str(_LAUNCHER), str(directory), server_key, "--"]
+        launcher = [str(_LAUNCHER), str(directory), launch_key, "--"]
         return sys.executable, ["-I", "-S", *launcher, command, *args]
 
     def records(self) -> list[ProcessRecord]:
@@ -129,12 +129,13 @@ class ProcessJournal:
         directory = self._dir
         return _read_records(directory) if directory is not None else []
 
-    def launch_error(self, server_key: str) -> ProcessRecord | None:
-        """Самая свежая запись ключа, если в ней сбой ``exec``.
+    def launch_error(self, launch_key: str) -> ProcessRecord | None:
+        """Самая свежая запись ключа запуска (ключ сессии: сервер и
+        отпечаток), если в ней сбой ``exec``.
 
         Удачный запуск после сбоя прежнюю причину гасит.
         """
-        own = [r for r in self.records() if r.server == server_key]
+        own = [r for r in self.records() if r.server == launch_key]
         if own and own[-1].error is not None:
             return own[-1]
         return None

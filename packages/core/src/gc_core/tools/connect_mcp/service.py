@@ -44,6 +44,7 @@ from gc_core.tools.connect_mcp.registry import (
 from gc_core.tools.connect_mcp.server_identity import (
     connection_fingerprint,
     is_process_transport,
+    session_key,
     with_service_defaults,
 )
 from gc_core.tools.connect_mcp.service_records import (
@@ -275,10 +276,14 @@ class McpService:
             self._backend_cache = ToolsCache(os_backend=self._os_backend)
         return self._backend_cache
 
-    def with_launcher(self, server_key: str, server_cfg: dict) -> dict:
+    def with_launcher(self, launch_key: str, server_cfg: dict) -> dict:
         """Определение для запуска: процесс сервера с постоянной сессией
         на POSIX — копия, где команда сервера идёт через пускатель журнала
         сервиса; иначе ``server_cfg`` как есть. Звать с цикла сервиса.
+
+        ``launch_key`` — ключ сессии (сервер и отпечаток): журнал общий на
+        сервис, и сбой запуска одного определения ключа не должен стать
+        причиной отказа другого (`_launch_failure`).
 
         Команда раскрывается так же, как при запуске без пускателя (``~``,
         mcp-env); поиск по PATH пускатель делает в окружении сервера, а
@@ -290,7 +295,7 @@ class McpService:
             return server_cfg
         server_command = _resolve_command(str(server_cfg["command"]))
         command, args = self._journal.launch_argv(
-            server_command, _launch_args(server_cfg), server_key
+            server_command, _launch_args(server_cfg), launch_key
         )
         return {
             **server_cfg,
@@ -359,7 +364,9 @@ class McpService:
             return None
         if not is_server_gone(exc):
             return None
-        record = self._journal.launch_error(entry.key)
+        record = self._journal.launch_error(
+            session_key(entry.key, entry.fingerprint)
+        )
         if record is None:
             return None
         error = _LAUNCH_ERRORS.get(record.error, OSError)

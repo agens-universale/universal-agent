@@ -21,6 +21,7 @@ from gc_core.tools.connect_mcp.call_errors import McpServerGone
 from gc_core.tools.connect_mcp.consumer_status import STATE_FAILED
 from gc_core.tools.connect_mcp.process_journal import journal_root
 from gc_core.tools.connect_mcp.registry import mcp_tool_full_name
+from gc_core.tools.connect_mcp.server_identity import session_key
 from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
@@ -137,7 +138,7 @@ async def test_session_is_journaled(
     [record] = journal_records(service)
     assert record.pid == pid
     assert record.pgid == pid
-    assert record.server == "a"
+    assert record.server == session_key("a", _entry(consumer).fingerprint)
     assert record.error is None
     assert launches(control) == [pid]
 
@@ -405,3 +406,21 @@ async def test_startup_crash_reason_survives_launcher(
     assert "spawn_launcher" in " ".join(_launcher_args(consumer))
     assert status.state == STATE_FAILED
     assert "сервер завершился при старте: boom-at-start" in status.reason
+
+
+async def test_launch_error_belongs_to_its_definition(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Журнал общий на сервис, сбой exec — по ключу сессии: сбой запуска
+    другого определения того же ключа (другой потребитель) не становится
+    причиной отказа этого."""
+    service = McpService(connect_on_start=True)
+    live = _settings({"a": _server(tmp_path / "a.json")})
+    broken = _settings({"a": {"transport": "stdio", "command": "no-such"}})
+    consumer = await _ready(mcp_reaper, service, live, label="live")
+    other = await _ready(mcp_reaper, service, broken, label="broken")
+    assert _entry(other).last_failure.code == "command_not_found"
+
+    gone = service.record_failure(_entry(consumer), McpServerGone())
+
+    assert gone.code != "command_not_found"

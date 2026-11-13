@@ -182,7 +182,7 @@ class McpConnections:
         servers = mcp_cache_config(self._settings)["mcp-servers"]
         cfg = with_service_defaults(servers[entry.key])
         cfg[SESSION_KEY_FIELD] = session_key_of(entry)
-        return self._service.with_launcher(entry.key, cfg)
+        return self._service.with_launcher(cfg[SESSION_KEY_FIELD], cfg)
 
     def discovery_timeout(self) -> float:
         """Срок подключения по настройкам последней сверки."""
