@@ -45,7 +45,6 @@ from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
     parse_turn_outcome,
-    turn_shown_in,
 )
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
@@ -132,6 +131,11 @@ from gc_tui.services.footer_slot import (
     toggle_info_line,
 )
 from gc_tui.services.git_info import current_branch
+from gc_tui.services.history_model import (
+    HistoryInputs,
+    HistoryModel,
+    build_history,
+)
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
 from gc_tui.services.keyboard_layout import swap_layout
@@ -203,13 +207,11 @@ from gc_tui.services.trace_mapper import (
     RenderContext,
     coerce_args,
     collect_render_context,
-    map_message,
     response_tail,
     with_closing_replies,
 )
 from gc_tui.services.trace_render import (
     build_call_row,
-    build_compaction_marker_event,
     build_compaction_widgets,
     build_nested_prose_row,
     build_turn_line,
@@ -217,14 +219,10 @@ from gc_tui.services.trace_render import (
     tool_caption,
 )
 from gc_tui.services.trace_retention import (
-    apply_payload_retention,
-    events_leaving_window,
     filter_sidecar_to_parents,
     is_light_payload,
-    message_ids_in_retention_window,
     nested_call_parent_id,
     parent_outside_retention,
-    retention_window_start_index,
     subagent_parent_ids_from_events,
 )
 from gc_tui.services.turn_outcome import (
@@ -598,7 +596,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._registry = build_default_registry()
         self._palette: CommandPalette | None = None
         self._brand: StartHeader | None = None
-        self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
+        # История ленты открытого треда — единственный её владелец (номера
+        # событий, показанные id, итог последнего хода, хвост ответа).
+        self._feed_history = HistoryModel()
         # A1: правило показа ответов (дедуп, попытки turn_finish) — то же,
         # что у /copy.
         self._answer_flow = AnswerFlow()
@@ -614,7 +614,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._store: Optional[FileTaskStore] = None
         self._cursor: Optional[TaskCursor] = None
-        self._next_no: int = 1
         self._active_task_id: Optional[str] = None
         # Снимок записи на тик опроса (см. _tick_record); вне тика — None.
         self._tick_record_cache: tuple[str, Optional[ThreadRecord]] | None = (
@@ -657,8 +656,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Виджеты последней попытки turn_finish хода (ответ, код, итог,
         # заметка) — при повторе свернуть предыдущую.
         self._submit_solution_widgets: list[list[Widget]] = []
-        # Записи незаконченного ответа модели из прошлой пачки опроса.
-        self._response_tail: list = []
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
         self._summary_body_widgets: dict[int, CompactionBody] = {}
         self._summary_marker_widgets: dict[int, CompactionRule] = {}
@@ -693,11 +690,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # client_id реплик, которые стоп или конец хода не сняли у ядра
         # (`_withdraw_queue`): ядро их держит, пока тред их не сверит.
         self._held_client_ids: set[str] = set()
-        # id записей, уже отрисованных в трейсе: запись с таким id не
-        # рисуется повторно ни на одном пути (rebuild, live-тик).
-        self._rendered_ids: set[str] = set()
-        # Индекс первого события каждого сегмента в _task_events (retention).
-        self._segment_starts: list[int] = []
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -788,11 +780,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Снимок `tui` открытого треда до записи «running» новым ходом —
         # `(тред, {status, last_indicator})`: откат его возвращает (§3.8).
         self._pre_run_tui_meta: Optional[tuple[str, dict]] = None
-        # Запись итога последнего хода открытого треда (из потока записей)
-        # и признак «после неё началась реплика» — тогда последний ход
-        # записи не имеет, строка — по статусу сессии.
-        self._last_turn_outcome: Optional[TurnOutcome] = None
-        self._outcome_superseded: bool = False
         # Свежая строка хода — та, что последней получила `freshen`
         # (`_freshen_turn_line`); снятую `_fresh_turn_line` не отдаёт.
         self._fresh_line: Optional[TurnLine] = None
@@ -2298,14 +2285,9 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
-        self._task_events.clear()
-        self._last_turn_outcome = None
-        self._outcome_superseded = False
-        self._rendered_ids.clear()
-        self._segment_starts.clear()
+        self._feed_history = HistoryModel()
         self._answer_flow.new_turn()
         self._reset_new_replies()
-        self._next_no = 1
         self._stick_bottom = True  # новый трейс → показываем низ (latest)
         self._last_auto_y = 0
         self._active_calls.clear()
@@ -2317,7 +2299,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
-        self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
         self._held_reveals.clear()
@@ -2429,6 +2410,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         Returns False если сессия занята другим TUI (не attach).
         """
         prev = self._active_task_id
+        withdrawn = self._withdrawn_in(task_id)
         if not self._session_lock_acquire(task_id):
             return False
         if prev and prev != task_id:
@@ -2469,26 +2451,11 @@ class TraceScreen(TraceFollowMixin, Screen):
             task_record.state.permission_mode if task_record else None,
             resumed=is_resume,
         )
-        # read_all_events — атомарный снимок live-файла + cursor (как раньше).
-        # Была ли компакция, определяем по голове live-снимка (после turn_end
-        # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
-        # старым путём из ЭТОГО снимка (consistent с cursor, без лишних чтений —
-        # иначе перетасовка тайминга ломает гонку optimistic-reply). read_segments
-        # (glob архивов + повторное чтение) — только для сжатых тредов.
-        records, cursor = self._store.read_all_events(task_id)
-        compacted = bool(records) and self._store.is_compaction_summary(
-            records[0]
-        )
-        self._cursor = cursor
         # Очистить #trace от предыдущей сессии — иначе при переходе
         # session A → session B (через /sessions) трейсы склеиваются
         # (виджеты A остаются, B дорисовывается поверх).
         self._clear_trace()
-        if compacted:
-            self._render_segments(self._store.read_segments(task_id))
-        else:
-            self._segment_starts = [0]
-            self._render_records(records)
+        self._open_history(task_id, withdrawn)
         self._merge_sidecar_nested(task_id)
         self._refresh_header()
         self._refresh_footer()
@@ -2559,12 +2526,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         """После рестарта: смонтировать виджеты failed-реплик из
         meta.tui.pending_user_messages — но только truly-orphaned (не нашли
         соответствующего user-сообщения ни в meta.user_intent_log,
-        ни в self._task_events). Реплика очереди при живом прогоне
+        ни в событиях истории ленты). Реплика очереди при живом прогоне
         (пересборка ленты посреди хода) — снова в очереди, не failed.
 
         Source of truth — meta.user_intent_log (persisted across
         summarizations; user_ask-записи); legacy meta.user_messages_log и
-        _task_events — safety net на случай пустого/старого log."""
+        события истории ленты — safety net на случай пустого/старого log."""
         if self._store is None:
             return
         from gc_tui.services.relative_time import parse_iso_utc
@@ -2591,7 +2558,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Safety net: live trace (на случай если оба log пусты —
         # старый формат meta, повреждение и т.п.).
         delivered_wires.update(
-            ev.summary for ev in self._task_events if ev.kind == "user"
+            ev.summary
+            for ev in self._feed_history.events()
+            if ev.kind == "user"
         )
         # Устаревание: самый поздний ts доставленного user_ask. Pending/failed
         # реплику старше него пользователь уже оставил позади (есть доставленные
@@ -2664,45 +2633,63 @@ class TraceScreen(TraceFollowMixin, Screen):
             message_id=message_id,
         )
 
-    def _render_segments(self, segments: list[dict]) -> None:
-        """Рендер ВСЕХ сегментов сырьём — полный трейс, без схлопывания старых
-        сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
-        между сегментами, чтобы было видно, где прошла компакция).
+    def _open_history(
+        self, task_id: str, withdrawn: set[str] | frozenset
+    ) -> None:
+        """История треда одним чтением (сегменты и курсор из одного
+        снимка) — в модель и в ленту."""
+        segments, self._cursor = self._store.read_history(task_id)
+        self._render_segments(segments, withdrawn=withdrawn)
 
-        Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
-        лежит в следующем файле с тем же id, рисуется первое вхождение.
-        Payload остаётся full, пока этот id есть в окне segments[-2:]."""
-        records = [rec for seg in segments for rec in seg["messages"]]
-        context = self._render_context(
-            rec.get("payload") for rec in records if isinstance(rec, dict)
-        )
-        # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
-        self._response_tail = response_tail(
-            [rec.get("payload") for rec in records if isinstance(rec, dict)]
-        )
-        window_start = retention_window_start_index(len(segments))
-        window_ids = message_ids_in_retention_window(segments)
-        for i, seg in enumerate(segments):
-            seg_in_window = i >= window_start
-            self._segment_starts.append(len(self._task_events))
-            for rec in seg["messages"]:
-                payload = rec.get("payload")
-                mid = payload.get("id") if isinstance(payload, dict) else None
-                in_window = seg_in_window or (
-                    mid is not None and mid in window_ids
-                )
-                self._render_record(rec, context=context, in_window=in_window)
-            comp = seg["compacted_by"]
-            if comp is not None:
-                self._append_and_render(
-                    build_compaction_marker_event(self._next_no, i, comp)
-                )
+    def _withdrawn_in(self, task_id: str) -> set[str]:
+        """Реплики треда, снятые откатом: отметка модели открытого треда и
+        заявки на удаление, ещё не исполненные."""
+        ids = {
+            mid
+            for _runner, tid, mid in self._pending_orphan_cleanups
+            if tid == task_id
+        }
+        if task_id == self._active_task_id:
+            ids |= self._feed_history.withdrawn
+        return ids
 
-    def _append_and_render(self, ev, *, live: bool = False) -> None:
-        """Событие с номером _next_no — в _task_events и на экран."""
-        self._next_no += 1
-        self._task_events.append(ev)
-        self._render_event(ev, live=live)
+    def _history_inputs(self) -> HistoryInputs:
+        """Входы построения модели из настроек открытой сессии."""
+        return HistoryInputs(
+            root=self._current_cwd(),
+            injected_fields=tuple(sorted(self._injected_fields())),
+        )
+
+    def _render_segments(
+        self,
+        segments: list[dict],
+        *,
+        withdrawn: set[str] | frozenset = frozenset(),
+    ) -> None:
+        """Модель истории из ВСЕХ сегментов — и вся она в ленту (полный
+        трейс, маркер сжатия между сегментами; дедуп preserved-копий и
+        окно удержания — в построении модели)."""
+        self._feed_history = build_history(
+            segments, inputs=self._history_inputs(), withdrawn=withdrawn
+        )
+        self._render_history()
+
+    def _render_history(self) -> None:
+        """Модель целиком — в ленту теми же виджетами, что живой путь
+        рисует запись за записью."""
+        history = self._feed_history
+        turn_starts = set(history.turn_starts)
+        for i, item in enumerate(history.items):
+            if item.kind == "model_choice":
+                self._restore_model_mark(item.side)
+            elif item.kind == "outcome":
+                self._show_outcome(parse_turn_outcome(item.side))
+            elif item.kind == "compaction":
+                self._render_event(item.event)
+            else:
+                if i in turn_starts:
+                    self._turn_started_after_record(live=False)
+                self._draw_event(item.event, live=False)
 
     def _render_records(
         self,
@@ -2717,11 +2704,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
         ]
+        history = self._feed_history
         if live:
             # Ответ модели мог начаться в прошлой пачке опроса: его текст
             # нужен вызову turn_finish, пришедшему сейчас.
-            payloads = [*self._response_tail, *payloads]
-        self._response_tail = response_tail(payloads)
+            payloads = [*history.response_tail, *payloads]
+        history.response_tail = response_tail(payloads)
         if context is None:
             context = self._render_context(payloads)
         elif live:
@@ -2792,45 +2780,39 @@ class TraceScreen(TraceFollowMixin, Screen):
         context: RenderContext | None = None,
         in_window: bool = True,
     ) -> None:
+        """Запись треда — в модель истории (единственная точка дописывания
+        живым путём) и в ленту."""
+        history = self._feed_history
         if is_model_choice_record(rec):
-            if not live:
+            # Живой хвост записи не рисует: черту уже дала живая смена.
+            if history.add_model_choice(rec) and not live:
                 self._restore_model_mark(rec)
             return
         if is_turn_outcome_record(rec):
-            # Итог хода — не сообщение ленты: строка последнего хода, пока
-            # после записи не началась реплика. Сирота (сообщения её хода
-            # в ленте нет: откат, сброс) строки не даёт.
-            outcome = parse_turn_outcome(rec)
-            if outcome is None or not turn_shown_in(rec, self._rendered_ids):
-                return
-            self._last_turn_outcome = outcome
-            self._outcome_superseded = False
-            self._end_turn_blocks(outcome)
-            self._mount_turn_line(outcome)
+            outcome = history.add_outcome(rec)
+            if outcome is not None:
+                self._show_outcome(outcome)
             return
         payload = rec.get("payload")
-        if not isinstance(payload, dict) or self._is_withdrawn(payload):
+        if not isinstance(payload, dict) or history.is_withdrawn(payload):
             return
+        ev = history.add_message(rec, context=context, in_window=in_window)
         # Реплика после записи — начало следующего хода (и та, что экран
         # уже показал сам: важна позиция в файле, а не повтор).
         if extract_real_user_message_text(payload):
-            self._outcome_superseded = True
             self._turn_started_after_record(live=live)
-        mid = payload.get("id")
-        if mid is not None:
-            if mid in self._rendered_ids:
-                return
-            self._rendered_ids.add(mid)
-        ev = map_message(
-            payload,
-            no=self._next_no,
-            ts=rec.get("ts", ""),
-            context=context,
-        )
-        if ev is None:
-            return
-        apply_payload_retention(ev, seg_in_window=in_window)
-        self._append_and_render(ev, live=live)
+        if ev is not None:
+            self._draw_event(ev, live=live)
+
+    def _show_outcome(self, outcome: TurnOutcome) -> None:
+        """Итог хода — не сообщение ленты: строка последнего хода на месте
+        записи. Сирота (сообщения её хода в истории нет: откат, сброс) в
+        модель не входит и строки не даёт."""
+        self._end_turn_blocks(outcome)
+        self._mount_turn_line(outcome)
+
+    def _draw_event(self, ev, *, live: bool) -> None:
+        self._render_event(ev, live=live)
         # Spec 2026-05-26 + 2026-05-28: запоминаем kind последнего события.
         # Для submit_solution финального ответа — sticky sentinel
         # "_finalized" вместо "agent": блокирует повторный mount в
@@ -2927,22 +2909,14 @@ class TraceScreen(TraceFollowMixin, Screen):
                 row.display = shown
         self._thoughts_shown = shown
 
-    def _is_withdrawn(self, payload: dict) -> bool:
-        """Реплика открытого треда снята откатом, а тред её ещё держит
-        (заявка на удаление ждёт освобождения треда): в историю ленты она не
-        входит — ни перерисовкой, ни хвостом."""
-        mid, tid = payload.get("id"), self._active_task_id
-        return mid is not None and any(
-            claim[1:] == (tid, mid) for claim in self._pending_orphan_cleanups
-        )
-
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
         над очередью и над отправленной, ещё не записанной репликой: запись
         стопа дочитана после новой отправки). Строка последнего хода свежая
         (§3.2), если под ней нет отправленной незаписанной реплики, —
-        тогда следующий ход уже начался; прошлая оседает."""
-        fresh = not self._outcome_superseded and not self._sent_reply_below()
+        тогда следующий ход уже начался; прошлая оседает от реплики за
+        записью (`_turn_started_after_record`)."""
+        fresh = not self._sent_reply_below()
         summary = None
         stale = self._fallback_line_for(outcome.opened_by)
         if stale is not None:
@@ -3056,13 +3030,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Откат реплики `msg_id`: её нет в истории ленты — запись её хода
         стала сиротой (`turn_shown_in`), дочитанная позже строки не даст;
         строка, вставшая до отката (запись дочитана раньше Esc), уходит."""
-        self._rendered_ids.discard(msg_id)
+        self._feed_history.mark_withdrawn(msg_id)
         for line in self.query(TurnLine):
             if line.opened_by == msg_id:
                 line.remove()
-        last = self._last_turn_outcome
-        if last is not None and last.opened_by == msg_id:
-            self._last_turn_outcome = None
 
     def _show_thinking_indicator(self, *, state: str = "thinking") -> None:
         """Показать индикатор: смонтировать (если ещё нет) или снять `.hidden`.
@@ -3133,11 +3104,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         записи (статус «running» без живого хода: процесс убит) — тоже
         None: запись — прошлого хода, даже если реплики после неё нет
         (континуация плана открывается технической)."""
-        if self._outcome_superseded:
+        if self._feed_history.outcome_superseded:
             return None
         if self._session_status_word() == "interrupted":
             return None
-        return self._last_turn_outcome
+        return self._feed_history.last_turn_outcome
 
     def _show_turn_outcome(
         self,
@@ -4261,7 +4232,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         Parent вне окна retention (light payload) — nested не монтируем.
         Нет call-события в ленте — якорь оставляем (live до записи сегментов).
         """
-        if parent_outside_retention(self._task_events, parent_call_id):
+        if parent_outside_retention(
+            self._feed_history.events(), parent_call_id
+        ):
             return None
         return self._active_calls.get(
             parent_call_id
@@ -4279,7 +4252,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not records:
             return
         records = filter_sidecar_to_parents(
-            records, subagent_parent_ids_from_events(self._task_events)
+            records,
+            subagent_parent_ids_from_events(self._feed_history.events()),
         )
         if not records:
             return
@@ -5308,13 +5282,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         осмысленные события (ответ / 'контекст сжат' / продолжение) — значит вопрос
         НЕ висячий (его output мог быть суммаризован при компакции), remnant не нужен.
         False — ask_human реально последнее осмысленное событие (висячий вопрос)."""
-        ah_idx = self._last_ask_human_index(self._task_events)
+        events = self._feed_history.events()
+        ah_idx = self._last_ask_human_index(events)
         if ah_idx is None:
             return False
         meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
-        return any(
-            ev.kind in meaningful for ev in self._task_events[ah_idx + 1 :]
-        )
+        return any(ev.kind in meaningful for ev in events[ah_idx + 1 :])
 
     def _last_ask_human_index(self, events: list) -> int | None:
         """Индекс последнего события смонтированного вопроса ask_human."""
@@ -5916,7 +5889,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if tid == self._active_task_id:
             # Начался новый ход: запись итога прошлого — уже не его строка,
             # она оседает в ленте до реплики нового.
-            self._outcome_superseded = True
+            self._feed_history.outcome_superseded = True
             self._closed_turn_summary = None
             self._settle_turn_line()
 
@@ -6680,15 +6653,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Полная перерисовка трейса из хранилища: сброс потока и откат
         неудавшегося шага сжатия."""
         tid = self._active_task_id
+        withdrawn = self._withdrawn_in(tid)
         self._clear_trace()
         self._reset_render_state()
-        records, cur = self._store.read_all_events(tid)
-        self._cursor = cur
-        if records and self._store.is_compaction_summary(records[0]):
-            self._render_segments(self._store.read_segments(tid))
-        else:
-            self._segment_starts = [0]
-            self._render_records(records)
+        self._open_history(tid, withdrawn)
         self._merge_sidecar_nested(tid)
         # После компакции (stream_reset) баннер мог пере-монтироваться для уже
         # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
@@ -6721,7 +6689,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _append_compaction_step(self, step: CompactionStep) -> None:
         """Хвост архива, маркер, новый живой файл — живым путём, одним
         контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
-        start = len(self._task_events)
+        start = len(self._feed_history.items)
         context = self._render_context(
             rec.get("payload")
             for rec in [*step.archive_tail, *step.live_records]
@@ -6729,26 +6697,19 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)
-        self._segment_starts.append(len(self._task_events))
+        self._feed_history.start_segment()
         self._render_records(step.live_records, live=True, context=context)
-        self._lighten_segment_left_window(step)
+        # Retention: сегмент, выпавший из окна, облегчаем как полная
+        # перерисовка. Вложенные строки субагентов не трогаем (спека 3.4).
+        self._feed_history.apply_retention(step.window_ids)
         self._drop_answered_ask_human_banner(start)
 
-    def _lighten_segment_left_window(self, step: CompactionStep) -> None:
-        """Retention: сегмент, выпавший из окна, облегчаем как полная
-        перерисовка. Вложенные строки субагентов не трогаем (спека 3.4)."""
-        for ev in events_leaving_window(
-            self._task_events, self._segment_starts, step.window_ids
-        ):
-            apply_payload_retention(ev, seg_in_window=False)
-
     def _mount_compaction_marker(self, step: CompactionStep) -> None:
-        no = self._next_no
-        self._append_and_render(
-            build_compaction_marker_event(
-                no, step.segment_index, step.compacted_by
-            )
+        ev = self._feed_history.add_compaction_marker(
+            step.segment_index, step.compacted_by
         )
+        self._render_event(ev)
+        no = ev.no
         marker = self._summary_marker_widgets.get(no)
         runner = getattr(self.app, "active_runner", None)
         if (
@@ -6764,13 +6725,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
 
     def _drop_answered_ask_human_banner(self, start: int) -> None:
-        """Снять баннер ask_human, если среди событий шага (с индекса start)
+        """Снять баннер ask_human, если среди событий шага (с элемента
+        истории start)
         после вопроса диалог продолжился: ответ ушёл в сводку и отдельной
         записью не придёт. Маркер сжатия — не продолжение: агент, который
         реально ждёт ответа, баннер сохраняет."""
         if self._ask_human_banner is None:
             return
-        added = self._task_events[start:]
+        added = self._feed_history.events(start)
         ah_idx = self._last_ask_human_index(added)
         after = 0 if ah_idx is None else ah_idx + 1
         if any(ev.kind in _DIALOG_CONTINUATION_KINDS for ev in added[after:]):
@@ -8841,7 +8803,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._was_running = False
         self._watched_runner = None
         self._watched_run_seq = None
-        self._outcome_superseded = False
+        self._feed_history.outcome_superseded = False
         # Строка снятой реплики снята в этом же обработчике и ещё в `query`.
         lines = [
             w
@@ -9850,31 +9812,29 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _open_event_by_no(self, no: int) -> None:
         """Открыть полный payload события №no в Viewer.
         Триггер — двойной клик по строке tool-вызова / агентской реплики."""
-        for ev in self._task_events:
-            if ev.no == no:
-                from gc_tui.screens.viewer import ViewerScreen
+        ev = self._feed_history.event_by_no(no)
+        if ev is None:
+            self._mount_trace_row(
+                prefix="[!] ",
+                content=f"нет события {no}",
+                kind_class="line-error",
+            )
+            return
+        from gc_tui.screens.viewer import ViewerScreen
 
-                # ViewerScreen сам делает render_payload — pretty-print JSON
-                # с подсветкой темой кода ленты для dict/list или plain Static
-                # для остального. Передаём raw payload без предварительного dumps.
-                # summary: в segments-пути full_payload пуст ({}); показываем
-                # синтез сводки (summary_content заполнен в обоих путях).
-                content = (
-                    ev.summary_content
-                    if ev.kind == "summary"
-                    else ev.full_payload
-                )
-                self.app.push_screen(
-                    ViewerScreen(
-                        title=f"event {no} · {ev.tool_name or ev.kind}",
-                        content=content,
-                    )
-                )
-                return
-        self._mount_trace_row(
-            prefix="[!] ",
-            content=f"нет события {no}",
-            kind_class="line-error",
+        # ViewerScreen сам делает render_payload — pretty-print JSON
+        # с подсветкой темой кода ленты для dict/list или plain Static
+        # для остального. Передаём raw payload без предварительного dumps.
+        # summary: в segments-пути full_payload пуст ({}); показываем
+        # синтез сводки (summary_content заполнен в обоих путях).
+        content = (
+            ev.summary_content if ev.kind == "summary" else ev.full_payload
+        )
+        self.app.push_screen(
+            ViewerScreen(
+                title=f"event {no} · {ev.tool_name or ev.kind}",
+                content=content,
+            )
         )
 
     def on_open_event_request(self, message) -> None:
@@ -9919,12 +9879,12 @@ class TraceScreen(TraceFollowMixin, Screen):
     def on_open_tool_call_detail_request(self, message) -> None:
         """Ctrl+click / Enter по row → детальный экран call + output.
 
-        Parent-тулы — из ``_task_events`` (data_*). Nested child — из
+        Parent-тулы — из модели истории ленты (data_*). Nested child — из
         sidecar ``data_subagents_*``.
         """
         call_ev = None
         result_ev = None
-        for ev in self._task_events:
+        for ev in self._feed_history.events():
             if ev.call_id != message.call_id:
                 continue
             if ev.kind == "call":
@@ -9974,7 +9934,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._store is not None and self._active_task_id:
             records = self._store.read_subagent_trace(self._active_task_id)
         parent = nested_call_parent_id(records or [], call_id)
-        if parent and parent_outside_retention(self._task_events, parent):
+        if parent and parent_outside_retention(
+            self._feed_history.events(), parent
+        ):
             return None, None
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
         if not detail or not isinstance(detail.get("call"), dict):

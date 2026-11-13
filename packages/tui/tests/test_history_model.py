@@ -223,8 +223,8 @@ def test_build_history_imports_no_textual(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", _FIXTURES)
 async def test_model_matches_open_path(tmp_path, name):
-    """Модель из ``read_history`` — те же события, номера и состояние, что
-    экран строит сегодня при открытии сессии."""
+    """Открытие сессии: модель экрана — модель из ``read_history`` со
+    входами сессии (события, номера, состояние)."""
     # Импорт приложения — в тесте: палитра выбирается до импорта gc_tui.app.
     from gc_tui.app import TuiApp
 
@@ -245,14 +245,12 @@ async def test_model_matches_open_path(tmp_path, name):
         )
         segments, _cursor = scr._store.read_history(HISTORY_THREAD)
         model = build_history(segments, inputs=inputs)
-        events = _events(model)
-        assert events == scr._task_events
-        assert model.rendered_ids == scr._rendered_ids
-        assert model.next_no == scr._next_no
-        assert model.last_turn_outcome == scr._last_turn_outcome
-        assert model.outcome_superseded == scr._outcome_superseded
-        assert model.response_tail == scr._response_tail
-        assert [
-            sum(it.event is not None for it in model.items[:start])
-            for start in model.segment_starts
-        ] == scr._segment_starts
+        screen = scr._feed_history
+        assert _events(model) == screen.events()
+        assert model.items == screen.items
+        assert model.rendered_ids == screen.rendered_ids
+        assert model.next_no == screen.next_no
+        assert model.last_turn_outcome == screen.last_turn_outcome
+        assert model.outcome_superseded == screen.outcome_superseded
+        assert model.response_tail == screen.response_tail
+        assert model.segment_starts == screen.segment_starts

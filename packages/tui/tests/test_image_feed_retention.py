@@ -180,7 +180,7 @@ async def test_main_screen_keeps_images_of_a_segment_outside_the_window(
         replies = {r._text: r._images for r in scr.query(UserReplyContainer)}
         assert replies[f"{chip_text(1)} старое"] == (a1,)
         assert replies[f"{chip_text(3)} вот"] == (a3,)
-        users = [ev for ev in scr._task_events if ev.kind == "user"]
+        users = [ev for ev in scr._feed_history.events() if ev.kind == "user"]
         assert all(
             ev.full_payload.get("_retention") != "light" for ev in users
         )

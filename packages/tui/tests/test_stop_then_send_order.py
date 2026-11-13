@@ -206,8 +206,8 @@ async def test_new_turn_after_stop_waits_for_stopped_record(tmp_path):
         await wait_until(
             pilot,
             lambda: (
-                scr._last_turn_outcome is not None
-                and scr._last_turn_outcome.opened_by == new
+                scr._feed_history.last_turn_outcome is not None
+                and scr._feed_history.last_turn_outcome.opened_by == new
             ),
             "итог нового хода прочитан",
         )
@@ -221,9 +221,9 @@ async def test_new_turn_after_stop_waits_for_stopped_record(tmp_path):
         ]
         expected = [f"› {OLD_TEXT}", f"line:{old}", f"› {NEW_TEXT}"]
         assert _trace(scr) == expected
-        assert scr._last_turn_outcome.status == "done"
+        assert scr._feed_history.last_turn_outcome.status == "done"
         scr.attach_active_task(OTHER, is_resume=True)
         scr.attach_active_task(TID, is_resume=True)
         await pilot.pause()
         assert _trace(scr) == expected
-        assert scr._last_turn_outcome.opened_by == new
+        assert scr._feed_history.last_turn_outcome.opened_by == new

@@ -198,10 +198,10 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
 
         nested = scr._nested_tool_rows.get("call_child_9")
         assert nested is not None
-        # nested отсутствует в parent _task_events
+        # nested отсутствует в событиях истории parent
         assert not any(
             ev.call_id == "call_child_9" and ev.kind == "call"
-            for ev in scr._task_events
+            for ev in scr._feed_history.events()
         )
 
         click = events.Click(

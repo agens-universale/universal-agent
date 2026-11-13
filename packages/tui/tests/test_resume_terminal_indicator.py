@@ -108,7 +108,7 @@ async def test_resume_unrecorded_outcome_no_line(tmp_path):
 
 def _mount_record(scr, outcome):
     """Запись итога дочитана рендером: строка на её месте в ленте."""
-    scr._last_turn_outcome = outcome
+    scr._feed_history.last_turn_outcome = outcome
     scr._mount_turn_line(outcome)
 
 

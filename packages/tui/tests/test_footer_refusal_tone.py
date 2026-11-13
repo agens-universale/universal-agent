@@ -61,7 +61,9 @@ def _nested_no_detail(scr, monkeypatch):
 def _retention_detail(scr, monkeypatch):
     from gc_tui.screens import main
 
-    scr._task_events.append(SimpleNamespace(call_id="c1", kind="call"))
+    scr._feed_history.append_event(
+        SimpleNamespace(no=1, call_id="c1", kind="call", tool_name=None)
+    )
     monkeypatch.setattr(main, "is_light_payload", lambda ev: True)
     scr.on_open_tool_call_detail_request(SimpleNamespace(call_id="c1"))
 

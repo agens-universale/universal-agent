@@ -182,7 +182,7 @@ def _trace_text(app) -> str:
 
 
 def _events(scr) -> list[tuple]:
-    return [(e.no, e.kind, e.summary) for e in scr._task_events]
+    return [(e.no, e.kind, e.summary) for e in scr._feed_history.events()]
 
 
 def _count(monkeypatch, scr, name: str) -> list:
@@ -280,7 +280,7 @@ def _base_thread(tmp_path: Path) -> _Thread:
 def _payloads(scr) -> list:
     return [
         (e.call_id, is_light_payload(e))
-        for e in scr._task_events
+        for e in scr._feed_history.events()
         if e.kind in ("call", "result")
     ]
 

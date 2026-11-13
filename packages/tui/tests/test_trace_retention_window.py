@@ -300,18 +300,22 @@ class _SidecarStore:
 
 
 def _event(scr, call_id: str, kind: str):
-    for ev in scr._task_events:
+    for ev in scr._feed_history.events():
         if ev.call_id == call_id and ev.kind == kind:
             return ev
     raise AssertionError(f"нет {kind} {call_id}")
 
 
 def _assert_prose_full(scr):
-    users = [ev.summary for ev in scr._task_events if ev.kind == "user"]
+    users = [
+        ev.summary for ev in scr._feed_history.events() if ev.kind == "user"
+    ]
     assert _OLD_USER in users
     assert _MID_USER in users
     assert _LIVE_USER in users
-    agents = [ev.summary for ev in scr._task_events if ev.kind == "agent"]
+    agents = [
+        ev.summary for ev in scr._feed_history.events() if ev.kind == "agent"
+    ]
     assert _OLD_ASSISTANT in agents
     assert _OLD_FINISH in agents
     assert _LIVE_ASSISTANT in agents
