@@ -21,6 +21,7 @@ from gc_core.plugins.manifest import (
     load_plugin,
     shown_matcher,
 )
+from gc_core.plugins.sources import shown_url
 from gc_core.settings import runtime_of
 from gc_core.tools.subagents.role_info import role_availability, role_rights
 
@@ -68,7 +69,8 @@ def _is_installed_path(root: Path) -> bool:
 
 
 def _source(item) -> str:
-    return f"{item.source}@{item.commit[:8]}" if item.commit else item.source
+    source = shown_url(item.source)
+    return f"{source}@{item.commit[:8]}" if item.commit else source
 
 
 def _version(version: str) -> str:

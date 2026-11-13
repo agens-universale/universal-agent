@@ -138,3 +138,14 @@ def test_build_redactor_toggle():
     assert build_redactor(None) is None
     assert build_redactor({"enabled": False}) is None
     assert isinstance(build_redactor({"enabled": True}), Redactor)
+
+
+def test_url_credentials_masked():
+    """Учётные данные в URL (``user:pass@``) маскируются, адрес остаётся."""
+    r = Redactor()
+    text = "clone https://bob:s3cret@git.example/r.git failed"
+
+    assert r.redact(text) == (f"clone https://{MASK}@git.example/r.git failed")
+    assert r.redact("see https://git.example/r.git") == (
+        "see https://git.example/r.git"
+    )

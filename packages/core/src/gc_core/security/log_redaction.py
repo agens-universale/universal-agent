@@ -57,6 +57,8 @@ SECRET_VALUE_PATTERNS = (
     r"\bglpat-[0-9A-Za-z_\-]{20}",  # GitLab PAT
     r"\bnpm_[A-Za-z0-9]{36}",  # npm token
     r"\bxox[baprs]-[0-9A-Za-z-]{10,}",  # Slack token
+    # --- учётные данные в URL: scheme://user:pass@host ---
+    r"(?<=://)[^/\s@]+(?=@)",
     # --- PEM private key block (RSA/EC/DSA/OPENSSH/PGP) ---
     r"-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z0-9 ]*PRIVATE KEY-----",
 )

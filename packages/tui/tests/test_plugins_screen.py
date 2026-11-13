@@ -458,3 +458,19 @@ def test_plugin_card_hides_matcher_where_it_does_not_apply(monkeypatch):
     (card,) = mod.plugin_cards(_snapshot_settings((plugin,)))
 
     assert card["hooks"] == ["UserPromptSubmit", "SessionStart startup"]
+
+
+def test_card_source_hides_url_credentials():
+    from gc_core.plugins.installed import InstalledPlugin
+    from gc_tui.services.plugin_cards import _source
+
+    item = InstalledPlugin(
+        name="p",
+        version="1",
+        source="https://bob:s3cret@git.example/plug.git",
+        commit="0123456789abcdef",
+    )
+
+    assert _source(item) == (
+        "https://***REDACTED***@git.example/plug.git@01234567"
+    )

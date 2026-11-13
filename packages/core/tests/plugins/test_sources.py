@@ -240,3 +240,38 @@ def test_short_commit_hash_is_rejected_on_install(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="полный"):
         with installed.prepare(f"file://{repo}", ref=first[:7]):
             pass
+
+
+_SECRET_URL = "https://bob:s3cret@git.example/team/plug.git"
+
+
+def test_clone_failure_never_shows_url_credentials(
+    tmp_path, monkeypatch, caplog
+):
+    """Ни уведомление, ни лог (с текстом ошибки git) не выдают пароль."""
+    _isolate(tmp_path, monkeypatch)
+
+    def failing_clone(url, _ref, _target):
+        raise subprocess.CalledProcessError(
+            128, ["git", "clone"], stderr=f"fatal: unable to access '{url}/'"
+        )
+
+    monkeypatch.setattr(sources, "_clone", failing_clone)
+    caplog.set_level("DEBUG", logger=sources.__name__)
+
+    snap = catalog.build_plugin_snapshot(
+        _loaded({"git": _SECRET_URL}), clone=True
+    )
+    not_cloned = catalog.build_plugin_snapshot(
+        _loaded({"git": _SECRET_URL + "x"}), clone=False
+    )
+    shown = [*snap.notices, *not_cloned.notices, caplog.text]
+
+    assert len(snap.notices) == 1
+    assert all("s3cret" not in text for text in shown)
+    assert "git.example/team/plug.git" in snap.notices[0]
+
+
+def test_shown_url_masks_credentials():
+    assert "s3cret" not in sources.shown_url(_SECRET_URL)
+    assert sources.shown_url("obra/superpowers") == "obra/superpowers"

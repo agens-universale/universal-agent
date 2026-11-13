@@ -54,7 +54,8 @@ def _row(p: installed.InstalledPlugin) -> str:
     state = "on " if p.enabled else "off"
     pin = (p.commit or "")[:8]
     ref = f"@{p.ref}" if p.ref else ""
-    return f"{state} {p.name} {p.version}  {p.source}{ref} {pin}".rstrip()
+    source = sources.shown_url(p.source)
+    return f"{state} {p.name} {p.version}  {source}{ref} {pin}".rstrip()
 
 
 def _role_settings(prepared: installed.PreparedInstall) -> object | None:
@@ -142,10 +143,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"{args.cmd}: {args.name}")
     except (ValueError, OSError) as exc:
-        print(f"ошибка: {exc}", file=sys.stderr)
+        print(f"ошибка: {sources.shown_url(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:  # git и сеть
-        print(f"ошибка: {exc}", file=sys.stderr)
+        print(f"ошибка: {sources.shown_url(str(exc))}", file=sys.stderr)
         return 1
     return 0
 

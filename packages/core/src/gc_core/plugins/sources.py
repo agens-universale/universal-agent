@@ -40,6 +40,14 @@ def normalize_url(git: str) -> str:
     return text
 
 
+def shown_url(text: str) -> str:
+    """Адрес источника (или текст с ним) для показа и логов: без учётных
+    данных ``user:pass@`` — их хранит только реестр установленных."""
+    from gc_core.security.log_redaction import Redactor
+
+    return Redactor().redact(text)
+
+
 def cache_root() -> Path:
     from gc_core.config_modules import env_vars
 
@@ -117,7 +125,7 @@ def _warn_not_cloned(key: tuple[str, str, str], url: str) -> None:
     logger.warning(
         "plugin source %s is not cloned yet; it is cloned when the "
         "agent starts (plugin snapshot build)",
-        url,
+        shown_url(url),
     )
 
 
@@ -141,16 +149,22 @@ def resolve_source(
         if update or not (target / ".git").is_dir():
             _clone(url, source.ref, target)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        detail = getattr(exc, "stderr", "") or exc
+        detail = shown_url(str(getattr(exc, "stderr", "") or exc))
         # Без клона пользователь получит уведомление набора; здесь — причина.
         if not (target / ".git").is_dir():
-            logger.debug("plugin source %s unavailable: %s", url, detail)
+            logger.debug(
+                "plugin source %s unavailable: %s", shown_url(url), detail
+            )
             _resolved[key] = None
             return None
-        logger.warning("plugin source %s not updated: %s", url, detail)
+        logger.warning(
+            "plugin source %s not updated: %s", shown_url(url), detail
+        )
     result = root if root.is_dir() else None
     if result is None:
-        logger.debug("plugin source %s: no directory %s", url, source.subdir)
+        logger.debug(
+            "plugin source %s: no directory %s", shown_url(url), source.subdir
+        )
     _resolved[key] = result
     return result
 

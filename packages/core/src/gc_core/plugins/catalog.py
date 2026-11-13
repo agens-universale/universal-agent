@@ -56,7 +56,9 @@ def _installed_paths(cfg: PluginsConfig) -> list[str]:
 
 
 def _source_notice(source) -> str:
-    head = f"Плагин из источника {source.git} не подключён: "
+    head = (
+        f"Плагин из источника {sources.shown_url(source.git)} не подключён: "
+    )
     if sources.is_cloned(source) and source.subdir:
         return head + f"в репозитории нет подкаталога {source.subdir}."
     if sources.is_short_commit(source.ref):
