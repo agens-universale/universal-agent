@@ -113,3 +113,28 @@ def test_failed_swap_restores_old_install(tmp_path, monkeypatch):
     monkeypatch.undo()
     assert (store / "p" / ".claude-plugin" / "plugin.json").is_file()
     assert list((store / ".staging").iterdir()) == []
+
+
+def test_failed_update_write_keeps_plugin_disabled(tmp_path, monkeypatch):
+    """Новая версия и прежний статус «выключен» публикуются одной записью:
+    сбой следующей записи реестра не включает плагин."""
+    from gc_core.plugins import installed
+
+    store = tmp_path / "installed"
+    install(str(make_plugin(tmp_path / "src" / "p", "p")), root=store)
+    installed.disable("p", store)
+    real_write = installed._write_meta
+    writes = []
+
+    def flaky(root, meta):
+        writes.append(meta)
+        if len(writes) > 1:
+            raise OSError("disk full")
+        real_write(root, meta)
+
+    monkeypatch.setattr(installed, "_write_meta", flaky)
+    installed.update("p", root=store)
+    monkeypatch.undo()
+
+    assert [p.enabled for p in list_installed(store)] == [False]
+    assert installed.enabled_paths(store) == []
