@@ -369,7 +369,7 @@ async def test_startup_long_preserved_request_progress_and_replay(
                 "test": {
                     "workspace": str(tmp_path),
                     "core": {
-                        "level": "default",
+                        "model": "default",
                         "backend": {
                             "api_mode": "chat_completions",
                             "completions_url": url,

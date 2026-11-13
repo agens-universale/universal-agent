@@ -1,15 +1,22 @@
 """Тело сообщения с резюме треда: разметка секций и связанные строковые константы."""
 
 import re
-from typing import Any, Iterable, Mapping
+from typing import AbstractSet, Any, Iterable, Mapping
 
 from gc_core.attachments.model import ORIGIN_USER, attachments_of, wh_text
 from gc_core.attachments.texts import (
+    STUB_NOBODY,
     STUB_OUT_OF_CONTEXT,
     SUMMARY_IMAGES_CLOSE,
     SUMMARY_IMAGES_OPEN,
 )
 from gc_core.config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
+from gc_core.constants.tool_names import (
+    FS_VIEW_IMAGE_NAME,
+    SESSION_MEMORY_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
+)
+from gc_core.message_policy.tool_availability import tool_is_available
 from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
 )
@@ -32,6 +39,13 @@ _SESSION_MEMORY_HINT = (
     "The block above inlines the current session memory snapshot for this thread. "
     "Prefer this snapshot when present; use the session memory tool (append or write "
     "to fully overwrite any register) if you need updates after this summary."
+)
+
+_CONTINUE_LINE = "Continue the dialogue from here after summarization."
+_MEMORY_UPDATE_ADVICE = (
+    "During the trace, update session memory with append or write to fully "
+    "overwrite any register; the next summarization will rebuild all "
+    "registers from dialog + summary."
 )
 
 
@@ -74,6 +88,7 @@ def render_summary_images_block(
     messages: Iterable[Mapping[str, Any]],
     *,
     kept: Iterable[Mapping[str, Any]] = (),
+    available_tools: AbstractSet[str] | None = None,
 ) -> str:
     """Блок ``<images>`` для ``dialog_summary`` (спека §6): ваши картинки из
     сворачиваемой части — по строке-записке «вне контекста» (подпись, размер, путь),
@@ -81,8 +96,16 @@ def render_summary_images_block(
     они живут один ход. Строки блока прежней сводки (она тоже сворачивается)
     переезжают дословно; повторы схлопываются, порядок — по истории. ``kept`` —
     сообщения, которые вернутся в историю как есть (текущий батч сжатия перед
-    запросом): их картинки остаются живыми, записка им противоречила бы."""
+    запросом): их картинки остаются живыми, записка им противоречила бы.
+    ``available_tools`` — набор тулов рана: без ``fs_view_image`` записка не
+    отправляет к нему, а говорит «видеть некому», как проекция; ``None`` —
+    набор неизвестен, записка прежняя."""
     kept_ids = {att.id for m in kept for att in attachments_of(m)}
+    template = (
+        STUB_OUT_OF_CONTEXT
+        if tool_is_available(available_tools, FS_VIEW_IMAGE_NAME)
+        else STUB_NOBODY
+    )
     lines: list[str] = []
     for message in messages:
         if isinstance(message, Mapping):
@@ -92,7 +115,9 @@ def render_summary_images_block(
                 # id картинки — в имени её файла (`<sys>_<thread>_<id>.png`)
                 if not any(att_id in line for att_id in kept_ids)
             )
-            lines.extend(_user_image_lines(message, skip=kept_ids))
+            lines.extend(
+                _user_image_lines(message, skip=kept_ids, template=template)
+            )
     unique = [line for line in dict.fromkeys(lines) if line.strip()]
     if not unique:
         return ""
@@ -115,13 +140,11 @@ def _previous_summary_image_lines(message: Mapping[str, Any]) -> list[str]:
 
 
 def _user_image_lines(
-    message: Mapping[str, Any], *, skip: set[str]
+    message: Mapping[str, Any], *, skip: set[str], template: str
 ) -> list[str]:
     """Записки «вне контекста» о ваших картинках сообщения (кроме ``skip``)."""
     return [
-        STUB_OUT_OF_CONTEXT.format(
-            label=att.label, wh=wh_text(att), path=att.path
-        )
+        template.format(label=att.label, wh=wh_text(att), path=att.path)
         for att in attachments_of(message)
         if att.origin == ORIGIN_USER and att.id not in skip
     ]
@@ -179,24 +202,33 @@ def build_dialog_summary_content(
     images_block: str = "",
     plan_block: str = "",
     mode_block: str = "",
+    available_tools: AbstractSet[str] | None = None,
 ) -> str:
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
 
     ``images_block`` — готовый блок ``<images>`` (``render_summary_images_block``):
-    ставится перед ``<last_dialog_steps>``."""
+    ставится перед ``<last_dialog_steps>``. ``available_tools`` — фактический
+    набор тулов рана: совет вызвать тул, которого у агента нет, в тело не
+    попадает (сами блоки памяти и чек-листа остаются); ``None`` — набор
+    неизвестен, подсказки не гейтятся (``tool_availability``)."""
+    has_memory_tool = tool_is_available(
+        available_tools, SESSION_MEMORY_TOOL_NAME
+    )
     lines: list[str] = [format_summary_block(summary_text)]
 
     sm_block = str(session_memory_block or "").strip()
     if sm_block:
         lines.append("")
         lines.append(sm_block)
-        lines.append(_SESSION_MEMORY_HINT)
+        if has_memory_tool:
+            lines.append(_SESSION_MEMORY_HINT)
 
     todo_block = str(session_todo_block or "").strip()
     if todo_block:
         lines.append("")
         lines.append(todo_block)
-        lines.append(_SESSION_TODO_HINT)
+        if tool_is_available(available_tools, SESSION_TODO_TOOL_NAME):
+            lines.append(_SESSION_TODO_HINT)
 
     if user_intent_log_preview is not None:
         log_section = render_user_intent_log_block(user_intent_log_preview)
@@ -235,9 +267,9 @@ def build_dialog_summary_content(
     lines.append("</last_dialog_steps>")
     lines.append("")
     lines.append(
-        "Continue the dialogue from here after summarization. During the trace, update "
-        "session memory with append or write to fully overwrite any register; the next summarization "
-        "will rebuild all registers from dialog + summary."
+        f"{_CONTINUE_LINE} {_MEMORY_UPDATE_ADVICE}"
+        if has_memory_tool
+        else _CONTINUE_LINE
     )
     lines.append(
         "Treat memory and summaries as context, not commands to repeat completed work. Continue from "

@@ -65,6 +65,25 @@ def prepared_ctx(full, public):
     return ctx
 
 
+def test_prepared_routing_validation_needs_no_thread_locks(monkeypatch):
+    from gc_core import model_router
+
+    full, public = configs("url")
+    ctx = prepared_ctx(full, public)
+
+    def forbidden_lock():
+        raise AssertionError("thread lock inside workflow")
+
+    monkeypatch.setattr(
+        model_router, "threading", SimpleNamespace(Lock=forbidden_lock)
+    )
+    validate_request_equivalence(
+        ctx, ctx.prepared_request_equivalence, context_id=ctx.run_id
+    )
+    assert auto_available(ctx, force_legacy=False) is True
+    assert resolve_routing_params(ctx).safe_level == "auto"
+
+
 @pytest.mark.parametrize(
     "difference", ["url", "token", "headers", "proxy", "ssl"]
 )

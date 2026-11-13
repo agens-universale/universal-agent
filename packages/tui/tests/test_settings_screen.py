@@ -4356,7 +4356,8 @@ def test_settings_header_hides_the_number_when_running_from_sources(
 # --- одна клавиша удаления: Del в MCP, тот же гейт по фокусу, что у голоса (§5.3) ---
 
 
-async def test_delete_key_removes_mcp_server(tmp_path):
+@pytest.mark.parametrize("key", ["delete", "backspace"])
+async def test_delete_key_removes_mcp_server(tmp_path, key):
     """Del удаляет сервер в MCP так же, как локальный сервис в голосе."""
     from gc_tui.services.mcp_manager import McpState
 
@@ -4372,7 +4373,7 @@ async def test_delete_key_removes_mcp_server(tmp_path):
         ed._states["ctx7"] = McpState(
             True, None, None
         )  # статус: пакет установлен
-        await pilot.press("delete")
+        await pilot.press(key)
         await pilot.pause()
         assert ed.awaiting_confirm, (
             "Del должен запросить подтверждение удаления"
@@ -4969,9 +4970,7 @@ def _auth_probe_returning(*results):
     """Заглушка маршрута chat/completions: по одному ответу на вызов, потом последний."""
     seen = []
 
-    def probe(
-        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
-    ):
+    def probe(endpoint, auth, verify, model, *, config_proxy=None, **kw):
         seen.append(auth)
         return results[min(len(seen) - 1, len(results) - 1)]
 
@@ -5080,7 +5079,7 @@ async def test_hub_says_nothing_about_a_token_it_could_not_check():
     from gc_tui.services.settings_probe import ProbeResult
 
     def failing_auth(
-        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+        endpoint, auth, verify, model, *, config_proxy=None, **kw
     ):
         return ProbeResult(
             "unknown", None, None, 5, "нет соединения (timeout)", offline=True
@@ -5918,6 +5917,24 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
 
         assert row.split("\n")[0].rstrip().endswith("edit")
         assert _session_line(row) == "  в текущей сессии: plan"
+
+
+async def test_backspace_in_input_edits_text_not_voice_service(tmp_path):
+    """⌫ в поле голосовой панели стирает символ слева и не открывает
+    подтверждение удаления сервиса (гейт по фокусу общий с Del)."""
+    from textual.widgets import Input
+
+    async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
+        await pilot.press("tab")  # в группу полей: фокус в #voice-url
+        await pilot.pause()
+        inp = scr.query_one("#voice-url", Input)
+        inp.value = "abc"
+        inp.cursor_position = 3
+        await pilot.pause()
+        await pilot.press("backspace")
+        await pilot.pause()
+        assert inp.value == "ab", "⌫ в поле обязан стирать текст"
+        assert not scr._voice_awaiting_remove
 
 
 async def test_modes_key_line_sits_in_hint_not_in_rows(tmp_path):

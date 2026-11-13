@@ -145,3 +145,56 @@ def test_string_instead_of_headers_or_kwargs_is_a_validation_error():
             make_settings(), extra_overrides={path: ""}
         )
         assert loaded.settings.backend.model_dump()[path.split(".")[1]] == {}
+
+
+def _probe_settings(**dotted):
+    from gc_testkit.settings import make_settings
+
+    base = {
+        "agent.x_cl_id": "cl-7",
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer shared",
+            "X-Gateway-Key": "gw",
+        },
+    }
+    return make_settings({**base, **dotted})
+
+
+def test_probe_headers_carry_the_agent_extras_without_auth_or_session():
+    """Проба идёт с теми же дополнительными заголовками, что агент: шлюз,
+    требующий свой заголовок, иначе отвечает пробе 401 при рабочем агенте.
+    Authorization подбирает сама проба, сессии у неё нет."""
+    from gc_core.utils.connect_backend import connection_probe_headers
+
+    headers = connection_probe_headers(_probe_settings())
+    assert headers == {"x_cl_id": "cl-7", "X-Gateway-Key": "gw"}
+
+
+def test_probe_headers_prefer_the_model_overlay_like_the_agent():
+    from gc_core.model_router import ResolvedModel
+    from gc_core.utils.connect_backend import connection_probe_headers
+
+    resolved = ResolvedModel(
+        alias="main",
+        model="m",
+        url="https://own.test/v1/chat/completions",
+        authorization="Bearer own",
+        backend_overrides={
+            "chat_completion_headers": {
+                "authorization": "Bearer per-model",
+                "X-Own": "1",
+            }
+        },
+        tariff=None,
+        source="test",
+    )
+    headers = connection_probe_headers(_probe_settings(), resolved)
+    assert headers == {"x_cl_id": "cl-7", "X-Own": "1"}
+
+
+def test_probe_headers_skip_chat_extras_in_responses_mode():
+    from gc_core.utils.connect_backend import connection_probe_headers
+
+    settings = _probe_settings(**{"backend.api_mode": "responses"})
+    assert connection_probe_headers(settings) == {"x_cl_id": "cl-7"}

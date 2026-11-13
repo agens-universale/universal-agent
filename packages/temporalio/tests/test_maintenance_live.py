@@ -31,7 +31,13 @@ async def test_terminated_turn_context_is_released(
 
     def slow():
         time.sleep(3.0)
-        return [call("r", "fs_read_file", {"path": "a.txt"})]
+        return [
+            call(
+                "r",
+                "fs_read_file",
+                {"add_line_numbers": False, "path": "a.txt"},
+            )
+        ]
 
     script.extend([slow, [finish("done")]])
     async with runtime(tmp_path, url) as (env, provider, config):

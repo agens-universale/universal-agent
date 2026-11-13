@@ -48,6 +48,36 @@ class EmbeddedChoiceError(Exception):
         self.raw_code = raw_code
 
 
+class BackendBadResponseError(ValueError):
+    """Успешный по статусу ответ модели, тело которого не разобрать: пустое
+    или не JSON (HTML-заглушка прокси, обрезок). Раньше это улетало голым
+    ``JSONDecodeError`` («Expecting value: line 1 column 1 (char 0)»), и по
+    тексту было не понять, что сломался ответ сервера, а не агент.
+
+    Ответ воспроизводимый: длинный backoff его не лечит, транспорт повторяет
+    запрос один раз и сразу. Само тело в текст не идёт — начало тела пишется
+    в лог при разборе. Подкласс ValueError: прежние ``except ValueError``
+    продолжают ловить."""
+
+    def __init__(
+        self,
+        *,
+        status_code: int | None,
+        content_type: str,
+        length: int,
+        api_mode: str,
+    ) -> None:
+        super().__init__(
+            f"Backend {api_mode} returned an empty or non-JSON body "
+            f"(HTTP {status_code}, content-type={content_type!r}, "
+            f"{length} bytes)"
+        )
+        self.status_code = status_code
+        self.content_type = content_type
+        self.length = length
+        self.api_mode = api_mode
+
+
 #: Исключение «HTTP-статус не тот». Кортеж, а не один класс: форма пережила
 #: время, когда транспортов было два (requests у тулов и MCP, httpx у модели),
 #: и вызывающие полагаются на isinstance с кортежем.
@@ -374,6 +404,29 @@ _IMAGE_REJECTION_MARKERS = (
     "unknown variant `image_url`",  # шлюзы на serde: части image_url не знают
     "only supports text input",  # litellm-прокси: «Model only supports text input»
 )
+
+
+_KNOWN_PROVIDER_CODES = frozenset(
+    {"context_length_exceeded", "rate_limit_exceeded"}
+)
+
+
+def known_provider_code(exc: BaseException) -> str | None:
+    """Известный код отказа без переноса текста/HTTP-объектов между процессами."""
+    code = getattr(exc, "status_code", None)
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code not in (400, 413, 422):
+            return None
+        try:
+            error = exc.response.json().get("error", {})
+            code = error.get("code") if isinstance(error, dict) else None
+        except (ValueError, AttributeError, httpx.ResponseNotRead):
+            return None
+    return (
+        code
+        if isinstance(code, str) and code in _KNOWN_PROVIDER_CODES
+        else None
+    )
 
 
 def _rejection_text(exc: BaseException) -> str:

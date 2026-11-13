@@ -911,6 +911,12 @@ NOT_IN_MATRIX = {
     "paths.chat_completions_system_prompt_path": "выставляет parity_config",
     "paths.threads_data_path": "выставляет parity_config — туда пишется тред",
     "paths.logs_dump_dir": "выставляет parity_config",
+    # Сценарий матрицы всегда отвечает вызовами инструментов и turn_finish:
+    # переключение политики ответа без инструментов в нём не наблюдаемо.
+    # Текстовые/пустые ответы и повреждённые вызовы при обоих значениях
+    # stop_on_no_tool_response проверяет test_executor_turn_outcome.py.
+    "agent.text_answer_mode": "нет текстового ответа в сценарии; покрытие deny/judge/allow в test_executor_turn_outcome",
+    "agent.stop_on_no_tool_response": "нет ответа без инструментов в сценарии; покрытие opt-in и дефолта в test_executor_turn_outcome",
     # Только TUI: матрица гоняет CLI-прогон.
     "tui.stream": "только TUI",
     "tui.text_answer_mode": "только TUI",

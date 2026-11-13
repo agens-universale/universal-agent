@@ -23,13 +23,17 @@ def unauthorized(request: Request, token: str) -> Response | None:
     if _bearer_ok(header, token):
         return None
     exc = ApiError(401, "invalid_api_key", "invalid api key")
-    return json_response(error_payload(exc), 401)
+    response = json_response(error_payload(exc), 401)
+    response.headers["WWW-Authenticate"] = "Bearer"
+    return response
 
 
 def _bearer_ok(header: str | None, token: str) -> bool:
     if not isinstance(header, str) or not header.startswith("Bearer "):
         return False
     got = header[len("Bearer ") :]
+    if not got.isascii() or not token.isascii():
+        return False
     if len(got) != len(token):
         return False
     return secrets.compare_digest(got, token)

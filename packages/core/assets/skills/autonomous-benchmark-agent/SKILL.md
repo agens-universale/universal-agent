@@ -45,7 +45,7 @@ Allowed when scoped to the benchmark workspace or sandbox:
 
 - inspect files, code, documents, instructions, browser/app state;
 - search locally;
-- edit/create files under allowed paths;
+- edit/create files; the runtime allows, asks, or blocks;
 - run local tests/checks/linters/build commands with bounded timeouts;
 - install project/runtime dependencies via standard package managers (`pip`, `uv`, `npm`, `pnpm`, `yarn`, `cargo`, `go mod`, `bundle`, `composer`, etc.) when build, test, or reproduction requires it; prefer project lockfiles and manifests (`requirements.txt`, `pyproject.toml`, `package.json`, `Cargo.toml`, etc.); use the repo's venv or local toolchain when present; do not ask for permission;
 - operate GUI applications through computer-use tools when required;

@@ -1,6 +1,7 @@
 """Native deployment files use core interpolation without publishing credentials."""
 
 import json
+from copy import deepcopy
 from dataclasses import asdict
 
 import pytest
@@ -11,6 +12,35 @@ from gc_core.context_preparation import settings_from_snapshot
 from gc_core_temporalio.contracts import ActivityCall
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime
+
+
+@pytest.mark.parametrize(
+    "legacy, current, expected",
+    [
+        ("auto", None, "auto"),
+        ("default", None, "default"),
+        ("max", "light", "light"),
+    ],
+)
+def test_old_history_settings_use_compat_without_mutating_snapshot(
+    legacy, current, expected
+):
+    raw = {
+        "level": legacy,
+        "agent_edits": {"cache_max_orig": 12},
+        "backend": {"completions_url": "${ENV:ARCHIVED_ENDPOINT}"},
+    }
+    if current is not None:
+        raw["model"] = current
+    original = deepcopy(raw)
+    rebuilt = settings_from_snapshot(raw, {"launch_root": "/archived/root"})
+    assert rebuilt.settings.model == expected
+    assert rebuilt.settings.agent_edits.snapshots_max_files == 12
+    assert (
+        rebuilt.settings.backend.completions_url == "${ENV:ARCHIVED_ENDPOINT}"
+    )
+    assert rebuilt.runtime.launch_root == "/archived/root"
+    assert raw == original
 
 
 async def test_native_file_interpolates_credentials_before_validation_and_keeps_them_worker_only(

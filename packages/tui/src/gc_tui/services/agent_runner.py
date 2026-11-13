@@ -200,12 +200,33 @@ class AgentRunner:
         """
         if self._marked_stopped or self._stop_requested:
             return
+        self._log_error(exc)
         if self._on_error is None:
             return
         try:
             self._on_error(exc)
         except Exception:
             pass
+
+    def _log_error(self, exc: BaseException) -> None:
+        """Исключение хода — в лог прогона, с трейсбеком.
+
+        Лента TUI показывает одну строку, а в лог оно не попадало вовсе:
+        источник ошибки вроде «Expecting value…» искать было не по чему.
+        Executor ещё не собран (упала сама сборка) — пишем в лог модуля.
+        """
+        ctx = getattr(self._executor, "_ctx", None)
+        logger = getattr(ctx, "logger", None) or _log
+        logger.error(
+            "tui_run_error %s: %s",
+            exc.__class__.__name__,
+            exc,
+            exc_info=exc,
+            extra={
+                "event": "tui_run_error",
+                "error_type": exc.__class__.__name__,
+            },
+        )
 
     def _read_answer_blocking(self, _question: str) -> str | HumanAnswer:
         """Ответ из очереди TUI. БЛОКИРУЕТ поток — звать только вне loop.

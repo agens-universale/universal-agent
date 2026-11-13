@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("color_trace")
+
 pytest.importorskip("textual")
 
 from gc_core.execution.progress import (
