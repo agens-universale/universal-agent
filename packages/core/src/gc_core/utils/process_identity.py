@@ -98,7 +98,8 @@ def boot_id() -> str:
             path = Path("/proc/sys/kernel/random/boot_id")
             value = path.read_text(encoding="utf-8")
         elif sys.platform == "darwin":
-            value = _run([_SYSCTL, "-n", "kern.bootsessionuuid"], check=True)
+            argv = [_SYSCTL, "-n", "kern.bootsessionuuid"]
+            value = _run(argv, check=True).stdout
         else:
             return "0"
     except (OSError, subprocess.SubprocessError):
@@ -118,16 +119,35 @@ def _linux_states(pids: list[int]) -> dict[int, tuple[str, str]]:
 
 
 def _ps_states(pids: list[int]) -> dict[int, tuple[str, str]]:
-    """Один ``ps`` на все pid; отсутствующие он пропускает (код 1)."""
+    """Один ``ps`` на все pid; при ошибке — по одному.
+
+    Отсутствующие pid ``ps`` пропускает, но pid выше предела macOS
+    отклоняет весь вызов с пустым выводом: одна битая запись не должна
+    скрыть живые процессы остальных.
+    """
+    table = _ps_table(pids)
+    if table is not None or len(pids) == 1:
+        return table or {}
+    states: dict[int, tuple[str, str]] = {}
+    for pid in pids:
+        states.update(_ps_table([pid]) or {})
+    return states
+
+
+def _ps_table(pids: list[int]) -> dict[int, tuple[str, str]] | None:
+    """Таблица ``ps`` по pid; ``ps`` завершился ошибкой — ``None``."""
     argv = [_PS, "-o", "pid=,stat=,lstart=", "-p", ",".join(map(str, pids))]
     try:
-        return parse_ps_table(_run(argv, check=False))
+        result = _run(argv, check=False)
     except (OSError, subprocess.SubprocessError):
         return {}
+    if result.returncode:
+        return None
+    return parse_ps_table(result.stdout)
 
 
-def _run(argv: list[str], *, check: bool) -> str:
-    result = subprocess.run(
+def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess:
+    return subprocess.run(
         argv,
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -136,7 +156,6 @@ def _run(argv: list[str], *, check: bool) -> str:
         env={**os.environ, "LC_ALL": "C"},
         check=check,
     )
-    return result.stdout
 
 
 __all__ = [

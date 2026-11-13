@@ -25,6 +25,7 @@ from gc_core.tools.connect_mcp.process_journal import (
     journal_root,
     sweep_orphans,
 )
+from gc_core.utils import process_identity
 from gc_core.utils.process_identity import (
     boot_id,
     parse_linux_stat,
@@ -209,6 +210,7 @@ def test_tools_are_found_by_absolute_path(monkeypatch, tmp_path):
         ["/bin/ps", "-o", "lstart=", "-p", str(os.getpid())],
         capture_output=True,
         text=True,
+        env={**os.environ, "LC_ALL": "C"},
         check=True,
     ).stdout
     monkeypatch.setenv("PATH", str(fake))
@@ -220,6 +222,29 @@ def test_tools_are_found_by_absolute_path(monkeypatch, tmp_path):
 
 
 # --- пускатель и запись ------------------------------------------------------
+
+
+def test_ps_rejecting_one_pid_does_not_hide_others(monkeypatch, tmp_path):
+    """``ps`` macOS на pid выше своего предела отказывает целиком (код 1,
+    пустой вывод): остальные pid опрашиваются по одному."""
+    fake = tmp_path / "ps"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case ",$4," in *,999999999,*)\n'
+        '  echo "ps: process id too large: 999999999" >&2; exit 1;;\n'
+        "esac\n"
+        'for p in $(echo "$4" | tr , " "); do\n'
+        '  [ "$p" = 7 ] || echo "$p S Fri Nov 13 12:11:31 2026"\n'
+        "done\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(process_identity, "_PS", str(fake))
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    states = process_start_states([5, 7, 999999999])
+
+    assert states == {5: ("Fri Nov 13 12:11:31 2026", False)}
 
 
 def test_launch_argv_shape_and_owner(mcp_home):
