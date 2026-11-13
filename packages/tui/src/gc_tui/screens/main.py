@@ -2998,7 +2998,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
 
     def _freshen_turn_line(
-        self, line: TurnLine, summary, error: Optional[str]
+        self,
+        line: TurnLine,
+        summary: Optional[tuple[int, int, int]],
+        error: Optional[str],
     ) -> None:
         """Единственный путь `freshen` на экране: прежняя свежая строка
         оседает — свежей бывает не больше одной."""
@@ -6854,6 +6857,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             [c for c in trace.children if c.id not in self._TRACE_HEADER_IDS]
         )
         self._show_brand()  # defensive: монтирует, только если шапки ещё нет
+        # Снятая строка итога не должна держаться ссылкой до следующего хода.
+        self._fresh_line = None
         # Лента рисуется заново — с действующим флагом мыслей.
         self._thoughts_shown = self._thoughts_on()
 
