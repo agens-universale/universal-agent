@@ -151,3 +151,5 @@ def test_url_credentials_masked():
     )
     compact = '{"u":"https://x.com","e":"a@b.com"}'
     assert r.redact(compact) == compact
+    for odd in ("pa,ss", "pa'ss"):
+        assert odd not in r.redact(f"https://bob:{odd}@git.example/r.git")
