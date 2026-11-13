@@ -904,6 +904,7 @@ NOT_IN_MATRIX = {
     "backend.proxy": "то же",
     "backend.request_timeout_sec": "нужен живой медленный бэкенд — L4",
     "mcp.meta.request_timeout_sec": "нужен живой MCP-сервер — L4",
+    "mcp.meta.tools_cache_ttl": "нужен живой MCP-сервер — L4",
     "mcp.servers": "нужны живые серверы — L3/L4",
     "agent_auth": "внешняя авторизация, нужен живой провайдер",
     "endpoint_presets": "выбор эндпойнта, нужен живой провайдер",

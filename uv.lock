@@ -1302,6 +1302,7 @@ name = "gc-core"
 version = "0.6.0"
 source = { editable = "packages/core" }
 dependencies = [
+    { name = "anyio" },
     { name = "certifi" },
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
@@ -1318,6 +1319,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.5" },
     { name = "certifi" },
     { name = "chardet", specifier = ">=7.4.3" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
