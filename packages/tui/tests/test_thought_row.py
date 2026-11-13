@@ -376,15 +376,40 @@ async def test_collapsed_thought_body_synced_on_expand():
 
 
 @pytest.mark.asyncio
-async def test_settle_syncs_collapsed_body():
+async def test_settle_leaves_collapsed_body_to_expand():
+    """Свёрнутое тело `settle` не трогает (перерисовка скрытого
+    перекладывает экран) — текст получает раскрытие."""
     from gc_tui.widgets.thought_row import ThoughtRow
 
     row = ThoughtRow(text="начало", live=True, attempt=None, seconds=1)
     async with _scrolled_app(row).run_test(size=(60, 20)) as pilot:
         await _scroll_away(pilot)
+        body = row.query_one(".expandable-text")
+        before = str(body.render())
         row.update_live("итог мысли", 3.0, True)
         row.settle()
         await pilot.pause()
-        body = row.query_one(".expandable-text")
-        assert str(body.render()) == "итог мысли"
+        assert str(body.render()) == before
         assert row._pulse_timer is None
+        row.toggle()
+        await pilot.pause()
+        assert str(body.render()) == "итог мысли"
+
+
+@pytest.mark.asyncio
+async def test_offscreen_thought_width_no_full_map():
+    """Ширина строки за экраном — по последней раскладке, без пересборки
+    карты (её всё равно пересоберёт само обновление Static, но один
+    раз, а не на каждое чтение ширины)."""
+    from arrange_counter import count_arranges
+    from gc_tui.widgets.thought_row import ThoughtRow
+
+    row = ThoughtRow(text="начало", live=True, attempt=None, seconds=1)
+    async with _scrolled_app(row).run_test(size=(60, 20)) as pilot:
+        await _scroll_away(pilot)
+        with count_arranges() as counts:
+            width = row._row_width()
+        with count_arranges() as control:
+            row.size  # карту пересобирает
+        assert (counts.full_map, control.full_map) == (0, 1)
+        assert width == 60 - row.parent.scrollbar_size_vertical

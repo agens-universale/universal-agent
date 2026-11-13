@@ -27,7 +27,7 @@ def reply_above(
     области (`region.y < scroll_y`). `placements` — дети ленты в её
     порядке, верх по возрастанию; реплику отличает `is_reply`."""
     index = bisect_left(placements, scroll_y, key=lambda p: p.region.y)
-    for placement in reversed(placements[:index]):
-        if is_reply(placement.widget):
-            return placement.widget
+    for i in range(index - 1, -1, -1):
+        if is_reply(placements[i].widget):
+            return placements[i].widget
     return None

@@ -192,6 +192,25 @@ async def test_handler_idle_during_select(tmp_path):
         assert row not in scr._missed_frames
 
 
+@pytest.mark.asyncio
+async def test_select_end_refreshes_rows_shown_during_select(tmp_path):
+    """Строка стала видна за время выделения — конец выделения освежает
+    её сам, без новой раскладки."""
+    _write_task(tmp_path)
+    row = _live_row()
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr = await _session(pilot, row)
+        _miss_frames(row)
+        scr._selecting = True
+        await _scroll_home(pilot, scr)
+        assert "27с" not in row._content_static.content.plain
+
+        scr._selecting = False
+        await pilot.pause()
+        assert "· 27с" in row._content_static.content.plain
+        assert row not in scr._missed_frames
+
+
 def _read_call_records() -> list[dict]:
     """Ход с идущим чтением: член блока `Explored` и его заголовок."""
     return [

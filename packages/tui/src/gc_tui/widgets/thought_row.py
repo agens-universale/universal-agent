@@ -174,7 +174,6 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         if self._settled:
             return
         self._settled = True
-        self._sync_body()
         self._set(self._text, self._seconds, False)
 
     def toggle(self) -> None:
@@ -261,10 +260,12 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
 
     def _row_width(self) -> int:
         """Ширина строки; до раскладки — ширина ленты (строка в ней во всю
-        ширину)."""
-        if self.size.width > 0:
-            return self.size.width
+        ширину). Обе — по последней раскладке, без поиска в карте экрана:
+        у строки за экраном он пересобирает карту."""
+        width = textual_compat.laid_out_width(self)
+        if width > 0:
+            return width
         parent = self.parent
         if isinstance(parent, Widget):
-            return parent.scrollable_content_region.width
+            return textual_compat.laid_out_scrollable_width(parent)
         return 0
