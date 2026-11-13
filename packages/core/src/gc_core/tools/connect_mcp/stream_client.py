@@ -734,7 +734,12 @@ async def _call_tool_stream_sse_async(
                 session, tool_name, arguments, timeout
             )
 
-    # Преобразуем контент в JSON-совместимый вид.
+    return _result_dict(result)
+
+
+def _result_dict(result: Any) -> Dict[str, Any]:
+    """Результат ``tools/call`` в JSON-совместимый вид:
+    ``{"content": [...], "isError": bool}``."""
     content_items: List[Any] = []
     for item in getattr(result, "content", []) or []:
         if hasattr(item, "model_dump"):
@@ -743,12 +748,9 @@ async def _call_tool_stream_sse_async(
             )
         else:
             content_items.append(item)
-
-    is_error = bool(getattr(result, "isError", False))
-
     return {
         "content": content_items,
-        "isError": is_error,
+        "isError": bool(getattr(result, "isError", False)),
     }
 
 
@@ -793,18 +795,7 @@ async def _acall_tool_on_session(
     timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     result = await _call_tool_request(s, tool_name, arguments, timeout)
-    content_items: List[Any] = []
-    for item in getattr(result, "content", []) or []:
-        if hasattr(item, "model_dump"):
-            content_items.append(
-                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
-            )
-        else:
-            content_items.append(item)
-    return {
-        "content": content_items,
-        "isError": bool(getattr(result, "isError", False)),
-    }
+    return _result_dict(result)
 
 
 async def _alist_tools_on_session(s: ClientSession) -> List[Dict[str, Any]]:
@@ -1100,26 +1091,7 @@ async def _call_tool_stream_http_async(
                     result = await _call_tool_request(
                         session, tool_name, arguments, timeout
                     )
-
-                    content_items: List[Any] = []
-                    for item in getattr(result, "content", []) or []:
-                        if hasattr(item, "model_dump"):
-                            content_items.append(
-                                item.model_dump(
-                                    by_alias=True,
-                                    mode="json",
-                                    exclude_unset=True,
-                                )
-                            )
-                        else:
-                            content_items.append(item)
-
-                    is_error = bool(getattr(result, "isError", False))
-
-                    return {
-                        "content": content_items,
-                        "isError": is_error,
-                    }
+                    return _result_dict(result)
         except McpError as exc:
             _raise_rpc_error(exc)
             last_error = exc
@@ -1445,21 +1417,7 @@ async def _call_tool_stream_stdio_async(
             await _ainitialize_stdio(session, log_path)
             result = await _call_tool_request(session, tool_name, arguments)
 
-    content_items: List[Any] = []
-    for item in getattr(result, "content", []) or []:
-        if hasattr(item, "model_dump"):
-            content_items.append(
-                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
-            )
-        else:
-            content_items.append(item)
-
-    is_error = bool(getattr(result, "isError", False))
-
-    return {
-        "content": content_items,
-        "isError": is_error,
-    }
+    return _result_dict(result)
 
 
 async def _aopen_persistent_stdio_session(
