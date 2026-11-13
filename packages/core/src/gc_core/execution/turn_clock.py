@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from gc_core.execution.environment import utc_now
+from gc_core.execution.environment import utc_clock
 from gc_core.execution.ports import port
 
 Mono = Callable[[], float]
@@ -37,10 +37,16 @@ class TurnClock:
     первого ``begin_wait`` до последнего ``end_wait``.
     """
 
-    def __init__(self, *, mono: Mono, wall: Wall) -> None:
+    def __init__(
+        self,
+        *,
+        mono: Mono,
+        wall: Wall,
+        lock_factory: Callable[[], Any] | None = None,
+    ) -> None:
         self._mono = mono
         self._wall = wall
-        self._lock = threading.Lock()
+        self._lock = (lock_factory or threading.Lock)()
         self._started = mono()
         self._ended: float | None = None
         self._waited = 0.0
@@ -57,8 +63,14 @@ class TurnClock:
         self._open: dict[str, tuple[float, float]] = {}
 
     @classmethod
-    def start(cls, *, mono: Mono, wall: Wall) -> "TurnClock":
-        return cls(mono=mono, wall=wall)
+    def start(
+        cls,
+        *,
+        mono: Mono,
+        wall: Wall,
+        lock_factory: Callable[[], Any] | None = None,
+    ) -> "TurnClock":
+        return cls(mono=mono, wall=wall, lock_factory=lock_factory)
 
     @property
     def closed(self) -> bool:
@@ -171,7 +183,7 @@ def turn_clock_sources(ctx: Any) -> tuple[Mono, Wall]:
     """Монотоника рантайма (порт ``operations``) и стена среды исполнения."""
     operations = port(ctx, "operations")
     mono = operations.monotonic if operations is not None else time.monotonic
-    return mono, utc_now
+    return mono, utc_clock()
 
 
 def bind_turn_clock(ctx: Any, clock: TurnClock) -> None:

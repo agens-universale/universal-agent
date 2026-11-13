@@ -14,6 +14,7 @@ import json
 import pytest
 
 pytest.importorskip("textual")
+pytestmark = pytest.mark.usefixtures("color_trace")
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome

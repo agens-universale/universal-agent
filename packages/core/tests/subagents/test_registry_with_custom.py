@@ -110,3 +110,22 @@ class TestRequiredToolsAlwaysGranted:
             "subagent_required_tools_kept" in m and "turn_finish" in m
             for m in msgs
         )
+
+    def test_todo_stop_is_honoured_without_warning(self, tmp_path, caplog):
+        # session_todo не в служебном ядре: личный запрет из файла
+        # исполняется, варнинга «оставлен» на него быть не должно.
+        _write(
+            tmp_path,
+            "a.md",
+            "subagent_alpha",
+            extra="stop_tools: [session_todo]\n",
+        )
+        with caplog.at_level(logging.WARNING):
+            defs = resolve_subagent_definitions(
+                make_settings({"agent.subagents_dir": str(tmp_path)})
+            )
+        assert "subagent_alpha" in defs
+        assert not any(
+            "subagent_required_tools_kept" in r.getMessage()
+            for r in caplog.records
+        )

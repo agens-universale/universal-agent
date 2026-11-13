@@ -98,6 +98,12 @@ ALLOWED: dict[str, str] = {
     # MCP.
     _CORE + "mcp_runtime/state.py": _MCP_RUNTIME,
     _CORE + "tools/connect_mcp/api.py": "медиа MCP вне треда",
+    _CORE + "tools/connect_mcp/stderr_capture.py": (
+        "pipe и ограниченный stderr-лог MCP — диагностика, не данные агента"
+    ),
+    _CORE + "tools/connect_mcp/transport.py": (
+        "лог stderr stdio MCP-сервера — диагностика, не данные агента"
+    ),
     _MCP + "install.py": _MCP_RUNTIME,
     _MCP + "process_supervisor.py": _MCP_RUNTIME,
     _MCP + "runtime/wiring.py": _MCP_RUNTIME,

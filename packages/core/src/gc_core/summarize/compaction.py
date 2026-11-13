@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import (
+    AbstractSet,
     Any,
     Callable,
     Dict,
@@ -27,6 +28,7 @@ from gc_core.message_policy.mode_messages import (
 from gc_core.message_policy.todo_context import (
     render_todo_for_persistent_state,
 )
+from gc_core.message_policy.tool_availability import available_tool_names
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -190,7 +192,10 @@ def apply_summary_state_patch(
     intent_log_preview_chars: int | None = None,
     kept_messages: Sequence[Mapping[str, Any]] = (),
     can_propose_plan: bool,
+    available_tools: AbstractSet[str] | None = None,
 ) -> str:
+    """``available_tools`` — фактический набор тулов рана: подсказки сводки
+    про отобранные тулы не попадают в тело; ``None`` — набор неизвестен."""
     shared = _ensure_shared(state)
 
     snapshot = _patched_snapshot(
@@ -236,6 +241,7 @@ def apply_summary_state_patch(
         images_block=render_summary_images_block(
             collapsed if isinstance(collapsed, list) else [],
             kept=kept_messages,
+            available_tools=available_tools,
         ),
         # План — дело корневого агента: общее состояние сессии субагент
         # делит с родителем. Объявленный режим у каждого агента свой
@@ -247,6 +253,7 @@ def apply_summary_state_patch(
             getattr(state, "mode_announced", None),
             can_propose_plan=can_propose_plan,
         ),
+        available_tools=available_tools,
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(
@@ -555,6 +562,9 @@ async def arun_summary_compaction(
         intent_log_preview_chars=preview_chars,
         kept_messages=kept_messages,
         can_propose_plan=can_propose_plan,
+        # Набор рана, а не конфиг: tools/stop_tools файла субагента и
+        # не поднявшийся MCP глобальный stop_tools не покажет.
+        available_tools=available_tool_names(ctx, state),
     )
     if isinstance(trace, dict):
         _fill_trace_final_output(

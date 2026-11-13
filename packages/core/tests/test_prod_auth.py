@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from gc_core.config_modules.auth import build_auth_connector
-from gc_core.utils.prod_auth import AuthConnector
+from gc_core.utils.prod_auth import AuthConnector, AuthEntryPointError
 from gc_testkit.settings import make_settings
 
 
@@ -173,3 +174,60 @@ def test_build_auth_connector_none_without_agent_auth():
         build_auth_connector(make_settings({"backend.proxy": "socks5h://x:1"}))
         is None
     )
+
+
+def _auth_response(status, body, content_type="application/json"):
+    import httpx
+
+    return httpx.Response(
+        status,
+        text=body,
+        headers={"content-type": content_type},
+        request=httpx.Request("POST", "https://auth.example/token"),
+    )
+
+
+def _create_token_with(response):
+    with patch(
+        "gc_core.utils.prod_auth._NO_NETRC_SESSION.post",
+        return_value=response,
+    ):
+        return AuthConnector.create_token(
+            "https://auth.example/token", "e", "1", "p", "1", "hex", "l", True
+        )
+
+
+def test_create_token_empty_body_is_clear_auth_error():
+    """Пустое тело 200 от сервера авторизации — понятная ошибка, а не
+    «Expecting value: line 1 column 1 (char 0)»."""
+    with pytest.raises(AuthEntryPointError) as info:
+        _create_token_with(_auth_response(200, ""))
+
+    text = str(info.value)
+    assert "HTTP 200" in text
+    assert "0 bytes" in text
+    assert "Expecting value" not in text
+
+
+def test_create_token_error_status_is_clear_auth_error():
+    with pytest.raises(AuthEntryPointError) as info:
+        _create_token_with(
+            _auth_response(503, "<html>down</html>", "text/html")
+        )
+
+    assert "HTTP 503" in str(info.value)
+
+
+def test_create_token_without_access_token_is_clear_auth_error():
+    with pytest.raises(AuthEntryPointError) as info:
+        _create_token_with(_auth_response(200, '{"detail": "nope"}'))
+
+    assert "access_token" in str(info.value)
+
+
+def test_create_token_valid_body_passes():
+    body = '{"access_token": "t", "expires_in": 60}'
+    assert _create_token_with(_auth_response(200, body)) == {
+        "access_token": "t",
+        "expires_in": 60,
+    }

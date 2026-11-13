@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -14,9 +15,12 @@ from gc_server.chat.http_common import (
     unauthorized,
 )
 from gc_server.chat.http_guard import install_http_guard
+from gc_server.chat.model_errors import error_http_status, model_api_error
 from gc_server.chat.model_route import AGENT_ID, models_body
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.turn import TurnRun
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(facade: ResponsesFacade) -> FastAPI:
@@ -88,6 +92,10 @@ async def read_response(response_id: str, request: Request) -> Response:
         return json_response(await facade.get(response_id))
     except ApiError as exc:
         return json_response(error_payload(exc), exc.status)
+    except Exception as exc:
+        logger.exception("responses read failed")
+        error = model_api_error(exc)
+        return json_response(error_payload(error), error.status)
 
 
 async def cancel_response(response_id: str, request: Request) -> Response:
@@ -99,6 +107,10 @@ async def cancel_response(response_id: str, request: Request) -> Response:
         return json_response(await facade.cancel(response_id))
     except ApiError as exc:
         return json_response(error_payload(exc), exc.status)
+    except Exception as exc:
+        logger.exception("responses cancel failed")
+        error = model_api_error(exc)
+        return json_response(error_payload(error), error.status)
 
 
 async def _open_turn(facade: ResponsesFacade, body: Any) -> TurnRun | Response:
@@ -107,8 +119,9 @@ async def _open_turn(facade: ResponsesFacade, body: Any) -> TurnRun | Response:
     except ApiError as exc:
         return json_response(error_payload(exc), exc.status)
     except Exception as exc:
-        err = ApiError(500, "server_error", str(exc) or "server error")
-        return json_response(error_payload(err), 500)
+        logger.exception("responses open turn failed")
+        err = model_api_error(exc)
+        return json_response(error_payload(err), err.status)
 
 
 async def _finished_body(run: TurnRun, request: Request) -> Response:
@@ -117,5 +130,9 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
     except Exception:
         await run.request_stop()
         raise
-    code = 500 if payload.get("status") == "failed" else 200
+    code = (
+        error_http_status(payload)
+        if payload.get("status") == "failed"
+        else 200
+    )
     return json_response(payload, code)

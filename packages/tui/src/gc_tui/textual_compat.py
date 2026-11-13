@@ -26,7 +26,8 @@
 низ уезжает на разницу до следующего кадра; контент ниже окна — прокрутка
 уходит в минус, контент прижат к низу окна. `AnchoredScroll` считает
 якорную прокрутку от высоты той же раскладки, не ниже нуля; на иной
-версии Textual — обычный якорь.
+версии Textual — обычный якорь. Прямая запись позиции ползунка также
+обходит сброс кеша рисунка: при якорной раскладке сбрасываем его явно.
 """
 
 from __future__ import annotations
@@ -114,6 +115,10 @@ class AnchoredScroll(VerticalScroll):
         # Версия — до приватного состояния якоря: на иной его может не быть.
         if scroll and textual_is_patched_version() and self._anchor_held():
             value = self._anchor_y
+            if reactive is Widget.scroll_y:
+                # Compositor пишет position ползунка напрямую, мимо reactive:
+                # даже при верной позиции кеш может хранить прежний рисунок.
+                self.vertical_scrollbar.refresh()
         super().set_reactive(reactive, value)
 
     def _anchor_held(self) -> bool:

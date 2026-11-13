@@ -170,7 +170,7 @@ async def test_root_private_request_routing_and_recorded_replay(
                 "test": {
                     "workspace": str(tmp_path),
                     "core": {
-                        "level": "auto",
+                        "model": "auto",
                         "models": models,
                         "slots": {
                             "light": "fast",

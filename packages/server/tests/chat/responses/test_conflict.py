@@ -572,14 +572,17 @@ async def test_late_finalizer_cannot_replace_new_admission_summary(tmp_path):
         reservation="new",
     )
     await index.save(winner)
-    await index.save(
-        replace(
-            winner,
-            response_id="resp_00000000-0000-0000-0000-000000000002",
-            status="failed",
-            reservation="old",
+    from gc_core.threads.errors import ThreadConflict
+
+    with pytest.raises(ThreadConflict):
+        await index.save(
+            replace(
+                winner,
+                response_id="resp_00000000-0000-0000-0000-000000000002",
+                status="failed",
+                reservation="old",
+            )
         )
-    )
     summary = index.summary(await index.threads.get(key))
     assert summary["latest_response_id"] == winner.response_id
     assert summary["status"] == "in_progress"

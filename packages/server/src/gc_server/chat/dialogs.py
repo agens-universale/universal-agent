@@ -111,6 +111,11 @@ async def dialog_turns(
     return turns
 
 
+async def dialog_exists(index: ResponseIndex, thread_id: str) -> bool:
+    """Есть хотя бы один сохранённый ход, даже если его каталог удалён."""
+    return await _thread_records(index, thread_id) is not None
+
+
 async def dialog_folder(
     index: ResponseIndex, thread_id: str, relative: str
 ) -> dict | None:

@@ -20,20 +20,24 @@ from gc_core.utils.backend_errors import (
     is_model_unavailable_error,
     is_previous_response_cache_miss,
     is_retriable_backend_error,
+    known_provider_code,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
 def _provider_failure(exc, message, details=None):
+    code = known_provider_code(exc)
+    details = {**(details or {}), **({"provider_code": code} if code else {})}
     return ModelFailure(
         kind="provider",
         error_type=type(exc).__name__,
         message=message,
-        details=details or {},
+        details=details,
         auth_error=is_auth_error(exc),
         retryable=is_retriable_backend_error(exc),
         unavailable=is_model_unavailable_error(exc),
-        context_overflow=is_context_overflow_error(exc),
+        context_overflow=is_context_overflow_error(exc)
+        or code == "context_length_exceeded",
         response_cache_miss=is_previous_response_cache_miss(exc),
         image_rejection=is_image_rejection_error(exc),
         image_request=is_image_request_error(exc),

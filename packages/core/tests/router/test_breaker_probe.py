@@ -311,9 +311,12 @@ def test_without_patch_marker_turn_start_fails_as_before():
 def test_durable_turn_start_clears_open_alias_without_probe():
     """Temporal: ход ждёт модель по политике повторов activity, пробы нет —
     начало хода снимает отметку, и activity получает пустой снимок."""
+    from contextlib import nullcontext
+
     ctx = _ctx()
     s = _state(ctx)
     ctx.durable_execution = True
+    ctx.lock_factory = nullcontext
     ctx.execution_patch = lambda patch: True
     ctx.operations = types.SimpleNamespace(monotonic=time.monotonic)
     breaker = ctx.model_router.breaker

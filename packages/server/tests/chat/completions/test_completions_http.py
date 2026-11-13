@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 from gc_server.chat.completions.facade import CompletionsFacade
 from gc_server.chat.completions.history import SYSTEM
@@ -253,3 +255,27 @@ def test_report_equal_to_bounced_prose_stays_in_answer(tmp_path):
     agent.last = _finish_args("Сделал.")
     content = _ask(client)
     assert content == "<think>\nСделал.\n</think>\nСделал."
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_no_tool_response_finishes_with_public_error(tmp_path, stream):
+    from gc_core.execution.constants import (
+        NO_TOOL_RESPONSE,
+        NO_TOOL_RESPONSE_MESSAGE,
+    )
+
+    client, agent = _finish_app(tmp_path)
+    agent.last = ""
+    agent.executor.last_terminal_outcome = NO_TOOL_RESPONSE
+    with client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "GC-UA",
+                "messages": [{"role": "user", "content": "вопрос"}],
+                "stream": stream,
+            },
+        )
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == NO_TOOL_RESPONSE
+    assert response.json()["error"]["message"] == NO_TOOL_RESPONSE_MESSAGE

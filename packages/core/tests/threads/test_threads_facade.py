@@ -309,3 +309,46 @@ def test_run_sync_refuses_store_that_waits():
 
     with pytest.raises(RuntimeError, match="локального"):
         run_sync(Threads(Waiting()).get(KEY))
+
+
+async def test_file_thread_inventory_does_not_scan_on_event_loop(
+    tmp_path, monkeypatch
+):
+    import threading
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.facade import Threads
+
+    store = FileThreadStore(str(tmp_path))
+    matching = store._matching
+    loop_thread = threading.get_ident()
+    scanned = []
+
+    def checked(query):
+        scanned.append(threading.get_ident())
+        assert threading.get_ident() != loop_thread
+        return matching(query)
+
+    monkeypatch.setattr(store, "_matching", checked)
+    assert [
+        thread
+        async for thread in Threads(store).iter_threads(system="responses")
+    ] == []
+    assert scanned
+
+
+async def test_file_inventory_still_supports_explicit_sync_bridge(tmp_path):
+    from gc_core.threads.facade import Threads, run_sync
+    from gc_core.threads.file_store import FileThreadStore
+
+    async def inventory():
+        return [
+            record
+            async for record in Threads(
+                FileThreadStore(str(tmp_path))
+            ).iter_threads()
+        ]
+
+    # TUI can call its synchronous bridge while its own UI loop is running.
+    assert run_sync(inventory()) == []
+    # The context flag must not leak back into ordinary async operations.
+    assert await inventory() == []
