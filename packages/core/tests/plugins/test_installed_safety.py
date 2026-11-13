@@ -133,10 +133,7 @@ def test_failed_update_write_keeps_plugin_disabled(tmp_path, monkeypatch):
         real_write(root, meta)
 
     monkeypatch.setattr(installed, "_write_meta", flaky)
-    try:
-        installed.update("p", root=store)
-    except OSError:
-        pass
+    installed.update("p", root=store)
     monkeypatch.undo()
 
     assert [p.enabled for p in list_installed(store)] == [False]

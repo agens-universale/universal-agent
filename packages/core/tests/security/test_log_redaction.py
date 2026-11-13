@@ -149,3 +149,5 @@ def test_url_credentials_masked():
     assert r.redact("see https://git.example/r.git") == (
         "see https://git.example/r.git"
     )
+    compact = '{"u":"https://x.com","e":"a@b.com"}'
+    assert r.redact(compact) == compact

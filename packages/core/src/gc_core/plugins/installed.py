@@ -92,10 +92,15 @@ def _read_meta(root: Path) -> dict[str, dict]:
 
 
 def _write_meta(root: Path, meta: dict[str, dict]) -> None:
+    """Реестр целиком: временный файл и замена — оборванная запись не
+    оставляет полупустого реестра."""
     root.mkdir(parents=True, exist_ok=True)
-    _meta_path(root).write_text(
+    path = _meta_path(root)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    tmp.replace(path)
 
 
 def _safe_name(name: str) -> str:

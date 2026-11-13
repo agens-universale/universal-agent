@@ -474,3 +474,18 @@ def test_card_source_hides_url_credentials():
     assert _source(item) == (
         "https://***REDACTED***@git.example/plug.git@01234567"
     )
+
+
+@pytest.mark.parametrize("what", ["Хуки", "MCP-серверы", "Хуки и MCP-серверы"])
+def test_untrusted_notice_belongs_to_its_plugin(what):
+    """Уведомление о недоверенном плагине — предупреждение в его карточке,
+    в том числе когда не запускаются его MCP-серверы."""
+    from gc_tui.services.plugin_cards import notice_owner
+
+    notice = (
+        f"{what} плагина plug из конфига проекта не запускаются. Чтобы "
+        "включить, установите плагин командой `gc-plugin install` или "
+        "добавьте его в личный конфиг"
+    )
+
+    assert notice_owner(notice) == "plug"
