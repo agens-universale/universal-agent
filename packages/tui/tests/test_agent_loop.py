@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import logging
 import os
+import signal
 import threading
 import time
 from types import SimpleNamespace
@@ -681,6 +683,36 @@ def test_shutdown_cancels_cleanup_past_the_budget(agent_loop):
     assert not agent_loop.thread.is_alive()
 
 
+def test_shutdown_cancels_cleanup_born_in_the_reserve(agent_loop):
+    """Отмена уборки в запасе рождает следующую (дочистка остальных сессий
+    MCP) — её тоже отменяют, а не бросают недоигравшей."""
+    started = threading.Event()
+    seen: list[str] = []
+
+    async def _deaf(name: str, then=None) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            seen.append(name)
+            if then is not None:
+                asyncio.get_running_loop().create_task(then())
+            raise
+
+    async def _turn() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(_deaf("first", then=lambda: _deaf("second")))
+
+    agent_loop.submit(_turn())
+    assert started.wait(5)
+    agent_loop.shutdown(timeout=2.0)
+
+    assert seen == ["first", "second"]
+    assert not agent_loop.thread.is_alive()
+
+
 #: stdio-сервер с медленным закрытием: глух к концу stdin и к SIGTERM —
 #: закрытие сессии не укладывается в срок выхода, выходит только по SIGKILL.
 _SLOW_CLOSE_SERVER = r"""
@@ -729,9 +761,13 @@ def test_exit_mid_turn_leaves_no_persistent_mcp_process(agent_loop, tmp_path):
 
     agent_loop.submit(_turn())
     assert started.wait(5)
-    agent_loop.shutdown(timeout=3.0)
+    try:
+        agent_loop.shutdown(timeout=3.0)
 
-    assert _exits_within(pid, 2.0)
+        assert _exits_within(pid, 2.0)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGKILL)  # не оставить сервер при падении
 
 
 def _exits_within(pid: int, timeout: float) -> bool:

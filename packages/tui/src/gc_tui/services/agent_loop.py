@@ -183,11 +183,13 @@ class AgentLoop:
     def _cancel_leftovers(self, loop: asyncio.AbstractEventLoop) -> None:
         """Отменить живые задачи и дождаться их вместе с уборкой.
 
-        Уборка отменённой задачи бывает отдельной задачей, родившейся уже
-        при отмене (закрытие сессии MCP под ``shield``): её ждём до срока
-        выхода, не отменяя, — брошенная при закрытии цикла, она не доиграет,
-        и процесс сервера переживёт TUI. Что не уложилось, отменяется в
-        последнем запасе: закрытие сессии на отмене добивает процесс.
+        Уборка, родившаяся уже после снимка отдельной задачей (закрытие
+        сессии MCP под ``shield``), доигрывает до срока выхода без отмены:
+        брошенная при закрытии цикла, она не доиграет, и процесс сервера
+        переживёт TUI. Что не уложилось, отменяется в последнем запасе —
+        повторно, пока задачи не кончатся: отмена уборки родит следующую
+        (дочистку остальных сессий), а закрытие сессии на отмене добивает
+        процесс сразу.
         """
         for task in _live_tasks(loop):
             task.cancel()
@@ -196,12 +198,16 @@ class AgentLoop:
             loop.run_until_complete(
                 asyncio.wait(live, timeout=self._left() - reserve)
             )
-        for task in live:
-            task.cancel()
-        if live:
+        end = time.monotonic() + max(reserve, 0.1)
+        while live and (left := end - time.monotonic()) > 0:
+            for task in live:
+                task.cancel()
             loop.run_until_complete(
-                asyncio.wait(live, timeout=max(reserve, 0.1))
+                asyncio.wait(
+                    live, timeout=left, return_when=asyncio.FIRST_COMPLETED
+                )
             )
+            live = _live_tasks(loop)
 
     def _left(self) -> float:
         """Остаток срока выхода; без `shutdown` срока нет — ноль и меньше."""
