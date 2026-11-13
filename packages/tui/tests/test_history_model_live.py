@@ -12,7 +12,10 @@ from feed_dump import (
     feed_live,
     load_history_fixture,
 )
-from gc_testkit.develop_files import record_from_meta
+from gc_testkit.develop_files import (
+    append_new_thread_messages,
+    record_from_meta,
+)
 from gc_testkit.tui_support import tui_settings
 from gc_tui.models import TraceEvent
 from gc_tui.services.history_model import (
@@ -63,6 +66,7 @@ def _state(model: HistoryModel) -> dict:
     return {
         "items": model.items,
         "turn_starts": model.turn_starts,
+        "reply_points": model.reply_points,
         "segment_starts": model.segment_starts,
         "rendered_ids": model.rendered_ids,
         "response_tail": [p for p in model.response_tail if p is not None],
@@ -139,6 +143,13 @@ async def test_withdrawn_is_permanent(tmp_path):
         msg_id = await _withdrawn_reply(pilot, threads_dir)
         scr._run_orphan_cleanups()
         assert scr._pending_orphan_cleanups == []
+        segments, _cursor = scr._store.read_history(_TID)
+        ids = [
+            (rec.get("payload") or {}).get("id")
+            for seg in segments
+            for rec in seg["messages"]
+        ]
+        assert msg_id not in ids
         assert msg_id in scr._feed_history.withdrawn
         assert msg_id not in scr._feed_history.rendered_ids
 
@@ -163,6 +174,61 @@ async def test_rebuild_keeps_withdrawn_reply_out(tmp_path):
         ids = {ev.message_id for ev in scr._feed_history.events()}
         assert msg_id not in ids
         assert msg_id in scr._feed_history.withdrawn
+
+
+@pytest.mark.asyncio
+async def test_rebuild_settles_like_live_on_repeated_reply(tmp_path):
+    """Повтор реплики (preserved-копия) за записью итога — начало хода и
+    при пересборке: строка итога оседает, как у живого пути."""
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_testkit.thread_writes import turn_outcome_record
+    from gc_tui.widgets.turn_line import TurnLine
+
+    threads_dir = tmp_path / "threads"
+    reply = {"id": "u1", "role": "user", "content": "вопрос"}
+    answer = {
+        "id": "a1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "ответ"}],
+    }
+    outcome = TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-11-13T10:00:00+00:00",
+        ended_at="2026-11-13T10:00:12+00:00",
+        duration_sec=12.0,
+        error=None,
+    )
+    async with _app(threads_dir).run_test(size=(160, 45)) as pilot:
+        scr = pilot.app.screen
+        (threads_dir / f"data_cli_{_TID}.jsonl").write_text(
+            "", encoding="utf-8"
+        )
+        assert scr.attach_active_task(_TID, is_resume=True)
+        append_new_thread_messages(
+            str(threads_dir), "cli", _TID, [reply, answer], set()
+        )
+        turn_outcome_record(str(threads_dir), "cli", _TID, outcome)
+        scr._poll_trace_tail()
+        # Копия той же реплики (тот же id) — строкой файла, без дедупа.
+        append_new_thread_messages(
+            str(threads_dir), "cli", _TID, [dict(reply)], set(), start_seq=2
+        )
+        scr._poll_trace_tail()
+        await pilot.pause()
+        live = [line.is_fresh for line in scr.query(TurnLine)]
+        live_points = list(scr._feed_history.reply_points)
+
+        scr._rebuild_from_store()
+        await pilot.pause()
+        rebuilt = [line.is_fresh for line in scr.query(TurnLine)]
+
+    assert live == [False]
+    assert rebuilt == live
+    assert scr._feed_history.reply_points == live_points
+    assert len(live_points) == 2
 
 
 def test_build_history_skips_withdrawn():

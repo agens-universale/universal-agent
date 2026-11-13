@@ -12,7 +12,7 @@ import os
 import threading
 import time
 import uuid
-from collections import namedtuple
+from collections import Counter, namedtuple
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
@@ -207,7 +207,6 @@ from gc_tui.services.trace_mapper import (
     RenderContext,
     coerce_args,
     collect_render_context,
-    response_tail,
     with_closing_replies,
 )
 from gc_tui.services.trace_render import (
@@ -2678,8 +2677,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Модель целиком — в ленту теми же виджетами, что живой путь
         рисует запись за записью."""
         history = self._feed_history
-        turn_starts = set(history.turn_starts)
+        replies = Counter(history.reply_points)
         for i, item in enumerate(history.items):
+            self._settle_for_replies(replies[i])
             if item.kind == "model_choice":
                 self._restore_model_mark(item.side)
             elif item.kind == "outcome":
@@ -2687,9 +2687,15 @@ class TraceScreen(TraceFollowMixin, Screen):
             elif item.kind == "compaction":
                 self._render_event(item.event)
             else:
-                if i in turn_starts:
-                    self._turn_started_after_record(live=False)
                 self._draw_event(item.event, live=False)
+        # Повтор реплики последней записью — тоже начало хода.
+        self._settle_for_replies(replies[len(history.items)])
+
+    def _settle_for_replies(self, count: int) -> None:
+        """Реплики (и повторы preserved-копий) перед элементом — столько
+        же начал хода, сколько у живого пути."""
+        for _ in range(count):
+            self._turn_started_after_record(live=False)
 
     def _render_records(
         self,
@@ -2704,12 +2710,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
         ]
-        history = self._feed_history
-        if live:
-            # Ответ модели мог начаться в прошлой пачке опроса: его текст
-            # нужен вызову turn_finish, пришедшему сейчас.
-            payloads = [*history.response_tail, *payloads]
-        history.response_tail = response_tail(payloads)
+        # Ответ модели мог начаться в прошлой пачке опроса: его текст
+        # нужен вызову turn_finish, пришедшему сейчас.
+        payloads = self._feed_history.carry_response_tail(payloads, live=live)
         if context is None:
             context = self._render_context(payloads)
         elif live:
@@ -5889,7 +5892,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if tid == self._active_task_id:
             # Начался новый ход: запись итога прошлого — уже не его строка,
             # она оседает в ленте до реплики нового.
-            self._feed_history.outcome_superseded = True
+            self._feed_history.supersede_outcome()
             self._closed_turn_summary = None
             self._settle_turn_line()
 
@@ -8803,7 +8806,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._was_running = False
         self._watched_runner = None
         self._watched_run_seq = None
-        self._feed_history.outcome_superseded = False
+        self._feed_history.restore_outcome()
         # Строка снятой реплики снята в этом же обработчике и ещё в `query`.
         lines = [
             w

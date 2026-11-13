@@ -82,6 +82,10 @@ class HistoryModel:
     context: RenderContext = field(default_factory=RenderContext)
     items: list[HistoryItem] = field(default_factory=list)
     turn_starts: list[int] = field(default_factory=list)
+    # Позиции (индекс следующего элемента ``items``) каждой настоящей
+    # реплики в порядке файла, и повтора preserved-копии тоже: за ними
+    # строка итога оседает (важна позиция в файле, а не повтор).
+    reply_points: list[int] = field(default_factory=list)
     rendered_ids: set[str] = field(default_factory=set)
     response_tail: list = field(default_factory=list)
     segment_starts: list[int] = field(default_factory=list)
@@ -140,6 +144,23 @@ class HistoryModel:
         elif kind == "model_choice":
             self.last_model_choice = rec
 
+    def carry_response_tail(self, payloads: list, *, live: bool) -> list:
+        """Хвост ответа после порции ``payloads``. Живой опрос несёт хвост
+        прошлой пачки: текст ответа и его вызов приходят разными пачками.
+        Возвращает payload порции вместе с хвостом."""
+        if live:
+            payloads = [*self.response_tail, *payloads]
+        self.response_tail = response_tail(payloads)
+        return payloads
+
+    def supersede_outcome(self) -> None:
+        """Начался новый ход: запись итога прошлого — уже не его строка."""
+        self.outcome_superseded = True
+
+    def restore_outcome(self) -> None:
+        """Ход снят откатом: прошлый ход снова последний."""
+        self.outcome_superseded = False
+
     def start_segment(self) -> None:
         """Следующие элементы — новая часть треда (после сжатия)."""
         self.segment_starts.append(len(self.items))
@@ -173,6 +194,7 @@ class HistoryModel:
         real_reply = bool(extract_real_user_message_text(payload))
         if real_reply:
             self.outcome_superseded = True
+            self.reply_points.append(len(self.items))
         mid = payload.get("id")
         if mid is not None:
             if mid in self.rendered_ids:
