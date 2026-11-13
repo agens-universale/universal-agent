@@ -11,7 +11,10 @@
 """
 
 import base64
+import errno
+import os
 import posixpath
+import re
 import shlex
 import stat as stat_module
 import uuid
@@ -30,6 +33,7 @@ from gc_core.utils.file_text import (
     encode_text_for_write,
 )
 from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
+from gc_core.utils.text_preview import head_tail_preview
 
 #: Потолок на один вопрос «где мы» при сборке контекста. Со стороны ядра
 #: дедлайна нет, и без него медленный контейнер задерживал бы сборку сколько
@@ -39,6 +43,25 @@ CWD_PRIME_TIMEOUT_SEC = 20
 #: Потолок на запуск фоновой команды. Сам запуск — это `exec`, который только
 #: отцепляет команду и печатает pid, ответ приходит за доли секунды.
 BACKGROUND_SPAWN_TIMEOUT_SEC = 30
+
+#: Предел причины отказа команды ФС в сообщении модели (как у пробы среды).
+_FAILURE_DETAIL_CHARS = 500
+
+#: Маркеры find без ``-printf`` (busybox) в stderr.
+_NO_PRINTF_FIND = re.compile(
+    "printf|unrecognized|bad option|invalid predicate|unknown predicate",
+    re.IGNORECASE,
+)
+_PERMISSION_DENIED = re.compile("permission denied", re.IGNORECASE)
+_IS_A_DIRECTORY = re.compile("is a directory", re.IGNORECASE)
+#: Путь в кавычках в строке ошибки: GNU ``'P'``, старые coreutils ``‘P’``.
+_QUOTED = re.compile("'[^']*'|‘[^’]*’")
+
+
+def _missing_file(path: str) -> FileNotFoundError:
+    """«Файла нет» с причиной и путём, как у локального бэкенда:
+    ``FileNotFoundError(path)`` модель видела бы голым путём."""
+    return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
 
 
 def build_find_walk_command(
@@ -95,7 +118,7 @@ class PosixShellFsMixin:
     async def read(self, path: str) -> str:
         # Raw bytes via download, then same codec as local ``read_text_for_edit``.
         if not await self.exists(path):
-            raise FileNotFoundError(path)
+            raise _missing_file(path)
         text = decode_text_best_effort(await self.read_bytes(path))
         if text is not None:
             return text
@@ -119,15 +142,23 @@ class PosixShellFsMixin:
         n = max(0, int(n))
         if n == 0:
             return b""
-        # GNU coreutils on the remote side (same assumption as ``stat -c`` / ``find -printf``).
+        # ``head -c`` есть у GNU, BSD и busybox.
         # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool cap.
         # Do not pass ``-w 0``: Harbor's streamed exec reads stdout with
         # ``StreamReader`` readline (64 KiB). An unwrapped blob is one line and
         # raises LimitOverrunError before we see stdout. Default wrap is 76
         # columns; ``b64decode(validate=False)`` ignores the newlines.
-        res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64")
+        # Код конвейера — код base64 (в dash нет pipefail): без кода head
+        # отсутствующий файл читался бы пустым. Код head уходит через fd 3,
+        # данные — через fd 4 мимо подстановки; отказ base64 — его код.
+        # Файл открывается один раз: отдельная проба съедала бы начало канала.
+        q = shlex.quote(path)
+        res = await self._afs_exec(
+            f"( s=$( {{ {{ head -c {n} {q}; echo $? >&3; }} | base64 >&4; }}"
+            f' 3>&1 ) || exit; exit "$s" ) 4>&1'
+        )
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"head failed: {path}")
+            raise self._fs_failure(path, res, what="head")
         if res.stdout_hit_capture_cap:
             raise OSError(f"head output exceeded capture ceiling: {path}")
         # Как у полного скачивания: переводы строк снимаем явно, остальное строго —
@@ -193,13 +224,13 @@ class PosixShellFsMixin:
     async def getsize(self, path: str) -> int:
         res = await self._afs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"stat failed: {path}")
+            raise self._fs_failure(path, res, what="stat")
         return int(res.stdout.strip())
 
     async def sha256(self, path: str) -> str:
         res = await self._afs_exec(f"sha256sum {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"sha256sum failed: {path}")
+            raise self._fs_failure(path, res, what="sha256sum")
         return res.stdout.split()[0]
 
     async def stat(self, path: str) -> dict:
@@ -262,42 +293,72 @@ class PosixShellFsMixin:
         return [(e.rel, e.is_dir) for e in await self.walk_entries(path)]
 
     @staticmethod
-    def _fs_failure(path: str, res: Any, *, what: str) -> OSError:
-        """Отказ команды ФС: «файла нет» — только когда так сказала та сторона.
-        Таймаут (код ``None``), пустой stderr, permission denied — ``OSError``:
-        иначе модель решала бы, что файла нет, и шла его создавать."""
-        err = (res.stderr or "").strip()
-        low = err.lower()
+    def _failure_detail(res: Any) -> str:
+        """Причина отказа для сообщения модели: stderr, а при пустом —
+        stdout (Harbor-docker сливает stderr в stdout); не длиннее предела,
+        начало и конец. Классификация читает stderr, не это.
+        Вывод бывает в десятки мегабайт: сначала обрезка, потом ``strip``."""
+        err = res.stderr or ""
+        text = err if err and not err.isspace() else (res.stdout or "")
+        return head_tail_preview(text, _FAILURE_DETAIL_CHARS).strip()
+
+    @classmethod
+    def _failure_message(cls, what: str, path: str, res: Any) -> str:
+        """Операция, код выхода и путь, за ними — причина (если есть). Без
+        них модель видит обрывок вывода, не зная, что и где не удалось."""
+        message = f"{what} failed (exit {res.return_code}): {path}"
+        detail = cls._failure_detail(res)
+        return f"{message}: {detail}" if detail else message
+
+    @staticmethod
+    def _names_missing(path: str, stderr: str) -> bool:
+        """Строка stderr называет именно этот путь и говорит «нет файла».
+
+        Путь — в кавычках (``'P'`` у GNU stat/head/cp/find; ``‘P’`` и
+        ```P'`` у coreutils до 8.25) или ``P:`` (sha256sum, busybox, ошибки
+        перенаправления sh) после начала строки, пробела или кавычки:
+        ``/w/a`` не совпадает с ``/w/a/b`` и ``/x/w/a``. Ищем по сырому stderr
+        без копий: вывод бывает в десятки мегабайт. Промежуток до «no such
+        file» ограничен: иначе строка с путём в тысячах мест разбиралась бы
+        за квадратичное время."""
+        p = re.escape(path)
+        pattern = (
+            rf"(?:[‘`']{p}['’]|(?:^|[ '\"]){p}:)"
+            r".{0,80}(?i:no such file)"
+        )
+        return re.search(pattern, stderr, re.MULTILINE) is not None
+
+    @classmethod
+    def _fs_failure(cls, path: str, res: Any, *, what: str) -> OSError:
+        """Отказ команды ФС: «файла нет» — только когда та сторона назвала
+        этот путь. Таймаут (код ``None``), пустой stderr, permission denied,
+        отсутствие другого пути (сторона копирования, временный файл,
+        исчезнувший при обходе вложенный элемент) — ``OSError``: иначе модель
+        решала бы, что файла нет, и шла его создавать. stdout не читаем:
+        частичный обход может упомянуть вложенный отсутствующий файл."""
         if getattr(res, "timed_out", False):
             return OSError(f"{what} timed out: {path}")
-        if "no such file" in low:
-            return FileNotFoundError(path)
-        if "permission denied" in low:
-            return PermissionError(err)
-        if "is a directory" in low:
-            return IsADirectoryError(err)
-        return OSError(
-            err or f"{what} failed (exit {res.return_code}): {path}"
-        )
+        err = res.stderr or ""
+        if cls._names_missing(path, err):
+            return _missing_file(path)
+        message = cls._failure_message(what, path, res)
+        if _PERMISSION_DENIED.search(err):
+            return PermissionError(message)
+        if _IS_A_DIRECTORY.search(err):
+            return IsADirectoryError(message)
+        return OSError(message)
 
     @classmethod
     def _find_failure(cls, path: str, res: Any) -> OSError:
         """Отказ ``find``: busybox без ``-printf`` — ``OSError`` с подсказкой,
         остальное — как у любой команды ФС (``_fs_failure``)."""
-        err = (res.stderr or "").strip()
-        low = err.lower()
-        if any(
-            m in low
-            for m in (
-                "printf",
-                "unrecognized",
-                "bad option",
-                "invalid predicate",
-                "unknown predicate",
-            )
-        ):
+        # busybox пишет ошибку опции первой строкой. Пути в кавычках
+        # вырезаем: «printf» в имени файла — не маркер.
+        first = re.match(r"\s*([^\n]{0,500})", res.stderr or "").group(1)
+        if _NO_PRINTF_FIND.search(_QUOTED.sub("", first)):
             return OSError(
-                f"GNU find with -printf is required on the backend: {err}"
+                "GNU find with -printf is required on the backend: "
+                f"{cls._failure_detail(res)}"
             )
         return cls._fs_failure(path, res, what="find")
 
@@ -383,12 +444,13 @@ class PosixShellFsMixin:
         try:
             await self._aupload_bytes(data, remote_tmp)
             res = await self._afs_exec(
-                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; rm -f {shlex.quote(remote_tmp)}"
+                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}"
             )
             if res.return_code != 0:
-                raise OSError(res.stderr.strip() or f"append failed: {path}")
+                raise self._fs_failure(path, res, what="append")
         finally:
-            # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
+            # Best-effort: remove remote_tmp on every path (upload, exec or
+            # non-zero rc).
             try:
                 await self._afs_exec(f"rm -f {shlex.quote(remote_tmp)}")
             except Exception:
@@ -397,12 +459,12 @@ class PosixShellFsMixin:
     async def copy(self, src: str, dst: str) -> None:
         res = await self._afs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"cp failed: {src} -> {dst}")
+            raise self._fs_failure(f"{src} -> {dst}", res, what="cp")
 
     async def makedirs(self, path: str) -> None:
         res = await self._afs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"mkdir failed: {path}")
+            raise self._fs_failure(path, res, what="mkdir")
 
     # --- background ---
     async def aspawn_background(

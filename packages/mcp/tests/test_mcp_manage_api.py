@@ -86,6 +86,92 @@ def test_installed_state_installed_with_version(monkeypatch):
     assert st["installed"] is True and st["version"] == "0.3.1"
 
 
+def test_installed_state_offers_update_for_outdated_wiring(monkeypatch):
+    # Node агента сменилась: npm новой версии ещё нет (статус «?»), но
+    # подключение отстало от рецепта — переустановка его и перепишет.
+    class E:
+        name = "browser_playwright"
+
+        class install:
+            type = "npx"
+
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([E()], "root")
+    )
+    monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
+    monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "?")
+    monkeypatch.setattr(cli, "_wiring_outdated", lambda e, r, d: True)
+    st = cli.installed_state("browser_playwright")
+    assert st == {"installed": None, "version": None, "update": "обновление"}
+
+
+def _npx_playwright_on_disk(tmp_path, monkeypatch, *, npx):
+    """browser_playwright подключён на диске с данным путём npx."""
+    from gc_core.config_modules import env_vars
+    from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import wiring
+
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "cfg",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "cache",
+            "state": tmp_path / "s",
+        },
+    )
+    wiring.wire_snippet(
+        "browser_playwright",
+        RECIPES / "browser_playwright",
+        npx=npx,
+        cache=str(tmp_path / "cache"),
+    )
+
+    class E:
+        name = "browser_playwright"
+        path = "browser_playwright"
+
+        class install:
+            type = "npx"
+
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([E()], RECIPES),
+    )
+    monkeypatch.setattr(cli, "_agent_dep_dir", lambda: tmp_path / "d")
+    monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "yes")
+
+
+def test_installed_state_reads_wiring_from_disk(tmp_path, monkeypatch):
+    from recommended_mcp import install as inst
+
+    current = str(inst._node_install_paths(tmp_path / "d")["npx"])
+    _npx_playwright_on_disk(tmp_path, monkeypatch, npx=current)
+    assert cli.installed_state("browser_playwright")["update"] is None
+
+    _npx_playwright_on_disk(tmp_path, monkeypatch, npx="/old/v18/npx")
+    assert cli.installed_state("browser_playwright")["update"] == "обновление"
+
+
+def test_package_update_wins_over_outdated_wiring(monkeypatch):
+    # Пин pypi новее установленного: номер версии полезнее «обновления».
+    entry = _pypi_entry("office-mcp==0.4.0")
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([entry], "root")
+    )
+    monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
+    monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "yes")
+    monkeypatch.setattr(cli, "_wiring_outdated", lambda e, r, d: True)
+    import recommended_mcp.install as inst
+    from recommended_mcp.runtime import venv as venv
+
+    monkeypatch.setattr(inst, "_dist_name", lambda e, root: "office-mcp")
+    monkeypatch.setattr(venv, "query_installed_version", lambda d: "0.3.1")
+    assert cli.installed_state("x")["update"] == "0.4.0"
+
+
 def test_manual_server_names_reads_runtime_key():
     server = {"transport": "stdio", "command": "x"}
     cfg = {"mcp.servers": {"corp-jira": server, "corp-confluence": server}}

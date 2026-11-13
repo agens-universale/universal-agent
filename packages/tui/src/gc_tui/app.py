@@ -582,7 +582,7 @@ class TuiApp(App):
 
         def _on_available(fresh: bool) -> None:
             self._update_available = (
-                True  # постоянный сигнал: brand-строка + запись в /notices
+                True  # постоянный сигнал: шапка + /notices
             )
             if self.is_running:
                 if fresh:
@@ -590,11 +590,11 @@ class TuiApp(App):
                         _AUTO_UPDATE_NOTICE, severity="information"
                     )  # toast только при свежей находке
                 # M3: главный экран, а не активный (self.screen) — иначе, если авто-чек
-                # приходит, пока сверху онбординг/PostUpdate/Settings, строка в карточке
-                # так и не появится за всю сессию.
+                # приходит, пока сверху онбординг/PostUpdate/Settings, хвост обновления
+                # в шапке так и не появится за всю сессию.
                 scr = self._main_screen()
                 if scr is not None and hasattr(scr, "refresh_update_notice"):
-                    scr.refresh_update_notice()  # дорисовать строку в brand-блоке
+                    scr.refresh_update_notice()  # дорисовать хвост в строке версии шапки
 
         def _on_result(result) -> None:
             self._update_check_result = (
@@ -1843,7 +1843,38 @@ class TuiApp(App):
         return self.active_runner
 
     def _build_real_executor(self):
-        """Build the real AgentExecutor from config. Called when no factory injected."""
+        """Build the real AgentExecutor from config. Called when no factory injected.
+
+        Конец сборки — конец загрузки MCP для шапки, успешный или нет
+        (контракт §6.3): любой сбой сборки, в том числе до старта MCP,
+        отдаёт шапке прогресс с ошибкой, а успех отмечается только у
+        готового executor."""
+        from gc_tui.services.mcp_progress import McpProgress
+
+        progress = McpProgress()
+        published = False
+
+        def publish() -> None:
+            nonlocal published
+            self._mcp_progress = progress
+            published = True
+
+        try:
+            executor = self._assemble_executor(progress, publish)
+        except BaseException:
+            progress.finish(False)
+            # Упала до публикации — прогресс ещё не на app; ставим, иначе
+            # шапка ждала бы загрузку вечно. После публикации на app мог
+            # встать прогресс более новой сборки — его не затираем.
+            if not published:
+                self._mcp_progress = progress
+            raise
+        progress.finish(True)
+        return executor
+
+    def _assemble_executor(self, progress, publish):
+        """Сборка executor; прогресс MCP встаёт на app (`publish`) после
+        `begin`, чтобы шапка не приняла пустой список серверов за «MCP нет»."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import (
             cli_forces_legacy_model,
@@ -1852,7 +1883,6 @@ class TuiApp(App):
         from gc_core.run_context import acreate_run_context
         from gc_core.settings import settings_of
 
-        from gc_tui.services.mcp_progress import McpProgress
         from gc_tui.toggles import tui_agent_settings
 
         # Своё у TUI поверх действующих настроек: промпт-ассеты, адаптивный bounce
@@ -1860,9 +1890,8 @@ class TuiApp(App):
         loaded = tui_agent_settings(self.effective_settings())
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
-        progress = McpProgress()
         progress.begin(list(settings_of(loaded).mcp.servers))
-        self._mcp_progress = progress
+        publish()
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 
         self._stream_pump = StreamPump(
@@ -2058,17 +2087,15 @@ class TuiApp(App):
         )
 
     def collect_unread_notices(self) -> List[Notice]:
-        """Бейдж КАРТОЧКИ: стартовые + unread runtime.
-
-        Обновления здесь нет намеренно: в карточке оно показано отдельной строкой
-        (_compose_card_lines), и счётчик утверждал бы то же самое второй раз."""
+        """Стартовые + unread runtime, без обновления (его добавляет бейдж
+        футера, `collect_footer_notices`)."""
         return self._startup_notices() + collect_unread_runtime_notices()
 
     def collect_footer_notices(self) -> List[Notice]:
-        """Бейдж ФУТЕРА: то же, что в карточке, ПЛЮС обновление.
+        """Бейдж ФУТЕРА: unread-уведомления ПЛЮС обновление.
 
-        В футере отдельной строки про обновление нет — без счётчика признак исчезал бы
-        вместе с карточкой, как только трейс уедет вверх, и до перезапуска не вернулся."""
+        Хвост обновления в шапке уезжает вверх вместе с трейсом — без счётчика
+        в футере признак пропадал бы до перезапуска."""
         return self._update_notice() + self.collect_unread_notices()
 
     # --- режим разрешений -------------------------------------------------
@@ -2308,10 +2335,7 @@ class TuiApp(App):
         main._cmd_diff()
 
     def refresh_notices_indicators(self) -> None:
-        """Обновить счётчики уведомлений в карточке главного экрана и футере активного."""
-        main = self._main_screen()
-        if main is not None and hasattr(main, "_refresh_notices_card"):
-            main._refresh_notices_card()
+        """Обновить счётчик уведомлений в футере активного экрана."""
         fn = getattr(self.screen, "_refresh_notices_footer", None)
         if callable(fn):
             fn()

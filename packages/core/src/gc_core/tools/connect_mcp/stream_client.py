@@ -17,7 +17,6 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
 from mcp.types import CONNECTION_CLOSED
 
-from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.durable_scope import (
     call_tool_with_progress,
@@ -26,8 +25,8 @@ from gc_core.tools.connect_mcp.durable_scope import (
 from gc_core.tools.connect_mcp.session_task import SessionTask
 from gc_core.tools.connect_mcp.transport import (
     _exit_error_from_log,
-    _resolve_command,
     _stderr_log,
+    _stdio_command,
 )
 from gc_core.utils.async_http import build_ssl_context
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
@@ -1162,6 +1161,15 @@ async def _ainitialize_stdio(
         raise
 
 
+def _stdio_server_params(server_cfg: Dict[str, Any]) -> StdioServerParameters:
+    """Параметры SDK-клиента — из того же разбора, что у своих запусков
+    (`_stdio_command`): один сервер стартует с одним окружением."""
+    cmd, cwd, env = _stdio_command(server_cfg)
+    return StdioServerParameters(
+        command=cmd[0], args=cmd[1:], env=env, cwd=cwd or None
+    )
+
+
 async def _list_tools_stream_stdio_async(
     server_cfg: Dict[str, Any],
     timeout: float,
@@ -1170,17 +1178,7 @@ async def _list_tools_stream_stdio_async(
     """
     Асинхронный список тулов через stdio транспорт MCP (через SDK).
     """
-    command = server_cfg.get("command")
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-
-    params = StdioServerParameters(
-        command=_resolve_command(str(command)),
-        args=[str(a) for a in args],
-        env=mcp_stdio_env(server_cfg.get("env") or None),
-        cwd=server_cfg.get("cwd") or None,
-    )
+    params = _stdio_server_params(server_cfg)
 
     # stderr сервера — в его приватный лог, а не в stderr родителя (у SDK
     # ``errlog=sys.stderr`` по умолчанию): под TUI тот теряется.
@@ -1240,17 +1238,7 @@ async def _call_tool_stream_stdio_async(
     """
     Асинхронный вызов конкретного MCP-тула через stdio транспорт (через SDK).
     """
-    command = server_cfg.get("command")
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-
-    params = StdioServerParameters(
-        command=_resolve_command(str(command)),
-        args=[str(a) for a in args],
-        env=mcp_stdio_env(server_cfg.get("env") or None),
-        cwd=server_cfg.get("cwd") or None,
-    )
+    params = _stdio_server_params(server_cfg)
 
     with _stderr_log(server_cfg, server_name) as (errlog, log_path):
         async with (
@@ -1294,16 +1282,7 @@ async def _call_tool_stream_stdio_persistent(
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
     async def _open_session() -> ClientSession:
-        command = server_cfg.get("command")
-        args = server_cfg.get("args") or []
-        if not isinstance(args, list):
-            args = [args]
-        params = StdioServerParameters(
-            command=_resolve_command(str(command)),
-            args=[str(a) for a in args],
-            env=mcp_stdio_env(server_cfg.get("env") or None),
-            cwd=server_cfg.get("cwd") or None,
-        )
+        params = _stdio_server_params(server_cfg)
         # Лог открыт до конца входа: процесс спавнится внутри него, а
         # ``initialize`` в ``_enter_session`` — последний шаг входа.
         with _stderr_log(server_cfg, server_name) as (errlog, log_path):

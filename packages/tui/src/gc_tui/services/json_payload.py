@@ -43,12 +43,22 @@ class PayloadBlocks(Vertical):
     """
 
 
-def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
+def unfold_payload(
+    content: Any,
+    max_depth: int = _MAX_UNFOLD_DEPTH,
+    *,
+    repair_truncated: bool = True,
+) -> Any:
     """Рекурсивно развернуть JSON-в-строке.
 
     Строка, парсящаяся в dict/list, заменяется распарсенным значением (и так
     вглубь, до max_depth). Прочие значения возвращаются как есть. Экран события
-    — отладочный просмотр: разворачивание НЕ теряет данные, только форму."""
+    — отладочный просмотр: разворачивание НЕ теряет данные, только форму.
+
+    ``repair_truncated`` — достраивать ли оборванный JSON. Для вывода тула да:
+    его обрезаем мы сами, и конверт об этом говорит. Аргументы вызова мы не
+    обрезаем — обрывок в них показывается как сохранён: кто оборвал, экран
+    не знает."""
     if max_depth <= 0:
         return content
     if isinstance(content, str):
@@ -57,18 +67,26 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
             try:
                 parsed = json.loads(s)
             except ValueError:
-                parsed = _parse_truncated_json(s)
+                parsed = _parse_truncated_json(s) if repair_truncated else None
                 if parsed is None:
                     return content
             if isinstance(parsed, (dict, list)):
-                return unfold_payload(parsed, max_depth - 1)
+                return unfold_payload(
+                    parsed, max_depth - 1, repair_truncated=repair_truncated
+                )
         return content
     if isinstance(content, dict):
         return {
-            k: unfold_payload(v, max_depth - 1) for k, v in content.items()
+            k: unfold_payload(
+                v, max_depth - 1, repair_truncated=repair_truncated
+            )
+            for k, v in content.items()
         }
     if isinstance(content, list):
-        return [unfold_payload(v, max_depth - 1) for v in content]
+        return [
+            unfold_payload(v, max_depth - 1, repair_truncated=repair_truncated)
+            for v in content
+        ]
     return content
 
 
@@ -148,14 +166,27 @@ def _strip_dangling(t: str) -> str:
     return t
 
 
-def render_payload(content: Any) -> Widget:
+def broken_call_arguments(payload: Any) -> Optional[str]:
+    """Аргументы вызова, не разбираемые как JSON, — сырой строкой; иначе
+    None. Пустые аргументы — вызов без параметров, не обрывок."""
+    arguments = payload.get("arguments") if isinstance(payload, dict) else None
+    if not isinstance(arguments, str) or not arguments.strip():
+        return None
+    try:
+        json.loads(arguments)
+    except ValueError:
+        return arguments
+    return None
+
+
+def render_payload(content: Any, *, repair_truncated: bool = True) -> Widget:
     """Сериализовать и отрендерить payload как Widget.
 
     - dict / list (в т.ч. полученные разворачиванием JSON-строки) → render_unfolded
     - прочие строки → plain Static
     - другое → str(content) как plain
     """
-    data = unfold_payload(content)
+    data = unfold_payload(content, repair_truncated=repair_truncated)
     if isinstance(data, (dict, list)):
         return render_unfolded(data)
     if isinstance(data, str):

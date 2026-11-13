@@ -485,12 +485,9 @@ def _stdio_command(
     cmd = [command] + [str(a) for a in args]
     cwd = server_cfg.get("cwd")
 
-    from gc_core.mcp_runtime.env import augment_process_env
+    from gc_core.mcp_runtime.env import mcp_process_env
 
-    env = augment_process_env()
-    for k, v in (server_cfg.get("env") or {}).items():
-        env[str(k)] = str(v)
-    return cmd, cwd, env
+    return cmd, cwd, mcp_process_env(command, server_cfg.get("env"))
 
 
 # --- stderr stdio-сервера ----------------------------------------------------

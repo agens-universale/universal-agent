@@ -8,6 +8,12 @@ from gc_testkit.tui_support import (
 )
 
 
+def _header_text(scr) -> str:
+    """Шапка главного экрана так, как её раскладывает сам виджет."""
+    header = scr.query_one("#brand-block")
+    return header.render().laid_out(header.content_region.width).plain
+
+
 async def test_update_section_shows_actions_and_hint(tmp_path, monkeypatch):
     from gc_core import app_version
     from gc_core.updater import check as check_mod
@@ -459,9 +465,7 @@ async def test_apply_check_result_persists_verdict_and_syncs_main_card(
         state = upgrade_gate.read_state()
         assert state.get("last_update_remote_commit") == "newcommit"
         assert state.get("last_update_checked_installed") == "old"
-        main = app._main_screen()
-        card = str(main._mcp_status_row.render())
-        assert "↑ доступна новая версия" in card
+        assert "↑ доступна новая версия" in _header_text(app._main_screen())
 
 
 async def test_apply_check_result_unknown_keeps_known_update_verdict(
@@ -517,9 +521,8 @@ async def test_apply_check_result_unknown_keeps_known_update_verdict(
             check_mod.CheckResult("unknown", None, "не удалось: офлайн")
         )
         assert app._update_available is True  # флаг выжил
-        main = app._main_screen()
-        card = str(main._mcp_status_row.render())
-        assert "↑ доступна новая версия" in card  # строка в карточке выжила
+        # хвост в шапке выжил
+        assert "↑ доступна новая версия" in _header_text(app._main_screen())
 
 
 async def test_apply_check_result_current_clears_available(
@@ -575,6 +578,8 @@ async def test_apply_check_result_current_clears_available(
             )
         )
         assert app._update_available is False
+        # хвост в шапке снят тем же вызовом
+        assert "доступна новая версия" not in _header_text(app._main_screen())
 
 
 async def test_checked_line_unknown_is_dash_not_warn(tmp_path, monkeypatch):

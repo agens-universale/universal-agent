@@ -6,22 +6,21 @@
 
 from __future__ import annotations
 
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 
-from gc_tui.palette import GRADIENT_COOL, GRADIENT_MID, GRADIENT_WARM
+from gc_tui.palette import (
+    ACCENT,
+    DIM,
+    GRADIENT_COOL,
+    GRADIENT_MID,
+    GRADIENT_WARM,
+    INK,
+    MUTED,
+)
+from gc_tui.services.column_row import ColumnRow, WidthAware
 
 APP_NAME = "GigaCode"
-
-# Логотип ANSI Shadow «GIGACODE» (псевдографика CP437: █ ╗ ╝ ═ ║).
-# Осознанное исключение из правила «только ASCII» — разовый брендовый момент.
-LOGO = (
-    " ██████╗ ██╗ ██████╗  █████╗  ██████╗ ██████╗ ██████╗ ███████╗\n"
-    "██╔════╝ ██║██╔════╝ ██╔══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝\n"
-    "██║  ███╗██║██║  ███╗███████║██║     ██║   ██║██║  ██║█████╗  \n"
-    "██║   ██║██║██║   ██║██╔══██║██║     ██║   ██║██║  ██║██╔══╝  \n"
-    "╚██████╔╝██║╚██████╔╝██║  ██║╚██████╗╚██████╔╝██████╔╝███████╗\n"
-    " ╚═════╝ ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝"
-)
 
 # Позиционирующее заявление под логотипом.
 TAGLINE = "Universal Agent"
@@ -63,52 +62,104 @@ def gradient_color(frac: float) -> str:
     return _rgb_to_hex(_lerp(olive, teal, (frac - 0.5) / 0.5))
 
 
-def logo_text() -> Text:
-    """Логотип как rich.Text с поколоночным градиентом (пробелы не красятся)."""
-    lines = LOGO.split("\n")
-    width = max((len(line) for line in lines), default=1)
-    t = Text()
-    for li, line in enumerate(lines):
-        if li:
-            t.append("\n")
-        for col, ch in enumerate(line):
-            if ch == " ":
-                t.append(" ")
-            else:
-                frac = col / (width - 1) if width > 1 else 0.0
-                t.append(ch, style=gradient_color(frac))
-    return t
+# Вордмарк стартовой шапки: две строки по 29 колонок.
+MARK = (
+    "█▀▀ █ █▀▀ ▄▀█ █▀▀ █▀█ █▀▄ █▀▀",
+    "█▄█ █ █▄█ █▀█ █▄▄ █▄█ █▄▀ ██▄",
+)
+UPDATE_TAIL = ("↑ доступна новая версия", " · /settings → Обновление")
+
+_MARK_W = len(MARK[0])
+_GAP = "   "
+_TAG_W = len(TAGLINE)
 
 
-# Разрядка тэглайна (как `.logo-sub` в gc-ua-install.html: airy letter-spacing,
-# заметный gap между словами). Межсловный зазор — двойной от межбуквенного.
-# Оба меняются одним числом.
-_TAGLINE_LETTER_GAP = "  "  # 2 пробела — между буквами
-_TAGLINE_WORD_GAP = "    "  # 4 пробела — между словами (двойной от letter-gap)
-
-
-def version_under_logo() -> str:
-    """Версия отдельной строкой под тэглайном, центрированная по ширине лого — тем же
-    приёмом, что и сам тэглайн (ведущие пробелы, а не CSS: рамка карточки шире бренда,
-    и align центрировал бы по ней). Воздух над строкой даёт CSS (`.brand-version`).
-    Из исходников показывается «dev», см. app_version.display_version."""
+def version_label() -> str:
     from gc_core import app_version
 
-    text = app_version.display_version(
-        long=True
-    )  # в карточке есть место на пояснение
-    logo_w = max((len(line) for line in LOGO.splitlines()), default=0)
-    return " " * max(0, (logo_w - len(text)) // 2) + text
+    return app_version.display_version(long=True)
 
 
-def tagline_under_logo() -> str:
-    """Тэглайн под логотипом: разрядка букв (`_TAGLINE_LETTER_GAP`), межсловный
-    зазор (`_TAGLINE_WORD_GAP`, двойной), центрирование по ширине лого (ведущие
-    пробелы). Стиль — как `.logo-sub` в docs/gc-ua-install.html. Сам
-    отступ-строка над тэглайном — CSS (`.brand-tagline { margin-top: 1 }`)."""
-    tag = _TAGLINE_WORD_GAP.join(
-        _TAGLINE_LETTER_GAP.join(word) for word in TAGLINE.upper().split()
-    )
-    logo_w = max((len(line) for line in LOGO.split("\n")), default=0)
-    pad = max(0, (logo_w - len(tag)) // 2)
-    return " " * pad + tag
+def _gradient_text(line: str, *, span: int) -> Text:
+    """Строка с градиентом по колонкам на общую ширину ``span``."""
+    text = Text(no_wrap=True)
+    for col, ch in enumerate(line):
+        if ch == " ":
+            text.append(ch)
+        else:
+            frac = col / (span - 1) if span > 1 else 0.0
+            text.append(ch, style=f"bold {gradient_color(frac)}")
+    return text
+
+
+class BrandHeader(WidthAware):
+    """Блок бренда: знак из двух строк, подпись и версия. Раскладка — по
+    ширине, которую дал рендер (`options.max_width`): узко — один ряд."""
+
+    def __init__(
+        self,
+        version: str,
+        *,
+        update: bool = False,
+        status: Text | ColumnRow | None = None,
+    ) -> None:
+        self.version = version
+        self.update = update
+        self.status = status
+
+    @property
+    def _mark_need(self) -> int:
+        return _MARK_W + len(_GAP) + max(_TAG_W, len(self.version))
+
+    @staticmethod
+    def _tail_atoms() -> list[Text]:
+        """Хвост обновления: стрелка с текстом акцентом, адрес настроек — DIM."""
+        return [
+            Text(UPDATE_TAIL[0], style=ACCENT),
+            Text(UPDATE_TAIL[1], style=DIM),
+        ]
+
+    def _tail_beside(self) -> int:
+        """Ширина строки версии вместе с хвостом (две клетки зазора)."""
+        tail = len(UPDATE_TAIL[0]) + len(UPDATE_TAIL[1])
+        wide = _MARK_W + len(_GAP) + len(self.version)
+        return wide + 2 + tail
+
+    def _mark_rows(self, beside: bool) -> list[Text]:
+        top = _gradient_text(MARK[0], span=_MARK_W)
+        top.append(_GAP + TAGLINE, style=INK)
+        bottom = _gradient_text(MARK[1], span=_MARK_W)
+        bottom.append(_GAP + self.version, style=MUTED)
+        if beside:
+            bottom.append("  ")
+            for atom in self._tail_atoms():
+                bottom.append_text(atom)
+        return [top, bottom]
+
+    def _single_row(self) -> ColumnRow:
+        head = _gradient_text(f"{APP_NAME}  ", span=len(APP_NAME))
+        atoms = [
+            Text(f"{TAGLINE}  ", style=INK),
+            Text(self.version, style=MUTED),
+        ]
+        return ColumnRow(head, atoms)
+
+    def _status(self) -> RenderResult:
+        # Строка загрузки сама не переносится (`loading_line`): копия не нужна.
+        yield Text("")
+        yield self.status
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        width = options.max_width
+        wide = width >= self._mark_need
+        beside = wide and self.update and width >= self._tail_beside()
+        if wide:
+            yield from self._mark_rows(beside)
+        else:
+            yield self._single_row()
+        if self.status is not None:
+            yield from self._status()
+        if self.update and not beside:
+            yield ColumnRow(Text("  "), self._tail_atoms())

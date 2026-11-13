@@ -8,6 +8,7 @@ SSE (``stream:false`` проигнорирован). Разбор падал г�
 быстрым повтором.
 """
 
+import asyncio
 import json
 import logging
 
@@ -235,3 +236,58 @@ def test_transient_5xx_keeps_long_backoff(monkeypatch, sleeps):
 
     assert len(spy.requests) == 5
     assert sleeps == [10.0, 20.0, 40.0, 80.0]
+
+
+@pytest.mark.parametrize(
+    "call_api", [_chat, _responses], ids=["chat", "responses"]
+)
+def test_malformed_sse_logs_metadata_without_model_text(
+    monkeypatch, caplog, capsys, call_api
+):
+    body = 'data: {"password": "private-model-output", "unfinished": '
+    install_transport(monkeypatch, _body(body, "text/event-stream"))
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(BackendBadResponseError) as info:
+            call_api(logger=logging.getLogger("bad-sse-test"))
+    assert info.value.length == len(body)
+    assert "backend_bad_response" in [r.event for r in caplog.records]
+    assert "private-model-output" not in caplog.text
+    assert "private-model-output" not in str(info.value)
+    assert "private-model-output" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("api_mode", ["chat", "responses"])
+async def test_stop_interrupts_bad_response_retry_pause(monkeypatch, api_mode):
+    from gc_core.execution.contracts import ModelRequestStopped
+    from gc_core.user_stop import UserStop, bind_user_stop
+
+    spy = install_transport(monkeypatch, _body(""))
+    monkeypatch.setattr(cb, "_BAD_RESPONSE_RETRY_DELAY_SEC", 30)
+    entered = asyncio.Event()
+    pause = cb.apause_model_retry
+
+    async def observed_pause(seconds):
+        entered.set()
+        await pause(seconds)
+
+    monkeypatch.setattr(cb, "apause_model_retry", observed_pause)
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), None)
+    request = (
+        cb.arequest_backend_chat_completions
+        if api_mode == "chat"
+        else cb.arequest_backend_responses
+    )
+    with bind_user_stop(gate):
+        task = asyncio.create_task(
+            request({}, {}, url="http://x", use_retry=True)
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=3)
+            gate.request()
+            with pytest.raises(ModelRequestStopped):
+                await asyncio.wait_for(task, timeout=1)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert len(spy.requests) == 1

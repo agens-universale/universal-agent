@@ -10,11 +10,12 @@
 
 Активируется per-server флагом в config.yml:
 
-    mcp-servers:
-      browser:
-        transport: stdio
-        command: ...
-        persistent_session: true
+    mcp:
+      servers:
+        browser:
+          transport: stdio
+          command: ...
+          persistent_session: true
 
 Жизненный цикл сессий привязан к AgentExecutor.run(): в finally вызывается
 PersistentStdioRegistry.instance().aclose_all(), чтобы не оставлять висящие
@@ -63,8 +64,8 @@ from gc_core.tools.connect_mcp.transport import (
     _areadline_with_timeout,
     _cancelled_notification,
     _readline_with_timeout,
-    _resolve_command,
     _stderr_log,
+    _stdio_command,
     _wait_startup_exit_error,
     forget_stdio_reader,
 )
@@ -95,21 +96,7 @@ def _spawn_detached_stdio_process(
     ``stderr`` сессия передаёт из ``_stderr_log`` — лог сервера в каталоге
     состояния gc; ``DEVNULL`` по умолчанию остался для прямых вызовов.
     """
-    command = server_cfg.get("command")
-    if not command:
-        raise ValueError("stdio MCP server config must have 'command'")
-    command = _resolve_command(str(command))
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-    cmd = [command] + [str(a) for a in args]
-    cwd = server_cfg.get("cwd")
-    env_extra = server_cfg.get("env") or {}
-    from gc_core.mcp_runtime.env import augment_process_env
-
-    env = augment_process_env()
-    for k, v in env_extra.items():
-        env[str(k)] = str(v)
+    cmd, cwd, env = _stdio_command(server_cfg)
 
     popen_kwargs: Dict[str, Any] = dict(
         stdin=subprocess.PIPE,

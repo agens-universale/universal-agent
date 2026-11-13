@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import MagicMock
 
+import pytest
+
 from gc_core.utils.convertations import (
     get_output_list,
     output_chat_completion_to_response,
@@ -514,6 +516,55 @@ async def test_salvaged_think_is_not_text_answer_even_in_allow():
     outbound = format_message_chat_completions_to_send_backend(out[0])
     assert outbound["content"] == "<think>search the leaderboard</think>"
     assert "reasoning_content" not in outbound
+
+
+def test_get_output_list_warns_on_unparsable_tool_arguments():
+    """Бэкенд закрыл вызов как готовый, а аргументы — обрывок JSON: сборка
+    не меняется (модель получит ошибку разбора), в логе — предупреждение с
+    метаданными, по которым видно, кто оборвал. Текст обрывка в лог не
+    пишется: строкой его маскировка секретов по имени ключа не видит."""
+    log = MagicMock()
+    broken = '{"path": "a.toml", "include_line_count": '
+    calls = [
+        _tool_call("ok", arguments='{"path": "b"}'),
+        _tool_call("cut", name="fs_file_info", arguments=broken),
+        _tool_call("empty", arguments=""),
+    ]
+    out = get_output_list(
+        _dct("tool_calls", content=None, tool_calls=calls),
+        logger_override=log,
+    )
+    assert [o["arguments"] for o in out] == ['{"path": "b"}', broken, ""]
+    log.warning.assert_called_once()
+    msg = log.warning.call_args[0][0] % log.warning.call_args[0][1:]
+    assert "not valid JSON" in msg
+    assert "finish_reason='tool_calls'" in msg
+    assert "fs_file_info" in msg and "cut" in msg
+    assert f"chars={len(broken)}" in msg
+    assert broken not in msg
+    assert not log.debug.called
+
+
+@pytest.mark.parametrize(
+    "tool_call",
+    [
+        None,
+        {"type": "function", "function": None},
+        {"type": "function", "function": "fs_read_file"},
+        {"id": "c1", "type": "function", "function": {"name": "x"}},
+    ],
+)
+def test_warning_does_not_break_recovery_of_invalid_calls(tool_call):
+    """Режим восстановления оставляет мусорный вызов в батче (дальше его
+    отклонит общая проверка). Предупреждение о битых аргументах идёт до
+    нормализации и не должно ронять разбор на таком вызове."""
+    log = MagicMock()
+    out = get_output_list(
+        _dct("tool_calls", content=None, tool_calls=[tool_call]),
+        logger_override=log,
+        recover_invalid_tool_calls=True,
+    )
+    assert [o["type"] for o in out] == ["function_call"]
 
 
 if __name__ == "__main__":

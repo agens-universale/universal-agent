@@ -12,6 +12,7 @@ from typing import Callable, List, Optional
 
 import httpx
 
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
 from gc_core.utils.chat_completions_stream import BackendStreamError
@@ -208,7 +209,8 @@ def maybe_push_llm_failure_notice(
     who: Optional[str] = None,
     enabled: bool = True,
 ) -> None:
-    if not enabled:
+    # Стоп хода — не сбой модели: об остановке не уведомляем.
+    if not enabled or isinstance(exc, ModelRequestStopped):
         return
     push_runtime_notice(
         notice_from_llm_failure(

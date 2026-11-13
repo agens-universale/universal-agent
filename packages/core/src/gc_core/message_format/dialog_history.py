@@ -146,6 +146,7 @@ def build_history_text(
     *,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> str:
     rows: List[str] = []
     for idx, msg in enumerate(messages, start=1):
@@ -156,7 +157,11 @@ def build_history_text(
             else max_message_chars
         )
         text = message_text_limited(
-            msg, per_limit, tags=tags, strip_think=strip_think
+            msg,
+            per_limit,
+            tags=tags,
+            strip_think=strip_think,
+            include_reasoning=include_reasoning,
         ).strip()
         if not text:
             continue
@@ -177,13 +182,18 @@ def trim_history_to_max_dialogue_chars(
     max_message_chars: int,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> List[Dict[str, Any]]:
     return _tail_by_limit(
         messages,
         max_dialogue_chars,
         lambda msg: len(
             message_text_limited(
-                msg, max_message_chars, tags=tags, strip_think=strip_think
+                msg,
+                max_message_chars,
+                tags=tags,
+                strip_think=strip_think,
+                include_reasoning=include_reasoning,
             )
         ),
     )

@@ -2,6 +2,7 @@
 """PosixShellFsMixin: файловые операции как POSIX-команды поверх трёх примитивов."""
 
 import shlex
+import time
 
 import pytest
 from gc_core.backends.posix_shell_fs import PosixShellFsMixin
@@ -267,3 +268,281 @@ async def test_readable_writable_ask_the_remote_side():
     )
     assert await be.readable("/etc/shadow") is True
     assert await be.writable("/etc/shadow") is False
+
+
+_HELP = "help " * 400
+
+
+async def test_find_failure_shows_stdout_when_stderr_empty():
+    out = "find: unrecognized: -printf\n" + _HELP
+    be = RecordingShell(
+        answers={"-printf": ExecResult(return_code=1, stdout=out, stderr="")}
+    )
+    for call in (be.listdir, be.walk_entries):
+        with pytest.raises(OSError) as ei:
+            await call("/etc")
+        assert not isinstance(ei.value, FileNotFoundError)
+        message = str(ei.value)
+        prefix = "find failed (exit 1): /etc"
+        assert message.startswith(prefix + ": find: unrecognized: -printf")
+        assert len(message) <= len(prefix) + 2 + 500
+
+
+async def test_huge_failure_output_is_bounded():
+    huge_stdout = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1, stdout="x\tf\t1\n" * 200_000, stderr=""
+            )
+        }
+    )
+    with pytest.raises(OSError) as ei:
+        await huge_stdout.walk_entries("/w")
+    message = str(ei.value)
+    prefix = "find failed (exit 1): /w"
+    assert message.startswith(prefix + ": x\tf\t1")
+    assert "[середина опущена]" in message
+    assert len(message) <= len(prefix) + 2 + 500
+    huge_stderr = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1, stderr="find: a: Permission denied\n" * 40_000
+            )
+        }
+    )
+    with pytest.raises(PermissionError) as ei:
+        await huge_stderr.walk_entries("/w")
+    message = str(ei.value)
+    assert message.startswith(prefix + ": find: a: Permission denied")
+    assert "[середина опущена]" in message
+    assert len(message) <= len(prefix) + 2 + 500
+
+
+@pytest.mark.parametrize(
+    ("call", "prefix"),
+    [
+        (lambda be: be.stat("/w/a"), "stat failed (exit 1): /w/a"),
+        (lambda be: be.getsize("/w/a"), "stat failed (exit 1): /w/a"),
+        (
+            lambda be: be.copy("/w/a", "/w/b"),
+            "cp failed (exit 1): /w/a -> /w/b",
+        ),
+        (lambda be: be.makedirs("/w/d"), "mkdir failed (exit 1): /w/d"),
+        (
+            lambda be: be.read_head_bytes("/w/a", 8),
+            "head failed (exit 1): /w/a",
+        ),
+        (lambda be: be.sha256("/w/a"), "sha256sum failed (exit 1): /w/a"),
+        (
+            lambda be: be.append("/w/a", "x"),
+            "append failed (exit 1): /w/a",
+        ),
+    ],
+)
+async def test_single_command_failures_show_stdout(call, prefix):
+    be = RecordingShell(
+        answers={
+            "": ExecResult(return_code=1, stdout="boom: reason\n", stderr="")
+        }
+    )
+    with pytest.raises(OSError) as ei:
+        await call(be)
+    assert str(ei.value) == prefix + ": boom: reason"
+
+
+async def test_failure_without_output_keeps_generic_text():
+    be = RecordingShell(
+        answers={"-printf": ExecResult(return_code=1, stdout="", stderr="")}
+    )
+    with pytest.raises(OSError) as ei:
+        await be.listdir("/w")
+    assert str(ei.value) == "find failed (exit 1): /w"
+
+
+async def test_failure_tolerates_missing_output_streams():
+    be = RecordingShell(
+        answers={
+            "-printf": ExecResult(return_code=1, stdout=None, stderr=None)
+        }
+    )
+    with pytest.raises(OSError) as ei:
+        await be.listdir("/w")
+    assert str(ei.value) == "find failed (exit 1): /w"
+
+
+_MISSING = "No such file or directory"
+
+
+@pytest.mark.parametrize(
+    ("call", "stderr"),
+    [
+        (
+            lambda be: be.getsize("/w/a"),
+            f"stat: cannot statx '/w/a': {_MISSING}",
+        ),
+        (
+            lambda be: be.stat("/w/a"),
+            f"stat: cannot statx '/w/a': {_MISSING}",
+        ),
+        (
+            lambda be: be.makedirs("/w/d"),
+            f"mkdir: cannot create directory '/w/d': {_MISSING}",
+        ),
+        (
+            lambda be: be.read_head_bytes("/w/a", 8),
+            f"head: cannot open '/w/a' for reading: {_MISSING}",
+        ),
+        (
+            lambda be: be.sha256("/w/a"),
+            f"sha256sum: /w/a: {_MISSING}",
+        ),
+    ],
+    ids=["getsize", "stat", "makedirs", "head", "sha256"],
+)
+async def test_every_command_failure_is_classified(call, stderr):
+    """Регресс: операции обходили классификацию — отсутствующий файл
+    давал ``OSError``, а ``stat()`` — ``FileNotFoundError``."""
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    with pytest.raises(FileNotFoundError) as ei:
+        await call(be)
+    # Текст причины и путь, как у локального бэкенда, а не голый путь.
+    assert "No such file or directory" in str(ei.value)
+    assert ei.value.filename.startswith("/w/")
+
+
+@pytest.mark.parametrize(
+    ("call", "stderr", "prefix"),
+    [
+        (
+            lambda be: be.copy("/w/a", "/w/b"),
+            f"cp: cannot stat '/w/a': {_MISSING}",
+            "cp failed (exit 1): /w/a -> /w/b",
+        ),
+        (
+            lambda be: be.append("/w/a", "x"),
+            f"cat: /w/a.gc-append-tmp.x: {_MISSING}",
+            "append failed (exit 1): /w/a",
+        ),
+        (
+            lambda be: be.listdir("/w/a"),
+            f"find: '/w/a/b': {_MISSING}",
+            "find failed (exit 1): /w/a",
+        ),
+        (
+            lambda be: be.walk_entries("/w/a"),
+            f"find: '/w/a/b': {_MISSING}",
+            "find failed (exit 1): /w/a",
+        ),
+        (
+            lambda be: be.stat("/w/a"),
+            f"stat: cannot statx '/x/w/a': {_MISSING}",
+            "stat failed (exit 1): /w/a",
+        ),
+    ],
+    ids=["copy", "append-tmp", "listdir-nested", "walk-nested", "other"],
+)
+async def test_missing_other_path_is_not_a_missing_file(call, stderr, prefix):
+    """«Нет такого файла» про другой путь (сторону копирования, временный
+    файл дозаписи, исчезнувший при обходе вложенный элемент) — не повод
+    говорить модели, что нет запрошенного пути."""
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    with pytest.raises(OSError) as ei:
+        await call(be)
+    assert not isinstance(ei.value, FileNotFoundError)
+    assert str(ei.value) == f"{prefix}: {stderr}"
+
+
+async def test_classification_sees_markers_in_the_middle_of_long_stderr():
+    noise = "find: warning: noise\n" * 100
+    denied = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr=noise + "find: '/w/x': Permission denied\n" + noise,
+            )
+        }
+    )
+    with pytest.raises(PermissionError):
+        await denied.walk_entries("/w")
+
+
+async def test_busybox_marker_is_read_from_the_first_line():
+    """busybox пишет ошибку опции первой строкой, дальше — справку."""
+    busybox = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr="find: unrecognized: -printf\n" + "usage\n" * 200,
+            )
+        }
+    )
+    with pytest.raises(OSError, match="GNU find with -printf is required"):
+        await busybox.listdir("/w")
+
+
+async def test_printf_in_a_path_is_not_a_busybox_marker():
+    """Регресс: путь с «printf» (частый в C-проектах) в строке отказа
+    давал подсказку про GNU find вместо «нет доступа»."""
+    be = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr="find: '/w/src/printf.c': Permission denied\n",
+            )
+        }
+    )
+    with pytest.raises(PermissionError):
+        await be.walk_entries("/w")
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "stat: cannot stat \u2018/w/a\u2019: No such file or directory",
+        "stat: cannot stat `/w/a': No such file or directory",
+    ],
+    ids=["utf8-quotes", "c-locale-quotes"],
+)
+async def test_old_coreutils_quotes_name_the_path(stderr):
+    """coreutils до 8.25 (RHEL/CentOS 7) берут путь в ‘P’ или `P'."""
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    with pytest.raises(FileNotFoundError):
+        await be.getsize("/w/a")
+
+
+async def test_path_repeated_on_one_line_is_classified_fast():
+    """Регресс: промежуток между путём и «no such file» не ограничен —
+    строка с путём в тысячах мест разбиралась секунды."""
+    stderr = "'/w/a' " * 20_000 + "\n"
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    begin = time.monotonic()
+    with pytest.raises(OSError) as ei:
+        await be.getsize("/w/a")
+    assert time.monotonic() - begin < 2
+    assert not isinstance(ei.value, FileNotFoundError)
+
+
+async def test_direct_command_timeout_names_operation():
+    be = RecordingShell(
+        answers={"stat -c": ExecResult(return_code=None, timed_out=True)}
+    )
+    with pytest.raises(OSError) as ei:
+        await be.getsize("/w/a")
+    assert str(ei.value) == "stat timed out: /w/a"
+
+
+async def test_permission_denied_names_operation_and_path():
+    be = RecordingShell(
+        answers={
+            "stat -c": ExecResult(
+                return_code=1,
+                stderr="stat: cannot statx '/w/a': Permission denied\n",
+            )
+        }
+    )
+    with pytest.raises(PermissionError) as ei:
+        await be.stat("/w/a")
+    assert str(ei.value) == (
+        "stat failed (exit 1): /w/a: "
+        "stat: cannot statx '/w/a': Permission denied"
+    )

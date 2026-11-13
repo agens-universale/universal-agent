@@ -35,12 +35,11 @@ from gc_testkit.trace_grid import (
     trace_rows,
 )
 from gc_testkit.tui_support import tui_settings
-from rich.style import Style
-
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_blocks_view import HIDDEN_CLASS, BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.turn_line import TurnLine
+from rich.style import Style
 
 TID = "preview00000000000000000000000001"
 ORIGIN = 1
@@ -168,7 +167,7 @@ def _after_agent() -> list[dict]:
 def _calls() -> dict:
     ids = [f"r{i}" for i in range(4)] + [f"e{i}" for i in range(3)]
     ids += ["x1", "x2", "x3", AGENT, "n0", "m0", "m1", "m2", "m3"]
-    return {cid: 1.0 for cid in ids}
+    return dict.fromkeys(ids, 1.0)
 
 
 def _hunks(n: int) -> str:
@@ -572,9 +571,8 @@ async def test_preview_collapse_brings_header_into_view(tmp_path):
     """Прокрутка при раскрытии и свёртке — как в живой ленте (§9.3):
     лента прокручена вверх внутрь раскрытого блока, свёртка оставляет его
     заголовок видимым."""
-    from textual.containers import VerticalScroll
-
     from gc_tui.messages import BlockToggle
+    from textual.containers import VerticalScroll
 
     thread = _Thread(tmp_path, status="stopped")
     thread.add(*[p for i in range(12) for p in _read(i)])
@@ -625,7 +623,9 @@ async def test_window_toggle_one_frame(tmp_path, monkeypatch, where):
     thread = _Thread(tmp_path, status="stopped")
     thread.add(*[p for i in range(5) for p in _long_read(i)])
     thread.add(_say("a1", "Готово."))
-    async with _app(tmp_path).run_test(size=(70, 24)) as pilot:
+    # Высота — чтобы лента переполнялась и свёрнутой: иначе свёртка снимает
+    # полосу прокрутки вторым кадром, а проверка — про ленту с прокруткой.
+    async with _app(tmp_path).run_test(size=(70, 20)) as pilot:
         if where == "preview":
             screen = await _open_preview(pilot)
         else:

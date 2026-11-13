@@ -97,9 +97,11 @@ class StepTimings:
         _sinks[threading.get_ident()] = self
 
     def close(self) -> None:
+        # Закрыть могут сразу двое (поток после отмены и запись итога):
+        # pop без ошибки, если запись уже убрал второй.
         for tid, sink in list(_sinks.items()):
             if sink is self:
-                del _sinks[tid]
+                _sinks.pop(tid, None)
         with self._lock:
             fh, self._fh = self._fh, None
         if fh is not None:

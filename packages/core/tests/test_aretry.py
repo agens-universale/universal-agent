@@ -164,6 +164,105 @@ async def test_opted_in_user_stop_is_not_retried_with_permissive_policy(
     assert calls == ["stop"]
 
 
+async def test_late_stop_in_retry_pause_ends_retries_and_spares_turn(
+    monkeypatch,
+):
+    """Стоп нажат в паузе ретрая, а снятие дошло до loop уже после её конца:
+    новой попытки нет, наверх — стоп, следующая работа хода не обрывается."""
+    from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
+
+    loop = asyncio.get_running_loop()
+    gate = UserStop()
+    gate.prepare_run(loop, None)
+    held, calls = [], []
+    real_sleep = asyncio.sleep
+
+    async def pause_with_late_stop(delay, *_args, **_kwargs):
+        if delay:
+            # Снятие стопа задержано: тест отпустит его сам, после паузы.
+            loop.call_soon_threadsafe = lambda cb, *a: held.append((cb, a))
+            try:
+                gate.request()
+            finally:
+                del loop.call_soon_threadsafe
+        await real_sleep(0)
+
+    monkeypatch.setattr("asyncio.sleep", pause_with_late_stop)
+
+    @retry_with_backoff_async(
+        initial_delay_sec=10,
+        should_retry=lambda _: True,
+        interrupt_on_user_stop=True,
+    )
+    async def failing():
+        calls.append("attempt")
+        raise ConnectionError("offline")
+
+    with bind_user_stop(gate):
+        with pytest.raises(UserStopInterrupt):
+            await failing(use_retry=True)
+        assert len(held) == 1
+        for callback, args in held:
+            callback(*args)
+        await gate.await_settled(1)
+        await real_sleep(0.01)  # запись итога хода
+    assert calls == ["attempt"]
+
+
+async def test_stop_before_retry_pause_leaves_no_sleeping_task():
+    """Стоп запрошен до паузы: пауза не начинается, и её сон не остаётся
+    висеть в loop до конца задержки."""
+    from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
+
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), None)
+
+    @retry_with_backoff_async(
+        initial_delay_sec=60, interrupt_on_user_stop=True
+    )
+    async def failing():
+        gate.request()
+        raise ConnectionError("offline")
+
+    before = asyncio.all_tasks()
+    with bind_user_stop(gate), pytest.raises(UserStopInterrupt):
+        await failing(use_retry=True)
+    assert asyncio.all_tasks() == before
+
+
+async def test_stop_in_pause_is_a_stop_despite_an_earlier_cancel():
+    """У задачи хода остался счётчик прошлой, уже пойманной отмены: стоп в
+    паузе всё равно остановка, а не отмена всего хода."""
+    from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
+
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), None)
+    entered = asyncio.Event()
+
+    @retry_with_backoff_async(
+        initial_delay_sec=60, interrupt_on_user_stop=True
+    )
+    async def failing():
+        entered.set()
+        raise ConnectionError("offline")
+
+    async def turn():
+        asyncio.current_task().cancel()
+        try:
+            await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            pass  # пойманная отмена без uncancel: счётчик остался
+        with bind_user_stop(gate):
+            await failing(use_retry=True)
+
+    task = asyncio.create_task(turn())
+    await asyncio.wait_for(entered.wait(), 1)
+    await asyncio.sleep(0.01)
+    gate.request()
+    with pytest.raises(UserStopInterrupt):
+        await asyncio.wait_for(task, 1)
+
+
 @pytest.mark.parametrize("stop_at_error", [False, True])
 async def test_backoff_stops_without_an_outer_tool_handler(stop_at_error):
     from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop

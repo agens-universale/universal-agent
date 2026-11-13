@@ -1706,6 +1706,9 @@ async def _arequest_backend_canonical_once(
         mute_answer=mute_answer,
     )
     prompt_message_count = len(getattr(state, "messages", []) or [])
+    # Один логгер на весь вызов: транспорт пишет отброшенные чанки, конвертер
+    # — аргументы-не-JSON, и разбор обрыва нужен по обеим записям.
+    _run_log = getattr(ctx, "logger", None) or _fallback_logger
 
     send = functools.partial(
         _asend_chat_completions,
@@ -1727,7 +1730,7 @@ async def _arequest_backend_canonical_once(
             "adaptive_retry": not probe,
             "retry_embedded_choice_errors": retry_embedded_choice_errors,
             "salvage_reasoning": True,
-            "logger": getattr(ctx, "logger", None),
+            "logger": _run_log,
             "on_delta": _on_delta,
             "request_label": "main_agent",
             "runtime_notices_enabled": bool(getattr(ctx, "is_tui", False)),
@@ -1755,7 +1758,6 @@ async def _arequest_backend_canonical_once(
                 "Chat completion payload is not an object"
             )
         raise ValueError("chat/completions backend response must be an object")
-    _run_log = getattr(ctx, "logger", None) or _fallback_logger
     _finish = _first_choice_finish_reason(res)
     # Сохраняем finish_reason на state — catch-блок WrongFunctionArgumentsException
     # использует его, чтобы отличить усечённый JSON (length) от обычной невалидности.
@@ -1774,7 +1776,7 @@ async def _arequest_backend_canonical_once(
     persist_reasoning = persist_reasoning_content_for_model(resolved, settings)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
-        logger_override=getattr(ctx, "logger", _fallback_logger),
+        logger_override=_run_log,
         log_context={
             "url": url,
             "request_summary": _summarize_call_data_for_log(call_data),
