@@ -23,7 +23,7 @@ assume any particular task mode is active.
 - **L0** answer only — no tools except required output/finalization.
 - **L1** inspect/recommend — read/search/check; no modifications.
 - **L2** prepare artifact — draft/report/plan in allowed workspace.
-- **L3** local execution — edit/run/check within allowed paths.
+- **L3** local execution — edit/run/check; the runtime allows, asks, or blocks.
 - **L4** orchestrate — skills/subagents/multiple tools with validation.
 - **L5** external/irreversible — send/deploy/pay/delete/permission/public/commitment; ask approval.
 

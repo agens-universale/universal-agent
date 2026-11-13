@@ -28,7 +28,8 @@ from gc_core.constants.tool_names import (
 )
 from gc_core.execution.progress import (
     parse_tool_result_status,
-    tool_args_summary,
+    tool_call_id,
+    tool_card_title,
 )
 from gc_core.message_policy.nudges import output_for_card
 from gc_core.threads.facade import Cursor, Threads
@@ -196,7 +197,7 @@ def _call_report(
     message: dict, seen: set[str], root: str | None = None
 ) -> dict | None:
     name = message.get("name")
-    call_id = _call_id(message)
+    call_id = tool_call_id(message)
     if not isinstance(name, str) or name == "" or name in _HIDDEN:
         return None
     if call_id is None or call_id in seen:
@@ -206,7 +207,7 @@ def _call_report(
     report: dict[str, Any] = {
         "sessionUpdate": "tool_call",
         "toolCallId": call_id,
-        "title": _title(name, arguments, root),
+        "title": tool_card_title(name, arguments, root=root),
         "status": _IN_PROGRESS,
         "name": name,
     }
@@ -214,7 +215,7 @@ def _call_report(
     if parsed is None:
         return report
     shown = _arguments_for_card(name, parsed)
-    report["title"] = _title(name, shown, root)
+    report["title"] = tool_card_title(name, shown, root=root)
     report["rawInput"] = _truncate_values(shown)
     locations = _locations(name, parsed)
     if locations is not None:
@@ -225,7 +226,7 @@ def _call_report(
 def _output_report(
     message: dict, seen: set[str], finished: set[str] | None = None
 ) -> dict | None:
-    call_id = _call_id(message)
+    call_id = tool_call_id(message)
     if call_id is None or call_id not in seen:
         return None
     if finished is not None and call_id in finished:
@@ -384,23 +385,6 @@ def _preview_text(output: Any) -> str | None:
     if text == "":
         return None
     return text[:_CARD_LIMIT]
-
-
-def _title(name: str, arguments: Any, root: str | None) -> str:
-    preview = tool_args_summary(name, arguments, root=root)
-    if preview == "":
-        return name
-    return f"{name}({preview})"
-
-
-def _call_id(message: dict) -> str | None:
-    call_id = message.get("call_id")
-    if isinstance(call_id, str) and call_id != "":
-        return call_id
-    fallback = message.get("id")
-    if isinstance(fallback, str) and fallback != "":
-        return fallback
-    return None
 
 
 def _decode(

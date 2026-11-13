@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.transport import McpServerExitedError
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -15,6 +16,10 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     while getattr(exc, "exceptions", None) and depth < 5:
         exc = exc.exceptions[0]
         depth += 1
+    if isinstance(exc, McpServerExitedError):
+        # Раньше — «нет соединения с …»: stdio-сервер упал при старте, а его
+        # stderr уходил в никуда. Текст уже собран: строка причины и лог.
+        return str(exc)
     if isinstance(exc, FileNotFoundError):
         cmd = server_cfg.get("command") or "?"
         return f"команда '{cmd}' не найдена"

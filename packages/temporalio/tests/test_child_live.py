@@ -117,7 +117,10 @@ def child_provider(tmp_path, tool_name):
                     tool(
                         "read",
                         "fs_read_file",
-                        {"path": str(tmp_path / "example.txt")},
+                        {
+                            "path": str(tmp_path / "example.txt"),
+                            "add_line_numbers": False,
+                        },
                     ),
                 ]
             elif not child and not outputs:
@@ -432,7 +435,10 @@ def auto_child_provider(tmp_path):
                     tool(
                         f"read-{n}",
                         "fs_read_file",
-                        {"path": str(tmp_path / f"file-{n}.txt")},
+                        {
+                            "add_line_numbers": False,
+                            "path": str(tmp_path / f"file-{n}.txt"),
+                        },
                     )
                 ]
             elif not child and len(requests) == 1:
@@ -515,7 +521,7 @@ async def test_native_unbound_child_auto_and_old_history_replay(
     url, child_requests = auto_child_provider
     core = AppConfig.model_validate(
         {
-            "level": "auto",
+            "model": "auto",
             "models": {
                 "fast": {"model": "fast-model", "url": url, "token": ""},
                 "mid": {"model": "mid-model", "url": url, "token": ""},
@@ -669,7 +675,10 @@ def independent_child_provider(tmp_path):
                         tool(
                             f"read-{n}",
                             "fs_read_file",
-                            {"path": str(tmp_path / f"file-{n}.txt")},
+                            {
+                                "add_line_numbers": False,
+                                "path": str(tmp_path / f"file-{n}.txt"),
+                            },
                         )
                     ]
                 elif not any(
@@ -794,7 +803,7 @@ async def test_independent_child_pair_and_recorded_history_replay(
     }
     core = AppConfig.model_validate(
         {
-            "level": "auto",
+            "model": "auto",
             "models": models,
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend": {

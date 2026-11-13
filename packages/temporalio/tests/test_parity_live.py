@@ -93,7 +93,10 @@ def parity_scenarios(monkeypatch):
     cases["stop_mid_batch"] = {
         "turns": [
             batch(
-                call("fs_read_file", {"path": "input.txt"}),
+                call(
+                    "fs_read_file",
+                    {"add_line_numbers": False, "path": "input.txt"},
+                ),
                 call("exec_calculator", {"expression": "2+2"}, "not-started"),
             )
         ],
@@ -149,7 +152,11 @@ def parity_scenarios(monkeypatch):
                     "make_dirs": True,
                 },
             ),
-            call("fs_read_file", {"path": "nested/result.txt"}, "read-first"),
+            call(
+                "fs_read_file",
+                {"add_line_numbers": False, "path": "nested/result.txt"},
+                "read-first",
+            ),
             call(
                 "fs_append_file",
                 {
@@ -159,7 +166,11 @@ def parity_scenarios(monkeypatch):
                 },
                 "append",
             ),
-            call("fs_read_file", {"path": "nested/result.txt"}, "read-second"),
+            call(
+                "fs_read_file",
+                {"add_line_numbers": False, "path": "nested/result.txt"},
+                "read-second",
+            ),
             call(
                 "fs_write_file",
                 {
@@ -171,7 +182,7 @@ def parity_scenarios(monkeypatch):
             ),
             call(
                 "fs_read_file",
-                {"path": "nested/result.txt.bak"},
+                {"add_line_numbers": False, "path": "nested/result.txt.bak"},
                 "read-backup",
             ),
             finish("Backup verified"),
@@ -185,7 +196,7 @@ def parity_scenarios(monkeypatch):
             ),
             call(
                 "fs_read_file",
-                {"path": "downloads/fixture.txt"},
+                {"add_line_numbers": False, "path": "downloads/fixture.txt"},
                 "read-download",
             ),
             finish("Download verified"),
@@ -210,7 +221,11 @@ def parity_scenarios(monkeypatch):
 
     cases["stored_output"] = {
         "turns": [
-            call("fs_read_file", {"path": "big.txt"}, "read-big"),
+            call(
+                "fs_read_file",
+                {"add_line_numbers": False, "path": "big.txt"},
+                "read-big",
+            ),
             read_stored,
             finish("Stored output retrieved"),
         ],
@@ -474,6 +489,21 @@ async def test_actual_http_local_native_parity(
             }:
                 arguments = json.loads(function["arguments"])
                 arguments["path"] = str(tmp_path / arguments["path"])
+                if (
+                    name == "file_roundtrip"
+                    and function["name"] == "fs_read_file"
+                ):
+                    # Исторический сценарий ядра предшествует обязательному
+                    # флагу чтения. Обе стороны получают один актуальный вызов.
+                    arguments["add_line_numbers"] = False
+                function["arguments"] = json.dumps(arguments)
+            elif (
+                name == "memory_two_turns"
+                and function["name"] == "session_memory"
+            ):
+                # В текущем контракте content обязателен и для чтения.
+                arguments = json.loads(function["arguments"])
+                arguments.setdefault("content", "")
                 function["arguments"] = json.dumps(arguments)
             elif function["name"] == "download_file":
                 arguments = json.loads(function["arguments"])
@@ -702,6 +732,13 @@ async def test_actual_http_local_native_parity(
                 json.dumps(actual, ensure_ascii=False, indent=2)
             )
             assert actual == local
+            if name in {"file_roundtrip", "memory_two_turns"}:
+                outputs = [
+                    m["output"]
+                    for m in actual["messages"]
+                    if m.get("type") == "function_call_output"
+                ]
+                assert outputs and all(o["ok"] for o in outputs)
             if name == "stored_output":
                 outputs = [
                     m["output"]

@@ -75,8 +75,11 @@ def stdio_registry(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio
 
     reg = persistent_stdio.PersistentStdioRegistry()
+    # Второй аргумент — имя сервера (для имени лога stderr), двойнику не нужен.
     monkeypatch.setattr(
-        persistent_stdio, "PersistentStdioSession", lambda cfg: _FakeSession()
+        persistent_stdio,
+        "PersistentStdioSession",
+        lambda cfg, server_name=None: _FakeSession(),
     )
     return reg
 

@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("color_trace")
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.constants.tool_display import DisplayCategory as C
 from gc_testkit.paths import TUI_PKG

@@ -56,6 +56,21 @@ def test_no_address_anywhere_keeps_the_judge_unavailable():
         _judge(ctx)
 
 
+def test_transport_projection_needs_no_thread_lock(monkeypatch):
+    from gc_core import model_router
+
+    loaded = make_settings(_REGISTRY)
+
+    def forbidden_lock():
+        raise AssertionError("thread lock inside workflow")
+
+    monkeypatch.setattr(
+        model_router, "threading", SimpleNamespace(Lock=forbidden_lock)
+    )
+    assert consumer_has_transport(loaded, "command_judge") is True
+    assert consumer_has_transport(make_settings({}), "command_judge") is False
+
+
 def test_legacy_backend_url_is_enough_without_asking_the_router():
     ctx = _ctx({"backend.completions_url": "http://legacy.local/v1"})
     ctx.model_router = SimpleNamespace(resolve=None)  # не зовётся

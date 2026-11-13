@@ -19,7 +19,6 @@ from gc_core.constants.tool_names import (
     FINISH_TOOL_NAME,
     READ_STORED_TOOL_OUTPUT_NAME,
     SESSION_MEMORY_TOOL_NAME,
-    SESSION_TODO_TOOL_NAME,
 )
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
@@ -42,22 +41,20 @@ class FileDefinedSubagent(AbstractSubagent):
     # - session_read_stored_tool_output: оборачивание больших выводов безусловно, и в
     #   подсказке прямым текстом «Continue with session_read_stored_tool_output».
     #   Без тула ребёнку велят вызвать то, чего у него нет;
-    # - session_memory: харнес шлёт ребёнку bootstrap памяти на первом же шаге
-    #   (``runner.py``: «update persistent registers with the thread memory tool»)
-    #   и периодический tool_usage_notice. Оба текста рождаются из ГЛОБАЛЬНОГО
-    #   конфига и про `tools` файла не знают — без тула ребёнку снова велят вызвать
-    #   то, чего у него нет;
-    # - session_todo: тот же класс отказа — todo_reminder зовёт завести чек-лист,
-    #   сверяясь только с глобальным stop_tools.
-    # Все отказы выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
+    # - session_memory: контракт с оркестратором — регистры памяти живут в общем
+    #   ``shared``, ребёнок пишет туда то, что родитель прочтёт после него.
+    # Отказы выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
     # файла вовсе — это не запрет, а гарантия.
+    # session_todo в ядро НЕ входит: чек-лист ребёнка личный, снаружи его никто не
+    # читает, а схема тула — лишние токены в каждом запросе. Подсказки про него
+    # (todo_reminder, подсказка в сводке сжатия) сверяются с набором рана
+    # (``message_policy.tool_availability``), так что без тула они молчат.
     # Канон здесь, не в file_definitions: это runtime policy сдачи/stored output/памяти.
     REQUIRED_TOOL_NAMES = frozenset(
         {
             FINISH_TOOL_NAME,
             READ_STORED_TOOL_OUTPUT_NAME,
             SESSION_MEMORY_TOOL_NAME,
-            SESSION_TODO_TOOL_NAME,
         }
     )
 

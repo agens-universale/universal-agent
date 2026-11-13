@@ -22,6 +22,15 @@ def utc_now() -> datetime:
     return _utc_source.get()()
 
 
+def utc_clock() -> Callable[[], datetime]:
+    """Источник времени текущего рантайма для объекта, живущего между задачами.
+
+    Фиксируется сама функция: вызов из другой задачи (например, сигнал stop
+    workflow) не должен читать её contextvars и подменять часы на локальные.
+    """
+    return _utc_source.get()
+
+
 @contextmanager
 def execution_environment(
     *, new_id: Callable[[str], str], now: Callable[[], datetime]

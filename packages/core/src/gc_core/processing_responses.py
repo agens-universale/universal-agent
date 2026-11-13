@@ -990,7 +990,12 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     Падение `begin_turn` часы не отменяет — ход начат."""
     if not getattr(state, "parent_state_id", None):
         mono, wall = turn_clock_sources(ctx)
-        bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
+        bind_turn_clock(
+            ctx,
+            TurnClock.start(
+                mono=mono, wall=wall, lock_factory=port(ctx, "lock_factory")
+            ),
+        )
         _allow_breaker_probe(ctx)
     try:
         begin_turn(state, ctx)

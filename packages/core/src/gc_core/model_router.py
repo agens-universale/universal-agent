@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterator, Mapping
@@ -173,11 +173,16 @@ class CircuitBreaker:
     ждёт пробы (`_probe`, резолв пропускает, первое обращение — проба).
     Взятая проба до ответа — в `_running`: копия переносит её как ждущую.
     Все методы идут под одним замком: петля детей живёт в другом потоке.
+    `ModelRouter.sequential` передаёт `lock_factory=nullcontext`: операции workflow
+    исполняются последовательно, а потоковые блокировки там запрещены.
     `snapshot()`/`restore()` работают только с открытыми алиасами.
     """
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
+    def __init__(
+        self, *, lock_factory: Callable[[], Any] | None = None
+    ) -> None:
+        self._lock_factory = lock_factory or threading.Lock
+        self._lock = self._lock_factory()
         self._tripped: dict[str, str] = {}
         self._probe: dict[str, str] = {}
         self._running: dict[str, str] = {}
@@ -242,14 +247,16 @@ class CircuitBreaker:
             return dict(self._tripped)
 
     @classmethod
-    def restore(cls, snapshot: dict) -> CircuitBreaker:
-        breaker = cls()
+    def restore(
+        cls, snapshot: dict, *, lock_factory: Callable[[], Any] | None = None
+    ) -> CircuitBreaker:
+        breaker = cls(lock_factory=lock_factory)
         breaker._tripped = dict(snapshot or {})
         return breaker
 
     def copy(self) -> CircuitBreaker:
         with self._lock:
-            clone = CircuitBreaker()
+            clone = CircuitBreaker(lock_factory=self._lock_factory)
             clone._tripped = dict(self._tripped)
             clone._probe = {**self._running, **self._probe}
             return clone
@@ -365,6 +372,33 @@ class ModelRouter:
         }
         self._slots: dict[str, Any] = self._settings.slots.model_dump()
         self._assign: dict[str, Any] = self._settings.assign.model_dump()
+
+    @classmethod
+    def sequential(
+        cls,
+        settings: Any,
+        choice_provider: Callable[[], str],
+        *,
+        breaker_snapshot: dict[str, str] | None = None,
+        force_legacy: bool = False,
+        live_choice_provider: Callable[[], str] | None = None,
+    ) -> ModelRouter:
+        """Роутер без потоковых замков: workflow и локальные проекции настроек.
+
+        Создание и восстановление предохранителя идут через одну фабрику.
+        Объект нельзя разделять между потоками; обычный конструктор сохраняет
+        блокировку для локального агента и activities. Клоны роутера наследуют
+        этот предохранитель, а его copy() сохраняет способ синхронизации.
+        """
+        return cls(
+            settings,
+            choice_provider=choice_provider,
+            breaker=CircuitBreaker.restore(
+                breaker_snapshot or {}, lock_factory=nullcontext
+            ),
+            force_legacy=force_legacy,
+            live_choice_provider=live_choice_provider,
+        )
 
     def registry_empty(self) -> bool:
         return not self._models
@@ -723,7 +757,9 @@ def consumer_has_transport(
     if source.backend.completions_url:
         return True
     if router is None:
-        router = ModelRouter(
+        # Только синхронное чтение настроек; временный роутер не разделяется
+        # потоками. Снимок конфигурации строится и внутри workflow.
+        router = ModelRouter.sequential(
             source,
             choice_provider=lambda: effective_choice(
                 configured_choice(source), source

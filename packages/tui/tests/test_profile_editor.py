@@ -794,8 +794,9 @@ async def test_a_profile_deleted_from_outside_falls_back_to_the_list(
         assert scr._profiles_open is None
 
 
+@pytest.mark.parametrize("key", ["delete", "backspace"])
 async def test_the_list_keys_do_not_reach_it_while_the_editor_is_open(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, key
 ):
     """Пока открыт под-вид, клавиши секции целиком его — включая те, которых у
     редактора нет ВОВСЕ.
@@ -819,7 +820,7 @@ async def test_the_list_keys_do_not_reach_it_while_the_editor_is_open(
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
         _cursor_to(ed, "entry", alias="glm")
-        await pilot.press("delete")
+        await pilot.press(key)
         await pilot.pause()
         assert ed.awaiting_confirm
         assert not scr.query(".set-confirm"), (

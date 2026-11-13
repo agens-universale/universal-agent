@@ -1,6 +1,7 @@
 """Часы хода: длительность без ожидания человека (P1b, Task 2)."""
 
 import threading
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -40,6 +41,38 @@ def test_elapsed_without_waits_is_time_since_start():
     clock, mono = _clock()
     mono.now += 7.5
     assert clock.elapsed() == 7.5
+
+
+def test_workflow_clock_uses_bound_lock_and_excludes_human_wait(monkeypatch):
+    from gc_core import processing_responses
+    from gc_core.execution import turn_clock
+
+    def forbidden_lock():
+        raise AssertionError("thread lock inside workflow")
+
+    monkeypatch.setattr(
+        turn_clock, "threading", SimpleNamespace(Lock=forbidden_lock)
+    )
+    monkeypatch.setattr(processing_responses, "begin_turn", lambda *a: None)
+    mono = _Mono()
+    ctx = SimpleNamespace(
+        operations=SimpleNamespace(monotonic=mono),
+        lock_factory=nullcontext,
+        durable_execution=True,
+    )
+    with execution_environment(new_id=lambda _: "id", now=_Wall(mono)):
+        processing_responses.begin_turn_main_trace(SimpleNamespace(), ctx)
+        clock = ctx.turn_clock
+        mono.now += 2
+        clock.begin_wait()
+        mono.now += 5
+        clock.end_wait()
+        mono.now += 3
+    # Сигнал stop приходит в другой задаче без контекста основного workflow.
+    clock.close()
+    assert clock.elapsed() == 5
+    assert clock.waited() == 5
+    assert clock.ended_at == "2026-10-22T11:31:03.004Z"
 
 
 def test_one_wait_is_subtracted():
@@ -166,9 +199,10 @@ def test_sources_take_operations_monotonic():
 
 def test_sources_take_wall_from_execution_environment():
     fixed = datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
-    _, wall = turn_clock_sources(SimpleNamespace())
     with execution_environment(new_id=lambda p: p, now=lambda: fixed):
+        _, wall = turn_clock_sources(SimpleNamespace())
         assert wall() == fixed
+    assert wall() == fixed
 
 
 # ---- время вызовов хода (P4: карта `calls` записи итога) -----------------
