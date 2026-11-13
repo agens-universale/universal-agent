@@ -233,8 +233,11 @@ class PreparedInstall:
                 f"плагин {name} уже установлен (--force, чтобы заменить)"
             )
 
-    def commit(self, force: bool = False) -> InstalledPlugin:
-        """Скопировать в хранилище и записать метаданные."""
+    def commit(
+        self, force: bool = False, *, enabled: bool = True
+    ) -> InstalledPlugin:
+        """Скопировать в хранилище и записать метаданные одной записью —
+        вместе со статусом ``enabled``."""
         plugin = self.plugin
         self.ensure_free(force)
         name = _safe_name(plugin.name)
@@ -248,7 +251,7 @@ class PreparedInstall:
             ref=self._ref,
             subdir=self._subdir,
             commit=self._sha,
-            enabled=True,
+            enabled=enabled,
         )
         meta[name] = asdict(info)
         _write_meta(self._root, meta)
@@ -520,11 +523,7 @@ def update(
             )
         if confirm and prepared.differs_from(name) and not confirm(prepared):
             raise ValueError("обновление отменено")
-        info = prepared.commit(force=True)
-    if not was_enabled:
-        disable(info.name, root)
-        info.enabled = False
-    return info
+        return prepared.commit(force=True, enabled=was_enabled)
 
 
 def enabled_paths(root: Path | None = None) -> list[str]:
