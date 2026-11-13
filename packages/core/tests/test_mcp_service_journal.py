@@ -373,3 +373,35 @@ async def test_fingerprint_ignores_launcher(
     assert _entry(second).from_catalog
     assert [t["name"] for t in _entry(second).tools] == ["echo", "nap"]
     assert len(launches(control)) == 1
+
+
+@pytest.mark.parametrize("transport", _PROCESS_TRANSPORTS)
+async def test_startup_crash_reason_survives_launcher(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, transport
+):
+    """Основной путь хостов: сервис → пускатель журнала → лог stderr по
+    имени сервера → причина падения при старте в статусе потребителя."""
+    import sys
+
+    script = tmp_path / "crash_at_start.py"
+    script.write_text(
+        "import sys\nsys.stderr.write('boom-at-start\\n')\nsys.exit(3)\n",
+        encoding="utf-8",
+    )
+    settings = _settings(
+        {
+            "a": {
+                "transport": transport,
+                "command": sys.executable,
+                "args": [str(script)],
+                "persistent_session": True,
+            }
+        }
+    )
+    service = McpService(connect_on_start=True)
+    consumer = await _ready(mcp_reaper, service, settings)
+
+    status = consumer.status_of(_entry(consumer))
+    assert "spawn_launcher" in " ".join(_launcher_args(consumer))
+    assert status.state == STATE_FAILED
+    assert "сервер завершился при старте: boom-at-start" in status.reason
