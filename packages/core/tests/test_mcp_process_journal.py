@@ -221,9 +221,6 @@ def test_tools_are_found_by_absolute_path(monkeypatch, tmp_path):
     assert boot_id() != "fake-boot"
 
 
-# --- пускатель и запись ------------------------------------------------------
-
-
 def test_ps_rejecting_one_pid_does_not_hide_others(monkeypatch, tmp_path):
     """``ps`` macOS на pid выше своего предела отказывает целиком (код 1,
     пустой вывод): остальные pid опрашиваются по одному."""
@@ -245,6 +242,9 @@ def test_ps_rejecting_one_pid_does_not_hide_others(monkeypatch, tmp_path):
     states = process_start_states([5, 7, 999999999])
 
     assert states == {5: ("Fri Nov 13 12:11:31 2026", False)}
+
+
+# --- пускатель и запись ------------------------------------------------------
 
 
 def test_launch_argv_shape_and_owner(mcp_home):

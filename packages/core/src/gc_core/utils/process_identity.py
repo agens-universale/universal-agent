@@ -60,7 +60,8 @@ def parse_ps_table(text: str) -> dict[int, tuple[str, str]]:
 
 
 def process_start_states(pids: Iterable[int]) -> dict[int, tuple[str, bool]]:
-    """{pid: (метка, зомби ли)} для найденных процессов; один опрос ОС.
+    """{pid: (метка, зомби ли)} для найденных процессов; один опрос ОС
+    (``ps`` macOS, отклонивший вызов, — по одному pid).
 
     Нет процесса, ошибка чтения, другая ОС — pid в ответе нет.
     """
@@ -119,7 +120,7 @@ def _linux_states(pids: list[int]) -> dict[int, tuple[str, str]]:
 
 
 def _ps_states(pids: list[int]) -> dict[int, tuple[str, str]]:
-    """Один ``ps`` на все pid; при ошибке — по одному.
+    """Один ``ps`` на все pid; отказ без вывода — по одному.
 
     Отсутствующие pid ``ps`` пропускает, но pid выше предела macOS
     отклоняет весь вызов с пустым выводом: одна битая запись не должна
@@ -135,13 +136,13 @@ def _ps_states(pids: list[int]) -> dict[int, tuple[str, str]]:
 
 
 def _ps_table(pids: list[int]) -> dict[int, tuple[str, str]] | None:
-    """Таблица ``ps`` по pid; ``ps`` завершился ошибкой — ``None``."""
+    """Таблица ``ps`` по pid; ``ps`` отказал без вывода — ``None``."""
     argv = [_PS, "-o", "pid=,stat=,lstart=", "-p", ",".join(map(str, pids))]
     try:
         result = _run(argv, check=False)
     except (OSError, subprocess.SubprocessError):
         return {}
-    if result.returncode:
+    if result.returncode and not result.stdout.strip():
         return None
     return parse_ps_table(result.stdout)
 

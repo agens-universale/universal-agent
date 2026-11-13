@@ -400,8 +400,9 @@ def _signal_group(pgid: int, sig: int) -> bool:
 def _await_exit(records: list[ProcessRecord], deadline: float) -> None:
     """Ждать до ``deadline`` (монотонные часы), пока выйдут все лидеры.
 
-    Один опрос ОС на шаг. Зомби считается вышедшим: лидера, которого
-    хозяин ещё не пожал, по пустоте группы не дождаться.
+    Один опрос ОС на шаг (см. ``process_start_states``). Зомби считается
+    вышедшим: лидера, которого хозяин ещё не пожал, по пустоте группы не
+    дождаться.
     """
     while records:
         states = _states_of(records)
