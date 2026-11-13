@@ -216,10 +216,35 @@ class FileTaskStore:
         view = run_sync(_aview(self._threads, key))
         if view is None:
             return [], TaskCursor(None, 0, None)
-        batch, archives = view
+        batch, record = view
         return _complete(_feed(key, batch)), _task_cursor(
-            batch.cursor, archives
+            batch.cursor, len(record.archives)
         )
+
+    def read_history(
+        self, task_id: str, system: Optional[str] = None
+    ) -> tuple[list[dict], TaskCursor]:
+        """Сегменты (как ``read_segments``) и курсор сразу за ними — из
+        одного снимка: дозапись между чтениями не разводит историю и
+        курсор. Тред без сжатия (живая история не начинается сводкой) —
+        один сегмент записей ``read_all_events``."""
+        key = self._key(task_id, system)
+        snap = run_sync(_ahistory(self._threads, key))
+        if snap is None:
+            return [_segment(0, [], None)], TaskCursor(None, 0, None)
+        batch, archived = snap
+        cursor = _task_cursor(batch.cursor, len(archived))
+        history = [e for stream, e in batch.entries if stream == _HISTORY]
+        if not (
+            history and self.is_compaction_summary(_envelope(key, history[0]))
+        ):
+            return [_segment(0, _complete(_feed(key, batch)), None)], cursor
+        side = [
+            _side_envelope(key, stream, e)
+            for stream, e in batch.entries
+            if stream != _HISTORY
+        ]
+        return _segments(key, [*archived, history], side), cursor
 
     def read_raw_thread_jsonl(
         self, task_id: str, system: Optional[str] = None
@@ -249,24 +274,7 @@ class FileTaskStore:
         """
         key = self._key(task_id, system)
         parts, side = run_sync(_aparts_and_side(self._threads, key))
-        # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
-        parsed: list[tuple[list[dict], Optional[dict]]] = []
-        for part in parts:
-            leading, seg = _split_leading([_envelope(key, e) for e in part])
-            parsed.append((seg, leading))
-
-        segments: list[dict] = []
-        for i, (seg, _leading) in enumerate(parsed):
-            compacted_by = None
-            if i + 1 < len(parsed):
-                next_leading = parsed[i + 1][1]
-                if next_leading is not None:
-                    compacted_by = _compaction(seg, next_leading)
-            segments.append(
-                {"index": i, "messages": seg, "compacted_by": compacted_by}
-            )
-        _place_in_segments(segments, parsed, side)
-        return segments
+        return _segments(key, parts, side)
 
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None
@@ -291,10 +299,10 @@ class FileTaskStore:
             view = run_sync(_aview(self._threads, key))
             if view is None:
                 return TailResult(new_records=[], next_cursor=cursor)
-            batch, archives = view
+            batch, record = view
             return TailResult(
                 new_records=_feed(key, batch),
-                next_cursor=_task_cursor(batch.cursor, archives),
+                next_cursor=_task_cursor(batch.cursor, len(record.archives)),
             )
         batch = run_sync(self._threads.tail(key, _FEED, cursor.position_token))
         if batch.reset:
@@ -319,8 +327,9 @@ async def _collect(threads: Threads, system: str) -> list[ThreadRecord]:
 
 async def _aview(
     threads: Threads, key: ThreadKey
-) -> Optional[tuple[TailBatch, int]]:
-    """Живая история, курсор за ней и число архивов — согласованные: тред,
+) -> Optional[tuple[TailBatch, ThreadRecord]]:
+    """Живая история, курсор за ней и запись треда (её архивы) —
+    согласованные: тред,
     сжатый между чтением его записи и истории, читается заново (иначе
     курсор новой версии истории нёс бы прежнее число архивов, и следующее
     сжатие стало бы сбросом). Треда нет — ``None``."""
@@ -332,7 +341,23 @@ async def _aview(
         batch = await threads.tail(key, _FEED, start)
         if not batch.reset:
             break
-    return batch, len(record.archives)
+    return batch, record
+
+
+async def _ahistory(
+    threads: Threads, key: ThreadKey
+) -> Optional[tuple[TailBatch, list[list[StreamEntry]]]]:
+    """Снимок ``_aview`` и части-архивы его записи треда: архив не
+    меняется, поэтому части и курсор согласованы. Треда нет — ``None``."""
+    view = await _aview(threads, key)
+    if view is None:
+        return None
+    batch, record = view
+    archived = [
+        await threads.store.read_archive(key, archive.id)
+        for archive in record.archives
+    ]
+    return batch, archived
 
 
 async def _acompaction_step(
@@ -515,6 +540,33 @@ async def _aparts_and_side(
         *(_side_envelope(key, TURNS, e) for e in turns),
         *(_side_envelope(key, MODEL_CHOICES, e) for e in choices),
     ]
+
+
+def _segment(index: int, messages: list[dict], compacted_by) -> dict:
+    return {"index": index, "messages": messages, "compacted_by": compacted_by}
+
+
+def _segments(
+    key: ThreadKey, parts: list[list[StreamEntry]], side: list[dict]
+) -> list[dict]:
+    """Части треда → сегменты: часть i без лидирующей сводки; synthesis
+    сегмента — лидирующая сводка следующей части, у последней — None.
+    Записи сбоку — в сегмент своего хода."""
+    # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
+    parsed: list[tuple[list[dict], Optional[dict]]] = []
+    for part in parts:
+        leading, seg = _split_leading([_envelope(key, e) for e in part])
+        parsed.append((seg, leading))
+    segments: list[dict] = []
+    for i, (seg, _leading) in enumerate(parsed):
+        compacted_by = None
+        if i + 1 < len(parsed):
+            next_leading = parsed[i + 1][1]
+            if next_leading is not None:
+                compacted_by = _compaction(seg, next_leading)
+        segments.append(_segment(i, seg, compacted_by))
+    _place_in_segments(segments, parsed, side)
+    return segments
 
 
 def _place_in_segments(
