@@ -159,10 +159,11 @@ async def _asend_initialized_notification(
     server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
+    server_key: Optional[str] = None,
 ) -> None:
     """Асинхронный двойник: отличается ровно транспортом."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    await aget_transport(server_cfg)(
+    await aget_transport(server_cfg, server_key)(
         url, headers, _NOTIFICATION_PAYLOAD, timeout
     )
 
@@ -172,17 +173,27 @@ async def _ainit_mcp_session(
     server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
+    server_key: Optional[str] = None,
 ) -> Optional[str]:
-    """Асинхронный двойник :func:`_init_mcp_session`; порядок шагов общий."""
+    """Асинхронный двойник :func:`_init_mcp_session`; порядок шагов общий.
+
+    ``server_key`` (имя сервера) уходит в транспорт — stdio называет им лог
+    stderr сервера.
+    """
     headers = _mcp_headers(server_cfg, token, session_id=None)
-    resp_headers, _body = await aget_transport(server_cfg)(
+    resp_headers, _body = await aget_transport(server_cfg, server_key)(
         url, headers, _initialize_payload(), timeout
     )
     session_id = _session_id_from(resp_headers)
     if not session_id:
         return None
     await _asend_initialized_notification(
-        url, session_id, server_cfg, token=token, timeout=timeout
+        url,
+        session_id,
+        server_cfg,
+        token=token,
+        timeout=timeout,
+        server_key=server_key,
     )
     return session_id
 
@@ -193,11 +204,12 @@ async def _atools_list_request(
     server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
+    server_key: Optional[str] = None,
     strict: bool = False,
 ) -> List[Dict[str, Any]]:
     """Асинхронный двойник :func:`_tools_list_request`; разбор общий."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    _resp_headers, data = await aget_transport(server_cfg)(
+    _resp_headers, data = await aget_transport(server_cfg, server_key)(
         url, headers, _tools_list_payload(), timeout
     )
     return _tools_from(data, strict=strict)
@@ -226,7 +238,7 @@ async def _acall_mcp_tool(
 ) -> Any:
     """Асинхронный двойник :func:`_call_mcp_tool`; обновление кэша сессии общее."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    resp_headers, body = await aget_transport(server_cfg)(
+    resp_headers, body = await aget_transport(server_cfg, server_key)(
         url, headers, _tools_call_payload(tool_name, arguments), timeout
     )
     _remember_session(resp_headers, server_key)
@@ -270,7 +282,7 @@ async def _aget_or_init_session_id(
         return session_id
 
     session_id = await _ainit_mcp_session(
-        url, server_cfg, token=token, timeout=timeout
+        url, server_cfg, token=token, timeout=timeout, server_key=server_key
     )
     if session_id:
         _MCP_SESSIONS[(current_owner(), server_key)] = session_id

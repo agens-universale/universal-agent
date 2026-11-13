@@ -284,3 +284,25 @@ def test_multiline_payload_selectable_blocks():
     children = list(getattr(w, "_pending_children", []) or w.children)
     assert len(children) >= 2  # каркас-голова, multiline-блок, (хвост)
     assert all(isinstance(c.content, RichText) for c in children)
+
+
+def test_unfold_without_repair_keeps_truncated_string_as_is():
+    """Аргументы вызова мы не обрезаем: обрывок в них экран вызова обязан
+    показать как сохранён, а не «починенным»."""
+    broken = '{"path": "a.toml", "include_hash": false, "include_line_count":'
+    assert unfold_payload(broken) == {"path": "a.toml", "include_hash": False}
+    assert unfold_payload(broken, repair_truncated=False) == broken
+    nested = {"arguments": broken}
+    assert unfold_payload(nested, repair_truncated=False) == nested
+
+
+def test_broken_call_arguments_returns_raw_string_only_for_non_json():
+    from gc_tui.services.json_payload import broken_call_arguments
+
+    broken = '{"path": "a.toml", "include_line_count": '
+    assert broken_call_arguments({"arguments": broken}) == broken
+    assert broken_call_arguments({"arguments": '{"path": "a"}'}) is None
+    # Пустые аргументы — вызов без параметров, не обрывок.
+    assert broken_call_arguments({"arguments": "  "}) is None
+    assert broken_call_arguments({"arguments": {"path": "a"}}) is None
+    assert broken_call_arguments("не dict") is None

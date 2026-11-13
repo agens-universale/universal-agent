@@ -357,3 +357,81 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(
     # Контракт этапа 1: compaction не должен менять project metadata/call metadata.
     assert state.initial_project_data == initial_project_data_before
     assert state.call_metadata == call_metadata_before
+
+
+_MEMORY_HINT_PHRASES = (
+    "use the session memory tool",
+    "update session memory with append or write",
+)
+_TODO_HINT_PHRASE = "with the session_todo tool"
+
+
+def _compacted_summary_with_stop_tools(monkeypatch, stop_tools):
+    """Тело сводки после настоящего сжатия у агента, чей набор тулов собран
+    из конфига с глобальным ``agent.stop_tools``."""
+    from gc_core.tools.registry import get_builtin_tools_data
+
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
+    )
+
+    async def _fake_summary(**_kwargs):
+        return valid_summary_xml_for_tests(seed="context")
+
+    _patch_chat_completion(monkeypatch, _fake_summary)
+    empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+    async def _fake_patch_replace(**_k):
+        return empty_patch
+
+    monkeypatch.setattr(
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        _fake_patch_replace,
+    )
+    settings = make_settings({"agent.stop_tools": list(stop_tools)})
+    ctx = _ctx(trigger_chars=1)
+    ctx.tools_data = get_builtin_tools_data(settings)
+    state = _state()
+    state.shared = types.SimpleNamespace(working_memory={"goal": "цель"})
+    state.session_todo = [{"content": "шаг", "status": "in_progress"}]
+    state.messages = [
+        {"role": "user", "content": "first request", "id": "m1"},
+        {"role": "assistant", "content": "first reply", "id": "m2"},
+    ]
+    state.user_intent_log = user_ask_records("first request", turn=1)
+    run_coro(
+        arun_summary_compaction(
+            ctx=ctx,
+            state=state,
+            trigger_threshold_chars=1,
+            trigger_reason="post_step",
+            is_cli_mode=False,
+        )
+    )
+    return state.messages[-1]["content"]
+
+
+def test_summary_does_not_advise_memory_tool_the_agent_lacks(monkeypatch):
+    """Глобальный ``stop_tools: [session_memory]``: снимок памяти в сводке
+    остаётся, а совета вызвать тул памяти нет — его у агента нет."""
+    body = _compacted_summary_with_stop_tools(monkeypatch, ["session_memory"])
+    assert "<session_memory>" in body
+    assert "цель" in body
+    for phrase in _MEMORY_HINT_PHRASES:
+        assert phrase not in body
+    assert _TODO_HINT_PHRASE in body
+
+
+def test_summary_does_not_advise_todo_tool_the_agent_lacks(monkeypatch):
+    body = _compacted_summary_with_stop_tools(monkeypatch, ["session_todo"])
+    assert "<session_todo>" in body
+    assert _TODO_HINT_PHRASE not in body
+    for phrase in _MEMORY_HINT_PHRASES:
+        assert phrase in body
+
+
+def test_summary_keeps_tool_hints_when_tools_are_there(monkeypatch):
+    body = _compacted_summary_with_stop_tools(monkeypatch, [])
+    for phrase in (*_MEMORY_HINT_PHRASES, _TODO_HINT_PHRASE):
+        assert phrase in body

@@ -1028,9 +1028,9 @@ def slow_spawn(monkeypatch):
     real = persistent_stdio._spawn_detached_stdio_process
     spawned = []
 
-    def spawn(cfg):
+    def spawn(cfg, *args):
         time.sleep(0.5)
-        spawned.append(real(cfg))
+        spawned.append(real(cfg, *args))
         return spawned[-1]
 
     monkeypatch.setattr(

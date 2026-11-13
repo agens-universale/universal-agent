@@ -349,6 +349,12 @@ def test_settings_model_entry_form_snapshot(
         scr._refresh_footer()
         await pilot.pause()
         await _freeze_cursors(pilot)
+        # Форма целиком влезает: подсказка прокрутки от прежнего списка
+        # не должна оставаться в футере после окончательной раскладки.
+        from gc_tui.form_frame import FOOTER_SCROLL
+
+        assert scr.query_one("#set-scroll").max_scroll_y == 0
+        assert FOOTER_SCROLL not in str(scr.query_one("#set-footer").render())
 
     assert snap_compare(app, terminal_size=_ENTRY_FORM_SIZE, run_before=setup)
 

@@ -61,7 +61,7 @@ EXPECT = {
 
 def test_each_profile_toggles_match():
     for fname, (subagents, trigger) in EXPECT.items():
-        prof = yaml.safe_load((PROFILES / fname).read_text())
+        prof = yaml.safe_load((PROFILES / fname).read_text(encoding="utf-8"))
         gcc = prof["agent_kwargs"]["gc_cli_config"]
         c, parsed_trigger = _build(gcc)
         assert c.agent.use_local_subagents is subagents, fname
@@ -103,7 +103,9 @@ HARBOR_RUNS = sorted(
     p
     for p in BENCH_CONFIGS.glob("*.yml")
     if p.name not in MASTER_FLAT_RUNS
-    and list(_gc_cli_configs(yaml.safe_load(p.read_text()) or {}))
+    and list(
+        _gc_cli_configs(yaml.safe_load(p.read_text(encoding="utf-8")) or {})
+    )
 )
 
 
@@ -121,7 +123,9 @@ def test_harbor_runs_found():
 @pytest.mark.parametrize("path", HARBOR_RUNS, ids=lambda p: p.stem)
 def test_bench_config_harbor_run_builds(path):
     """Каждый gc_cli_config harbor-прогона собирается адаптером (схема develop)."""
-    for gcc in _gc_cli_configs(yaml.safe_load(path.read_text())):
+    for gcc in _gc_cli_configs(
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+    ):
         _build(gcc)
 
 
@@ -137,7 +141,7 @@ UAG_EXPECT = {
 @pytest.mark.parametrize("fname", sorted(UAG_EXPECT))
 def test_uag_s200k_profiles_keep_their_setup(fname):
     thinking, strip = UAG_EXPECT[fname]
-    doc = yaml.safe_load((BENCH_CONFIGS / fname).read_text())
+    doc = yaml.safe_load((BENCH_CONFIGS / fname).read_text(encoding="utf-8"))
     (gcc,) = _gc_cli_configs(doc)
     c, _ = _build(gcc)
     kwargs = c.backend.chat_completion_kwargs

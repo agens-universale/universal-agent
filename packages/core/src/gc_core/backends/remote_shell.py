@@ -331,15 +331,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 f"download timed out after {self.fs_op_timeout_sec} s: {path}"
             )
         if res.return_code != 0:
-            err = res.stderr.strip()
-            # «Файла нет» — только когда так сказала та сторона: каталог или
-            # запрет на чтение иначе выглядели бы как отсутствие файла, и
-            # модель шла бы его создавать.
-            if "No such file" in err:
-                raise FileNotFoundError(err)
-            if "Permission denied" in err:
-                raise PermissionError(err)
-            raise OSError(err or f"download failed: {path}")
+            raise self._fs_failure(path, res, what="download")
         if res.stdout_hit_capture_cap:
             raise OSError(
                 f"file exceeds download ceiling ({self.walk_output_max_chars} chars): {path}"

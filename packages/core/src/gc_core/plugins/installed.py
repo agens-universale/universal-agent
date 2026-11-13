@@ -92,10 +92,15 @@ def _read_meta(root: Path) -> dict[str, dict]:
 
 
 def _write_meta(root: Path, meta: dict[str, dict]) -> None:
+    """Реестр целиком: временный файл и замена — оборванная запись не
+    оставляет полупустого реестра."""
     root.mkdir(parents=True, exist_ok=True)
-    _meta_path(root).write_text(
+    path = _meta_path(root)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    tmp.replace(path)
 
 
 def _safe_name(name: str) -> str:
@@ -233,8 +238,11 @@ class PreparedInstall:
                 f"плагин {name} уже установлен (--force, чтобы заменить)"
             )
 
-    def commit(self, force: bool = False) -> InstalledPlugin:
-        """Скопировать в хранилище и записать метаданные."""
+    def commit(
+        self, force: bool = False, *, enabled: bool = True
+    ) -> InstalledPlugin:
+        """Скопировать в хранилище и записать метаданные одной записью —
+        вместе со статусом ``enabled``."""
         plugin = self.plugin
         self.ensure_free(force)
         name = _safe_name(plugin.name)
@@ -248,7 +256,7 @@ class PreparedInstall:
             ref=self._ref,
             subdir=self._subdir,
             commit=self._sha,
-            enabled=True,
+            enabled=enabled,
         )
         meta[name] = asdict(info)
         _write_meta(self._root, meta)
@@ -520,11 +528,7 @@ def update(
             )
         if confirm and prepared.differs_from(name) and not confirm(prepared):
             raise ValueError("обновление отменено")
-        info = prepared.commit(force=True)
-    if not was_enabled:
-        disable(info.name, root)
-        info.enabled = False
-    return info
+        return prepared.commit(force=True, enabled=was_enabled)
 
 
 def enabled_paths(root: Path | None = None) -> list[str]:

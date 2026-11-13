@@ -326,3 +326,24 @@ def test_core_plugins_have_no_print_or_input():
         and node.func.id in ("print", "input")
     ]
     assert offenders == []
+
+
+def test_cli_never_prints_url_credentials(monkeypatch, capsys):
+    """Строка списка и текст ошибки показывают адрес без ``user:pass@``."""
+    secret = "https://bob:s3cret@git.example/team/plug.git"
+    row = cli._row(
+        installed.InstalledPlugin(
+            name="p", version="1", source=secret, enabled=True
+        )
+    )
+
+    def failing_install(*_args, **_kwargs):
+        raise ValueError(f"{secret}: репозиторий не получен")
+
+    monkeypatch.setattr(installed, "prepare", failing_install)
+    code = cli.main(["install", "--yes", secret])
+
+    assert "s3cret" not in row
+    assert "git.example/team/plug.git" in row
+    assert code == 1
+    assert "s3cret" not in capsys.readouterr().err

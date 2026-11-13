@@ -43,6 +43,12 @@ def _tui_color_mode(monkeypatch):
     monkeypatch.delenv("NO_COLOR", raising=False)
 
 
+@pytest.fixture
+def color_trace(monkeypatch):
+    """Проверки палитры ленты явно выбирают цветной режим, как снимки."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _snapshot_clock(request, monkeypatch):
     """Часы эталонов — одни на все кадры (`pinned_snapshot_clock`): время

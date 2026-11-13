@@ -21,15 +21,17 @@ from gc_core.plugins.manifest import (
     load_plugin,
     shown_matcher,
 )
+from gc_core.plugins.sources import shown_url
 from gc_core.settings import runtime_of
 from gc_core.tools.subagents.role_info import role_availability, role_rights
 
 _LOAD_FAILED = "не загружен (см. лог)"
-# Диагностика снимка по плагинам: субагент, команда, хуки, MCP-сервер.
+# Диагностика снимка по плагинам: субагент, команда, недоверенные хуки и
+# MCP-серверы, MCP-сервер.
 _OWNER = re.compile(
     r"^(?:Субагент (?P<role>[^\s:]+):"
     r"|Команда плагина (?P<command>[^\s:]+):"
-    r"|Хуки плагина (?P<hooks>\S+) "
+    r"|(?:Хуки и MCP-серверы|Хуки|MCP-серверы) плагина (?P<untrusted>\S+) "
     r"|MCP-сервер .+? плагина (?P<mcp>\S+) )"
 )
 # Запись пользователя заменила сервер плагина — сведение, не неполадка.
@@ -68,7 +70,8 @@ def _is_installed_path(root: Path) -> bool:
 
 
 def _source(item) -> str:
-    return f"{item.source}@{item.commit[:8]}" if item.commit else item.source
+    source = shown_url(item.source)
+    return f"{source}@{item.commit[:8]}" if item.commit else source
 
 
 def _version(version: str) -> str:

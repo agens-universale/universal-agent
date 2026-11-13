@@ -87,6 +87,48 @@ def _assert_canon(scr, *, scroll_id, frame_id, footer_id):
     )
 
 
+async def test_settings_scroll_hint_tracks_late_content(tmp_path):
+    from gc_tui.app import TuiApp
+    from gc_tui.form_frame import FOOTER_SCROLL
+    from gc_tui.screens.settings import SettingsScreen
+    from textual.widgets import Static
+
+    app = TuiApp(settings=tui_settings(_cfg()))
+    async with app.run_test(size=(100, 40)) as pilot:
+        scr = SettingsScreen(
+            settings=as_settings(_cfg()),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
+        )
+        await app.push_screen(scr)
+        await pilot.pause()
+        scroll = scr.query_one("#set-scroll")
+        footer = scr.query_one("#set-footer", Static)
+        assert scroll.max_scroll_y == 0
+        assert FOOTER_SCROLL not in str(footer.render())
+
+        # Фоновая загрузка добавляет поля без Resize экрана и движения курсора.
+        extra = Static("\n".join(["Поздно загруженное поле"] * 50))
+        await scr.query_one("#set-frame").mount(extra)
+        await wait_until(
+            pilot,
+            lambda: FOOTER_SCROLL in str(footer.render()),
+            "подсказка прокрутки после загрузки полей",
+        )
+        assert scroll.max_scroll_y > 0
+        assert FOOTER_SCROLL in str(footer.render())
+
+        await extra.remove()
+        await wait_until(
+            pilot,
+            lambda: FOOTER_SCROLL not in str(footer.render()),
+            "скрытие подсказки после удаления полей",
+        )
+        assert scroll.max_scroll_y == 0
+        assert FOOTER_SCROLL not in str(footer.render())
+
+
 @pytest.mark.parametrize(
     "section",
     [

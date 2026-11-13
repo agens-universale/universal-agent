@@ -348,7 +348,7 @@ JSON экрана события и карточки вызова, YAML `/config
 - **Узкий футер:** первыми уходят имена (модели хода и ожидающего выбора), у
   `auto` — стрелка с точкой уровня; точки остаются.
 
-Стражи: `test_model_picker.py`, `test_trace_model_mark.py`,
+Стражи: `test_tui_model_picker.py`, `test_trace_model_mark.py`,
 `test_footer_model_choice.py`, `test_palette_sync.py`.
 
 ## 4c. Стартовая шапка

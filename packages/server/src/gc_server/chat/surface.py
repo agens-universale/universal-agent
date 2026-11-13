@@ -135,7 +135,7 @@ class ChatSurface:
         return app
 
     async def astart(self) -> None:
-        return None
+        self.responses.recovery.start()
 
     async def astop(self) -> None:
         # Порядок — у ``aclose_mcp_service``: ходы, сервис, агенты.

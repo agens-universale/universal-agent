@@ -84,6 +84,28 @@ def test_start_if_needed_starts_when_no_pid(tmp_path: Path) -> None:
     assert read_pid("science", tmp_path) == 5555
 
 
+def test_daemon_sees_its_command_dir_first(tmp_path: Path) -> None:
+    """Демон стартует с тем же окружением, что stdio-сервер: каталог
+    команды, заданной путём, — первым в PATH, env из рецепта поверх."""
+    supervisor = RunSupervisor(pids_dir=tmp_path)
+    command = str(tmp_path / "node" / "bin" / "npx")
+    run = RunSpec(type="command", command=command, env=(("X", "1"),))
+    proc = MagicMock()
+    proc.pid = 5556
+    proc.poll.return_value = None
+    with (
+        patch(
+            "recommended_mcp.process_supervisor.resolve_mcp_command",
+            return_value=command,
+        ),
+        patch("subprocess.Popen", return_value=proc) as popen,
+    ):
+        supervisor.start_if_needed("pw", run)
+    env = popen.call_args.kwargs["env"]
+    assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / "node" / "bin")
+    assert env["X"] == "1"
+
+
 def test_stop_command_daemons(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import logging
+import os
+import signal
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -625,3 +629,156 @@ def test_cancelled_warm_build_is_not_a_runner_error(agent_loop, monkeypatch):
         thread.join(5.0)
     assert errors == []
     assert thread_errors == []
+
+
+def test_shutdown_lets_cleanup_born_of_cancel_finish(agent_loop):
+    """Уборка, родившаяся при отмене отдельной задачей (её нет в первом
+    снимке задач цикла), доигрывает до закрытия цикла, а не бросается."""
+    started = threading.Event()
+    closed: list[str] = []
+
+    async def _close() -> None:
+        await asyncio.sleep(0.3)
+        closed.append("closed")
+
+    async def _turn() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            asyncio.get_running_loop().create_task(_close())
+
+    agent_loop.submit(_turn())
+    assert started.wait(5)
+    agent_loop.shutdown()
+
+    assert closed == ["closed"]
+
+
+def test_shutdown_cancels_cleanup_past_the_budget(agent_loop):
+    """Уборка, не уложившаяся в срок выхода, отменяется (закрытие сессии на
+    отмене добивает процесс), и поток цикла выходит в срок."""
+    started = threading.Event()
+    seen: list[str] = []
+
+    async def _stuck_close() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            seen.append("cancelled")
+            raise
+
+    async def _turn() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(_stuck_close())
+
+    agent_loop.submit(_turn())
+    assert started.wait(5)
+    agent_loop.shutdown(timeout=2.0)
+
+    assert seen == ["cancelled"]
+    assert not agent_loop.thread.is_alive()
+
+
+def test_shutdown_cancels_cleanup_born_in_the_reserve(agent_loop):
+    """Отмена уборки в запасе рождает следующую (дочистка остальных сессий
+    MCP) — её тоже отменяют, а не бросают недоигравшей."""
+    started = threading.Event()
+    seen: list[str] = []
+
+    async def _deaf(name: str, then=None) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            seen.append(name)
+            if then is not None:
+                asyncio.get_running_loop().create_task(then())
+            raise
+
+    async def _turn() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(_deaf("first", then=lambda: _deaf("second")))
+
+    agent_loop.submit(_turn())
+    assert started.wait(5)
+    agent_loop.shutdown(timeout=2.0)
+
+    assert seen == ["first", "second"]
+    assert not agent_loop.thread.is_alive()
+
+
+#: stdio-сервер с медленным закрытием: глух к концу stdin и к SIGTERM —
+#: закрытие сессии не укладывается в срок выхода, выходит только по SIGKILL.
+_SLOW_CLOSE_SERVER = r"""
+import json, signal, sys, time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+for line in sys.stdin:
+    req = json.loads(line or "{}")
+    if req.get("id") is not None:
+        sys.stdout.write(json.dumps(
+            {"jsonrpc": "2.0", "id": req["id"], "result": {}}) + "\n")
+        sys.stdout.flush()
+time.sleep(60)
+"""
+
+
+@pytest.mark.skipif(os.name != "posix", reason="сигналы процессов — POSIX")
+def test_exit_mid_turn_leaves_no_persistent_mcp_process(agent_loop, tmp_path):
+    """Выход посреди хода: процесс постоянной stdio-сессии MCP с медленным
+    закрытием не переживает цикл агента (проверка по PID)."""
+    import sys
+
+    from gc_core.tools.connect_mcp import persistent_stdio as ps
+
+    script = tmp_path / "slow_close_server.py"
+    script.write_text(_SLOW_CLOSE_SERVER, encoding="utf-8")
+    session = ps.PersistentStdioSession(
+        {
+            "transport": "stdio",
+            "command": sys.executable,
+            "args": [str(script)],
+            "persistent_session": True,
+        }
+    )
+    session.call("tools/call", {"name": "ping", "arguments": {}}, timeout=10)
+    pid = session._proc.pid
+    started = threading.Event()
+
+    async def _turn() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(session.aclose())
+
+    agent_loop.submit(_turn())
+    assert started.wait(5)
+    try:
+        agent_loop.shutdown(timeout=3.0)
+
+        assert _exits_within(pid, 2.0)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGKILL)  # не оставить сервер при падении
+
+
+def _exits_within(pid: int, timeout: float) -> bool:
+    """Дочерний процесс вышел за ``timeout`` (SIGKILL доходит не мгновенно);
+    вышедшего пожинает."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if os.waitpid(pid, os.WNOHANG) != (0, 0):
+                return True
+        except ChildProcessError:  # уже пожат — вышел
+            return True
+        time.sleep(0.05)
+    return False

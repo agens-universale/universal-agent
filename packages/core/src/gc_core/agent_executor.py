@@ -613,6 +613,10 @@ class AgentExecutor:
         lock_factory = getattr(ctx, "lock_factory", None) or threading.Lock
         self._lock = lock_factory()
         self._pending_messages: list[dict] = []
+        # Остаток очереди завершившегося субагента возвращается сюда же, в
+        # очередь родителя (`activate_child_input`): иначе он пропадал вместе
+        # со скоупом.
+        ctx.parent_input_sink = self._enqueue_parent
         #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
         #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
         #: ответили «принято», и молча терять их нельзя. Забирает владелец —
@@ -2134,6 +2138,10 @@ class AgentExecutor:
         # уехать субагенту чужой сессии — до её контекста отсюда нет ссылки.
         if try_enqueue_user_message(self._ctx, message):
             return
+        self._enqueue_parent(message)
+
+    def _enqueue_parent(self, message: dict) -> None:
+        """Положить сообщение в очередь родителя (потокобезопасно)."""
         with self._lock:
             self._pending_messages.append(message)
 

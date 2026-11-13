@@ -205,3 +205,35 @@ def test_recording_is_decided_by_the_run_mode(
     ctx = fake_ctx(config, is_tui=is_tui)
 
     assert recording_enabled(ctx) is expected
+
+
+def test_own_data_paths_list_threads_logs_and_input_history(tmp_path):
+    """Список «не отслеживать»: каталог тредов (из настроек и из ctx), логи
+    прогона и история ввода TUI рядом с каждым каталогом тредов."""
+    from gc_core.agent_edits.ctx import own_data_from_ctx
+
+    threads = tmp_path / "proj" / "threads"
+    ctx_threads = tmp_path / "other" / "threads"
+    logs = tmp_path / "proj" / "logs"
+    ctx = fake_ctx(
+        {
+            "paths.threads_data_path": str(threads),
+            "paths.logs_dump_dir": str(logs),
+        },
+        threads_dir=str(ctx_threads),
+    )
+
+    assert set(own_data_from_ctx(ctx)) == {
+        str(threads),
+        str(tmp_path / "proj" / "input_history.jsonl"),
+        str(ctx_threads),
+        str(tmp_path / "other" / "input_history.jsonl"),
+        str(logs),
+    }
+
+
+def test_own_data_paths_empty_without_configured_paths():
+    """Ядро как библиотека: путей нет — и исключать нечего."""
+    from gc_core.agent_edits.ctx import own_data_from_ctx
+
+    assert own_data_from_ctx(fake_ctx()) == []

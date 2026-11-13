@@ -119,7 +119,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="auto_mcp",
         help=(
-            "Поднять HTTP/SSE MCP-daemon'ы для серверов из mcp-servers "
+            "Поднять HTTP/SSE MCP-daemon'ы для серверов из mcp.servers "
             "(по умолчанию включено; пересечение с манифестом recommended_mcp); "
             "по завершении гасятся только процессы этого запуска"
         ),

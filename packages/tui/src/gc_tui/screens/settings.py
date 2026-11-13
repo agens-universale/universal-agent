@@ -111,6 +111,10 @@ _PROBE_SECTIONS = {
 }  # server-probe: ручная проверка, глиф из config-probe
 # Явная прокрутка тела секции — обещание `FOOTER_SCROLL`.
 _SCROLL_KEYS = ("ctrl+up", "ctrl+down")
+# Клавиши удаления объекта под курсором: Del (fn+⌫ на Mac) и ⌫ — MacBook
+# присылает именно `backspace`. Только там, где в фокусе нет поля ввода: в поле
+# ⌫ стирает текст (гейты по фокусу остаются у каждой точки).
+_DELETE_KEYS = ("delete", "backspace")
 # Секции, пишущие в базовый config.yml: гейт пакетного шаблона общий, а вот
 # save-машина — только у редакторных. «Модели» пишут немедленно по действию
 # (решение 2 волны B), но в пакетный шаблон писать по-прежнему нельзя.
@@ -138,7 +142,7 @@ _FOOTERS = {
     # строке резервной модели и в каждой из её под-форм.
     # «Обновить версию», а не просто «обновить»: Ctrl+U ставит пакет заново (меняет
     # систему), а Alt+↓ только перечитывает — одним словом на двоих они неразличимы (§5.4).
-    _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · Esc",
+    _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del/⌫ — удалить · Esc",
     _MODES: "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню",
     # Строка одна — ↑/↓ не обещаем.
     _LOOK: "←/→ — изменить · PgUp/PgDn — секции · Esc — меню",
@@ -153,7 +157,7 @@ _FOOTERS = {
     # 64 колонках (бюджет `_FOOTER_MIN_COLS`).
     _PROFILES: (
         "↑/↓ · Enter — открыть · Space — активировать · n — создать · "
-        "r — переименовать · Del — удалить"
+        "r — переименовать · Del/⌫ — удалить"
     ),
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
@@ -213,12 +217,12 @@ _TAB_TO_VARIANTS = "Tab — вверх к выбору"
 # на 64 колонках (сторож test_all_footers_fit_the_two_line_budget), а два состояния
 # ОДНОЙ строки обязаны звать одни клавиши одними словами.
 _VOICE_FOOTER_LOCAL = (
-    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del — удалить · Esc"
+    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del/⌫ — удалить · Esc"
 )
 # Тот же футер, когда движок отстал от версии сборки: клавиша обещается ТОЛЬКО тогда
 # (канон секции — не звать клавишу, которая здесь ничего не делает). Глагол и клавиша —
 # как у MCP («Ctrl+U — обновить версию»), там этот сценарий уже живёт.
-_VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del — удалить · Esc"
+_VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del/⌫ — удалить · Esc"
 # Тот же футер, когда удалять нечего: сервиса нет, и Del молчит (`_voice_request_remove`).
 # Полей у такой строки тоже нет — переходить некуда, и Tab здесь не обещан (§6.1).
 _VOICE_FOOTER_LOCAL_FRESH = "↑/↓ · Enter — установить · Esc — меню"
@@ -946,6 +950,9 @@ class SettingsScreen(Screen):
         except NoMatches:
             pass
 
+    def _refresh_footer_after_layout(self) -> None:
+        self.call_after_refresh(self._refresh_footer)
+
     def on_mount(self) -> None:
         # Вердикт стартового авто-чека (app) — общий на сессию: хаб показывает статус сразу,
         # а секция не ходит в сеть второй раз (Enter на «Проверить обновления» — форсит).
@@ -956,6 +963,22 @@ class SettingsScreen(Screen):
         self._probe_in_flight = bool(
             endpoint
         )  # первый кадр меню сразу с …, без — → ✓ мелькания
+        # Поля секции монтируются позже экрана: доступность прокрутки
+        # меняется и без Resize самого экрана или движения курсора.
+        scroll = self.query_one(_SEL_SET_SCROLL, VerticalScroll)
+        self.watch(
+            scroll,
+            "show_vertical_scrollbar",
+            self._refresh_footer_after_layout,
+            init=False,
+        )
+        for geometry in ("window_virtual_size", "window_size"):
+            self.watch(
+                scroll.vertical_scrollbar,
+                geometry,
+                self._refresh_footer_after_layout,
+                init=False,
+            )
         self._render_view()
         # Каждое открытие секции начинается сверху. `VerticalScroll` сохраняет
         # собственное смещение между пересборками тела, поэтому без явного сброса
@@ -1713,6 +1736,47 @@ class SettingsScreen(Screen):
             model = ""
         return endpoint, auth, use_ssl, model, proxy
 
+    def _main_resolved(self):
+        """Комплект основной модели (`main`), как его резолвит `ModelRouter`
+        агента сейчас (уровень — действующий, `_acting_choice`), — или None.
+
+        Витринный резолв: открытый предохранитель не мешает. Не удался
+        (полусырой конфиг) — None: проба тогда идёт по одной форме."""
+        from gc_core.auto_routing.levels import effective_target
+        from gc_core.config import cli_forces_legacy_model
+        from gc_core.config_modules.model_registry import effective_choice
+        from gc_core.model_router import ModelRouter
+
+        from gc_tui.toggles import auto_available_cfg
+
+        config = self._settings
+        try:
+            available = auto_available_cfg(config)
+            return ModelRouter(
+                config,
+                choice_provider=lambda: effective_target(
+                    effective_choice(
+                        self._acting_choice(), self._cfg_settings()
+                    ),
+                    None,
+                    available,
+                ),
+                force_legacy=cli_forces_legacy_model(config),
+            ).resolve("main", check_breaker=False)
+        except Exception:
+            return None
+
+    def _connection_probe_target(self, form, *, form_edited: bool):
+        """Цель пробы «Подключения»: форма (`ProbeTarget`) плюс то, чем
+        реально пойдёт агент, — см. `settings_probe.connection_probe_target`."""
+        from gc_tui.services.settings_probe import (
+            agent_route,
+            connection_probe_target,
+        )
+
+        route = agent_route(self._settings, self._main_resolved())
+        return connection_probe_target(route, form, form_edited=form_edited)
+
     def _presets_of(self, config=None) -> list:
         """Пресеты адреса подключения того же стека, что `_probe_args_from_config`:
         настроек (своих или открытого профиля) либо подключения по документам —
@@ -1734,10 +1798,18 @@ class SettingsScreen(Screen):
         )
 
     def _start_config_probe(self) -> None:
+        from gc_tui.services.settings_probe import ProbeTarget
+
         endpoint, auth, verify, model, proxy = self._probe_args_from_config()
         if not endpoint:
             self._probe_config = None
             return
+        # Хаб судит действующий конфиг тем же маршрутом, что агент, — иначе
+        # глиф и строка секции разошлись бы вердиктом.
+        target = self._connection_probe_target(
+            ProbeTarget(endpoint, auth, verify, model, proxy),
+            form_edited=False,
+        )
         self._config_gen += 1
         gen = self._config_gen
         self._probe_in_flight = True
@@ -1751,11 +1823,12 @@ class SettingsScreen(Screen):
 
             try:
                 result = self._probe_fn(
-                    endpoint,
-                    auth,
-                    verify,
-                    model,
-                    config_proxy=proxy,
+                    target.endpoint,
+                    target.auth,
+                    target.verify,
+                    target.model,
+                    config_proxy=target.proxy,
+                    extra_headers=target.headers,
                 )
             except Exception as exc:
                 result = ProbeResult(
@@ -1776,11 +1849,12 @@ class SettingsScreen(Screen):
                 # судит секция, иначе хаб и секция разойдутся вердиктом.
                 try:
                     auth_result = probe_connection(
-                        endpoint,
-                        auth,
-                        verify,
-                        model,
-                        config_proxy=proxy,
+                        target.endpoint,
+                        target.auth,
+                        target.verify,
+                        target.model,
+                        config_proxy=target.proxy,
+                        extra_headers=target.headers,
                         probe_fn=self._auth_probe_fn,
                     )
                 except Exception:
@@ -1848,8 +1922,10 @@ class SettingsScreen(Screen):
         `manual` — проверку запустил человек (`Ctrl+Space`, `Enter`): её строки —
         ответ на клавишу и подводятся в кадр. Автопроверка кадр не двигает (см.
         `_set_probe_line`)."""
+        from gc_tui.services.settings_probe import ProbeTarget
+
         show = self._show_probe_line if manual else self._set_probe_line
-        endpoint_cfg, auth_cfg, verify, model, proxy_cfg = (
+        endpoint_cfg, auth_cfg, verify, _model, proxy_cfg = (
             self._probe_args_from_config()
         )
         url, auth_idx, token_raw, proxy_draft = (
@@ -1874,6 +1950,12 @@ class SettingsScreen(Screen):
             token = auth_cfg  # поле пусто → действующий токен
         # draft proxy: поле → иначе config; пустое поле = «не задано» → env через резолвер
         proxy = proxy_draft if proxy_draft else proxy_cfg
+        # Введённое в форме приоритетно; нетронутая форма при основной записи
+        # со своим подключением проверяет подключение записи — им и ходит агент.
+        target = self._connection_probe_target(
+            ProbeTarget(endpoint, token, verify, "", proxy),
+            form_edited=self._connection_editor().is_dirty(),
+        )
         # Снимок ПОЛЕЙ (не резолва) — по нему автопроба ухода с поля отличает
         # «значения изменились» от ходьбы по форме; пишем здесь, а не на местах
         # вызова, чтобы автопроба входа в секцию и ручные пробы тоже считались.
@@ -1892,13 +1974,18 @@ class SettingsScreen(Screen):
 
             try:
                 result = probe_connection(
-                    endpoint,
-                    token,
-                    verify,
-                    model,
-                    config_proxy=proxy,
+                    target.endpoint,
+                    target.auth,
+                    target.verify,
+                    target.model,
+                    config_proxy=target.proxy,
+                    extra_headers=target.headers,
                     probe_fn=self._auth_probe_fn,
                 )
+                if target.entry_own:
+                    # Принят токен записи, а не поля: его форма в поле общего
+                    # токена не переносится (`apply_accepted_auth`).
+                    result = replace(result, accepted_auth=None)
             except Exception as exc:
                 result = ProbeResult(
                     "unknown",
@@ -2305,7 +2392,7 @@ class SettingsScreen(Screen):
             ed.enter()
             self._refresh_footer()
             return True
-        if event.key == "delete" and not isinstance(
+        if event.key in _DELETE_KEYS and not isinstance(
             self.focused, (Input, TextArea)
         ):
             event.stop()
@@ -7740,7 +7827,7 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._move_voice(-1 if event.key == "up" else 1)
                 return
-            if event.key == "delete" and not self._voice_focus_in_editor():
+            if event.key in _DELETE_KEYS and not self._voice_focus_in_editor():
                 event.stop()  # в полях Del правит текст — не перехватываем
                 self._voice_request_remove()
                 return
@@ -7875,7 +7962,7 @@ class SettingsScreen(Screen):
                 if row["kind"] == "profile":
                     self._begin_profile_name_prompt("rename", row["name"])
                 return
-            if event.key == "delete":
+            if event.key in _DELETE_KEYS:
                 event.stop()
                 if row["kind"] == "profile":
                     self._request_delete_profile(row["name"])
@@ -7902,7 +7989,7 @@ class SettingsScreen(Screen):
                             hint
                         )  # у заголовка, 3с (было _notice — постоянный низ)
                     return
-                if event.key == "delete" and not isinstance(
+                if event.key in _DELETE_KEYS and not isinstance(
                     self.focused, Input
                 ):
                     # Единая клавиша удаления объекта под курсором (§5.3), тот же гейт

@@ -46,7 +46,13 @@ async def test_turn_is_pinned_and_next_turn_runs_on_new_build(
         deadline = time.time() + 20
         while not switched.is_set() and time.time() < deadline:
             time.sleep(0.1)
-        return [call("r", "fs_read_file", {"path": "a.txt"})]
+        return [
+            call(
+                "r",
+                "fs_read_file",
+                {"add_line_numbers": False, "path": "a.txt"},
+            )
+        ]
 
     script.extend([slow_tool_call, [finish("first")], [finish("second")]])
     v1 = _versioned(tmp_path, url, "model-a", "v1")

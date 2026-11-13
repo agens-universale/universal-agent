@@ -243,7 +243,7 @@ class AgentRuntimeClient(McpClientPort):
     def _bind_stdio_session(self):
         server_key = self.server_cfg.get(SESSION_KEY_FIELD) or self.server_name
         session = PersistentStdioRegistry.instance().get_or_create(
-            server_key, self.server_cfg
+            server_key, self.server_cfg, self.server_name
         )
         self._stdio_session = session
         return session
@@ -281,7 +281,9 @@ class AgentRuntimeClient(McpClientPort):
             )
         if transport == "stream_stdio":
             return await alist_tools_stream_stdio(
-                server_cfg=self.server_cfg, timeout=timeout
+                server_cfg=self.server_cfg,
+                timeout=timeout,
+                server_name=self.server_name,
             )
         if is_persistent_stdio(self.server_cfg):
             # Долгоживущая сессия сидит на `subprocess.Popen` СОЗНАТЕЛЬНО:
@@ -307,6 +309,7 @@ class AgentRuntimeClient(McpClientPort):
                 session_id=session_id,
                 server_cfg=self.server_cfg,
                 token=token,
+                server_key=self.server_name,
                 strict=strict,
             )
         except httpx.HTTPStatusError:
@@ -323,6 +326,7 @@ class AgentRuntimeClient(McpClientPort):
                 session_id=session_id,
                 server_cfg=self.server_cfg,
                 token=token,
+                server_key=self.server_name,
                 strict=strict,
             )
 
@@ -375,6 +379,7 @@ class AgentRuntimeClient(McpClientPort):
                 timeout=timeout,
                 tool_name=tool_name,
                 arguments=arguments,
+                server_name=self.server_name,
             )
         if is_persistent_stdio(self.server_cfg):
             # См. `alist_tools`: сессия на `Popen` — сознательное ограничение.

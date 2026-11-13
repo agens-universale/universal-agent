@@ -52,7 +52,10 @@ from gc_core.tools.connect_mcp.service_records import (
     McpServiceClosed,
     ServerEntry,
 )
-from gc_core.tools.connect_mcp.transport import _resolve_command
+from gc_core.tools.connect_mcp.transport import (
+    LAUNCHED_COMMAND_FIELD,
+    _resolve_command,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -271,17 +274,22 @@ class McpService:
 
         Команда раскрывается так же, как при запуске без пускателя (``~``,
         mcp-env); поиск по PATH пускатель делает в окружении сервера, а
-        ``cwd`` и ``env`` наследует без изменений. Отпечаток и ключ сессии
-        считаются по определению до подстановки.
+        ``cwd`` и ``env`` наследует без изменений. Окружение строится по
+        команде сервера (``LAUNCHED_COMMAND_FIELD``), а не по пускателю.
+        Отпечаток и ключ сессии считаются по определению до подстановки.
         """
         if not _launches_process(server_cfg):
             return server_cfg
+        server_command = _resolve_command(str(server_cfg["command"]))
         command, args = self._journal.launch_argv(
-            _resolve_command(str(server_cfg["command"])),
-            _launch_args(server_cfg),
-            server_key,
+            server_command, _launch_args(server_cfg), server_key
         )
-        return {**server_cfg, "command": command, "args": args}
+        return {
+            **server_cfg,
+            "command": command,
+            "args": args,
+            LAUNCHED_COMMAND_FIELD: server_command,
+        }
 
     async def aprune_journal(self) -> None:
         """Снять из журнала записи вышедших процессов — в рабочем потоке

@@ -63,13 +63,11 @@ def test_normalize_preserves_allof_without_forcing_type() -> None:
         assert normalized["type"] != "string"
 
 
-def test_normalize_still_defaults_string_when_no_type_and_no_combinator() -> (
-    None
-):
-    """Plain dicts without type/properties/items/anyOf still fall back to string."""
+def test_normalize_leaves_untyped_node_free() -> None:
+    """Узел без type/properties/items/anyOf — «любое значение», не строка."""
     raw = {"description": "Some param", "title": "Z"}
     normalized = _normalize_schema_recursive(raw, param_name="z")
-    assert normalized["type"] == "string"
+    assert "type" not in normalized
 
 
 def test_normalize_object_with_anyof_property() -> None:
@@ -252,12 +250,16 @@ def test_nested_object_required_includes_all_properties_for_openai_strict() -> (
     assert set(normalized["parameters"]["required"]) == {"path", "workbook"}
 
 
-def test_anyof_array_branch_items_get_type_for_openai_strict() -> None:
-    """``list | None`` from Pydantic yields ``items: {}`` inside anyOf; OpenAI needs ``type``."""
+def test_anyof_array_branch_items_stay_free_and_drop_strict() -> None:
+    """``list | None`` от Pydantic даёт ``items: {}`` внутри anyOf: элементы —
+    любые значения, а инструмент уходит без strict."""
+    from gc_core.utils.connect_backend import project_tool_specs
+
     tool_spec = {
         "type": "function",
         "name": "mcp_office_query_xlsx",
         "description": "Query xlsx.",
+        "strict": True,
         "parameters": {
             "type": "object",
             "properties": {
@@ -277,7 +279,11 @@ def test_anyof_array_branch_items_get_type_for_openai_strict() -> None:
     normalized = normalize_tool_spec_for_agent(tool_spec)
     array_branch = normalized["parameters"]["properties"]["filter"]["anyOf"][0]
     assert array_branch["type"] == "array"
-    assert "type" in array_branch["items"]
+    assert "type" not in array_branch["items"]
+    (sent,) = project_tool_specs(
+        [normalized], openai_strict=True, send_tool_strict=True
+    )
+    assert sent["strict"] is False
 
 
 def test_recursive_defs_ref_keeps_defs_for_openai_strict() -> None:
@@ -548,3 +554,226 @@ def test_non_strict_preserves_server_required_default() -> None:
         "per_page",
     }
     assert s.get("strict") is True
+
+
+def _single_param_spec(param_schema, *, name: str = "v") -> dict:
+    return {
+        "type": "function",
+        "name": "mcp_demo_tool",
+        "description": "Demo.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {name: param_schema},
+            "required": [name],
+        },
+    }
+
+
+def _validated(spec: dict, arguments: dict) -> dict:
+    return parse_and_validate_tool_arguments(
+        tool_name=spec["name"],
+        arguments=arguments,
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+
+
+@pytest.mark.parametrize("raw", [{}, {"description": "x"}])
+@pytest.mark.parametrize("value", [1, True, None, "s", [1], {"a": 1}])
+def test_untyped_property_accepts_any_value(raw: dict, value) -> None:
+    """Узел без ``type`` по JSON Schema — любое значение, не строка."""
+    spec = normalize_tool_spec_for_agent(_single_param_spec(raw))
+    assert "type" not in spec["parameters"]["properties"]["v"]
+    assert _validated(spec, {"v": value}) == {"v": value}
+
+
+@pytest.mark.parametrize("openai_strict", [False, True])
+def test_nested_untyped_items_accept_numbers(openai_strict: bool) -> None:
+    """``List[List]``: ``items: {}`` на глубине принимает числа."""
+    raw = {"type": "array", "items": {"type": "array", "items": {}}}
+    spec = normalize_tool_spec_for_agent(
+        _single_param_spec(raw), openai_strict=openai_strict
+    )
+    rows = [["2025-03", 4149.4, 2915.4]]
+    assert _validated(spec, {"v": rows}) == {"v": rows}
+
+
+def test_anyof_untyped_branch_stays_untyped() -> None:
+    raw = {"anyOf": [{}, {"type": "null"}]}
+    normalized = _normalize_schema_recursive(raw, param_name="v")
+    assert "type" not in normalized["anyOf"][0]
+
+
+def test_untyped_enum_accepts_its_values() -> None:
+    spec = normalize_tool_spec_for_agent(_single_param_spec({"enum": [1, 2]}))
+    assert _validated(spec, {"v": 1}) == {"v": 1}
+
+
+def test_boolean_true_schema_accepts_any_value() -> None:
+    spec = normalize_tool_spec_for_agent(
+        {
+            "type": "function",
+            "name": "mcp_demo_tool",
+            "description": "Demo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "v": True,
+                    "w": {"type": "array", "items": True},
+                },
+                "required": ["v", "w"],
+            },
+        }
+    )
+    props = spec["parameters"]["properties"]
+    assert set(props["v"]) == {"description"}
+    assert set(props["w"]["items"]) == {"description"}
+    args = {"v": 1, "w": [1]}
+    assert _validated(spec, args) == args
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {},
+        True,
+        {"enum": [1]},
+        {"type": "object", "additionalProperties": True},
+    ],
+)
+def test_free_node_predicate_true(schema) -> None:
+    from gc_core.execution.tool_schema import is_free_node
+
+    assert is_free_node(schema) is True
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string"},
+        {"$ref": "#/$defs/X"},
+        {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        False,
+    ],
+)
+def test_free_node_predicate_false(schema) -> None:
+    from gc_core.execution.tool_schema import is_free_node
+
+    assert is_free_node(schema) is False
+
+
+def _project_strict(spec: dict) -> dict:
+    from gc_core.utils.connect_backend import project_tool_specs
+
+    (sent,) = project_tool_specs(
+        [spec], openai_strict=False, send_tool_strict=True
+    )
+    return sent
+
+
+@pytest.mark.parametrize("openai_strict", [False, True])
+def test_untyped_node_is_sent_without_strict(openai_strict: bool) -> None:
+    """Инструмент со свободным узлом уходит без strict, соседний — со strict."""
+    from gc_core.utils.connect_backend import project_tool_specs
+
+    free = normalize_tool_spec_for_agent(_single_param_spec({}))
+    typed = normalize_tool_spec_for_agent(
+        _single_param_spec({"type": "string"})
+    )
+    sent_free, sent_typed = project_tool_specs(
+        [free, typed], openai_strict=openai_strict, send_tool_strict=True
+    )
+    assert sent_free["strict"] is False
+    assert sent_typed["strict"] is True
+    assert free["strict"] is True
+
+
+def test_free_node_inside_defs_drops_strict() -> None:
+    raw = _single_param_spec({"$ref": "#/$defs/V"})
+    raw["parameters"]["$defs"] = {"V": {}}
+    sent = _project_strict(normalize_tool_spec_for_agent(raw))
+    assert sent["strict"] is False
+
+
+def test_has_free_node_walks_defs() -> None:
+    from gc_core.execution.tool_schema import has_free_node
+
+    schema = {"type": "object", "properties": {}, "$defs": {"V": {}}}
+    assert has_free_node(schema) is True
+
+
+def test_anyof_true_branch_drops_strict() -> None:
+    raw = _single_param_spec({"anyOf": [True, {"type": "null"}]})
+    sent = _project_strict(normalize_tool_spec_for_agent(raw))
+    assert sent["strict"] is False
+
+
+@pytest.mark.parametrize("openai_strict", [False, True])
+def test_native_tools_keep_strict(openai_strict: bool) -> None:
+    """Страж: схемы встроенных тулов полностью типизированы — проекция не
+    снимает с них strict."""
+    from gc_core.tools.registry import _collect_builtin_registry
+    from gc_core.utils.connect_backend import project_tool_specs
+    from gc_testkit.settings import make_settings
+
+    specs = [
+        entry["spec"]
+        for entry in _collect_builtin_registry(make_settings()).values()
+    ]
+    sent = project_tool_specs(
+        specs, openai_strict=openai_strict, send_tool_strict=True
+    )
+    assert [(spec["name"], spec.get("strict")) for spec in sent] == [
+        (spec["name"], spec.get("strict")) for spec in specs
+    ]
+
+
+def _strict_projected_optional(extra_schema: dict) -> dict:
+    """Спека с обязательным ``key`` и необязательным ``extra`` после
+    проекции под ``openai_strict``."""
+    from gc_core.utils.connect_backend import project_tool_specs
+
+    raw = _single_param_spec({"type": "string"}, name="key")
+    raw["parameters"]["properties"]["extra"] = extra_schema
+    (sent,) = project_tool_specs(
+        [normalize_tool_spec_for_agent(raw)],
+        openai_strict=True,
+        send_tool_strict=True,
+    )
+    return sent
+
+
+@pytest.mark.parametrize(
+    "extra_schema",
+    [{}, {"type": "object", "additionalProperties": True}],
+    ids=["free_node", "free_object"],
+)
+def test_free_tool_is_not_strict_expanded(extra_schema: dict) -> None:
+    """Регресс: инструмент со свободным узлом уходил со ``strict: false``,
+    но с развёрнутым ``required`` и подсказкой «пропуск недоступен» —
+    необязательное поле выглядело обязательным."""
+    from gc_core.execution.tool_schema import (
+        OPTIONAL_EMPTY_AS_OMIT_HINT,
+        OPTIONAL_OMIT_HINT,
+    )
+
+    sent = _strict_projected_optional(extra_schema)
+    params = sent["parameters"]
+    assert sent["strict"] is False
+    assert params["required"] == ["key"]
+    desc = params["properties"]["extra"].get("description", "")
+    assert OPTIONAL_EMPTY_AS_OMIT_HINT not in desc
+    assert OPTIONAL_OMIT_HINT not in desc
+    assert _validated(sent, {"key": "k"}) == {"key": "k"}
+
+
+def test_typed_tool_keeps_strict_expansion() -> None:
+    from gc_core.execution.tool_schema import OPTIONAL_EMPTY_AS_OMIT_HINT
+
+    sent = _strict_projected_optional({"type": "string"})
+    params = sent["parameters"]
+    assert sent["strict"] is True
+    assert params["required"] == ["key", "extra"]
+    desc = params["properties"]["extra"]["description"]
+    assert OPTIONAL_EMPTY_AS_OMIT_HINT in desc

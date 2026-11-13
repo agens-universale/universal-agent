@@ -128,3 +128,50 @@ def test_facade_matches_assembler():
     asm.flush()
 
     assert assemble_streamed_completion(payloads) == asm.result()
+
+
+def test_unparsable_chunk_is_kept_for_the_log():
+    """Неразобранный чанк в сборку не идёт, но не пропадает молча: транспорт
+    пишет его в лог."""
+    asm = StreamAssembler()
+    asm.feed_line("data: " + json.dumps(_delta("a")))
+    asm.feed_line('data: {"choices": [{"delta": {"content": "b"')
+    asm.feed_line("data: [DONE]")
+    assert asm.result()["choices"][0]["message"]["content"] == "a"
+    assert asm.dropped_payloads == ['{"choices": [{"delta": {"content": "b"']
+
+
+def test_empty_data_line_is_not_a_dropped_chunk():
+    """`data:` без содержимого — не обрывок: в лог как потерю не идёт."""
+    asm = StreamAssembler()
+    asm.feed_line("data:")
+    asm.feed_line("data:   ")
+    asm.feed_line("data: " + json.dumps(_delta("a")))
+    assert asm.dropped_payloads == []
+
+
+def test_dropped_chunks_are_capped_but_counted():
+    """Поток целиком в чужом формате не копит тысячи обрывков: хранятся
+    первые, остальные только считаются."""
+    from gc_core.utils.stream_assembler import MAX_DROPPED_PAYLOADS
+
+    asm = StreamAssembler()
+    for i in range(MAX_DROPPED_PAYLOADS + 5):
+        asm.feed_line(f"data: {{bad {i}")
+    assert asm.dropped_payloads == [
+        f"{{bad {i}" for i in range(MAX_DROPPED_PAYLOADS)
+    ]
+    assert asm.dropped_count == MAX_DROPPED_PAYLOADS + 5
+
+
+def test_facade_does_not_count_empty_data_as_dropped():
+    """Пустой `data:` и через фасад со строками SSE — не обрывок: правило
+    одно, в разборе пейлоада."""
+    from gc_core.utils.chat_completions_stream import iter_sse_data_lines
+
+    asm = StreamAssembler()
+    for payload in iter_sse_data_lines(
+        ["data:", "data: " + json.dumps(_delta("a"))]
+    ):
+        asm.feed_payload(payload)
+    assert asm.dropped_payloads == []

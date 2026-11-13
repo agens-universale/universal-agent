@@ -63,31 +63,46 @@ class LocalFsBackend(FsBackend):
         self,
         *,
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+        cwd: str | None = None,
     ) -> None:
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
+        self._cwd = os.path.abspath(cwd) if cwd is not None else None
+
+    def _path(self, path: str) -> str:
+        return os.path.join(self._cwd, path) if self._cwd is not None else path
+
+    def _exec_cwd(self, cwd: str | None) -> str | None:
+        return self._path(cwd) if cwd is not None else self._cwd
 
     # --- stat ---
     async def exists(self, path: str) -> bool:
+        path = self._path(path)
         return os.path.exists(path)
 
     async def lexists(self, path: str) -> bool:
+        path = self._path(path)
         return os.path.lexists(path)
 
     async def is_file(self, path: str) -> bool:
+        path = self._path(path)
         return os.path.isfile(path)
 
     async def is_dir(self, path: str) -> bool:
+        path = self._path(path)
         return os.path.isdir(path)
 
     async def is_symlink(self, path: str) -> bool:
+        path = self._path(path)
         return os.path.islink(path)
 
     async def getsize(self, path: str) -> int:
+        path = self._path(path)
         return os.path.getsize(path)
 
     async def stat_info(
         self, path: str, follow_symlinks: bool = False
     ) -> dict:
+        path = self._path(path)
         st = os.stat(path, follow_symlinks=follow_symlinks)
         return {
             "size": st.st_size,
@@ -99,12 +114,15 @@ class LocalFsBackend(FsBackend):
         }
 
     async def readable(self, path: str) -> bool:
+        path = self._path(path)
         return os.access(path, os.R_OK)
 
     async def writable(self, path: str) -> bool:
+        path = self._path(path)
         return os.access(path, os.W_OK)
 
     async def realpath(self, path: str) -> str:
+        path = self._path(path)
         return os.path.realpath(path)
 
     async def is_hidden(self, path: str) -> bool:
@@ -115,6 +133,7 @@ class LocalFsBackend(FsBackend):
         (тест паритета list_files это и требует). Одной атрибутной проверки мало:
         на Windows у `.env` / `.gitignore` атрибута нет, а служебными они остаются.
         """
+        path = self._path(path)
         basename = os.path.basename(path)
         if basename.startswith("."):
             return True
@@ -128,9 +147,11 @@ class LocalFsBackend(FsBackend):
 
     # --- read ---
     async def read(self, path: str) -> str:
+        path = self._path(path)
         return read_text_for_edit(path)
 
     async def read_bytes(self, path: str) -> bytes:
+        path = self._path(path)
         with open(path, "rb") as f:
             return f.read()
 
@@ -141,10 +162,12 @@ class LocalFsBackend(FsBackend):
             yield _item
 
     async def read_head_bytes(self, path: str, n: int) -> bytes:
+        path = self._path(path)
         with open(path, "rb") as f:
             return f.read(n)
 
     async def sha256_bytes(self, path: str) -> str:
+        path = self._path(path)
         digest = hashlib.sha256()
         with open(path, "rb") as f:
             for block in iter(lambda: f.read(65536), b""):
@@ -159,6 +182,7 @@ class LocalFsBackend(FsBackend):
         await self.write_bytes(path, encode_text_for_write(content, encoding))
 
     async def write_bytes(self, path: str, data: bytes) -> None:
+        path = self._path(path)
         tmp_path = f"{path}.tmp"
         try:
             try:
@@ -189,18 +213,24 @@ class LocalFsBackend(FsBackend):
     ) -> None:
         # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
         # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
+        path = self._path(path)
         with open(path, "ab") as fd:
             fd.write(encode_text_for_append(content, encoding))
 
     async def copy(self, src: str, dst: str) -> None:
-        with open(src, "rb") as s, open(dst, "wb") as d:
+        with (
+            open(self._path(src), "rb") as s,
+            open(self._path(dst), "wb") as d,
+        ):
             d.write(s.read())
 
     async def makedirs(self, path: str) -> None:
+        path = self._path(path)
         os.makedirs(path, exist_ok=True)
 
     # --- traverse ---
     async def listdir(self, path: str) -> list:
+        path = self._path(path)
         entries = []
         for name in sorted(os.listdir(path)):
             full = os.path.join(path, name)
@@ -233,6 +263,7 @@ class LocalFsBackend(FsBackend):
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]:
         """Stream file relpaths in native ``os.walk`` filename order."""
+        path = self._path(path)
         for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
             dirnames.sort()
             filenames.sort()
@@ -269,6 +300,7 @@ class LocalFsBackend(FsBackend):
         or non-descendable directory is still listed; only its subtree is skipped.
         Symlinks are never followed (``os.walk(followlinks=False)`` parity).
         """
+        path = self._path(path)
         pruned = pruned_dir_predicate(prune_names, prune_dot_dirs)
         async for _item in self._walk_level(path, "", pruned, should_descend):
             yield _item
@@ -345,7 +377,7 @@ class LocalFsBackend(FsBackend):
         return await _arun_bounded_process(
             command,
             shell=True,
-            cwd=cwd,
+            cwd=self._exec_cwd(cwd),
             timeout=timeout,
             env=merged_env,
             stdin_text=None,
@@ -371,7 +403,7 @@ class LocalFsBackend(FsBackend):
         return await _arun_bounded_process(
             [str(a) for a in argv],
             shell=False,
-            cwd=cwd,
+            cwd=self._exec_cwd(cwd),
             timeout=timeout,
             env=merged_env,
             stdin_text=stdin,
@@ -391,7 +423,7 @@ class LocalFsBackend(FsBackend):
         return await _arun_bounded_process(
             [sys.executable, "-u", "-"],
             shell=False,
-            cwd=cwd,
+            cwd=self._exec_cwd(cwd),
             timeout=timeout,
             env=_sanitize_env(env),
             stdin_text=code,
@@ -424,7 +456,7 @@ class LocalFsBackend(FsBackend):
             else None
         )
         return await self._aspawn_detached(
-            command, cwd=cwd, env_full=merged_env
+            command, cwd=self._exec_cwd(cwd), env_full=merged_env
         )
 
     async def _aspawn_detached(
@@ -466,7 +498,7 @@ class LocalFsBackend(FsBackend):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd=cwd,
+                cwd=self._exec_cwd(cwd),
                 env=env_full,
                 **_background_detach_kwargs(),
             )
@@ -486,7 +518,7 @@ class LocalFsBackend(FsBackend):
         return {"pid": proc.pid, "exit_code": exit_code}
 
     def default_cwd(self) -> Optional[str]:
-        return os.getcwd()
+        return self._cwd if self._cwd is not None else os.getcwd()
 
 
 # --- bounded process runner (spec D1/D2/D6/D9) ---

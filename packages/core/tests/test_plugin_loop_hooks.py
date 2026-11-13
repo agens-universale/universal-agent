@@ -880,3 +880,46 @@ async def test_stop_kills_running_session_start_hook(tmp_path, monkeypatch):
     assert backend.calls == []
     assert _disk(ctx) == [("user", "один")]
     assert _notice_codes() == []
+
+
+def _mcp_plugin(tmp_path, name, marker):
+    """Плагин с одним stdio-сервером: запуск оставляет ``marker``."""
+    root = tmp_path / name
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": name})
+    )
+    code = f"open({str(marker)!r}, 'a').write('x')"
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {"mcpServers": {"srv": {"command": PY, "args": ["-c", code]}}}
+        )
+    )
+    return root
+
+
+@pytest.mark.parametrize("trusted", [True, False])
+async def test_untrusted_plugin_mcp_never_starts(
+    tmp_path, monkeypatch, trusted
+):
+    """MCP-сервер плагина из конфига проекта не доходит до транспорта:
+    процесс не запускается, в уведомлениях — как включить."""
+    from gc_core import run_context as rc
+
+    marker = tmp_path / "started"
+    root = _mcp_plugin(tmp_path, "plug", marker)
+    install(monkeypatch, ScriptedBackend(_finish_turn()))
+    untrusted = frozenset() if trusted else frozenset({str(root)})
+    loaded = _loaded(
+        tmp_path, monkeypatch, [root], untrusted_plugin_entries=untrusted
+    )
+    ctx = await rc.acreate_run_context(loaded)
+    await AgentExecutor(ctx).arun(["один"], thread_id="t1")
+
+    notice = (
+        "MCP-серверы плагина plug из конфига проекта не запускаются. Чтобы "
+        "включить, установите плагин командой `gc-plugin install` или "
+        "добавьте его в личный конфиг"
+    )
+    assert marker.exists() is trusted
+    assert (notice in loaded.runtime.notices) is not trusted

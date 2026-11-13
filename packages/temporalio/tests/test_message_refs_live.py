@@ -75,7 +75,13 @@ def growing_model():
                 step = len(bodies)
                 name, arguments = plan.get("by_step", {}).get(
                     step
-                ) or plan.get("tool", ("fs_read_file", {"path": "big.txt"}))
+                ) or plan.get(
+                    "tool",
+                    (
+                        "fs_read_file",
+                        {"add_line_numbers": False, "path": "big.txt"},
+                    ),
+                )
                 tool = (
                     call(f"r{step}", name, arguments)
                     if step <= plan["steps"]

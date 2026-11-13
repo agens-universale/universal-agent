@@ -117,7 +117,7 @@ def test_install_all_skips_optional(monkeypatch):
     monkeypatch.setattr(
         cli_mod,
         "_install_one",
-        lambda e, *a, **k: installed.append(e.name) or True,
+        lambda e, *a, **k: installed.append(e.name) or ("installed", ""),
     )
     monkeypatch.setattr(cli_mod, "_wire_one", lambda *a, **k: None)
 

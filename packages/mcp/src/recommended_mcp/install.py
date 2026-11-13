@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -64,8 +65,10 @@ _EXT_TAR_GZ = "tar.gz"
 _MANIFEST_NAME = "pyproject.toml"
 
 
-NODE_VERSION = "18.0.0"
+NODE_VERSION = "24.22.2"
 _NODE_DIST_BASE = "https://nodejs.org/dist"
+# Ниже Node 24 не запускается (требование её сборки под macOS).
+_NODE_MIN_MACOS = (13, 5)
 
 
 class InstallError(RuntimeError):
@@ -78,9 +81,29 @@ def _platform_supported(entry: MCPEntry) -> bool:
     )
 
 
+_PLATFORM_NAMES = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}
+
+
+def platform_skip_reason(entry: MCPEntry) -> str | None:
+    """Почему рецепт не ставится на этой ОС; None — ставится."""
+    if _platform_supported(entry):
+        return None
+    names = (_PLATFORM_NAMES.get(p, p) for p in entry.install.platforms)
+    return f"только для {', '.join(names)}"
+
+
 def _short_reason(exc: Exception) -> str:
     if isinstance(exc, subprocess.CalledProcessError):
-        return f"pip завершился с кодом {exc.returncode}"
+        # Шагов установки несколько (pip, npm, npx) — называем упавший:
+        # первые аргументы говорят, что за шаг, последний — что ставили.
+        name, *args = exc.cmd
+        head, tail = args[:3], args[3:]
+        shown = [Path(name).name, *head]
+        if len(tail) > 1:
+            shown.append("…")
+        shown += tail[-1:]
+        command = " ".join(shown)
+        return f"команда «{command}» завершилась с кодом {exc.returncode}"
     return str(exc) or exc.__class__.__name__
 
 
@@ -97,8 +120,9 @@ def run_install_entries(
     (name, status, detail), status ∈ {installed, skipped, failed}."""
     results: list[tuple[str, str, str]] = []
     for entry in manifest:
-        if not _platform_supported(entry):
-            results.append((entry.name, "skipped", f"platform {sys.platform}"))
+        reason = platform_skip_reason(entry)
+        if reason:
+            results.append((entry.name, "skipped", reason))
             continue
         try:
             if entry.install.type == "source" and editable:
@@ -115,7 +139,7 @@ def run_install_entries(
         except (subprocess.CalledProcessError, InstallError, OSError) as exc:
             reason = _short_reason(exc)
             results.append((entry.name, "failed", reason))
-            print(f"[warn] {entry.name}: пропущен — {reason}")
+            print(f"[warn] {entry.name}: не установлен — {reason}")
     return results
 
 
@@ -208,6 +232,16 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
 
         agent_dep_dir = gc_paths()["data"]
         npm = _node_install_paths(agent_dep_dir)["npm"]
+        if not Path(npm).exists():
+            # Пакет жил в Node прошлой версии — с ней его и удаляют. Не
+            # remove --all: тот снёс бы все MCP ради одного пакета.
+            print(
+                f"[warn] {entry.name}: Node агента v{NODE_VERSION} не найдена "
+                f"— npm-пакет не удалялся; если он остался в прошлой версии "
+                f"Node, её каталог можно удалить вручную: "
+                f"{Path(agent_dep_dir) / 'node'}/v<версия>"
+            )
+            return
         print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
         subprocess.run([str(npm), "uninstall", "-g", pkg], check=False)
     else:
@@ -224,10 +258,9 @@ def install_entry(
     repo_ref: str | None = None,
 ) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
-    if not _platform_supported(entry):
-        print(
-            f"[skip] {entry.name}: platform {sys.platform!r} not in {list(entry.install.platforms)}"
-        )
+    reason = platform_skip_reason(entry)
+    if reason:
+        print(f"[skip] {entry.name}: {reason}")
         return
 
     pkg_path = (root / entry.path).resolve()
@@ -572,6 +605,21 @@ def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
     return result.returncode == 0
 
 
+def _require_node_capable_os() -> None:
+    """Отказ до загрузки, если пиннутая Node здесь не запустится: иначе
+    архив качается, проверка версии падает, и так на каждом повторе."""
+    if sys.platform != "darwin":
+        return
+    release = platform.mac_ver()[0]
+    parts = tuple(int(p) for p in release.split(".")[:2] if p.isdigit())
+    if parts and parts < _NODE_MIN_MACOS:
+        need = ".".join(map(str, _NODE_MIN_MACOS))
+        raise InstallError(
+            f"Node v{NODE_VERSION} требует macOS {need}+, здесь {release} — "
+            "npx-рецепты на этой системе не ставятся"
+        )
+
+
 def _verify_existing_node(paths: dict[str, Path]) -> bool:
     """True, если все три бинаря на месте и `node --version` совпадает с NODE_VERSION."""
     if not (
@@ -657,6 +705,7 @@ def _ensure_cached_node(agent_dep_dir: Path) -> dict[str, Path]:
         print(f"[npx] cached Node v{NODE_VERSION} already at {paths['root']}")
         return paths
 
+    _require_node_capable_os()
     archive_filename, ext = _node_archive_basename()
     expected_sha = _fetch_expected_sha256(archive_filename)
 
@@ -766,7 +815,7 @@ def _install_manifest(
         print(f"[summary] НЕ установлено: {n} — {d}")
     if failed:
         print(
-            f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+            f"[summary] {len(failed)} MCP не установлено — агент будет работать; "
             f"поставь вручную или используй совместимый Python"
         )
     state = save_runtime_state(manifest_path=manifest_path)

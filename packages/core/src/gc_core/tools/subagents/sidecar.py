@@ -126,10 +126,9 @@ async def apersist_subagent_trace(
     писалась ни разу, при полностью работающих субагентах.
 
     Самый тихий шов контракта: возврат отбрасывают ВСЕ вызывающие
-    (``processing_responses`` ×4, ``subagents/runner`` ×3). Единственный
-    вызывающий без своего loop — колбэк ``ChildInputScope.enqueue`` из чужого
-    потока; он уводит эту корутину на loop прогона через
-    ``run_coroutine_threadsafe`` (см. ``SubagentRunner``).
+    (``processing_responses`` ×4, ``subagents/runner`` ×3). Все зовут её на
+    loop прогона: реплику пользователя ребёнку пишут при её заборе из
+    очереди, а не в чужом потоке постановки (см. ``SubagentRunner``).
     """
     ident = resolve_sidecar_identity(ctx)
     if ident is None:

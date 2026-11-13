@@ -3527,6 +3527,155 @@ def test_shell_channel_does_not_start_where_recording_is_off(repo):
     assert ShellDelta.begin(ctx) is None
 
 
+# --- собственные данные gc внутри проекта ----------------------------------
+
+
+def _own_data_ctx(launch_root, threads_dir, logs_dir):
+    """Контекст, у которого каталоги данных gc настроены ВНУТРЬ проекта."""
+    ctx = _ctx(launch_root, threads_dir)
+    update_ctx(
+        ctx,
+        {
+            "paths.threads_data_path": str(threads_dir),
+            "paths.logs_dump_dir": str(logs_dir),
+        },
+    )
+    return ctx
+
+
+def _gc_writes_own_data(launch_root, threads_dir, logs_dir, n: int) -> None:
+    """Что gc сам дописывает во время команды агента: журнал правок треда
+    (параллельная правка тулом), файл треда, лог прогона, историю ввода TUI
+    (она лежит рядом с каталогом тредов — здесь это корень проекта)."""
+    EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1")).append(
+        EditRecord(
+            path=f"tool_{n}.txt",
+            turn_id="turn-1",
+            ts=float(n),
+            call_id=f"call-{n}",
+            op="write",
+            hunks="",
+            add=0,
+            del_=0,
+            before_sha256=None,
+            after_sha256=None,
+            flags=[],
+        )
+    )
+    for path in (
+        threads_dir / "cli_th1.jsonl",
+        logs_dir / "run.log",
+        launch_root / "input_history.jsonl",
+    ):
+        with path.open("ab") as fh:
+            fh.write(f"line {n}\n".encode())
+
+
+def test_gc_own_data_inside_project_is_not_recorded_as_agent_edit(repo):
+    """Каталоги тредов и логов настроены внутрь проекта (и не в .gitignore):
+    команда меняет файл проекта, а gc в это же время дописывает свои данные.
+    В журнал ложится ТОЛЬКО файл проекта — ни журнал правок, ни файл треда,
+    ни лог, ни история ввода правками агента не считаются. Две команды
+    подряд: на второй журнал и прочее уже лежат в статусе как `??`, и карман
+    снимает их байты — ровно путь, которым журнал попадал в «правки»."""
+    launch_root, _ = repo
+    threads_dir = launch_root / "threads"
+    logs_dir = launch_root / "logs"
+    threads_dir.mkdir()
+    logs_dir.mkdir()
+    ctx = _own_data_ctx(launch_root, threads_dir, logs_dir)
+    seen: dict = {}
+    pocket_cache: dict = {}
+
+    for n in (1, 2):
+        delta = ShellDelta.begin(ctx, seen=seen, pocket_cache=pocket_cache)
+        assert delta is not None
+        _run_command(
+            launch_root, f"open('tracked.txt','ab').write(b'cmd{n}\\n')"
+        )
+        _gc_writes_own_data(launch_root, threads_dir, logs_dir, n)
+        delta.after_and_record()
+
+    shell_paths = {r.path for r in _records(threads_dir) if not r.call_id}
+    assert shell_paths == {"tracked.txt"}
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("threads/edits_cli_th1.jsonl") is None
+
+
+def test_gc_own_data_outside_project_keeps_previous_behaviour(repo):
+    """Данные gc вне проекта — поведение прежнее: команда, создавшая в
+    проекте одноимённые каталоги `threads/` и `logs/`, записывается целиком."""
+    launch_root, threads_dir = repo
+    logs_dir = threads_dir.parent / "logs"
+    logs_dir.mkdir()
+    ctx = _own_data_ctx(launch_root, threads_dir, logs_dir)
+
+    delta = ShellDelta.begin(ctx)
+    _run_command(
+        launch_root,
+        "import os\n"
+        "os.makedirs('threads'); os.makedirs('logs')\n"
+        "open('threads/a.txt','wb').write(b'a\\n')\n"
+        "open('logs/b.txt','wb').write(b'b\\n')\n"
+        "open('input_history.jsonl','wb').write(b'c\\n')\n",
+    )
+    delta.after_and_record()
+
+    assert {r.path for r in _records(threads_dir)} == {
+        "threads/a.txt",
+        "logs/b.txt",
+        "input_history.jsonl",
+    }
+
+
+def test_gc_own_data_known_to_an_old_journal_is_not_pocketed(repo):
+    """Журнал, записанный до фикса, уже знает свой путь как «правку»: карман
+    берёт кандидатов и из журнала, и без фильтра снова снял бы байты журнала
+    и записал бы его дозапись правкой команды."""
+    launch_root, _ = repo
+    threads_dir = launch_root / "threads"
+    logs_dir = launch_root / "logs"
+    threads_dir.mkdir()
+    logs_dir.mkdir()
+    _git(launch_root, "add", "-A")
+    ctx = _own_data_ctx(launch_root, threads_dir, logs_dir)
+    _seed_known_file(
+        threads_dir, launch_root, "notes.txt", b"n\n", ts=time.time() - 60
+    )
+    journal_key = "threads/edits_cli_th1.jsonl"
+    EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1")).append(
+        EditRecord(
+            path=journal_key,
+            turn_id="turn-0",
+            ts=time.time() - 30,
+            call_id=None,
+            op="shell",
+            hunks="",
+            add=0,
+            del_=0,
+            before_sha256=None,
+            after_sha256=None,
+            flags=[],
+        )
+    )
+    # Журнал в индексе и совпадает с ним: git-подканал его «до» знает, а
+    # кандидатом кармана он может стать только как известный журналу путь.
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "own data committed")
+
+    delta = ShellDelta.begin(ctx)
+    _run_command(launch_root, "open('tracked.txt','ab').write(b'x\\n')")
+    _gc_writes_own_data(launch_root, threads_dir, logs_dir, 1)
+    delta.after_and_record()
+
+    new = {
+        r.path
+        for r in _records(threads_dir)
+        if r.turn_id == "turn-1" and not r.call_id
+    }
+    assert new == {"tracked.txt"}
+
+
 def test_binary_written_by_command_records_its_size(repo):
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))

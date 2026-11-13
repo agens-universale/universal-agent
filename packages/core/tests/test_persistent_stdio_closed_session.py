@@ -52,9 +52,9 @@ async def test_close_during_spawn_kills_the_new_process(
     real = persistent_stdio._spawn_detached_stdio_process
     spawned = []
 
-    def slow_spawn(cfg):
+    def slow_spawn(cfg, *args):
         time.sleep(0.5)  # окно запуска: ``_proc`` ещё пуст
-        spawned.append(real(cfg))
+        spawned.append(real(cfg, *args))
         return spawned[-1]
 
     monkeypatch.setattr(

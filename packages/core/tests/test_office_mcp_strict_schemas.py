@@ -10,6 +10,7 @@ import pytest
 pytest.importorskip("office_mcp")
 
 from gc_core.tools.connect_mcp.agent_tools import normalize_tool_spec_for_agent
+from gc_core.utils.connect_backend import project_tool_specs
 from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 from office_mcp.server import ServerConfig, build_server
 
@@ -70,11 +71,6 @@ def _strict_schema_errors(
             missing = set(props) - set(req)
             if missing:
                 errors.append(f"{path}: required missing {sorted(missing)}")
-        items = node.get("items")
-        if isinstance(items, dict) and not any(
-            k in items for k in ("type", "anyOf", "oneOf", "allOf", "$ref")
-        ):
-            errors.append(f"{path}.items: missing type")
         for key, value in node.items():
             if key != "$defs":
                 errors.extend(_strict_schema_errors(value, path + (key,)))
@@ -107,6 +103,13 @@ def test_all_office_mcp_tools_normalize_for_openai_strict() -> None:
         )
         params = normalized["parameters"]
         errors.extend(_strict_schema_errors(params, (name,)))
+        # office-mcp типизирован полностью: появился узел без типа — strict
+        # снимется, и это решают осознанно, а не узнают из запросов.
+        (sent,) = project_tool_specs(
+            [normalized], openai_strict=True, send_tool_strict=True
+        )
+        if sent["strict"] is not True:
+            errors.append(f"{name}: strict dropped by projection")
         errors.extend(
             _dangling_ref_errors(
                 params, params.get("$defs"), (name, "parameters")

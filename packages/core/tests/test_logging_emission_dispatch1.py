@@ -3,7 +3,7 @@
 - src/summarize/summary_logging.py: summary_started, summary_precheck,
   summary_raw_text, summary_message_body, summary_completed, summary_failed
 - src/utils/connect_backend.py: backend_request, backend_response,
-  backend_responses_json_error
+  backend_bad_response
 - src/states.py (via src/instructions/loader.py): agent_md_read_failed
 - src/agent_executor.py: system_prompt_read_failed
 - src/processing_responses.py: dialog_message
@@ -167,12 +167,12 @@ def test_backend_request_and_response_events_chat_completions(
     )
 
 
-def test_backend_responses_json_error_event(tmp_path, monkeypatch):
+def test_backend_bad_response_event(tmp_path, monkeypatch):
     from gc_core.utils import connect_backend
 
     logger, path = _make_logger(tmp_path, level="debug")
 
-    # Ответ, который не разбирается как JSON: событие backend_responses_json_error
+    # Ответ, который не разбирается как JSON: событие backend_bad_response
     # должно попасть в лог, а исключение — подняться.
     install_transport(
         monkeypatch, stream_response("data: not-json-at-all\n\n")
@@ -190,8 +190,120 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
         )
     _flush(logger)
     recs = _records(path)
-    errs = [r for r in recs if r["event"] == "backend_responses_json_error"]
-    assert errs and "not-json-at-all" in errs[0]["last_chunk"]
+    errs = [r for r in recs if r["event"] == "backend_bad_response"]
+    assert errs and errs[0]["length"] == len("data: not-json-at-all")
+    assert "not-json-at-all" not in json.dumps(errs[0])
+    assert not any("not-json-at-all" in json.dumps(r) for r in recs)
+
+
+def test_last_chunk_is_readable_in_text_log(tmp_path, monkeypatch):
+    """В format: text поля событий не выводятся: чанк обязан быть в самом
+    сообщении debug-записи (text пишет debug в файл всегда)."""
+    from gc_core.utils import connect_backend
+
+    logger, path, _ = create_run_logger(
+        make_settings(
+            {
+                "paths.logs_dump_dir": str(tmp_path),
+                "logging.save_logs": True,
+                "logging.console_trace": False,
+            }
+        ),
+        run_id="t-text",
+        agent_kind="main",
+    )
+    chunk = json.dumps({"type": "response.incomplete", "response": {}})
+    install_transport(monkeypatch, stream_response(f"data: {chunk}\n\n"))
+    with pytest.raises(ValueError):
+        run_coro(
+            connect_backend.arequest_backend_responses(
+                {}, {}, url="http://x", verify=True, logger=logger
+            )
+        )
+    _flush(logger)
+    with open(path, encoding="utf-8") as fd:
+        assert "response.incomplete" in fd.read()
+
+
+def test_wrong_stream_finish_names_the_event_not_the_chunk(monkeypatch):
+    """Ответ responses кончился не `response.completed` (упор в лимит):
+    последний чанк — весь ответ с аргументами вызовов, в текст исключения
+    (его пишет и политика ретраев) он не попадает."""
+    from gc_core.utils import connect_backend
+
+    chunk = json.dumps(
+        {"type": "response.incomplete", "response": {"secret": "hunter2"}}
+    )
+    install_transport(monkeypatch, stream_response(f"data: {chunk}\n\n"))
+    with pytest.raises(ValueError) as exc:
+        run_coro(
+            connect_backend.arequest_backend_responses(
+                {}, {}, url="http://x", verify=True
+            )
+        )
+    assert "response.incomplete" in str(exc.value)
+    assert "hunter2" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+            "type": "error",
+            "code": "context_length_exceeded",
+            "message": "This model's maximum context length is 8192 tokens",
+        },
+        {
+            "type": "error",
+            "error": {"message": "Input exceeds the context window"},
+        },
+    ],
+)
+def test_top_level_error_event_keeps_the_provider_reason(monkeypatch, event):
+    """Событие error верхнего уровня потока (не внутри response): его код и
+    сообщение тоже доходят до восстановления по переполнению контекста."""
+    from gc_core.execution.finish_reason import is_context_overflow_error
+    from gc_core.utils import connect_backend
+
+    chunk = json.dumps(event)
+    install_transport(monkeypatch, stream_response(f"data: {chunk}\n\n"))
+    with pytest.raises(ValueError) as exc:
+        run_coro(
+            connect_backend.arequest_backend_responses(
+                {}, {}, url="http://x", verify=True
+            )
+        )
+    assert is_context_overflow_error(exc.value)
+
+
+def test_failed_stream_keeps_the_provider_reason(monkeypatch):
+    """Ошибка провайдера из события конца потока остаётся в тексте
+    исключения: по нему восстановление узнаёт переполнение контекста и
+    сжимает историю. Вывода модели в ней нет."""
+    from gc_core.execution.finish_reason import is_context_overflow_error
+    from gc_core.utils import connect_backend
+
+    chunk = json.dumps(
+        {
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": "context_length_exceeded",
+                    "message": "Input exceeds the context window of this model",
+                },
+                "output": [{"content": "hunter2"}],
+            },
+        }
+    )
+    install_transport(monkeypatch, stream_response(f"data: {chunk}\n\n"))
+    with pytest.raises(ValueError) as exc:
+        run_coro(
+            connect_backend.arequest_backend_responses(
+                {}, {}, url="http://x", verify=True
+            )
+        )
+    assert is_context_overflow_error(exc.value)
+    assert "hunter2" not in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

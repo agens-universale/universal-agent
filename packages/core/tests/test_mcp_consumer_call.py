@@ -189,9 +189,9 @@ def _count_session_binds(monkeypatch) -> list[str]:
     binds: list[str] = []
     real = PersistentStdioRegistry.get_or_create
 
-    def counting(self, server_key, server_cfg):
+    def counting(self, server_key, server_cfg, server_name=None):
         binds.append(server_key)
-        return real(self, server_key, server_cfg)
+        return real(self, server_key, server_cfg, server_name)
 
     monkeypatch.setattr(PersistentStdioRegistry, "get_or_create", counting)
     return binds

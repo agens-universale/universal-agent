@@ -171,14 +171,25 @@ def _user_agent() -> str:
     return f"{app_version.DIST_NAME}/{app_version.agent_version()}"
 
 
-def _headers(auth_header: Optional[str]) -> dict:
+def _headers(auth_header: Optional[str], extra: Optional[dict] = None) -> dict:
     """Заголовки запроса: тип, визитка продукта, авторизация.
 
     Визитка обязательна и ставится здесь, а не в транспорте: без User-Agent
     библиотека шлёт свой дефолт («python-requests/X.Y») — щит провайдера (Cloudflare у
     Groq, проверено живьём) отвечает 403 ещё ДО проверки токена, и список моделей
-    молчит на рабочем ключе."""
+    молчит на рабочем ключе.
+
+    `extra` — дополнительные заголовки агента (`connection_probe_headers`): шлюз,
+    требующий свой заголовок, без них отвечает пробе 401 при рабочем агенте.
+    Накладываются без учёта регистра, как у агента; Authorization среди них
+    пропускается — форму токена перебирает сама проба."""
     headers = {"Content-Type": "application/json", "User-Agent": _user_agent()}
+    for key, value in (extra or {}).items():
+        if key.lower() == "authorization":
+            continue
+        for existing in [k for k in headers if k.lower() == key.lower()]:
+            del headers[existing]
+        headers[key] = value
     if auth_header:
         headers["Authorization"] = auth_header
     return headers
@@ -274,10 +285,12 @@ def _parse_reply_models(reply: HttpReply, parser: Callable) -> list:
         return []
 
 
-def _get_with_auth_forms(get_ex, url: str, auth_forms: list, verify):
+def _get_with_auth_forms(
+    get_ex, url: str, auth_forms: list, verify, extra: Optional[dict] = None
+):
     """GET по очереди с каждой формой авторизации, пока ответ 401 и формы есть."""
     for index, form in enumerate(auth_forms):
-        reply = get_ex(url, _headers(form), verify)
+        reply = get_ex(url, _headers(form, extra), verify)
         if reply.status != 401 or index + 1 == len(auth_forms):
             break
     return reply
@@ -329,6 +342,7 @@ def probe_fetch(
     *,
     verify: bool | str = True,
     config_proxy: Optional[str] = None,
+    extra_headers: Optional[dict] = None,
     http_get_ex: Optional[Callable] = None,
 ) -> FetchOutcome:
     """models-цепочка (/config → /models); без доступного каталога 401 приоритетнее прочих кодов."""
@@ -351,7 +365,9 @@ def probe_fetch(
         (_CONFIG_PATH, parse_config_models),
         (_MODELS_PATH, parse_models_list),
     ):
-        reply = _get_with_auth_forms(get_ex, base + path, auth_forms, verify)
+        reply = _get_with_auth_forms(
+            get_ex, base + path, auth_forms, verify, extra_headers
+        )
         parsed = _parse_reply_models(reply, parser)
         if _is_catalog_reply(reply, parsed, _raw_catalog(reply, path)):
             if parsed:
@@ -403,6 +419,7 @@ def probe_post(
     *,
     verify: bool | str = True,
     config_proxy: Optional[str] = None,
+    extra_headers: Optional[dict] = None,
     http_post_ex: Optional[Callable] = None,
 ) -> tuple[Optional[int], str, int, Any]:
     """Минимальный POST в сам chat/completions (ступень 2 probe).
@@ -421,7 +438,7 @@ def probe_post(
             )
     else:
         post_ex = http_post_ex
-    headers = _headers(auth_header)
+    headers = _headers(auth_header, extra_headers)
     body = {
         "model": model,
         "messages": [{"role": "user", "content": "ping"}],

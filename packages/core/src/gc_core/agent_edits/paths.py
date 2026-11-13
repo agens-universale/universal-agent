@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -47,18 +48,81 @@ def is_protected_from_tracking(
     return cls in ("operational", "instructions", "vcs")
 
 
+@dataclass(frozen=True)
+class OwnDataPaths:
+    """Нормализованные исключения одного обхода, не кеш между командами."""
+
+    roots: tuple[Path, ...]
+    case_insensitive: bool
+
+    def contains(self, resolved: Path) -> bool:
+        return any(
+            is_within_root(
+                resolved, root, case_insensitive=self.case_insensitive
+            )
+            for root in self.roots
+        )
+
+
+def prepare_own_data(
+    launch_root: PathLike, own_data: Sequence[str] | None
+) -> OwnDataPaths:
+    ci = _case_insensitive()
+    roots = []
+    if own_data:
+        try:
+            root = normalize_path_for_policy(launch_root, launch_root)
+        except (ValueError, OSError):
+            return OwnDataPaths((), ci)
+        for raw in own_data:
+            try:
+                data = normalize_path_for_policy(raw, launch_root)
+            except (ValueError, OSError):
+                continue
+            if not is_within_root(root, data, case_insensitive=ci):
+                roots.append(data)
+    return OwnDataPaths(tuple(roots), ci)
+
+
+def is_own_data(
+    path: PathLike,
+    launch_root: PathLike,
+    own_data: Sequence[str] | OwnDataPaths | None,
+) -> bool:
+    """Путь — собственные данные gc (``ctx.own_data_paths``): не трекаем.
+
+    Элемент списка — каталог (всё под ним) или файл (только он сам).
+    Каталог, внутри которого лежит сам проект, пропускается: иначе
+    отслеживание правок умерло бы целиком, а не только для данных gc.
+    """
+    if not own_data:
+        return False
+    try:
+        resolved = normalize_path_for_policy(path, launch_root)
+    except (ValueError, OSError):
+        return False
+    prepared = (
+        own_data
+        if isinstance(own_data, OwnDataPaths)
+        else prepare_own_data(launch_root, own_data)
+    )
+    return prepared.contains(resolved)
+
+
 def canonical_path_key(
     path: PathLike,
     launch_root: PathLike,
     *,
     protected_extra: Sequence[str] | None = None,
+    own_data: Sequence[str] | OwnDataPaths | None = None,
 ) -> Optional[str]:
     """Имя файла в журнале и снапшотах — или ``None``, если путь не трекаем.
 
     Три исхода, и у каждого свой смысл:
 
     * под ``launch_root`` → относительный POSIX — полное обслуживание;
-    * защищён от отслеживания → ``None`` — не трекаем вовсе;
+    * защищён от отслеживания или это собственные данные gc
+      (``own_data``, см. ``is_own_data``) → ``None`` — не трекаем вовсе;
     * всё остальное → абсолютный POSIX — файл ВНЕ проекта: дифф в ленте есть,
       базы нет, на экране его не будет (``is_external_key``).
 
@@ -71,9 +135,14 @@ def canonical_path_key(
     except (ValueError, OSError):
         return None
 
+    prepared = (
+        own_data
+        if isinstance(own_data, OwnDataPaths)
+        else prepare_own_data(launch_root, own_data)
+    )
     if is_protected_from_tracking(
         resolved, launch_root, protected_extra=protected_extra
-    ):
+    ) or prepared.contains(resolved):
         return None
 
     ci = _case_insensitive()

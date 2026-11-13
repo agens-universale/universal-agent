@@ -8,7 +8,7 @@ from gc_core.plugins import sources
 from gc_core.settings import runtime_of
 from gc_server.app import ServerRuntime
 from gc_server.cli import prewarm_plugin_sources
-from gc_server.config import ServerConfig
+from gc_server.config import ServerConfig, load_server_config
 from gc_testkit.plugin_store import install_plugin
 from gc_testkit.settings import make_settings
 
@@ -24,32 +24,46 @@ def _names(loaded):
     return tuple(p.name for p in runtime_of(loaded).plugins.plugins)
 
 
-def test_server_surface_lists_installed(tmp_path, monkeypatch):
+def test_server_skips_installed_without_config(tmp_path, monkeypatch):
+    """Без config_server.yml установленные на хосте плагины (и их хуки)
+    сервер не берёт."""
     install_plugin(tmp_path, monkeypatch)
 
-    assert _names(_runtime().surface_settings("chat")) == ("inst",)
+    assert _names(_runtime().surface_settings("chat")) == ()
 
 
-def test_server_agent_overrides_use_installed_false(tmp_path, monkeypatch):
+def test_server_skips_installed_with_old_config(tmp_path, monkeypatch):
+    """Прежний config_server.yml без ключа плагинов — так же."""
     install_plugin(tmp_path, monkeypatch)
-    runtime = _runtime(agent_overrides={"plugins": {"use_installed": False}})
+    path = tmp_path / "config_server.yml"
+    path.write_text("server:\n  apis: [chat]\n", encoding="utf-8")
+    runtime = ServerRuntime(
+        base=make_settings({}), config=load_server_config(str(path))
+    )
 
     assert _names(runtime.surface_settings("chat")) == ()
 
 
-def test_surface_override_use_installed_false(tmp_path, monkeypatch):
+def test_server_agent_overrides_enable_installed(tmp_path, monkeypatch):
+    install_plugin(tmp_path, monkeypatch)
+    runtime = _runtime(agent_overrides={"plugins": {"use_installed": True}})
+
+    assert _names(runtime.surface_settings("chat")) == ("inst",)
+
+
+def test_surface_override_enables_installed(tmp_path, monkeypatch):
     install_plugin(tmp_path, monkeypatch)
     runtime = _runtime(
-        webhook={"agent_overrides": {"plugins.use_installed": False}}
+        webhook={"agent_overrides": {"plugins.use_installed": True}}
     )
 
-    assert _names(runtime.surface_settings("webhook")) == ()
-    assert _names(runtime.surface_settings("chat")) == ("inst",)
+    assert _names(runtime.surface_settings("webhook")) == ("inst",)
+    assert _names(runtime.surface_settings("chat")) == ()
 
 
 def test_surface_snapshot_is_built_once(tmp_path, monkeypatch):
     install_plugin(tmp_path, monkeypatch)
-    runtime = _runtime()
+    runtime = _runtime(agent_overrides={"plugins.use_installed": True})
 
     first = runtime.surface_settings("chat")
 

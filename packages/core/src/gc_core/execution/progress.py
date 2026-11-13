@@ -477,6 +477,30 @@ def _pairs_summary(data: Dict[str, Any], limit: int) -> str:
     return _clip(", ".join(pairs), limit)
 
 
+def tool_card_title(
+    name: str, arguments: Any, *, root: str | None = None
+) -> str:
+    """Заголовок карточки тула: ``name(сводка аргументов)`` или голое имя.
+
+    Общий для карточек ACP и server — копии в двух фронтендах расходились бы.
+    """
+    preview = tool_args_summary(name, arguments, root=root)
+    if preview == "":
+        return name
+    return f"{name}({preview})"
+
+
+def tool_call_id(message: dict) -> Optional[str]:
+    """Id вызова тула из записи истории: ``call_id``, иначе ``id``, иначе None."""
+    call_id = message.get("call_id")
+    if isinstance(call_id, str) and call_id != "":
+        return call_id
+    fallback = message.get("id")
+    if isinstance(fallback, str) and fallback != "":
+        return fallback
+    return None
+
+
 def _arg_pair_preview(key: str, value: Any) -> str:
     if isinstance(value, str):
         preview = " ".join(value.split())
@@ -656,4 +680,6 @@ __all__ = [
     "run_command_text",
     "strip_root_cd",
     "tool_args_summary",
+    "tool_call_id",
+    "tool_card_title",
 ]

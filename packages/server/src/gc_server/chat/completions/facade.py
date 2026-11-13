@@ -13,7 +13,7 @@ from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
 
 from gc_server.agent_roles import COMPLETIONS
-from gc_server.chat.agent_config import prepare_agent_settings
+from gc_server.chat.agent_config import agent_io, prepare_agent_settings
 from gc_server.chat.completions.ask_human import bind_ask_human
 from gc_server.chat.completions.content import ContentMap
 from gc_server.chat.completions.history import (
@@ -59,7 +59,7 @@ class CompletionsFacade:
         self.cors_origins = _cors_origins(section.cors_origins)
         self.bind_host = section.host or LOOPBACK
         self.max_body_bytes = section.max_body_bytes or DEFAULT_MAX_BODY_BYTES
-        self._launch_root = section.launch_root
+        self._launch_root = cwd_for_new(None, section.launch_root)
         self.model_id = str(settings.settings.agent.model or "")
         self._create_lock = asyncio.Lock()
 
@@ -89,11 +89,12 @@ class CompletionsFacade:
                 instructions_path=completions_special_instructions_path(),
                 variant=COMPLETIONS,
             )
+            backend = agent_io(settings, cwd, self._os_backend)
             return await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
                 mcp_service=self._mcp_service,
-                os_backend=self._os_backend,
+                os_backend=backend,
             )
 
     async def _begin(

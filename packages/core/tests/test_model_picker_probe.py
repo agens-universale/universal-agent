@@ -211,3 +211,49 @@ def test_probe_fetch_status_kept_when_body_broken():
     assert out.models is None
     assert out.status == 200  # статус сохранён, не None
     assert out.network_error == ""
+
+
+def test_probe_post_sends_extra_headers_but_keeps_its_own_auth():
+    """Дополнительные заголовки агента доезжают до POST; Authorization среди
+    них не перебивает форму, которую перебирает проба."""
+    seen = {}
+
+    def post_ex(url, headers, body, verify):
+        seen.update(headers)
+        return mp.HttpReply(200, {})
+
+    mp.probe_post(
+        "http://x/v1/chat/completions",
+        "Bearer probe",
+        "m",
+        extra_headers={
+            "x_cl_id": "cl",
+            "X-Gateway-Key": "gw",
+            "authorization": "Bearer other",
+            "user-agent": "corp-agent",
+        },
+        http_post_ex=post_ex,
+    )
+    assert seen["Authorization"] == "Bearer probe"
+    assert "authorization" not in seen
+    assert seen["X-Gateway-Key"] == "gw"
+    assert seen["x_cl_id"] == "cl"
+    # Заголовок с тем же именем в другом регистре — замена, а не второй.
+    assert "User-Agent" not in seen
+    assert seen["user-agent"] == "corp-agent"
+
+
+def test_probe_fetch_sends_extra_headers_to_the_catalog():
+    seen = []
+
+    def get_ex(url, headers, verify):
+        seen.append(headers.get("X-Gateway-Key"))
+        return mp.HttpReply(200, {"data": [{"id": "m"}]})
+
+    mp.probe_fetch(
+        "http://x/v1/chat/completions",
+        None,
+        extra_headers={"X-Gateway-Key": "gw"},
+        http_get_ex=get_ex,
+    )
+    assert seen and set(seen) == {"gw"}

@@ -24,15 +24,21 @@ def cwd_for_new(sent: str | None, launch_root: Any) -> str:
 
     Каталог хода — периметр записи агента, а с хранилищем агента в базе
     ещё и ключ проекта (память, скиллы). Проверяется и отдаётся ходу
-    раскрытый путь (симлинки и «..»): подмена компонента после проверки
-    не уведёт ход за периметр."""
+    раскрытый путь (симлинки и «..»). Guards проверяют операции инструментов,
+    а не право выбрать рабочий каталог. Это не файловая песочница."""
     root = _root(launch_root)
     if not isinstance(sent, str) or not os.path.isabs(sent):
         return root
     cwd = os.path.realpath(sent)
     boundary = os.path.realpath(root)
-    if os.path.commonpath([boundary, cwd]) != boundary:
+    try:
+        inside = os.path.commonpath([boundary, cwd]) == boundary
+    except ValueError:
+        inside = False
+    if not inside:
         raise ApiError(400, "invalid_request", "cwd is outside launch_root")
+    if not os.path.isdir(cwd):
+        raise ApiError(400, "invalid_request", "cwd is not a directory")
     return cwd
 
 
@@ -43,5 +49,5 @@ def same_cwd(sent: str, recorded: str) -> bool:
 
 def _root(launch_root: Any) -> str:
     if isinstance(launch_root, str) and os.path.isabs(launch_root):
-        return os.path.normpath(launch_root)
-    return os.path.normpath(os.getcwd())
+        return os.path.realpath(launch_root)
+    return os.path.realpath(os.getcwd())

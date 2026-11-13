@@ -74,6 +74,7 @@ from gc_core.agent_edits.ctx import (
     identity_from_ctx,
     launch_root_from_ctx,
     limit,
+    own_data_from_ctx,
     protected_extra_from_ctx,
 )
 from gc_core.agent_edits.delete_records import (
@@ -98,6 +99,8 @@ from gc_core.agent_edits.paths import (
     canonical_path_key,
     goes_through_link,
     is_external_key,
+    is_own_data,
+    prepare_own_data,
 )
 from gc_core.agent_edits.recorder import is_recording
 from gc_core.agent_edits.snapshots import (
@@ -544,6 +547,21 @@ class ShellDelta:
             # только защищённые от отслеживания). Байты такого пути читать
             # нельзя: точная база дала бы право откатить чужой файл нажатием
             # `r`.
+            # Собственные данные gc (`own_data_from_ctx`) приходят только из
+            # журнала, записанного до их исключения: `_at_risk_keys` их уже не
+            # отдаёт. Читать их байты — снова записать журнал «правкой».
+            own_data = prepare_own_data(
+                self._launch_root, own_data_from_ctx(self._ctx)
+            )
+            known = [
+                k
+                for k in known
+                if not is_own_data(
+                    abs_path_for_key(self._launch_root, k),
+                    self._launch_root,
+                    own_data,
+                )
+            ]
             diverged, staged_only = self._at_risk_keys()
             merged = _dedup(diverged + known + staged_only)
             candidates = [k for k in merged if not is_external_key(k)][
@@ -639,6 +657,9 @@ class ShellDelta:
         слиянии — задача 3).
         """
         protected = protected_extra_from_ctx(self._ctx)
+        own_data = prepare_own_data(
+            self._launch_root, own_data_from_ctx(self._ctx)
+        )
 
         def keys_of(rels: list[str]) -> list[str]:
             keys = []
@@ -647,6 +668,7 @@ class ShellDelta:
                     str(self._abs(rel)),
                     self._launch_root,
                     protected_extra=protected,
+                    own_data=own_data,
                 )
                 if key is not None:
                     keys.append(key)
@@ -1187,11 +1209,17 @@ class ShellDelta:
         чей регистр разошёлся (обычное дело при core.ignorecase).
         """
         extra = protected_extra_from_ctx(self._ctx)
+        own_data = prepare_own_data(
+            self._launch_root, own_data_from_ctx(self._ctx)
+        )
         planned: list[tuple[str, str, _FileFacts]] = []
         for rel in part:
             abs_path = self._abs(rel)
             key = canonical_path_key(
-                str(abs_path), self._launch_root, protected_extra=extra
+                str(abs_path),
+                self._launch_root,
+                protected_extra=extra,
+                own_data=own_data,
             )
             if (
                 key is None
@@ -1796,6 +1824,7 @@ class ShellDelta:
                 str(abs_path),
                 self._launch_root,
                 protected_extra=protected_extra_from_ctx(self._ctx),
+                own_data=own_data_from_ctx(self._ctx),
             )
         # Внешний путь шелл-канал не записывает ВОВСЕ: у шелл-записи `call_id`
         # пустой, значит блока в ленте она не даёт никогда, а на экран внешний

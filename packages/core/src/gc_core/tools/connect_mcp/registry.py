@@ -10,6 +10,7 @@ from gc_core.tools.connect_mcp.call_errors import first_leaf
 from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.secret_mask import without_secrets
+from gc_core.tools.connect_mcp.transport import McpServerExitedError
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -32,6 +33,10 @@ def _discovery_error_text(
     ``message`` — текст исключения для типов без своей формулировки;
     вызывающий может подать его уже очищенным. Длинный текст обрезается.
     """
+    if isinstance(exc, McpServerExitedError):
+        # Раньше — «нет соединения с …»: stdio-сервер упал при старте, а его
+        # stderr уходил в никуда. Текст уже собран: строка причины и лог.
+        return str(exc)
     if isinstance(exc, FileNotFoundError):
         cmd = server_cfg.get("command") or "?"
         return f"команда '{cmd}' не найдена"

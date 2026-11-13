@@ -136,7 +136,7 @@ def assemble_context(
             **deepcopy(metadata),
             "tool_fabric": candidates[name]["tool_fabric"],
         }
-    router = ModelRouter(
+    router = ModelRouter.sequential(
         loaded,
         choice_provider=lambda: effective_choice(
             configured_choice(loaded.settings), loaded.settings

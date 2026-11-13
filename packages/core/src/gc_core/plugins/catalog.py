@@ -56,7 +56,9 @@ def _installed_paths(cfg: PluginsConfig) -> list[str]:
 
 
 def _source_notice(source) -> str:
-    head = f"Плагин из источника {source.git} не подключён: "
+    head = (
+        f"Плагин из источника {sources.shown_url(source.git)} не подключён: "
+    )
     if sources.is_cloned(source) and source.subdir:
         return head + f"в репозитории нет подкаталога {source.subdir}."
     if sources.is_short_commit(source.ref):
@@ -251,17 +253,19 @@ def build_plugin_snapshot(
     loaded_entries = _load_entries(entries.paths)
     untrusted = loaded.runtime.untrusted_plugin_entries
     plugins = tuple(plugin for _, plugin in loaded_entries)
-    servers, keys, mcp_notices = plugin_mcp_part(
-        plugins, loaded.settings.mcp.servers
-    )
-    roots = skill_roots(plugins)
-    commands, command_notices = _plugin_commands(plugins, roots)
-    roles, role_notices = _plugin_roles(loaded, plugins, keys)
     trusted = frozenset(
         plugin.name
         for path, plugin in loaded_entries
         if path in entries.installed or path not in untrusted
     )
+    # Процессы плагина (хуки и MCP-серверы) — только у доверенных (§7.1).
+    servers, keys, mcp_notices = plugin_mcp_part(
+        tuple(p for p in plugins if p.name in trusted),
+        loaded.settings.mcp.servers,
+    )
+    roots = skill_roots(plugins)
+    commands, command_notices = _plugin_commands(plugins, roots)
+    roles, role_notices = _plugin_roles(loaded, plugins, keys)
     return PluginSnapshot(
         plugins=plugins,
         trusted=trusted,
@@ -274,24 +278,36 @@ def build_plugin_snapshot(
         + mcp_notices
         + command_notices
         + role_notices
-        + _untrusted_hook_notices(plugins, trusted),
+        + _untrusted_notices(plugins, trusted),
         fingerprint=fingerprint,
     )
 
 
-def _untrusted_hook_notices(
+def _untrusted_notices(
     plugins: tuple[Plugin, ...], trusted: frozenset[str]
 ) -> tuple[str, ...]:
-    """Хуки плагинов из конфига проекта не запускаются (§7.1)."""
-    names = dict.fromkeys(
-        p.name for p in plugins if p.hooks and p.name not in trusted
-    )
-    return tuple(
-        f"Хуки плагина {name} из конфига проекта не запускаются. Чтобы "
-        "включить, установите плагин командой `gc-plugin install` или "
-        "добавьте его в личный конфиг"
-        for name in names
-    )
+    """Хуки и MCP-серверы плагинов из конфига проекта не запускаются (§7.1)."""
+    notices: dict[str, None] = {}
+    for plugin in plugins:
+        if plugin.name in trusted:
+            continue
+        parts = [
+            what
+            for what, present in (
+                ("хуки", plugin.hooks),
+                ("MCP-серверы", plugin.mcp_servers),
+            )
+            if present
+        ]
+        if parts:
+            what = " и ".join(parts)
+            notices[
+                f"{what[0].upper()}{what[1:]} плагина {plugin.name} из "
+                "конфига проекта не запускаются. Чтобы включить, установите "
+                "плагин командой `gc-plugin install` или добавьте его в "
+                "личный конфиг"
+            ] = None
+    return tuple(notices)
 
 
 def with_plugin_snapshot(
