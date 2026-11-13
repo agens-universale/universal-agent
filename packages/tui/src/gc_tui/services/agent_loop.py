@@ -36,6 +36,12 @@ _log = logging.getLogger(__name__)
 
 #: Шаг сторожа занятости цикла.
 _WATCH_TICK_SEC = 1.0
+#: Запас срока выхода на отмену уборки, не уложившейся в срок.
+_KILL_RESERVE_SEC = 1.0
+
+
+def _live_tasks(loop: asyncio.AbstractEventLoop) -> list[asyncio.Task]:
+    return [t for t in asyncio.all_tasks(loop) if not t.done()]
 
 
 class AgentLoop:
@@ -175,13 +181,31 @@ class AgentLoop:
         return max(self._deadline - time.monotonic(), 0.1)
 
     def _cancel_leftovers(self, loop: asyncio.AbstractEventLoop) -> None:
-        tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
-        for task in tasks:
+        """Отменить живые задачи и дождаться их вместе с уборкой.
+
+        Уборка отменённой задачи бывает отдельной задачей, родившейся уже
+        при отмене (закрытие сессии MCP под ``shield``): её ждём до срока
+        выхода, не отменяя, — брошенная при закрытии цикла, она не доиграет,
+        и процесс сервера переживёт TUI. Что не уложилось, отменяется в
+        последнем запасе: закрытие сессии на отмене добивает процесс.
+        """
+        for task in _live_tasks(loop):
             task.cancel()
-        if tasks:
+        reserve = min(_KILL_RESERVE_SEC, max(self._left(), 0.0) / 2)
+        while (live := _live_tasks(loop)) and self._left() > reserve:
             loop.run_until_complete(
-                asyncio.wait(tasks, timeout=self._budget())
+                asyncio.wait(live, timeout=self._left() - reserve)
             )
+        for task in live:
+            task.cancel()
+        if live:
+            loop.run_until_complete(
+                asyncio.wait(live, timeout=max(reserve, 0.1))
+            )
+
+    def _left(self) -> float:
+        """Остаток срока выхода; без `shutdown` срока нет — ноль и меньше."""
+        return self._deadline - time.monotonic()
 
     def _aclose_clients(self, loop: asyncio.AbstractEventLoop) -> None:
         from gc_core.utils import async_http
