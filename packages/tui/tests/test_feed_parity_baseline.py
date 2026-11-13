@@ -29,18 +29,16 @@ HISTORY_FIXTURES = [
     "finish_attempts",
 ]
 
-#: Расхождения «живой путь ≠ открытие»: фикстура → причина. Тест такой
-#: фикстуры — строгий xfail: совпадение роняет его, и запись снимается.
-#: Список может только сокращаться.
-KNOWN_LIVE_VS_OPEN: dict[str, str] = {
-    "subagents": (
-        "вложенный трейс субагента: живой путь рисует его из событий "
-        "прогресса раннера (_drain_subagent_progress), открытие — из "
-        "sidecar (_merge_sidecar_nested); в записях треда событий прогресса "
-        "нет, подача фикстуры их не воспроизводит — живая лента без "
-        "вложенных строк"
-    ),
-}
+#: Расхождения нынешнего кода «живой путь ≠ открытие»: фикстура → причина.
+#: Тест такой фикстуры — строгий xfail: совпадение роняет его, и запись
+#: снимается. Список может только сокращаться.
+KNOWN_LIVE_VS_OPEN: dict[str, str] = {}
+
+#: Фикстуры, где вложенные строки субагента (`-in-agent`) вне сравнения:
+#: вживую их рисуют события прогресса раннера, открытие — sidecar, а в
+#: записях треда событий прогресса нет и подача их не воспроизводит.
+#: Паритет вложенного трейса — отдельные тесты (узел субагентов).
+NESTED_OUTSIDE_PARITY = frozenset({"subagents"})
 
 _SIZE = (160, 45)
 _SETTLE_STEPS = 40
@@ -56,6 +54,7 @@ _SETTINGS = {
 
 
 def _app(threads_dir):
+    # Импорт приложения — в тесте: палитра выбирается до импорта gc_tui.app.
     from gc_tui.app import TuiApp
 
     threads_dir.mkdir()
@@ -102,11 +101,13 @@ async def dump_after_live_feed(name: str, tmp_path, *, splits):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", HISTORY_FIXTURES)
-@pytest.mark.parametrize("splits", [(), (3,), (1, 4, 7)])
+#: (2, 9) — ответ модели отрезан от своего вызова: в calls, ask_human,
+#: finish_attempts и compaction запись 9 — turn_finish за текстом ответа
+#: (запись 8), запись 2 — вызов за текстом шага (запись 1).
+@pytest.mark.parametrize("splits", [(), (3,), (1, 4, 7), (2, 9)])
 async def test_open_matches_live_feed(
     name, splits, tmp_path, request, monkeypatch
 ):
-    pytest.importorskip("textual")
     if name in KNOWN_LIVE_VS_OPEN:
         request.applymarker(
             pytest.mark.xfail(reason=KNOWN_LIVE_VS_OPEN[name], strict=True)
@@ -115,4 +116,10 @@ async def test_open_matches_live_feed(
     with pinned_snapshot_clock(monkeypatch):
         opened = await dump_after_open(name, tmp_path)
         live = await dump_after_live_feed(name, tmp_path, splits=splits)
+    if name in NESTED_OUTSIDE_PARITY:
+        opened, live = _without_nested(opened), _without_nested(live)
     assert without_ephemeral(live) == opened
+
+
+def _without_nested(rows: list) -> list:
+    return [row for row in rows if "-in-agent" not in row[2]]

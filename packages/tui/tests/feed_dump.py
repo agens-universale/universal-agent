@@ -19,8 +19,25 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from gc_core.persistence.model_choice_record import parse_model_choice
+from gc_core.persistence.turn_outcome import parse_turn_outcome
+from gc_core.thread_store import append_subagent_record
+from gc_core.threads.facade import run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_testkit.paths import module_dir
+from gc_testkit.thread_writes import (
+    acompact,
+    model_choice_record,
+    turn_outcome_record,
+)
+from gc_tui.services.stores.file_store import FileTaskStore
+
+if TYPE_CHECKING:
+    from gc_tui.screens.main import TraceScreen
+    from textual.widget import Widget
 
 #: Тред фикстуры в хранилище теста.
 HISTORY_THREAD = "historyfixtureaaaaaaaaaaaaaaaaaa"
@@ -52,9 +69,9 @@ class HistoryFixture:
     первой идёт сводка); ``records`` — они же подряд; ``sidecar`` — трасса
     субагентов."""
 
-    records: list[dict]
-    segments: list[list[dict]]
-    sidecar: list[dict]
+    records: tuple[dict, ...]
+    segments: tuple[tuple[dict, ...], ...]
+    sidecar: tuple[dict, ...]
 
 
 def history_fixtures_dir() -> Path:
@@ -74,30 +91,27 @@ def load_history_fixture(name: str) -> HistoryFixture:
             parts_dir.glob("part_*.jsonl"),
             key=lambda p: int(p.stem.split("_")[1]),
         )
-        segments = [_read_jsonl(p) for p in files]
+        segments = tuple(tuple(_read_jsonl(p)) for p in files)
     else:
-        segments = [_read_jsonl(base / f"{name}.jsonl")]
+        segments = (tuple(_read_jsonl(base / f"{name}.jsonl")),)
     sidecar_path = base / f"{name}.sidecar.jsonl"
     sidecar = _read_jsonl(sidecar_path) if sidecar_path.exists() else []
-    records = [rec for seg in segments for rec in seg]
-    return HistoryFixture(records, segments, sidecar)
+    records = tuple(rec for seg in segments for rec in seg)
+    return HistoryFixture(records, segments, tuple(sidecar))
 
 
 # ---- дамп ленты -----------------------------------------------------------
 
 
-def _plain(widget) -> str:
-    try:
-        rendered = widget.render()
-    except Exception:
-        return ""
+def _plain(widget: Widget) -> str:
+    rendered = widget.render()
     plain = getattr(rendered, "plain", None)
     if isinstance(plain, str):
         return plain
     return rendered if isinstance(rendered, str) else ""
 
 
-def _shown(widget):
+def _shown(widget: Widget):
     """Виджет и его показанные потомки в порядке DOM (скрытый
     `display: none` потомок — без своего поддерева)."""
     yield widget
@@ -106,7 +120,7 @@ def _shown(widget):
             yield from _shown(child)
 
 
-def _flat_text(widget) -> str:
+def _flat_text(widget: Widget) -> str:
     """Плоский текст отрисовки виджета и его показанных потомков, без
     хвостовых пробелов строк."""
     texts = (_plain(w) for w in _shown(widget))
@@ -114,7 +128,7 @@ def _flat_text(widget) -> str:
     return "\n".join(line.rstrip() for line in lines if line.strip())
 
 
-def feed_dump(feed) -> list[DumpRow]:
+def feed_dump(feed: Widget) -> list[DumpRow]:
     """Прямые дети ленты (кроме блока бренда): класс виджета, плоский
     текст, классы из `FEED_DUMP_CLASSES`."""
     return [
@@ -152,13 +166,9 @@ class _ThreadWriter:
         self,
         threads_dir: str,
         records: Sequence[dict],
-        sidecar: list[dict],
+        sidecar: Sequence[dict],
         on_model_choice: Callable[[dict], None] | None = None,
     ) -> None:
-        from gc_core.threads.file_store import FileThreadStore
-        from gc_core.threads.models import ThreadKey
-        from gc_tui.services.stores.file_store import FileTaskStore
-
         self._store = FileThreadStore(threads_dir)
         self._key = ThreadKey(system="cli", thread=HISTORY_THREAD)
         self._sidecar = list(sidecar)
@@ -190,9 +200,6 @@ class _ThreadWriter:
     def compact(self, records: Sequence[dict]) -> int:
         """Сжатие: новая история — сводка и следующие за ней
         preserved-копии (id уже были). Возвращает, сколько записей взято."""
-        from gc_core.threads.facade import run_sync
-        from gc_testkit.thread_writes import acompact
-
         taken = 1
         while taken < len(records) and self._is_preserved(records[taken]):
             taken += 1
@@ -215,8 +222,6 @@ class _ThreadWriter:
         )
 
     def _flush(self, messages: list[dict]) -> None:
-        from gc_tui.services.stores.file_store import FileTaskStore
-
         if not messages:
             return
         FileTaskStore(self._store.threads_dir).append_messages(
@@ -238,9 +243,6 @@ class _ThreadWriter:
             self._subagent(rec)
 
     def _subagent(self, rec: dict) -> None:
-        from gc_core.thread_store import append_subagent_record
-        from gc_core.threads.facade import run_sync
-
         run_sync(
             append_subagent_record(
                 self._store,
@@ -256,13 +258,6 @@ class _ThreadWriter:
         if rec["type"] == "model_choice" and self._on_model_choice:
             self._on_model_choice(rec)
             return
-        from gc_core.persistence.model_choice_record import parse_model_choice
-        from gc_core.persistence.turn_outcome import parse_turn_outcome
-        from gc_testkit.thread_writes import (
-            model_choice_record,
-            turn_outcome_record,
-        )
-
         threads_dir = self._store.threads_dir
         if rec["type"] == "turn_outcome":
             turn_outcome_record(
@@ -302,7 +297,7 @@ def _write_all(writer: _ThreadWriter, records: Sequence[dict]) -> None:
 
 
 def feed_live(
-    screen,
+    screen: TraceScreen,
     records: Sequence[dict],
     *,
     splits: Sequence[int],
@@ -337,7 +332,9 @@ def feed_live(
             screen._poll_active()
 
 
-def _feed_batch(screen, writer: _ThreadWriter, batch: Sequence[dict]) -> None:
+def _feed_batch(
+    screen: TraceScreen, writer: _ThreadWriter, batch: Sequence[dict]
+) -> None:
     i = 0
     while i < len(batch):
         if writer.is_compaction(batch[i]):
