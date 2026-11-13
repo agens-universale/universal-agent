@@ -78,7 +78,7 @@ def _restore_signals() -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 5 or argv[3] != "--":
-        sys.stderr.write("usage: <journal dir> <server key> -- <command>\n")
+        sys.stderr.write("usage: <journal dir> <launch key> -- <command>\n")
         return _EXIT_USAGE
     directory, server, command, args = argv[1], argv[2], argv[4], argv[5:]
     record = {

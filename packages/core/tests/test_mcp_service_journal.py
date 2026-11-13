@@ -423,4 +423,4 @@ async def test_launch_error_belongs_to_its_definition(
 
     gone = service.record_failure(_entry(consumer), McpServerGone())
 
-    assert gone.code != "command_not_found"
+    assert gone.code == "connect_error"

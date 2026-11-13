@@ -51,6 +51,8 @@ class _Service:
         self.statuses: dict[str, ServerStatus] = dict(statuses or {})
         #: Серверы, чьё определение в наборе отличается от сборки.
         self.changed: set[str] = set()
+        #: Настройки, по которым окно спрашивало `matching_status`.
+        self.matched_with: list = []
         self.opened: list[_Consumer] = []
         self.closes = 0
         self.closed = False
@@ -67,8 +69,9 @@ class _Service:
         assert consumer in self.opened
         return dict(self.statuses)
 
-    def matching_status(self, consumer, _settings) -> dict[str, ServerStatus]:
+    def matching_status(self, consumer, settings) -> dict[str, ServerStatus]:
         assert consumer in self.opened
+        self.matched_with.append(settings)
         return {
             key: status
             for key, status in self.statuses.items()
@@ -107,11 +110,13 @@ class _Builds:
 
     def __init__(self, mcp_status: dict | None = None, during=None) -> None:
         self.kwargs: list[dict] = []
+        self.settings: list = []
         self.mcp_status = mcp_status
         self.during = during
 
-    async def __call__(self, _settings, **kwargs):
+    async def __call__(self, settings, **kwargs):
         self.kwargs.append(kwargs)
+        self.settings.append(settings)
         if self.during is not None:
             self.during()
         return _Ctx(self.mcp_status)
@@ -386,7 +391,8 @@ def test_rebuild_with_changed_server_waits_for_its_status(
             service.statuses["srv"] = ServerStatus(STATE_CONNECTING)
             service.changed = set()
 
-    _patch_build(monkeypatch, _Builds(during=_replace_entry))
+    builds = _Builds(during=_replace_entry)
+    _patch_build(monkeypatch, builds)
     app = _app(tmp_path, _SRV, service)
     app._build_real_executor()  # потребитель окна открыт, srv подключён
     service.changed = {"srv"}  # /profile сменил определение srv
@@ -396,6 +402,8 @@ def test_rebuild_with_changed_server_waits_for_its_status(
     reported, outcome = published[-1]
     assert reported["srv"] is None
     assert outcome is None
+    # Отсев — по настройкам этой же сборки, что уходят в сверку набора.
+    assert service.matched_with[-1] is builds.settings[-1]
 
 
 @pytest.mark.asyncio
