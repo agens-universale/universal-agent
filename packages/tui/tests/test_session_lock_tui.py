@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.tui_support import wait_until
 from gc_tui.services.session_lock import BUSY_MESSAGE, lock_path, try_acquire
 
 
@@ -192,6 +193,11 @@ async def test_sessions_switch_releases_previous(tmp_path):
         await pilot.pause()
         screen = pilot.app.screen
         screen._resume_thread(tid_b)
-        assert pilot.app.tui_state.active_task_id == tid_b
+        # Сессия грузится в фоне; переход — когда готова.
+        await wait_until(
+            pilot,
+            lambda: pilot.app.tui_state.active_task_id == tid_b,
+            "переход в B",
+        )
         assert not Path(lock_path(str(tmp_path), "cli", tid_a)).exists()
         assert Path(lock_path(str(tmp_path), "cli", tid_b)).exists()

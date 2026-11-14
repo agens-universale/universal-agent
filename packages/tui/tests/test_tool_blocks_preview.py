@@ -561,11 +561,11 @@ async def test_preview_enter_opens_thread_and_space_toggles(tmp_path):
         top = history_level(0)
         phrases = [w for w in preview.query(BlockAction) if w.level == top]
         assert any(w.phrase == "… ещё 2" for w in phrases)
-        dismissed = []
-        preview.dismiss = lambda result=None: dismissed.append(result)
+        resumed = []
+        preview.action_resume = lambda: resumed.append(True)
         await pilot.press("enter")
         await pilot.pause()
-        assert dismissed == [True]
+        assert resumed == [True]
 
 
 @pytest.mark.asyncio

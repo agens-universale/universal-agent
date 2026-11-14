@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.trace_retention import (
     events_leaving_window,
@@ -497,7 +497,6 @@ async def test_preview_same_retention_and_drops_sidecar_list(tmp_path):
         await pilot.pause()
         scr = pilot.app.screen
         assert isinstance(scr, PreviewScreen)
-        assert scr._segments == []
         assert scr._subagent_records == []
         texts = [r._text for r in scr.query(UserReplyContainer)]
         assert _OLD_USER in texts and _LIVE_USER in texts

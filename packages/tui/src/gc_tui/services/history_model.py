@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from bisect import bisect_right
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -42,6 +43,14 @@ from gc_tui.services.trace_retention import (
 )
 
 ItemKind = Literal["event", "outcome", "model_choice", "compaction"]
+
+
+class HistoryBuildCancelled(Exception):
+    """Построение остановлено: его результат больше не нужен."""
+
+
+def _never() -> bool:
+    return False
 
 
 @dataclass(frozen=True)
@@ -300,13 +309,16 @@ def build_history(
     *,
     inputs: HistoryInputs,
     withdrawn: set[str] | frozenset = frozenset(),
+    cancelled: Callable[[], bool] = _never,
 ) -> HistoryModel:
     """Сегменты треда (формат ``FileTaskStore.read_history``) → модель.
 
     Все сегменты сырьём, маркер сжатия — между сегментом и следующим;
     preserved-копия (тот же id в следующей части) входит один раз;
     payload вызовов вне окна удержания облегчается. ``withdrawn`` —
-    реплики, снятые откатом (их запись может ещё лежать в файле)."""
+    реплики, снятые откатом (их запись может ещё лежать в файле).
+    ``cancelled`` спрашивается перед каждой записью: True —
+    ``HistoryBuildCancelled`` (фоновое построение отменили)."""
     records = [rec for seg in segments for rec in seg["messages"]]
     payloads = [rec.get("payload") for rec in records if isinstance(rec, dict)]
     model = HistoryModel(
@@ -323,6 +335,8 @@ def build_history(
     for i, seg in enumerate(segments):
         model.start_segment()
         for rec in seg["messages"]:
+            if cancelled():
+                raise HistoryBuildCancelled
             _add_record(model, rec, seg_in_window=i >= window_start)
         comp = seg["compacted_by"]
         if comp is not None:

@@ -1,6 +1,10 @@
 """PreviewScreen — read-only превью сессии реальными виджетами трейса.
 
-Esc → dismiss(False) (назад). Enter → dismiss(True) (продолжить сессию).
+Esc → dismiss(None) (назад). Enter → продолжить сессию (§3.3, путь 3):
+модель экрана сессии строится в фоне из уже прочитанного превью, но со
+входами целевой сессии; превью ждёт с индикатором на месте строки
+подсказок (Esc отменяет и оставляет в превью), готово — замок и
+dismiss(готовая история) — переход делает список.
 Лента — как живая (`TraceFollowMixin`): открывается у низа, «не внизу» —
 липкая реплика и плашка «в конец» (клик или End — к низу). Окно ленты то
 же, что в сессии (`TraceWindowMixin`): смонтирован хвост, старое
@@ -18,12 +22,21 @@ from textual.widgets import Static
 
 from gc_tui import textual_compat
 from gc_tui.messages import BlockToggle, CopyBlockRequest, OpenImageRequest
+from gc_tui.models import TaskCursor
+from gc_tui.screens.main import trace_screen_of
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
 from gc_tui.screens.trace_window import TraceWindowMixin
 from gc_tui.services.clipboard_ops import copy_out
+from gc_tui.services.history_loader import (
+    HistoryLoader,
+    LoadedHistory,
+    history_inputs_for,
+)
+from gc_tui.services.history_model import HistoryModel
 from gc_tui.services.image_open import open_image
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.trace_retention import subagent_parent_ids_in_window
+from gc_tui.widgets.open_indicator import OpenIndicator
 
 _PATH_MAXLEN = 48
 _FOOTER_HINTS = (
@@ -32,7 +45,9 @@ _FOOTER_HINTS = (
 )
 
 
-class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
+class PreviewScreen(
+    TraceWindowMixin, TraceFollowMixin, Screen[LoadedHistory | None]
+):
     # priority=True: Enter/Esc срабатывают ДО фокусной строки. Иначе focusable
     # ToolCallRow/TraceRow перехватывают Enter (open-detail + stop) и тред не
     # открывается. В превью нет ввода — Enter всегда = открыть тред, Esc = назад.
@@ -51,29 +66,38 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
         subagent_records: list | None = None,
         mcp_snapshot: dict | None = None,
         model_slots: dict | None = None,
+        cursor: TaskCursor | None = None,
+        model: HistoryModel | None = None,
     ) -> None:
         super().__init__()
         # Слоты уровней действующих настроек — точки знака черт смены
         # модели.
         self._model_slots = model_slots
+        # Прочитанное превью (сегменты и курсор сразу за ними) — для
+        # перехода в сессию без повторного чтения (§5.7, путь 3).
         self._segments = segments
-        self._thread_id = thread_id
+        self._cursor = cursor
+        self._session_id = thread_id
         self._project_path = project_path
         self._subagent_records = subagent_records
         # Снимок MCP треда (meta.runtime.mcp_tools) — подписи MCP-вызовов.
         self._mcp_snapshot = mcp_snapshot
         # Блоки вызовов превью (P4): исполнители уровней и маршрут тогла.
         self._blocks = None
-        # Окно ленты: модель истории, параметры отрисовки и вложенное.
-        self._model = None
+        # Окно ленты: модель истории (готовая из списка или своя по
+        # сегментам), параметры отрисовки и вложенное.
+        self._model = model
         self._chunk_options = None
         self._nested = None
+        # Переход в сессию: загрузчик и индикатор в строке подсказок.
+        self._loader: HistoryLoader | None = None
+        self._indicator: OpenIndicator | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
                 yield Static(
-                    f"превью · сессия {self._thread_id[:8]}",
+                    f"превью · сессия {self._session_id[:8]}",
                     id="header-left",
                     markup=False,
                 )
@@ -104,11 +128,17 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
         records = self._subagent_records or []
         # корень из шапки превью: пути в подписях вызовов — от него
         root = self._project_path or None
+        # Хранилища загрузчику не нужно: переход в сессию строит модель
+        # из прочитанного превью.
+        self._loader = HistoryLoader(None, self.app.call_later)
         injected = self._injected_fields()
-        self._model = build_history(
-            segments,
-            inputs=HistoryInputs(root=root, injected_fields=tuple(injected)),
-        )
+        if self._model is None:
+            self._model = build_history(
+                segments,
+                inputs=HistoryInputs(
+                    root=root, injected_fields=tuple(injected)
+                ),
+            )
         blocks = self._blocks = self._preview_blocks()
         window_parents = subagent_parent_ids_in_window(segments)
         self._nested = NestedSource(
@@ -132,9 +162,8 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
         # В превью нет итога «сейчас»: строка последнего хода — как все.
         if refs.fresh_turn_line is not None:
             refs.fresh_turn_line.settle()
-        # Сырые сегменты после построения модели не держим; трасса
-        # субагентов остаётся у узла вложенного — для кусков сверху.
-        self._segments = []
+        # Трасса субагентов остаётся у узла вложенного — для кусков
+        # сверху; сегменты ждут перехода в сессию.
         self._subagent_records = []
         # Как живая лента после открытия сессии — у низа.
         self._watch_trace_follow()
@@ -202,9 +231,9 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
         lookup = None
         threads_dir = getattr(self.app, "_threads_dir", None)
         system_id = getattr(self.app, "_system", None)
-        if threads_dir and system_id and self._thread_id:
+        if threads_dir and system_id and self._session_id:
             lookup = lookup_for_settings(
-                threads_dir, system_id, self._thread_id, cfg
+                threads_dir, system_id, self._session_id, cfg
             )
         return PreviewBlocks(
             edits_lookup=lookup, diff_preview=preview, expanded_turns=window
@@ -219,13 +248,58 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
             self._toggle_trace_block(self._blocks.views, message)
 
     def action_resume(self) -> None:
-        self.dismiss(True)
+        """Enter: идёт ход — вопрос о стопе поверх превью, затем загрузка;
+        повторный Enter во время загрузки — ничего."""
+        if self._loader.busy:
+            return
+        main = trace_screen_of(self.app)
+        main.confirm_switch(self._session_id, lambda: self._open_session(main))
+
+    def _open_session(self, main) -> None:
+        tid = self._session_id
+        footer = self.query_one("#preview-footer", Static)
+        self._indicator = OpenIndicator(
+            "открываю сессию",
+            host=self,
+            paint=lambda frame: footer.update(
+                _FOOTER_HINTS if frame is None else frame
+            ),
+        )
+        self._loader.start(
+            tid,
+            history_inputs_for(self.app, tid),
+            segments=self._segments,
+            cursor=self._cursor,
+            withdrawn=main.withdrawn_in(tid),
+            on_ready=lambda loaded: self._session_ready(main, loaded),
+        )
+
+    def _session_ready(self, main, loaded: LoadedHistory) -> None:
+        """Сессия готова: замок до закрытия превью; занята — превью
+        остаётся («занято» сказано)."""
+        self._stop_indicator()
+        if main.claim_session(self._session_id):
+            self.dismiss(loaded)
+
+    def _stop_indicator(self) -> None:
+        if self._indicator is not None:
+            self._indicator.stop()
+            self._indicator = None
 
     def action_to_end(self) -> None:
         self._scroll_to_bottom()
 
     def action_back(self) -> None:
-        self.dismiss(False)
+        """Esc: идёт открытие — отменить и остаться; иначе назад."""
+        if self._loader.busy:
+            self._loader.cancel()
+            self._stop_indicator()
+            return
+        self.dismiss(None)
+
+    def on_unmount(self) -> None:
+        if self._loader is not None:
+            self._loader.cancel()
 
     def on_summary_toggle_request(self, message) -> None:
         """Клик по маркеру сжатия → раскрыть/свернуть тело сводки (маркер

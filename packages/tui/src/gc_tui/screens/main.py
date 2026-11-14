@@ -2461,7 +2461,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         Returns False если сессия занята другим TUI (не attach).
         """
         prev = self._active_task_id
-        withdrawn = self._withdrawn_in(task_id)
+        withdrawn = self.withdrawn_in(task_id)
         if not self._enter_thread(task_id, is_resume=is_resume):
             return False
         segments, cursor = self._store.read_history(task_id)
@@ -2728,7 +2728,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             message_id=message_id,
         )
 
-    def _withdrawn_in(self, task_id: str) -> set[str]:
+    def withdrawn_in(self, task_id: str) -> set[str]:
         """Реплики треда, снятые откатом: отметка модели открытого треда и
         заявки на удаление, ещё не исполненные."""
         ids = {
@@ -7148,7 +7148,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         """Полная перерисовка трейса из хранилища: сброс потока и откат
         неудавшегося шага сжатия."""
         tid = self._active_task_id
-        withdrawn = self._withdrawn_in(tid)
+        withdrawn = self.withdrawn_in(tid)
         self._clear_trace()
         self._reset_render_state()
         segments, self._cursor = self._store.read_history(tid)
@@ -9033,18 +9033,69 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._settle_ended_run()
         self._open_thread(target)
 
+    def confirm_switch(self, target: str, proceed: Callable[[], None]) -> None:
+        """Вопрос «остановить ход и перейти?» — сразу, поверх экрана, где
+        нажали (§3.3): ответ получает он же. Хода нет или «да» —
+        `proceed()`; сам ход остановится только в момент перехода
+        (`switch_to_history`)."""
+        if not self._switch_stops_run(target):
+            proceed()
+            return
+        from gc_tui.screens.confirm import ConfirmScreen
+
+        def _on_result(confirmed: bool) -> None:
+            if confirmed:
+                proceed()
+
+        self.app.push_screen(
+            ConfirmScreen(
+                title=RUN_SWITCH_TITLE,
+                message=RUN_SWITCH_MESSAGE,
+                hint=RUN_SWITCH_HINT,
+            ),
+            _on_result,
+        )
+
+    def claim_session(self, task_id: str) -> bool:
+        """Замок сессии до стопа хода и закрытия списка (§5.7): за время
+        загрузки её мог занять другой TUI. False — «занято» уже сказано."""
+        return self._session_lock_acquire(task_id)
+
+    def switch_to_history(
+        self, target: str, history: HistoryModel, cursor: TaskCursor
+    ) -> None:
+        """Переход в сессию с готовой моделью (§3.3, §5.7): ход, на стоп
+        которого согласились при открытии, останавливается сейчас — сессия
+        уже готова; дальше открытие одним синхронным шагом."""
+        if target != self._active_task_id:
+            if self._switch_stops_run(target):
+                self._stop_run_for_switch()
+            self._settle_ended_run()
+        self.open_thread_with_history(target, history, cursor, is_resume=True)
+
+    def _switch_stops_run(self, target: str) -> bool:
+        """Переход в `target` останавливает идущий ход открытой сессии."""
+        if target == self._active_task_id:
+            return False
+        runner = getattr(self.app, "active_runner", None)
+        return runner is not None and runner.is_running()
+
     def _stop_run_then_switch(self, target: str | None) -> None:
+        """Стоп хода, затем переход."""
+        self._stop_run_for_switch()
+        self._settle_ended_run()
+        self._open_thread(target)
+
+    def _stop_run_for_switch(self) -> None:
         """Обычный стоп (очередь — назад в поле), вопросы хода сняты, исход
-        «stopped» — в тред хода сразу; затем переход. Поток хода
-        дорабатывает в фоне, отвязанный от окна, как после обычного стопа:
-        всё, что он ещё пишет, идёт в его тред."""
+        «stopped» — в тред хода сразу. Поток хода дорабатывает в фоне,
+        отвязанный от окна, как после обычного стопа: всё, что он ещё
+        пишет, идёт в его тред."""
         if self._confirm_active:
             self._hide_confirm_banner()
         if self.app.tui_state.ask_human_state is not None:
             self._unmount_ask_human_banner()
         self._stop_and_replace_runner()
-        self._settle_ended_run()
-        self._open_thread(target)
 
     def _open_thread(self, target: str | None) -> None:
         """Сменить открытый тред; ход не идёт (проверил вход)."""
@@ -10861,3 +10912,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         )
         self._trace_mount(row)
         return row
+
+
+def trace_screen_of(app) -> TraceScreen | None:
+    """Экран сессии — низ стека экранов; None — хост без него."""
+    base = app.screen_stack[0] if app.screen_stack else None
+    return base if isinstance(base, TraceScreen) else None
