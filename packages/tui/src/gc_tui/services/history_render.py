@@ -218,6 +218,8 @@ class _Chunk:
         self._finish_ids: set[str] = set()
         self._ended = False
         self._fresh_at = _fresh_outcome_index(model)
+        # Первое вложенное в ``_mounted`` (`nest`); вложенного нет — None.
+        self._nested_from: int | None = None
 
     # ---- монтаж ----------------------------------------------------------
 
@@ -258,6 +260,7 @@ class _Chunk:
         self._attempts = []
         self._ended = i + 1 < self._model.turn_count()
         start = self._model.turn_starts[i]
+        first = len(self._mounted)
         rows = (
             self._ephemera.for_turn(self._model, i) if self._ephemera else []
         )
@@ -267,6 +270,13 @@ class _Chunk:
         self._mount_ephemeral(rows, None)
         if self._ended:
             self._interrupt_open()
+        if self._ephemera is not None:
+            # Снимок вида — пока ход свой: смонтированное раскрытием (фразы
+            # группы) — виджеты этого хода, а не последнего в куске.
+            view = self.refs.block_views.get(history_level(i))
+            self._restore_view(
+                self._ephemera, self._mounted[first:], [view] if view else []
+            )
 
     def _mount_ephemeral(self, rows: list, at: int | None) -> list:
         """Снятое эфемерное за элементом ``at - 1`` (None — всё
@@ -299,6 +309,8 @@ class _Chunk:
     def nest(self, nested: NestedSource) -> None:
         """Вложенное для вызовов куска — под их строками."""
         calls = self.refs.call_rows
+        self._turn = None
+        self._nested_from = len(self._mounted)
         self._mounted += nested.mount(
             self._host,
             nested.actions_for(set(calls)),
@@ -308,8 +320,14 @@ class _Chunk:
         )
 
     def finish(self) -> ChunkRefs:
-        if self._ephemera is not None:
-            self._restore_view(self._ephemera)
+        if self._ephemera is not None and self._nested_from is not None:
+            nested = [
+                view
+                for level, view in self.refs.block_views.items()
+                if not level.startswith(HISTORY_LEVEL_PREFIX)
+            ]
+            mounted = self._mounted[self._nested_from :]
+            self._restore_view(self._ephemera, mounted, nested)
         below = self._before
         if isinstance(below, ModelMark) and not is_being_removed(below):
             drop_mark_before(below)
@@ -321,9 +339,15 @@ class _Chunk:
             refs.last_model_mark = None
         return refs
 
-    def _restore_view(self, ephemera: Ephemera) -> None:
-        """Пометки снятых владельцев и снимок вида — виджетам куска."""
-        for widget in self._mounted:
+    @staticmethod
+    def _restore_view(
+        ephemera: Ephemera,
+        widgets: list[Widget],
+        views: list[ToolBlocksView],
+    ) -> None:
+        """Пометки снятых владельцев и снимок вида — виджетам и видам
+        блоков (хода или вложенного трейса)."""
+        for widget in widgets:
             for body in ephemera.restore_decorations(
                 anchor_key(widget), widget
             ):
@@ -332,7 +356,7 @@ class _Chunk:
             flag = ephemera.view(view_key()) if view_key else None
             if flag is not None:
                 widget.restore_view(flag)
-        for view in self.refs.block_views.values():
+        for view in views:
             view.restore_view(ephemera.view)
 
     def _turn_heads(self) -> dict[int, Widget]:

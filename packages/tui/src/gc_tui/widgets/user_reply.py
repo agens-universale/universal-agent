@@ -23,6 +23,7 @@ from gc_tui.palette import QUIET_REPLY_MARK as _QUIET_MARK
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import fit_path
+from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS
 from gc_tui.services.trace_render import (
     LINE_USER_CLASS,
     NESTED_USER_PREFIX,
@@ -432,8 +433,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
 
     def set_event_no(self, event_no: int) -> None:
         """Номер события треда: живая реплика получает его при сверке с записью треда —
-        до этого Ctrl+клик и Enter экрана события не открывают."""
+        до этого Ctrl+клик и Enter экрана события не открывают. Реплика
+        в треде — не эфемерное: её вернёт модель истории."""
         self._event_no = event_no
+        self.remove_class(EPHEMERAL_CLASS)
 
     def set_images(self, images: tuple[Attachment, ...]) -> None:
         """Заменить картинки реплики: pending-реплика при сверке получает копии из

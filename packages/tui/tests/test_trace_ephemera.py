@@ -47,8 +47,8 @@ def _app(threads_dir):
 
 def _records() -> list[dict]:
     """Фикстура субагентов (два хода), а в первый ход — команда с длинным
-    выводом и вопрос агента без ответа; итог первого хода — сбой с
-    длинной причиной."""
+    выводом, вопрос агента без ответа и группа из четырёх чтений; итог
+    первого хода — сбой с длинной причиной."""
     sub = list(load_history_fixture("subagents").records)
     calls = load_history_fixture("calls").records
     ask = load_history_fixture("ask_human").records
@@ -58,14 +58,36 @@ def _records() -> list[dict]:
     unanswered["payload"]["output"] = json.dumps(output)
     failed = json.loads(json.dumps(sub[8]))
     failed["outcome"].update(status="error", error={"message": _LONG_ERROR})
-    return [*sub[:4], calls[2], calls[3], ask[4], unanswered, *sub[4:8]] + [
-        failed,
-        *sub[9:],
-    ]
+    explored = [calls[i] for i in (6, 7, 16, 17, 18, 19, 21, 22, 29, 30)]
+    first = [*sub[:4], calls[2], calls[3], ask[4], unanswered, *explored]
+    return [*first, *sub[4:8], failed, *sub[9:]]
 
 
-_EXEC_CALL = load_history_fixture("calls").records[2]["payload"]["call_id"]
+_CALLS = load_history_fixture("calls").records
+_EXEC_CALL = _CALLS[2]["payload"]["call_id"]
+_GROUP_CALL = _CALLS[6]["payload"]["call_id"]
+_AGENT_CALL = load_history_fixture("subagents").records[2]["payload"][
+    "call_id"
+]
+#: Записи первого хода — до его итога включительно.
+_FIRST_TURN_END = 23
+_PLAN = "## План\n- шаг первый\n- шаг второй"
 _FIRST_REPLY = load_history_fixture("subagents").records[0]["payload"]["id"]
+
+
+def _sidecar() -> list[dict]:
+    """Трасса субагента фикстуры и ещё две команды: окно субагента
+    скрывает часть событий (раскрываемо)."""
+    sidecar = list(load_history_fixture("subagents").sidecar)
+    extra = []
+    for n in (1, 2):
+        for rec in sidecar[2:4]:
+            copy = json.loads(json.dumps(rec))
+            copy["payload"]["call_id"] += f"x{n}"
+            if "id" in copy["payload"]:
+                copy["payload"]["id"] += f"x{n}"
+            extra.append(copy)
+    return [*sidecar[:4], *extra, *sidecar[4:]]
 
 
 def _thought(attempt: str, text: str):
@@ -76,12 +98,13 @@ def _thought(attempt: str, text: str):
 
 async def live_session(pilot):
     """Экран на пустом треде; первый ход — живым путём с эфемерным: мысль,
-    блок «!», строка команды, пометка трейса под вызовом; второй ход —
-    текущий."""
+    блок «!», строка команды, пометка трейса под вызовом, после итога —
+    копия рамки плана над свежей строкой и реплика, ставшая «не
+    отправлено»; второй ход — текущий."""
     scr = pilot.app.screen
     assert scr.attach_active_task(HISTORY_THREAD)
     records = _records()
-    sidecar = load_history_fixture("subagents").sidecar
+    sidecar = _sidecar()
     feed_live(scr, records[:1], splits=())
     scr._sync_thoughts([_thought("a1", "думаю над ходом\n" * 8)])
     scr._settle_thoughts()
@@ -100,19 +123,30 @@ async def live_session(pilot):
         TraceNote("картинка не принята", owner="call", call_id=_EXEC_CALL),
     )
     scr._drain_trace_notes()
-    feed_live(scr, records[8:], splits=(), sidecar=sidecar)
+    feed_live(scr, records[8:_FIRST_TURN_END], splits=(), sidecar=sidecar)
+    scr._ensure_plan_panel_last({"text": _PLAN}, above_fresh_line=True)
+    scr._mount_user_reply("черновик", state="pending", client_id="cx")
+    scr._mark_pending_failed(None)
+    feed_live(scr, records[_FIRST_TURN_END:], splits=(), sidecar=sidecar)
     await pilot.pause()
     return scr
 
 
 def _expand_views(scr) -> None:
-    """Раскрыть: вывод команды, причину итога первого хода, мысль."""
-    from gc_tui.services.tool_blocks import OUTPUT_SLOT, phrase_key
+    """Раскрыть: вывод команды, группу чтений, окно субагента, причину
+    итога первого хода, мысль."""
+    from gc_tui.services.tool_blocks import (
+        AGENT_WINDOW,
+        OUTPUT_SLOT,
+        phrase_key,
+    )
     from gc_tui.widgets.turn_line import TurnLine
 
     view = scr._block_views[""]
     block = view.model.block_of(_EXEC_CALL)
     view.toggle(phrase_key(block, OUTPUT_SLOT))
+    view.toggle(view.model.block_of(_GROUP_CALL))
+    scr._block_views[_AGENT_CALL].toggle(AGENT_WINDOW)
     (line,) = [w for w in scr.query(TurnLine) if w.opened_by == _FIRST_REPLY]
     line.toggle()
     scr._streamed_thoughts[0].toggle()
@@ -152,6 +186,13 @@ async def test_trim_restore_roundtrip(tmp_path, monkeypatch):
             assert any("без ответа" in t for _c, t, _ in before)
             assert any("-in-agent" in c for _c, _t, c in before)
             assert any("-expanded" in c for _c, _t, c in before)
+            texts = [t for _c, t, _ in before]
+            # Свёрнуть: группу чтений и окно субагента.
+            assert texts.count("    − свернуть группу") == 1
+            assert sum("свернуть группу" in t for t in texts) == 2
+            assert any("черновик" in t for t in texts)
+            line = next(i for i, t in enumerate(texts) if "Ошибка" in t)
+            assert "предложенный план" not in texts[line + 1]
 
             assert scr.forget_turn(0)
             await pilot.pause()
@@ -233,8 +274,9 @@ async def test_withdrawn_not_resurrected_after_trim(tmp_path):
 
 @pytest.mark.asyncio
 async def test_bang_clear_after_trim(tmp_path):
-    """`! clear N` считает и блоки снятых ходов; очищенные не
-    возвращаются."""
+    """`! clear N` считает и блоки снятых ходов: `! clear 1` уносит живой
+    последний блок, снятый остаётся; следующий `! clear 1` уносит снятый —
+    он не возвращается."""
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await live_session(pilot)
         scr._mount_bang_row(
@@ -243,12 +285,21 @@ async def test_bang_clear_after_trim(tmp_path):
         scr._close_bang_block()
         assert scr.forget_turn(0)
         await pilot.pause()
-        scr._clear_bang_blocks(2)
+        scr._clear_bang_blocks(1)
         await pilot.pause()
         restore(scr, 0)
         await pilot.pause()
         texts = [t for _c, t, _ in feed_dump(_trace(scr))]
-        assert not any("echo hi" in t or "$ late" in t for t in texts)
+        assert any("echo hi" in t for t in texts)
+        assert not any("$ late" in t for t in texts)
+        assert scr.forget_turn(0)
+        await pilot.pause()
+        scr._clear_bang_blocks(1)
+        await pilot.pause()
+        restore(scr, 0)
+        await pilot.pause()
+        texts = [t for _c, t, _ in feed_dump(_trace(scr))]
+        assert not any("echo hi" in t for t in texts)
         assert not scr._ephemera.has_bang()
 
 
@@ -382,3 +433,39 @@ async def test_opened_turns_restore_compaction_body_shown(tmp_path):
         for turn in reversed(range(first, last)):
             restore(scr, turn)
         assert await _settled_dump(pilot) == before
+
+
+@pytest.mark.asyncio
+async def test_restored_group_phrase_belongs_to_its_turn():
+    """Раскрытие из снимка вида монтирует фразы группы в своём ходе:
+    голова следующего хода куска — его первый виджет."""
+    from gc_tui.services.history_model import HistoryInputs, build_history
+    from gc_tui.services.history_render import (
+        ChunkOptions,
+        FeedHost,
+        render_turns,
+    )
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from test_history_render import _Feed, _feed
+
+    model = build_history(
+        [{"messages": _records(), "compacted_by": None}],
+        inputs=HistoryInputs(root=None, injected_fields=()),
+    )
+    ephemera = Ephemera()
+    ephemera.note_view(f"block:{_GROUP_CALL}", True)
+    async with _Feed().run_test(size=_SIZE) as pilot:
+        refs = render_turns(
+            FeedHost(_feed(pilot.app)),
+            model,
+            range(2),
+            before=None,
+            options=ChunkOptions(),
+            ephemera=ephemera,
+        )
+        await pilot.pause()
+        texts = [t for _c, t, _ in feed_dump(_feed(pilot.app))]
+        head = refs.turn_heads[1]
+        assert isinstance(head, UserReplyContainer)
+        assert head.plain_text == "turn 2 calls=1 light"
+    assert "    − свернуть группу" in texts

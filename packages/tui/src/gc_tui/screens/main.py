@@ -3842,22 +3842,26 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
 
-    def _feed_mount(self, trace, widget, **where) -> None:
+    def _feed_mount(
+        self, trace, widget, *, at: Optional[int] = None, **where
+    ) -> None:
         """Добавить виджет в ленту (``where`` — `before` / `after`) с
-        отметкой в счётчике добавлений."""
+        отметкой в счётчике добавлений; ``at`` — место эфемерного в
+        модели, если он встаёт не в конец (`_note_ephemeral`)."""
         self._feed_appended += 1
         trace.mount(widget, **where)
         self._note_turn_head(widget)
-        self._note_ephemeral(widget)
+        self._note_ephemeral(widget, at)
 
-    def _note_ephemeral(self, widget) -> None:
+    def _note_ephemeral(self, widget, at: Optional[int] = None) -> None:
         """Виджет, за которым нет элемента модели истории, — в память
-        эфемерного (§5.4): место — за последним элементом модели. Не
-        эфемерное: отрисовка элемента модели, вложенный трейс (его
-        вернёт узел), стрим ответа, черты модели и реплики, которых ядро
-        ещё не записало (станут событиями)."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
+        эфемерного (§5.4): место ``at`` — число элементов модели перед
+        ним (по умолчанию — все). Не эфемерное: отрисовка элемента
+        модели, вложенный трейс (его вернёт узел), стрим ответа, черты
+        модели и прижатый хвост. Реплика без номера события (отправлена,
+        «не отправлено») захватывается вся: записанная ядром при снятии
+        возвращается моделью (`respawn` — None) и класс эфемерного снимает
+        сама (`set_event_no`)."""
         if (
             self._drawing_model
             or widget.has_class("-in-agent")
@@ -3865,14 +3869,12 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             or pins_to_bottom(widget)
             or widget is self._stream_block
             or widget is self._stream_answer_row
-            or (
-                isinstance(widget, UserReplyContainer)
-                and widget.state != "failed"
-            )
         ):
             return
         widget.add_class(EPHEMERAL_CLASS)
-        self._ephemera.capture(widget, after=len(self._feed_history.items))
+        if at is None:
+            at = len(self._feed_history.items)
+        self._ephemera.capture(widget, after=at)
 
     @contextlib.contextmanager
     def _model_drawing(self):
@@ -4538,9 +4540,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             )
 
     def _note_unanswered(self, call_id: str | None) -> bool:
-        """«└ без ответа» под вопросом `call_id` в его рамке — по реестру
-        строк вопросов, и когда ход вопроса снят с ленты. Вопроса не
-        рисовали (ушёл в сжатие) — False: событие рисуется строкой."""
+        """«└ без ответа» под вопросом `call_id` в его рамке (реестр строк
+        вопросов). Ход вопроса снят с ленты — пометку вернёт отрисовка по
+        модели (`unanswered`), строки не нужно: True. Вопроса нет и в
+        модели (ушёл в сжатие) — False: событие рисуется строкой."""
         from gc_tui.services.trace_render import (
             QUESTION_UNANSWERED,
             note_question,
@@ -4548,7 +4551,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
 
         question = self._question_rows.get(call_id) if call_id else None
         if question is None:
-            return False
+            return bool(call_id) and any(
+                ev.kind == "ask_human" and ev.call_id == call_id
+                for ev in self._feed_history.events()
+            )
         note_question(question, QUESTION_UNANSWERED)
         return True
 
@@ -5449,8 +5455,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._note_top_event(panel)
             self._feed_mount(trace, panel, before=live)
         elif anchor is not None:
+            # Место копии в модели — перед записью итога свежей строки.
             self._note_top_event(panel)
-            self._feed_mount(trace, panel, before=anchor)
+            at = self._feed_history.last_outcome_index()
+            self._feed_mount(trace, panel, at=at, before=anchor)
         else:
             self._trace_mount(panel)
         panel.set_accepted(self._plan_panel_accepted(text))
@@ -5853,9 +5861,12 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                 owner.add_consequence(body)
                 self._ephemera.decorate(owner, body, at=at)
             elif trimmed is not None:
-                # Реплика-владелец снята с ленты — пометка вернётся с ней.
+                # Реплика-владелец снята с ленты — пометка вернётся с ней;
+                # место — начало её хода (окно удержания).
+                history = self._feed_history
+                start = history.turn_starts[history.turn_index_of(trimmed)]
                 self._ephemera.decorate_key(
-                    f"event:{trimmed}", note_consequence(note), at=at
+                    f"event:{trimmed}", note_consequence(note), at=start
                 )
             elif note.owner == "call" and ticks > 0:
                 # Строка вызова ещё не в ленте — ждём её несколько тиков.

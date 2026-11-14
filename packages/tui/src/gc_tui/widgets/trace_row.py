@@ -101,9 +101,12 @@ class TraceRow(ClickModelMixin, Widget):
         except Exception:
             pass
 
-    def respawn(self) -> TraceRow:
+    def respawn(self) -> TraceRow | None:
         """Копия строки для памяти эфемерного (снятый ход вернётся с ней):
-        простая строка — префикс, текст и классы вида."""
+        простая строка — префикс, текст и классы вида. У строк со своим
+        устройством (подклассы) копии нет — None."""
+        if type(self) is not TraceRow:
+            return None
         return TraceRow(
             prefix=self._prefix,
             content=self._content,
