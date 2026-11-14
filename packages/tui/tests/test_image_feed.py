@@ -12,10 +12,6 @@ import pytest
 
 pytest.importorskip("textual")
 
-from rich.color import Color
-from textual.app import App
-from textual.containers import VerticalScroll
-
 from gc_core.attachments.model import ORIGIN_TOOL, TOOL_LABEL, chip_text
 from gc_core.attachments.texts import (
     TOOL_NO_IMAGE_STORE,
@@ -31,6 +27,7 @@ from gc_core.vision.errors import (
     REASON_EMPTY_RESPONSE,
     REASON_HTTP,
 )
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.palette import ACCENT, DIM
 from gc_tui.services.export import export_thread
@@ -43,10 +40,12 @@ from gc_tui.services.trace_mapper import (
     collect_render_context,
     map_message,
 )
-from trace_readonly import render_thread_readonly
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
-from gc_testkit.tui_support import tui_settings
+from rich.color import Color
+from textual.app import App
+from textual.containers import VerticalScroll
+from trace_readonly import render_thread_readonly
 
 TS = "2026-09-24T10:00:00+00:00"
 
@@ -542,11 +541,10 @@ def test_txt_export_lists_image_paths(tmp_path):
 @pytest.mark.asyncio
 async def test_preview_nested_reply_to_a_subagent_shows_its_images(tmp_path):
     """Реплика субагенту с картинкой в превью сессии — со строкой картинки."""
-    from textual.containers import VerticalScroll
-
-    from gc_tui.services.trace_render import merge_nested_readonly
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.user_reply import NestedUserReply
+    from textual.containers import VerticalScroll
+    from trace_readonly import merge_nested
 
     att = make_attachment_file(4, tmp_path)
     records = [
@@ -574,7 +572,7 @@ async def test_preview_nested_reply_to_a_subagent_shows_its_images(tmp_path):
                 target="task",
             )
             t.mount(parent)
-            merge_nested_readonly(t, records, {"call_sub": parent})
+            merge_nested(t, records, {"call_sub": parent})
 
     async with _A().run_test() as pilot:
         await pilot.pause()

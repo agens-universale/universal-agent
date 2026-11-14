@@ -27,13 +27,10 @@ from gc_core.security.action_judge_step import CHECK_FAILED_TYPE
 from gc_tui.models import TraceEvent
 from gc_tui.palette import DIM, ERR, OK, REFUSED
 from gc_tui.services.trace_mapper import map_message
-from gc_tui.services.trace_render import (
-    build_consequence_line,
-    merge_nested_readonly,
-)
+from gc_tui.services.trace_render import build_consequence_line
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from rich.text import Text
-from trace_readonly import render_events
+from trace_readonly import merge_nested, render_events
 
 _REFUSALS = [
     (
@@ -341,7 +338,7 @@ def test_preview_nested_refusal_row():
     parent = ToolCallRow(call_id="p1", label="Agent", target="")
     target.mount(parent)
     calls["p1"] = parent
-    merge_nested_readonly(target, _nested_records(declined_error()), calls)
+    merge_nested(target, _nested_records(declined_error()), calls)
     _assert_refused_row(
         target.children[1], "вы отклонили", "    ", reason=REFUSED
     )
@@ -353,7 +350,7 @@ def test_preview_nested_error_is_red_circle():
     target.mount(parent)
     calls["p1"] = parent
     error = {"type": "not_found", "message": "нет файла"}
-    merge_nested_readonly(target, _nested_records(error), calls)
+    merge_nested(target, _nested_records(error), calls)
     assert _styles_of(target.children[1]._render_prefix(), "●") == [ERR]
 
 

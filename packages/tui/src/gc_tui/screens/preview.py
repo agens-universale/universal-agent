@@ -95,11 +95,11 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
             FeedHost,
             render_turns,
         )
-        from gc_tui.services.trace_render import merge_nested_readonly
+        from gc_tui.services.nested_trace import NestedSource
 
         trace = self.query_one("#trace", VerticalScroll)
         segments = self._segments
-        records = self._subagent_records
+        records = self._subagent_records or []
         # корень из шапки превью: пути в подписях вызовов — от него
         root = self._project_path or None
         injected = self._injected_fields()
@@ -110,6 +110,13 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
         blocks = self._blocks = self._preview_blocks()
         mcp_tools = mcp_tools_from_snapshot(self._mcp_snapshot)
         mcp_servers = mcp_servers_of(self._mcp_snapshot)
+        window_parents = subagent_parent_ids_in_window(segments)
+        nested = NestedSource(
+            lambda: records,
+            window_parent_ids=lambda: window_parents,
+            root=root,
+            injected=injected,
+        )
         refs = render_turns(
             FeedHost(trace),
             model,
@@ -125,23 +132,12 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
                 model_slots=self._model_slots or {},
                 timers=blocks.timers,
             ),
+            nested=nested,
         )
         blocks.views = refs.block_views
         # В превью нет итога «сейчас»: строка последнего хода — как все.
         if refs.fresh_turn_line is not None:
             refs.fresh_turn_line.settle()
-        if records:
-            merge_nested_readonly(
-                trace,
-                records,
-                refs.call_rows,
-                allowed_parent_ids=subagent_parent_ids_in_window(segments),
-                mcp_tools=mcp_tools,
-                mcp_servers=mcp_servers,
-                root=root,
-                blocks=blocks,
-                injected_fields=injected,
-            )
         # Сырьё сегментов и sidecar после монтажа не держим: в виджетах уже
         # короткий трейс, тяжёлые tool output / nested вне окна не нужны.
         self._segments = []

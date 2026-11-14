@@ -7,8 +7,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from textual.color import Color
-
 from gc_testkit.tui_support import tui_settings
 from gc_tui.palette import DIM
 from gc_tui.services.trace_render import (
@@ -20,7 +18,8 @@ from gc_tui.services.trace_render import (
 from gc_tui.widgets.todo_block import TodoBlock
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
-from gc_tui.widgets.user_reply import NestedUserReply, UserReplyContainer
+from gc_tui.widgets.user_reply import UserReplyContainer
+from textual.color import Color
 
 _TODO_ARGS = json.dumps(
     {"todos": [{"content": "шаг", "status": "pending"}]}, ensure_ascii=False
@@ -135,7 +134,7 @@ _EXPECTED = [
 
 
 class _Store:
-    def read_subagent_trace(self, task_id):  # noqa: ARG002
+    def read_subagent_trace(self, task_id):
         return _SIDECAR
 
 
@@ -217,9 +216,7 @@ async def test_live_and_preview_share_layout(tmp_path):
     (модель блоков вызовов одна на оба пути)."""
     from textual.app import App
     from textual.containers import VerticalScroll
-
-    from gc_tui.services.trace_render import merge_nested_readonly
-    from trace_readonly import render_segments_history
+    from trace_readonly import merge_nested, render_segments_history
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         live = _layout(await _live_trace(pilot))
@@ -231,7 +228,7 @@ async def test_live_and_preview_share_layout(tmp_path):
         def on_mount(self):
             t = self.query_one("#t", VerticalScroll)
             calls = render_segments_history(t, _SEGMENTS).call_rows
-            merge_nested_readonly(t, _SIDECAR, calls)
+            merge_nested(t, _SIDECAR, calls)
 
     async with _Preview().run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -332,9 +329,7 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     уровня: у члена блока и внутри блока субагента пустых строк нет."""
     from textual.app import App
     from textual.containers import VerticalScroll
-
-    from gc_tui.services.trace_render import merge_nested_readonly
-    from trace_readonly import render_segments_history
+    from trace_readonly import merge_nested, render_segments_history
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
@@ -361,7 +356,7 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
         def on_mount(self):
             t = self.query_one("#t", VerticalScroll)
             calls = render_segments_history(t, _SEGMENTS).call_rows
-            merge_nested_readonly(t, _SIDECAR, calls)
+            merge_nested(t, _SIDECAR, calls)
 
     async with _styled(_Preview)().run_test(size=(120, 40)) as pilot:
         await pilot.pause()

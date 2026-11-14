@@ -12,14 +12,11 @@ import pytest
 from gc_tui.models import TraceEvent
 from gc_tui.palette import DIM, ERR
 from gc_tui.services.trace_mapper import map_message
-from gc_tui.services.trace_render import (
-    build_consequence_line,
-    merge_nested_readonly,
-)
+from gc_tui.services.trace_render import build_consequence_line
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import QuestionRow, TraceRow
 from rich.text import Text
-from trace_readonly import render_events
+from trace_readonly import merge_nested, render_events
 
 
 def _styles_of(text: Text, fragment: str) -> list[str]:
@@ -261,7 +258,7 @@ def test_preview_nested_halted_is_stop_row():
         _sidecar(1, "call", {"call_id": "n1", "name": "fs_read_file"}),
         _sidecar(2, "error", {"call_id": "n1", "output": out}),
     ]
-    merge_nested_readonly(target, records, calls)
+    merge_nested(target, records, calls)
     header, nested = target.children[1:]
     assert (header.mode, nested.mode) == ("header", "member")
     assert _consequence(nested).endswith("└ лимит шагов")
@@ -371,7 +368,7 @@ def test_preview_next_nested_call_goes_after_error_line():
         _sidecar(2, "error", {"call_id": "n1", "output": "boom"}),
         _sidecar(3, "call", {"call_id": "n2", "name": "fs_read_file"}),
     ]
-    merge_nested_readonly(target, records, calls)
+    merge_nested(target, records, calls)
     # Следующий вызов — свой блок `Explored`: заголовок встаёт за строкой
     # упавшей правки, не между ней и её `└` (P4 §7).
     first, header, second = target.children[1:]

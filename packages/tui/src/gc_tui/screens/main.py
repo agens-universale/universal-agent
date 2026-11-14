@@ -4458,7 +4458,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         error_brief: str | None = None,
         **_kw,
     ) -> None:
-        """Read-only счёт-в-счёт с merge_nested_readonly._prose (trace_render.py)."""
+        """Read-only счёт-в-счёт с узлом вложенного трейса (nested_trace.py)."""
         if self._nested_parent_row(parent_call_id) is None:
             return
         text = (prose or "").strip()
@@ -4481,7 +4481,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
         Пассивные todo-строки (не ToolCallRow): в _nested_tool_rows НЕ
         регистрируются, поэтому finish по их call_id — естественный no-op.
-        Строки собирает общий билдер (он же у merge_nested_readonly)."""
+        Строки собирает общий билдер (он же у узла nested_trace)."""
         if self._nested_parent_row(parent_call_id) is None:
             return
         from gc_tui.services.todo_render import build_todo_block
@@ -4504,7 +4504,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Mid-run user steer under active subagent_* (active-scope input) и ответ на
         вопрос субагента — с картинками ответа (визуальный контракт картинок §3).
 
-        Read-only счёт-в-счёт с merge_nested_readonly._user (trace_render.py)."""
+        Read-only счёт-в-счёт с узлом вложенного трейса (nested_trace.py)."""
         from gc_tui.widgets.user_reply import NestedUserReply
 
         if self._nested_parent_row(parent_call_id) is None:

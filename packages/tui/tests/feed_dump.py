@@ -21,6 +21,16 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gc_core.execution.progress import (
+    TOOL_END_OUTPUT_MAX,
+    TOOL_START_COMMAND_MAX,
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+    parse_tool_result_status,
+    result_facts,
+    run_command_text,
+    tool_args_summary,
+)
 from gc_core.persistence.model_choice_record import parse_model_choice
 from gc_core.persistence.turn_outcome import parse_turn_outcome
 from gc_core.thread_store import append_subagent_record
@@ -168,12 +178,14 @@ class _ThreadWriter:
         records: Sequence[dict],
         sidecar: Sequence[dict],
         on_model_choice: Callable[[dict], None] | None = None,
+        on_subagent: Callable[[list[dict]], None] | None = None,
     ) -> None:
         self._store = FileThreadStore(threads_dir)
         self._key = ThreadKey(system="cli", thread=HISTORY_THREAD)
         self._sidecar = list(sidecar)
         self._seen_ids: set[str] = set()
         self._on_model_choice = on_model_choice
+        self._on_subagent = on_subagent
         # Сводка не первой записью треда — сжатие (первая — начало треда).
         self._summaries = [
             rec
@@ -241,6 +253,8 @@ class _ThreadWriter:
         for rec in mine:
             self._sidecar.remove(rec)
             self._subagent(rec)
+        if self._on_subagent is not None:
+            self._on_subagent(mine)
 
     def _subagent(self, rec: dict) -> None:
         run_sync(
@@ -308,7 +322,8 @@ def feed_live(
     (живой путь), после конца хода — тик экрана без живого хода. Сжатие
     дочитывается шагом: опрос до и после каждой замены истории (за тик
     сжатие одно). ``sidecar`` — трасса субагентов, пишется перед выводом
-    вызова своего субагента. Смена модели живым путём — выбор между ходами
+    вызова своего субагента, а его прогон вживую — событиями прогресса
+    раннера (тиком экрана). Смена модели живым путём — выбор между ходами
     (`/model`): экран ставит черту и сам пишет запись в тред."""
     writer = _ThreadWriter(
         screen.app._threads_dir,
@@ -317,6 +332,7 @@ def feed_live(
         on_model_choice=lambda rec: screen._mark_model_choice(
             rec["model"]["choice"]
         ),
+        on_subagent=lambda recs: _live_subagent(screen, recs),
     )
     turn_ends = [
         i + 1
@@ -330,6 +346,85 @@ def feed_live(
         if end in turn_ends:
             # Ход кончился: поток хода вышел — тик без живого хода.
             screen._poll_active()
+
+
+def _live_subagent(screen: TraceScreen, records: list[dict]) -> None:
+    """Прогон субагента вживую: строка его вызова уже в ленте (опрос
+    хвоста), события прогресса раннера — в очередь приложения и тиком в
+    ленту."""
+    app = screen.app
+    if app._subagent_progress_sink is None:
+        app._subagent_progress_sink = QueueSubagentProgressSink()
+    screen._poll_trace_tail()
+    root, injected = screen._current_cwd(), screen._injected_fields()
+    names = {
+        rec["payload"]["call_id"]: rec["payload"]["name"]
+        for rec in records
+        if rec["kind"] == "call"
+    }
+    for rec in records:
+        app._subagent_progress_sink.emit(
+            progress_event(rec, names, root=root, injected=injected)
+        )
+    screen._drain_subagent_progress()
+
+
+def progress_event(
+    rec: dict,
+    names: dict[str, str],
+    *,
+    root: str,
+    injected: frozenset[str],
+) -> SubagentProgressEvent:
+    """Событие прогресса, которое раннер шлёт вместе с записью трассы
+    субагента (`processing_responses._aexecute_tool_call`); ``names`` —
+    имена вызовов по call_id. Команда и вывод сверх потолков события — None
+    (экран читает их из трассы)."""
+    payload = rec["payload"]
+    base = {
+        "parent_call_id": rec["parent_call_id"],
+        "child_run_id": rec["child_run_id"],
+        "step": 0,
+        "max_steps": 0,
+        "elapsed_ms": 0,
+    }
+    kind = rec["kind"]
+    if kind == "call":
+        name, args = payload["name"], payload.get("arguments") or ""
+        return SubagentProgressEvent(
+            kind="tool_start",
+            tool_name=name,
+            tool_call_id=payload["call_id"],
+            args_summary=tool_args_summary(
+                name, args, root=root, nested=True, injected=injected
+            ),
+            command=_within(
+                run_command_text(name, args), TOOL_START_COMMAND_MAX
+            ),
+            **base,
+        )
+    if kind in ("result", "error"):
+        output = payload["output"]
+        ok, brief = parse_tool_result_status(output)
+        status, fields = result_facts(output) if ok is False else (None, None)
+        return SubagentProgressEvent(
+            kind="tool_end",
+            tool_name=names.get(payload["call_id"]),
+            tool_call_id=payload["call_id"],
+            ok=ok if ok is not None else True,
+            error_brief=brief,
+            result_status=status,
+            result_error=fields,
+            output=_within(output, TOOL_END_OUTPUT_MAX),
+            **base,
+        )
+    if kind == "finished":
+        return SubagentProgressEvent(kind="finished", **base)
+    raise AssertionError(f"событие прогресса для {kind!r} не описано")
+
+
+def _within(text: str | None, limit: int) -> str | None:
+    return text if text is not None and len(text) <= limit else None
 
 
 def _feed_batch(

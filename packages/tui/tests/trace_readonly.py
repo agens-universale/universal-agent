@@ -64,3 +64,43 @@ def render_events(mount_target, *events, **options):
 def render_thread_readonly(mount_target, records: list) -> None:
     """Плоские записи треда одним сегментом — в ``mount_target``."""
     render_segments_history(mount_target, [{"index": 0, "messages": records}])
+
+
+def merge_nested(
+    mount_target,
+    records: list,
+    calls: dict,
+    *,
+    allowed_parent_ids: set[str] | None = None,
+    blocks=None,
+    root: str | None = None,
+    mcp_tools=None,
+) -> None:
+    """Вложенный трейс записей субагентов — под строки ``calls`` узлом
+    вложенного трейса; ``allowed_parent_ids`` — родители окна удержания
+    (None — все из ``calls``), ``blocks`` — блоки превью."""
+    from gc_tui.services.history_render import ChunkOptions, FeedHost
+    from gc_tui.services.nested_trace import NestedSource
+    from gc_tui.widgets.tool_blocks_view import PreviewBlocks
+
+    blocks = blocks if blocks is not None else PreviewBlocks()
+    window = set(calls) if allowed_parent_ids is None else allowed_parent_ids
+    node = NestedSource(
+        lambda: records,
+        window_parent_ids=lambda: window,
+        root=root,
+        injected=(),
+    )
+    node.mount(
+        FeedHost(mount_target),
+        node.actions_for(set(calls)),
+        calls,
+        views=blocks.views,
+        options=ChunkOptions(
+            edits_lookup=blocks.edits_lookup,
+            diff_preview=blocks.diff_preview,
+            expanded_turns=blocks.expanded_turns,
+            mcp_tools=mcp_tools,
+            timers=blocks.timers,
+        ),
+    )

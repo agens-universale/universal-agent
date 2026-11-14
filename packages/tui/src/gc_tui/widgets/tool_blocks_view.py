@@ -656,7 +656,8 @@ class PreviewBlocks:
     """Блоки превью `/sessions` (спека P4 §9.7, §9.10а): исполнители
     уровней, реестр застывших таймеров и журнал правок треда (только
     чтение) — общие для отрисовщика кусков истории (`render_turns`; виды
-    ходов — его `ChunkRefs.block_views`) и `merge_nested_readonly`."""
+    ходов — его `ChunkRefs.block_views`) и узла вложенного трейса
+    (`nested_trace`)."""
 
     views: BlockViews = field(default_factory=BlockViews)
     timers: CallTimers = field(default_factory=CallTimers)

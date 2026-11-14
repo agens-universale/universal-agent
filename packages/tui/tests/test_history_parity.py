@@ -3,8 +3,8 @@
 
 Все ходы модели, нарисованные `render_turns`, дают ту же ленту, что те же
 записи, поданные живым путём, за вычетом эфемерного; ходы по одному подряд
-— то же, что все разом. Вложенные строки субагента — вне сравнения (их
-паритет — у узла вложенного трейса)."""
+— то же, что все разом. Отрисовщик здесь без узла вложенного трейса:
+вложенные строки субагента — вне сравнения (их паритет — в тестах узла)."""
 
 from __future__ import annotations
 
@@ -19,10 +19,8 @@ from gc_testkit.tui_support import pinned_snapshot_clock
 from test_feed_parity_baseline import (
     _SIZE,
     HISTORY_FIXTURES,
-    NESTED_OUTSIDE_PARITY,
     _app,
     _settled_dump,
-    _without_nested,
     dump_after_live_feed,
 )
 
@@ -63,8 +61,10 @@ async def dump_after_render(name: str, tmp_path, *, one_by_one: bool):
         return await _settled_dump(pilot)
 
 
-def _comparable(name: str, rows: list) -> list:
-    return _without_nested(rows) if name in NESTED_OUTSIDE_PARITY else rows
+def _without_nested(rows: list) -> list:
+    """Отрисовщик здесь без узла вложенного трейса: вложенные строки
+    (`-in-agent`) вне сравнения, их паритет — в тестах узла."""
+    return [row for row in rows if "-in-agent" not in row[2]]
 
 
 @pytest.mark.asyncio
@@ -76,9 +76,7 @@ async def test_render_turns_matches_live_feed(
     with pinned_snapshot_clock(monkeypatch):
         rendered = await dump_after_render(name, tmp_path, one_by_one=False)
         live = await dump_after_live_feed(name, tmp_path, splits=splits)
-    assert _comparable(name, rendered) == _comparable(
-        name, without_ephemeral(live)
-    )
+    assert rendered == _without_nested(without_ephemeral(live))
 
 
 @pytest.mark.asyncio

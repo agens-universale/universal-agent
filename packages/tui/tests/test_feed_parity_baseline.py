@@ -34,12 +34,6 @@ HISTORY_FIXTURES = [
 #: снимается. Список может только сокращаться.
 KNOWN_LIVE_VS_OPEN: dict[str, str] = {}
 
-#: Фикстуры, где вложенные строки субагента (`-in-agent`) вне сравнения:
-#: вживую их рисуют события прогресса раннера, открытие — sidecar, а в
-#: записях треда событий прогресса нет и подача их не воспроизводит.
-#: Паритет вложенного трейса — отдельные тесты (узел субагентов).
-NESTED_OUTSIDE_PARITY = frozenset({"subagents"})
-
 _SIZE = (160, 45)
 _SETTLE_STEPS = 40
 #: Реестр моделей фикстуры смены модели (стенд писал её с этим реестром).
@@ -116,10 +110,4 @@ async def test_open_matches_live_feed(
     with pinned_snapshot_clock(monkeypatch):
         opened = await dump_after_open(name, tmp_path)
         live = await dump_after_live_feed(name, tmp_path, splits=splits)
-    if name in NESTED_OUTSIDE_PARITY:
-        opened, live = _without_nested(opened), _without_nested(live)
     assert without_ephemeral(live) == opened
-
-
-def _without_nested(rows: list) -> list:
-    return [row for row in rows if "-in-agent" not in row[2]]

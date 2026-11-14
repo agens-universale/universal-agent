@@ -100,7 +100,20 @@ class FeedHost:
 
 
 class NestedSource(Protocol):
-    """Узел вложенного трейса субагентов (§5.9) — подключается отдельно."""
+    """Узел вложенного трейса (§5.9): вложенное для родителей куска и его
+    домонтирование. Что из вызовов куска родитель, решает узел."""
+
+    def actions_for(self, parent_ids: set[str]) -> list: ...
+
+    def mount(
+        self,
+        host: HistoryHost,
+        actions: list,
+        calls: dict[str, Widget],
+        *,
+        views: BlockViews,
+        options: ChunkOptions,
+    ) -> list[Widget]: ...
 
 
 class Ephemera(Protocol):
@@ -150,14 +163,16 @@ def render_turns(
     before: Widget | None,
     options: ChunkOptions,
     ephemera: Ephemera | None = None,  # noqa: ARG001  # подключает §5.4
-    nested: NestedSource | None = None,  # noqa: ARG001  # подключает §5.9
+    nested: NestedSource | None = None,
 ) -> ChunkRefs:
     """Ходы ``turns`` модели целиком — в ленту перед ``before`` (None — в
     конец). Черта смены модели на стыке с куском ниже схлопывается с ним
-    так же, как подряд."""
+    так же, как подряд. ``nested`` — вложенный трейс под вызовами куска."""
     chunk = _Chunk(host, model, before, options)
     for i in turns:
         chunk.turn(i)
+    if nested is not None:
+        chunk.nest(nested)
     return chunk.finish()
 
 
@@ -249,6 +264,17 @@ class _Chunk:
             self._outcome(index, item.side)
         elif item.event is not None:
             self._event(item.event)
+
+    def nest(self, nested: NestedSource) -> None:
+        """Вложенное для вызовов куска — под их строками."""
+        calls = self.refs.call_rows
+        self._mounted += nested.mount(
+            self._host,
+            nested.actions_for(set(calls)),
+            calls,
+            views=self.refs.block_views,
+            options=self._opts,
+        )
 
     def finish(self) -> ChunkRefs:
         below = self._before
