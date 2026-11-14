@@ -129,7 +129,7 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
 @pytest.mark.asyncio
 async def test_readonly_render_segments_dedupes_preserved_reply():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -139,7 +139,7 @@ async def test_readonly_render_segments_dedupes_preserved_reply():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t", VerticalScroll),
                 [_seg_archived(), _seg_live()],
             )

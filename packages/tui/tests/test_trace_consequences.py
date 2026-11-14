@@ -13,13 +13,13 @@ from gc_tui.models import TraceEvent
 from gc_tui.palette import DIM, ERR
 from gc_tui.services.trace_mapper import map_message
 from gc_tui.services.trace_render import (
-    _dispatch_readonly,
     build_consequence_line,
     merge_nested_readonly,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import QuestionRow, TraceRow
 from rich.text import Text
+from trace_readonly import render_events
 
 
 def _styles_of(text: Text, fragment: str) -> list[str]:
@@ -231,24 +231,11 @@ def test_mapper_real_error_not_halted():
     assert ev.kind == "error" and ev.result_outcome == "error"
 
 
-def _blocks_on(target):
-    """Блоки превью на ``target``: строки вызовов идут через модель."""
-    from gc_tui.services.tool_blocks import ToolBlocks
-    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
-
-    blocks = PreviewBlocks()
-    blocks.views[""] = ToolBlocksView(
-        target, ToolBlocks(blocks.timers), level="", depth=0
-    )
-    return blocks
-
-
 def test_preview_halted_result_is_stop_row():
     """Чтение — член блока `Explored` (P4): глифа у члена нет, `└
     отменено` цветом стопа."""
-    target, calls = _Target(), {}
-    blocks = _blocks_on(target)
-    _dispatch_readonly(
+    target = _Target()
+    render_events(
         target,
         _ev(
             "call",
@@ -257,11 +244,8 @@ def test_preview_halted_result_is_stop_row():
             tool_name="fs_read_file",
             args_summary="x",
         ),
-        calls,
-        blocks=blocks,
+        _output_event({"ok": False, "status": "cancelled_by_user"}),
     )
-    ev = _output_event({"ok": False, "status": "cancelled_by_user"})
-    _dispatch_readonly(target, ev, calls, blocks=blocks)
     (header, row) = target.children
     assert (header.mode, row.mode) == ("header", "member")
     assert _styles_of(_lines(row), "отменено") == [DIM]
@@ -356,9 +340,8 @@ def _ev(kind: str, **kw) -> TraceEvent:
 
 
 def test_preview_error_is_line_under_call_not_tail():
-    target, calls = _Target(), {}
-    blocks = _blocks_on(target)
-    _dispatch_readonly(
+    target = _Target()
+    render_events(
         target,
         _ev(
             "call",
@@ -367,14 +350,7 @@ def test_preview_error_is_line_under_call_not_tail():
             tool_name="fs_read_file",
             args_summary="x",
         ),
-        calls,
-        blocks=blocks,
-    )
-    _dispatch_readonly(
-        target,
-        _ev("error", call_id="c1", summary="search не найден в файле"),
-        calls,
-        blocks=blocks,
+        _ev("error", no=2, call_id="c1", summary="search не найден в файле"),
     )
     # Член блока `Explored` (P4 §3.3): причина — строкой следствия члена.
     (_header, row) = target.children
@@ -488,10 +464,10 @@ def _ask_records(call_id: str = "ah1") -> list[dict]:
 
 
 def test_preview_unanswered_question_one_frame_with_line():
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
 
     target = _Target()
-    render_segments_readonly(
+    render_segments_history(
         target,
         [{"messages": [{"payload": p} for p in _ask_records()]}],
     )

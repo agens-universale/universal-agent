@@ -2,6 +2,7 @@
 
 import pytest
 from gc_testkit.tui_support import tui_settings
+from trace_readonly import render_events
 
 
 def test_block_panel_for_code_with_lang():
@@ -191,12 +192,12 @@ def _seg(payloads, synthesis=None, n=0, index=0):
 
 
 @pytest.mark.asyncio
-async def test_render_segments_readonly_parity():
+async def test_render_segments_history_parity():
     """Превью из сегментов = паритет с основным трейсом: hidden(policy) скрыт,
     маркер сжатия #K + синтез, intermediate_reply серым ●, error_msg
     красным."""
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.trace_row import TraceRow
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -252,7 +253,7 @@ async def test_render_segments_readonly_parity():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t", VerticalScroll), segments
             )
 
@@ -385,7 +386,7 @@ async def test_readonly_submit_note_label():
     pytest.importorskip("textual")
     import json as _json
 
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.trace_row import TraceRow
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -415,7 +416,7 @@ async def test_readonly_submit_note_label():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t", VerticalScroll), segments
             )
 
@@ -518,14 +519,13 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
         assert row.styles.margin.top == 1
 
 
-def test_dispatch_readonly_renders_todo_checklist():
+def test_history_renders_todo_checklist():
     """C1: read-only preview должен рендерить session_todo как чек-лист
     (паритет с живым путём main.py), а не ронять в generic line-meta."""
     pytest.importorskip("textual")
     import json
 
     from gc_tui.services.trace_mapper import map_message
-    from gc_tui.services.trace_render import _dispatch_readonly
     from gc_tui.widgets.trace_row import TraceRow
 
     ev = map_message(
@@ -554,7 +554,7 @@ def test_dispatch_readonly_renders_todo_checklist():
         def mount(self, w):
             mounted.append(w)
 
-    _dispatch_readonly(_FakeTarget(), ev, {})
+    render_events(_FakeTarget(), ev)
     # v5: чек-лист — один блок-виджет (единица выделения), строки внутри него.
     assert len(mounted) == 1
     block = mounted[0]
@@ -577,7 +577,6 @@ def test_kind_literal_includes_todo():
 def test_todo_event_renders_rich_text_with_glyph_colors():
     """kind=todo → TraceRow с rich.Text (канон §2), а не plain-строкой."""
     from gc_tui.models import TraceEvent
-    from gc_tui.services.trace_render import _dispatch_readonly
     from rich.text import Text as RichText
 
     todos = [
@@ -606,7 +605,7 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
         def mount(self, w, **kw):
             mounted.append(w)
 
-    _dispatch_readonly(_Target(), ev, calls={}, blocks=_blocks_on(_Target()))
+    render_events(_Target(), ev)
     # v5: один блок-виджет; строки внутри — заголовок + строка на пункт.
     assert len(mounted) == 1
     rows = mounted[0]._rows
@@ -623,19 +622,6 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     assert mounted[0].can_focus and not any(r.can_focus for r in rows)
 
 
-def _blocks_on(target):
-    """Блоки превью с исполнителем верхнего уровня на ``target`` (строки
-    вызовов превью идут через модель блоков, P4 Task 18)."""
-    from gc_tui.services.tool_blocks import ToolBlocks
-    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
-
-    blocks = PreviewBlocks()
-    blocks.views[""] = ToolBlocksView(
-        target, ToolBlocks(blocks.timers), level="", depth=0
-    )
-    return blocks
-
-
 def test_readonly_error_msg_finalizes_its_call_row():
     """Схемная ошибка вызова (technical error_message с call_id) обязана
     финализировать строку вызова ✗, как в живом трейсе (_render_error_msg).
@@ -645,7 +631,6 @@ def test_readonly_error_msg_finalizes_its_call_row():
     """
     pytest.importorskip("textual")
     from gc_tui.models import TraceEvent
-    from gc_tui.services.trace_render import _dispatch_readonly
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     mounted = []
@@ -654,8 +639,6 @@ def test_readonly_error_msg_finalizes_its_call_row():
         def mount(self, w, **kw):
             mounted.append(w)
 
-    calls: dict = {}
-    blocks = _blocks_on(_Target())
     call_ev = TraceEvent(
         no=1,
         event_ts_utc_iso="",
@@ -666,7 +649,6 @@ def test_readonly_error_msg_finalizes_its_call_row():
         call_id="c1",
         tool_name="session_todo",
     )
-    _dispatch_readonly(_Target(), call_ev, calls, blocks=blocks)
     err_ev = TraceEvent(
         no=2,
         event_ts_utc_iso="",
@@ -676,7 +658,7 @@ def test_readonly_error_msg_finalizes_its_call_row():
         full_payload={},
         call_id="c1",
     )
-    _dispatch_readonly(_Target(), err_ev, calls, blocks=blocks)
+    render_events(_Target(), call_ev, err_ev)
 
     assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
     row = mounted[0]
@@ -688,7 +670,6 @@ def test_readonly_error_msg_without_call_row_still_shown():
     """Ошибка без известного вызова — прежняя [!]-строка, ничего не теряем."""
     pytest.importorskip("textual")
     from gc_tui.models import TraceEvent
-    from gc_tui.services.trace_render import _dispatch_readonly
 
     mounted = []
 
@@ -705,7 +686,7 @@ def test_readonly_error_msg_without_call_row_still_shown():
         full_payload={},
         call_id="unknown",
     )
-    _dispatch_readonly(_Target(), ev, {}, blocks=_blocks_on(_Target()))
+    render_events(_Target(), ev)
     assert len(mounted) == 1
 
 
@@ -776,7 +757,6 @@ def test_info_note_consequence_is_grey_text_without_bang():
 def _readonly_orphan(kind: str):
     pytest.importorskip("textual")
     from gc_tui.models import TraceEvent
-    from gc_tui.services.trace_render import _dispatch_readonly
 
     mounted = []
 
@@ -793,7 +773,7 @@ def _readonly_orphan(kind: str):
         full_payload={},
         call_id="unknown",
     )
-    _dispatch_readonly(_Target(), ev, {})
+    render_events(_Target(), ev)
     return mounted
 
 
@@ -851,7 +831,7 @@ def test_summary_widgets_keep_code_block():
     )
 
 
-def test_dispatch_readonly_finish_after_reply_is_summary():
+def test_history_finish_after_reply_is_summary():
     """Превью: отчёт после текста того же ответа — запись «итог», не
     второй ответ; comment — отдельной строкой записи."""
     pytest.importorskip("textual")
@@ -861,7 +841,6 @@ def test_dispatch_readonly_finish_after_reply_is_summary():
         collect_render_context,
         map_message,
     )
-    from gc_tui.services.trace_render import _dispatch_readonly
 
     finish = {
         "type": "function_call",
@@ -884,7 +863,7 @@ def test_dispatch_readonly_finish_after_reply_is_summary():
         def mount(self, w):
             mounted.append(w)
 
-    _dispatch_readonly(_Target(), ev, {})
+    render_events(_Target(), ev)
 
     assert [w._content.plain for w in mounted] == [
         "итог: Попрощался.",

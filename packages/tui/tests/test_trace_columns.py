@@ -218,10 +218,8 @@ async def test_live_and_preview_share_layout(tmp_path):
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    from gc_tui.services.trace_render import (
-        merge_nested_readonly,
-        render_segments_readonly,
-    )
+    from gc_tui.services.trace_render import merge_nested_readonly
+    from trace_readonly import render_segments_history
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         live = _layout(await _live_trace(pilot))
@@ -232,7 +230,7 @@ async def test_live_and_preview_share_layout(tmp_path):
 
         def on_mount(self):
             t = self.query_one("#t", VerticalScroll)
-            calls = render_segments_readonly(t, _SEGMENTS)
+            calls = render_segments_history(t, _SEGMENTS).call_rows
             merge_nested_readonly(t, _SIDECAR, calls)
 
     async with _Preview().run_test(size=(120, 40)) as pilot:
@@ -335,10 +333,8 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    from gc_tui.services.trace_render import (
-        merge_nested_readonly,
-        render_segments_readonly,
-    )
+    from gc_tui.services.trace_render import merge_nested_readonly
+    from trace_readonly import render_segments_history
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
@@ -364,7 +360,7 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
 
         def on_mount(self):
             t = self.query_one("#t", VerticalScroll)
-            calls = render_segments_readonly(t, _SEGMENTS)
+            calls = render_segments_history(t, _SEGMENTS).call_rows
             merge_nested_readonly(t, _SIDECAR, calls)
 
     async with _styled(_Preview)().run_test(size=(120, 40)) as pilot:

@@ -28,12 +28,12 @@ from gc_tui.models import TraceEvent
 from gc_tui.palette import DIM, ERR, OK, REFUSED
 from gc_tui.services.trace_mapper import map_message
 from gc_tui.services.trace_render import (
-    _dispatch_readonly,
     build_consequence_line,
     merge_nested_readonly,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from rich.text import Text
+from trace_readonly import render_events
 
 _REFUSALS = [
     (
@@ -310,26 +310,12 @@ def _call_event() -> TraceEvent:
     )
 
 
-def _blocks_on(target):
-    """Блоки превью на ``target``: строки вызовов идут через модель."""
-    from gc_tui.services.tool_blocks import ToolBlocks
-    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
-
-    blocks = PreviewBlocks()
-    blocks.views[""] = ToolBlocksView(
-        target, ToolBlocks(blocks.timers), level="", depth=0
-    )
-    return blocks
-
-
 @pytest.mark.parametrize("error, text", _REFUSALS[:3])
 def test_preview_refusal_row(error, text):
     """Превью идёт через модель блоков, как живая лента: причина отказа —
     цветом исхода (P4 §3.3, §9.13)."""
-    target, calls = _Target(), {}
-    blocks = _blocks_on(target)
-    _dispatch_readonly(target, _call_event(), calls, blocks=blocks)
-    _dispatch_readonly(target, _output_event(error), calls, blocks=blocks)
+    target = _Target()
+    render_events(target, _call_event(), _output_event(error))
     (row,) = target.children
     _assert_refused_row(row, text, "  ", reason=REFUSED)
 
@@ -464,15 +450,15 @@ def test_preview_orphan_refusal_is_hollow_circle(error, glyph_style):
     красный `!`, а `○` отказа и серый текст «кто: почему»."""
     target = _Target()
     ev = _output_event(error)
-    _dispatch_readonly(target, ev, {})
+    render_events(target, ev)
     (row,) = target.children
     _assert_orphan_stop_row(row, glyph_style, ev.summary)
 
 
 def test_preview_orphan_error_stays_red_bang():
     target = _Target()
-    _dispatch_readonly(
-        target, _output_event({"type": "not_found", "message": "нет"}), {}
+    render_events(
+        target, _output_event({"type": "not_found", "message": "нет"})
     )
     (row,) = target.children
     assert str(row._prefix) == "! "
@@ -489,7 +475,7 @@ async def test_live_orphan_refusal_matches_preview(
     from gc_tui.widgets.trace_row import TraceRow
 
     target = _Target()
-    _dispatch_readonly(target, _output_event(error), {})
+    render_events(target, _output_event(error))
     (preview,) = target.children
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:

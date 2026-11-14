@@ -225,7 +225,7 @@ async def test_restore_hides_record_whose_message_is_gone(tmp_path):
 
 
 async def _previewed(segments: list[dict]):
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -234,7 +234,7 @@ async def _previewed(segments: list[dict]):
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t"), segments, model_slots=_SLOTS
             )
 

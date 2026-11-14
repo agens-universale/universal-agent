@@ -357,8 +357,8 @@ async def test_live_feed_skips_record_of_unrendered_reply(tmp_path):
 
 
 def _preview_app(segments: list[dict]):
-    """Приложение с одним превью сегментов (`render_segments_readonly`)."""
-    from gc_tui.services.trace_render import render_segments_readonly
+    """Приложение с одним превью сегментов (отрисовщик кусков истории)."""
+    from trace_readonly import render_segments_history
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -367,7 +367,7 @@ def _preview_app(segments: list[dict]):
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(self.query_one("#t"), segments)
+            render_segments_history(self.query_one("#t"), segments)
 
     return _A()
 

@@ -92,7 +92,7 @@ async def test_intermediate_reply_renders_as_grey_bullet_in_preview():
 
     from gc_testkit.paths import TUI_PKG
     from gc_tui import palette
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.trace_row import TraceRow
 
     class _Preview(App):
@@ -107,7 +107,7 @@ async def test_intermediate_reply_renders_as_grey_bullet_in_preview():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t", VerticalScroll), _SEGMENTS
             )
 

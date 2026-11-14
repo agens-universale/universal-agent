@@ -193,10 +193,8 @@ async def test_preview_keeps_images_of_a_segment_outside_the_window(tmp_path):
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    from gc_tui.services.trace_render import (
-        merge_nested_readonly,
-        render_segments_readonly,
-    )
+    from gc_tui.services.trace_render import merge_nested_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.services.trace_retention import subagent_parent_ids_in_window
     from gc_tui.widgets.user_reply import NestedUserReply, UserReplyContainer
 
@@ -209,7 +207,7 @@ async def test_preview_keeps_images_of_a_segment_outside_the_window(tmp_path):
 
         def on_mount(self):
             t = self.query_one("#t", VerticalScroll)
-            calls = render_segments_readonly(t, segs)
+            calls = render_segments_history(t, segs).call_rows
             merge_nested_readonly(
                 t,
                 _SIDECAR,

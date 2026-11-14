@@ -1,6 +1,6 @@
 """Подпись вызова: один билдер `build_call_row` на четыре пути ленты.
 
-Живой `_render_event`, превью `render_segments_readonly`, вложенный живой
+Живой `_render_event`, превью `render_turns`, вложенный живой
 `_mount_nested_tool` и вложенный из sidecar `merge_nested_readonly` — все
 рисуют `Label  объект` из ядра (`tool_display` + `tool_args_summary`);
 сырого wire-имени в строке нет (спека P3 §2.1)."""
@@ -287,10 +287,8 @@ async def test_live_mcp_label_from_screen_snapshot():
 @pytest.mark.asyncio
 async def test_preview_and_sidecar_nested_have_no_wire_name():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import (
-        merge_nested_readonly,
-        render_segments_readonly,
-    )
+    from gc_tui.services.trace_render import merge_nested_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -343,7 +341,9 @@ async def test_preview_and_sidecar_nested_have_no_wire_name():
 
         def on_mount(self):
             trace = self.query_one("#t", VerticalScroll)
-            calls = render_segments_readonly(trace, segments, mcp_tools=_JIRA)
+            calls = render_segments_history(
+                trace, segments, mcp_tools=_JIRA
+            ).call_rows
             merge_nested_readonly(trace, records, calls, mcp_tools=_JIRA)
 
     async with _A().run_test() as pilot:
