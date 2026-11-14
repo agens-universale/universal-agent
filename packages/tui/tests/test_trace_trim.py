@@ -348,3 +348,23 @@ async def test_admitted_pending_reply_heads_its_turn(tmp_path):
         assert scr._window_heads[4] is reply
         assert reply not in scr._window_turn_widgets(3)
         assert scr._window_turn_widgets(4)[0] is reply
+
+
+@pytest.mark.asyncio
+async def test_reset_render_state_does_not_trim_old_feed(
+    tmp_path, monkeypatch
+):
+    """Сброс состояния ленты (смена сессии, пересборка) снова «липнет к
+    низу», но ужатия по старой ленте с уже пустой моделью нет."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _session(pilot)
+        await _feed(pilot, scr, 0, 6)
+        await _user_scroll_up(pilot, scr)
+        assert scr._window_stuck is False
+        calls = []
+        monkeypatch.setattr(
+            scr, "_window_on_bottom", lambda: calls.append(True)
+        )
+        scr._reset_render_state()
+        assert scr._stick_bottom is True
+        assert calls == []
