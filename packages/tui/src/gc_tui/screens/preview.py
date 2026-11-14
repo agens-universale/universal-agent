@@ -272,7 +272,14 @@ class PreviewScreen(
             cursor=self._cursor,
             withdrawn=main.withdrawn_in(tid),
             on_ready=lambda loaded: self._session_ready(main, loaded),
+            on_error=self._open_failed,
         )
+
+    def _open_failed(self, exc: Exception) -> None:
+        """Сбой загрузки (битый файл треда): индикатор снят, превью
+        остаётся."""
+        self._stop_indicator()
+        self.app.notify(f"Не удалось открыть: {exc}", severity="error")
 
     def _session_ready(self, main, loaded: LoadedHistory) -> None:
         """Сессия готова: замок до закрытия превью; занята — превью

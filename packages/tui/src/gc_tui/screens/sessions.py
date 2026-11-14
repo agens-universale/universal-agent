@@ -568,8 +568,18 @@ class SessionsScreen(Screen):
                 ),
             )
         self._loader.start(
-            thread_id, inputs, withdrawn=withdrawn, on_ready=on_ready
+            thread_id,
+            inputs,
+            withdrawn=withdrawn,
+            on_ready=on_ready,
+            on_error=self._open_failed,
         )
+
+    def _open_failed(self, exc: Exception) -> None:
+        """Сбой загрузки (битый файл треда): индикатор снят, список
+        остаётся."""
+        self._stop_indicator()
+        self.app.notify(f"Не удалось открыть: {exc}", severity="error")
 
     def _selected_card(self) -> Optional[Static]:
         cards = self.query("#sessions-list .card.selected")

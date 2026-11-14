@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import threading
 
-import pytest
 from gc_tui.models import TaskCursor
 from gc_tui.services import history_loader
 from gc_tui.services.history_loader import HistoryLoader, history_inputs_for
@@ -75,6 +74,10 @@ class _Bridge:
             self.queue.pop(0)()
 
 
+def _raise(exc: Exception) -> None:
+    raise exc
+
+
 def _wait_threads():
     for t in threading.enumerate():
         if t.name == "history-loader":
@@ -87,8 +90,12 @@ def test_one_job_at_a_time():
     bridge = _Bridge()
     loader = HistoryLoader(store, bridge)
     got = []
-    loader.start("a", INPUTS, on_ready=lambda r: got.append(("a", r)))
-    gen_b = loader.start("b", INPUTS, on_ready=lambda r: got.append(("b", r)))
+    loader.start(
+        "a", INPUTS, on_ready=lambda r: got.append(("a", r)), on_error=_raise
+    )
+    gen_b = loader.start(
+        "b", INPUTS, on_ready=lambda r: got.append(("b", r)), on_error=_raise
+    )
     gate.set()
     _wait_threads()
     bridge.drain()
@@ -103,7 +110,7 @@ def test_cancel_discards_result():
     bridge = _Bridge()
     loader = HistoryLoader(store, bridge)
     got = []
-    loader.start("a", INPUTS, on_ready=got.append)
+    loader.start("a", INPUTS, on_ready=got.append, on_error=_raise)
     assert loader.busy is True
     loader.cancel()
     assert loader.busy is False
@@ -135,6 +142,7 @@ def test_generation_checked_between_segments(monkeypatch):
         segments=_segments(n_records=3, n_segments=3),
         cursor=CURSOR,
         on_ready=got.append,
+        on_error=_raise,
     )
     _wait_threads()
     bridge.drain()
@@ -150,7 +158,12 @@ def test_given_segments_are_not_read():
     got = []
     segments = _segments()
     loader.start(
-        "a", INPUTS, segments=segments, cursor=CURSOR, on_ready=got.append
+        "a",
+        INPUTS,
+        segments=segments,
+        cursor=CURSOR,
+        on_ready=got.append,
+        on_error=_raise,
     )
     _wait_threads()
     bridge.drain()
@@ -176,6 +189,7 @@ def test_thread_never_touches_widgets():
         INPUTS,
         withdrawn={"u0_1"},
         on_ready=lambda r: calls.append(threading.get_ident()),
+        on_error=_raise,
     )
     assert bridge.posted.wait(5)
     _wait_threads()
@@ -188,7 +202,9 @@ def test_withdrawn_reach_the_model():
     bridge = _Bridge()
     loader = HistoryLoader(_Store(), bridge)
     got = []
-    loader.start("a", INPUTS, withdrawn={"u0_1"}, on_ready=got.append)
+    loader.start(
+        "a", INPUTS, withdrawn={"u0_1"}, on_ready=got.append, on_error=_raise
+    )
     _wait_threads()
     bridge.drain()
     assert got[0].model.withdrawn == {"u0_1"}
@@ -201,10 +217,19 @@ def test_failure_surfaces_on_main_thread():
 
     bridge = _Bridge()
     loader = HistoryLoader(_Broken(), bridge)
-    loader.start("a", INPUTS, on_ready=lambda r: None)
+    errors = []
+    loader.start(
+        "a",
+        INPUTS,
+        on_ready=lambda r: None,
+        on_error=lambda exc: errors.append((exc, threading.get_ident())),
+    )
     _wait_threads()
-    with pytest.raises(OSError):
-        bridge.drain()
+    assert errors == []
+    bridge.drain()
+    ((exc, ident),) = errors
+    assert isinstance(exc, OSError)
+    assert ident == threading.get_ident()
     assert loader.busy is False
 
 

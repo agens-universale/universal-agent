@@ -65,9 +65,11 @@ class HistoryLoader:
         cursor: TaskCursor | None = None,
         withdrawn: set[str] | frozenset = frozenset(),
         on_ready: Callable[[LoadedHistory], None],
+        on_error: Callable[[Exception], None],
     ) -> int:
         """Начать загрузку; прежняя задача отменяется. ``segments`` и
         ``cursor`` — уже прочитанное (переход из превью): чтения нет.
+        Сбой чтения или построения — в ``on_error`` на главном потоке.
         Возвращает поколение задачи."""
         self._generation += 1
         gen = self._generation
@@ -81,6 +83,7 @@ class HistoryLoader:
             cursor,
             frozenset(withdrawn),
             on_ready,
+            on_error,
         )
         threading.Thread(
             target=job, name="history-loader", daemon=True
@@ -105,6 +108,7 @@ class HistoryLoader:
         cursor: TaskCursor | None,
         withdrawn: frozenset,
         on_ready: Callable[[LoadedHistory], None],
+        on_error: Callable[[Exception], None],
     ) -> None:
         with self._run_lock:
             if self._stale(gen):
@@ -121,7 +125,7 @@ class HistoryLoader:
             except HistoryBuildCancelled:
                 return
             except Exception as exc:
-                self._post(partial(self._fail, gen, exc))
+                self._post(partial(self._fail, gen, exc, on_error))
                 return
         loaded = LoadedHistory(model, cursor, segments)
         self._post(partial(self._deliver, gen, loaded, on_ready))
@@ -137,13 +141,18 @@ class HistoryLoader:
         self._busy = False
         on_ready(loaded)
 
-    def _fail(self, gen: int, exc: Exception) -> None:
-        """Сбой чтения или построения — в главном потоке, как при
-        синхронном открытии; отменённой задаче он не нужен."""
+    def _fail(
+        self,
+        gen: int,
+        exc: Exception,
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        """Сбой чтения или построения — в главном потоке; отменённой
+        задаче он не нужен."""
         if self._stale(gen):
             return
         self._busy = False
-        raise exc
+        on_error(exc)
 
 
 def history_inputs_for(app, task_id: str) -> HistoryInputs:

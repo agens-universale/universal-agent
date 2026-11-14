@@ -75,6 +75,37 @@ async def test_enter_indicator_in_hints_row(tmp_path, gate):
 
 
 @pytest.mark.asyncio
+async def test_load_failure_stays_in_preview(tmp_path, monkeypatch):
+    """Сбой построения модели: приложение не падает — подсказки на
+    месте, превью остаётся, причина в уведомлении."""
+    import threading
+
+    from gc_tui.services import history_loader
+
+    write_threads(tmp_path)
+    release = threading.Event()
+
+    def broken(_segments, **_kw):
+        release.wait(10)
+        raise ValueError("битая запись")
+
+    async with make_app(tmp_path).run_test() as pilot:
+        main, _lst, preview = await _open_preview(pilot, tmp_path)
+        monkeypatch.setattr(history_loader, "build_history", broken)
+        await pilot.press("enter")
+        await pilot.pause(0.7)
+        assert _footer(preview).startswith(f"• {LABEL}")
+        release.set()
+        await settle(pilot)
+        assert pilot.app.screen is preview
+        assert _footer(preview) == _FOOTER_HINTS
+        assert main._active_task_id == A
+        assert any(
+            "битая запись" in n.message for n in pilot.app._notifications
+        )
+
+
+@pytest.mark.asyncio
 async def test_esc_cancels_stays_in_preview(tmp_path, gate):
     write_threads(tmp_path)
     async with make_app(tmp_path).run_test() as pilot:

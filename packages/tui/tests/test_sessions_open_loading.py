@@ -67,6 +67,39 @@ async def test_enter_shows_indicator_after_delay_only(tmp_path, gate):
 
 
 @pytest.mark.asyncio
+async def test_load_failure_keeps_list_and_clears_indicator(
+    tmp_path, monkeypatch
+):
+    """Битый тред: приложение не падает — индикатор снят, список на
+    месте, причина в уведомлении."""
+    import threading
+
+    release = threading.Event()
+
+    def broken(_segments, **_kw):
+        release.wait(10)
+        raise ValueError("битая запись")
+
+    monkeypatch.setattr(history_loader, "build_history", broken)
+    write_threads(tmp_path)
+    async with make_app(tmp_path).run_test() as pilot:
+        main = pilot.app.screen
+        main.attach_active_task(A, is_resume=True)
+        lst = await open_list(pilot, tmp_path)
+        await pilot.press("enter")
+        await pilot.pause(0.7)
+        assert f"• {LABEL}" in card_text(lst)
+        release.set()
+        await settle(pilot)
+        assert pilot.app.screen is lst
+        assert LABEL not in card_text(lst)
+        assert main._active_task_id == A
+        assert any(
+            "битая запись" in n.message for n in pilot.app._notifications
+        )
+
+
+@pytest.mark.asyncio
 async def test_fast_open_shows_nothing(tmp_path):
     write_threads(tmp_path)
     async with make_app(tmp_path).run_test() as pilot:
