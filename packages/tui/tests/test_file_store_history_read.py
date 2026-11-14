@@ -29,16 +29,16 @@ def _ids(records: list[dict]) -> list[str]:
 
 
 @pytest.mark.parametrize("name", _FIXTURES)
-def test_read_history_matches_open_path(tmp_path, name):
-    """Те же сегменты и курсор, что у нынешнего открытия: несжатый тред —
-    один сегмент записей ``read_all_events``, сжатый — ``read_segments``."""
+def test_read_history_segments_and_cursor(tmp_path, name):
+    """Сегменты — как у ``read_segments``, курсор — сразу за ними: хвост
+    за ним пуст и не сбрасывает показ."""
     store = _store(tmp_path, name)
-    records, cursor = store.read_all_events(HISTORY_THREAD)
-    if store.is_compaction_summary(records[0]):
-        expected = store.read_segments(HISTORY_THREAD)
-    else:
-        expected = [{"index": 0, "messages": records, "compacted_by": None}]
-    assert store.read_history(HISTORY_THREAD) == (expected, cursor)
+    segments, cursor = store.read_history(HISTORY_THREAD)
+    assert segments == store.read_segments(HISTORY_THREAD)
+    tail = store.tail_events(HISTORY_THREAD, cursor)
+    assert tail.new_records == []
+    assert not tail.stream_reset
+    assert tail.compaction is None
 
 
 def test_read_history_of_missing_thread(tmp_path):

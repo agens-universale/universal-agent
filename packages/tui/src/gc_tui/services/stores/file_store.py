@@ -207,27 +207,13 @@ class FileTaskStore:
             user_content_to_text(payload.get("content"))
         )
 
-    def read_all_events(
-        self, task_id: str, system: Optional[str] = None
-    ) -> tuple[list[dict], TaskCursor]:
-        """Вся живая история и курсор сразу за ней — одним снимком; в
-        курсоре и число архивов: по нему тик узнает шаг сжатия."""
-        key = self._key(task_id, system)
-        view = run_sync(_aview(self._threads, key))
-        if view is None:
-            return [], TaskCursor(None, 0, None)
-        batch, record = view
-        return _complete(_feed(key, batch)), _task_cursor(
-            batch.cursor, len(record.archives)
-        )
-
     def read_history(
         self, task_id: str, system: Optional[str] = None
     ) -> tuple[list[dict], TaskCursor]:
         """Сегменты (как ``read_segments``) и курсор сразу за ними — из
         одного снимка: дозапись между чтениями не разводит историю и
         курсор. Тред без сжатия (живая история не начинается сводкой) —
-        один сегмент записей ``read_all_events``."""
+        один сегмент всех записей живой истории."""
         key = self._key(task_id, system)
         snap = run_sync(_ahistory(self._threads, key))
         if snap is None:

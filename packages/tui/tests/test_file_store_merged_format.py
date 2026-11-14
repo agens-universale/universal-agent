@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from gc_core.thread_store import ThreadSession
-from gc_testkit.develop_files import save_thread_meta
 from gc_core.threads.file_store import FileThreadStore
+from gc_testkit.develop_files import save_thread_meta
 from gc_tui.services.stores.file_store import FileTaskStore
 
 _SYSTEM = "cli"
@@ -89,12 +89,13 @@ def test_file_store_list_tasks_reads_token_usage(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 2. read_all_events — envelope полей (type, seq, payload)
+# 2. read_history — envelope полей (type, seq, payload)
 # ---------------------------------------------------------------------------
 
 
-async def test_file_store_read_all_events_reads_core_data(tmp_path):
-    """read_all_events() правильно читает записи ядра: envelope type/seq/payload."""
+async def test_file_store_read_history_reads_core_data(tmp_path):
+    """read_history() правильно читает записи ядра: envelope
+    type/seq/payload."""
     threads_dir = str(tmp_path)
     session = await _make_session(threads_dir)
 
@@ -105,7 +106,8 @@ async def test_file_store_read_all_events_reads_core_data(tmp_path):
     await session.apersist_batch(msgs, previous_response_id=None)
 
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
-    records, cursor = store.read_all_events(_TID)
+    segments, cursor = store.read_history(_TID)
+    records = segments[-1]["messages"]
 
     assert len(records) == 2
     # Envelope: поле type — "message"
@@ -124,7 +126,7 @@ async def test_file_store_read_all_events_reads_core_data(tmp_path):
     await session.apersist_batch(
         [{"role": "assistant", "content": "ещё"}], previous_response_id=None
     )
-    assert store.read_all_events(_TID)[1].storage_epoch == cursor.storage_epoch
+    assert store.read_history(_TID)[1].storage_epoch == cursor.storage_epoch
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +143,7 @@ async def test_file_store_epoch_changes_with_compaction(tmp_path):
     msgs = [{"role": "user", "content": "start"}]
     await session.apersist_batch(msgs, previous_response_id=None)
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
-    _records, before = store.read_all_events(_TID)
+    _records, before = store.read_history(_TID)
 
     await session.aarchive_and_compact_summary_payload(
         {
@@ -151,9 +153,10 @@ async def test_file_store_epoch_changes_with_compaction(tmp_path):
         }
     )
 
-    records, after = store.read_all_events(_TID)
-    # После компакции живая история начинается со сводки
-    assert len(records) >= 1
+    segments, after = store.read_history(_TID)
+    # После компакции живая история — новый сегмент, сводка — у прежнего
+    assert len(segments) == 2
+    assert segments[0]["compacted_by"] is not None
     assert after.storage_epoch != before.storage_epoch
     tail = store.tail_events(_TID, before)
     assert tail.stream_reset is False

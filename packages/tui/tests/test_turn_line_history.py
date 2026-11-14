@@ -137,7 +137,8 @@ def _shown_openers(tmp_path, tid=TID):
     """Записи итога, которые отдаёт полное чтение треда (без сирот)."""
     from gc_tui.services.stores.file_store import FileTaskStore
 
-    records, _cursor = FileTaskStore(str(tmp_path)).read_all_events(tid)
+    segments, _cursor = FileTaskStore(str(tmp_path)).read_history(tid)
+    records = segments[-1]["messages"]
     return [
         r["outcome"]["opened_by"]
         for r in records

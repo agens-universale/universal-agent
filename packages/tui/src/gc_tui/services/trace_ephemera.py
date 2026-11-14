@@ -153,9 +153,6 @@ class Ephemera:
     def bang_open_widgets(self) -> list:
         return [e.widget for e in self._bang_open or ()]
 
-    def has_bang(self) -> bool:
-        return bool(self._bang)
-
     def bang_clear(self, count: int | None) -> list:
         """Забыть последние ``count`` блоков «!» (None — все), снятые тоже;
         возвращает их живые виджеты — их снимает экран."""

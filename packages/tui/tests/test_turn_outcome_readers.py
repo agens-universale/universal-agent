@@ -98,7 +98,7 @@ def test_record_read_after_its_turn_leads_the_tail(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_user("m1"), _assistant("m2"))
     store = _store(thread)
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
 
     thread.outcome()
     thread.append(_user("m3"))
@@ -114,7 +114,7 @@ def test_record_read_after_its_turn_leads_the_tail(tmp_path):
 def test_record_in_one_batch_with_next_turn_follows_its_anchor(tmp_path):
     thread = _Thread(tmp_path)
     store = _store(thread)
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
 
     thread.append(_user("m1"), _assistant("m2"))
     thread.outcome()
@@ -131,7 +131,8 @@ def test_full_read_places_each_record_after_its_turn(tmp_path):
     thread.append(_user("m3"), _assistant("m4"))
     thread.outcome("m3")
 
-    records, _ = _store(thread).read_all_events(_TID)
+    segments, _ = _store(thread).read_history(_TID)
+    records = segments[-1]["messages"]
 
     assert _ids(records) == [
         "m1",
@@ -151,7 +152,8 @@ def test_full_read_drops_record_of_undone_reply(tmp_path):
     thread.outcome("m3")
     thread.discard("m3")
 
-    records, _ = _store(thread).read_all_events(_TID)
+    segments, _ = _store(thread).read_history(_TID)
+    records = segments[-1]["messages"]
 
     assert _ids(records) == ["m1", "m2", "turn_outcome"]
 
@@ -184,7 +186,7 @@ def test_compaction_after_record_is_a_step_not_reset(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_user("m1"), _assistant("m2"))
     store = _store(thread)
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
 
     thread.outcome()
     thread.compact("S")
@@ -227,7 +229,8 @@ def test_payload_ids_ignore_record(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_user("m1"))
     thread.outcome()
-    records, _ = _store(thread).read_all_events(_TID)
+    segments, _ = _store(thread).read_history(_TID)
+    records = segments[-1]["messages"]
 
     assert _ids(records) == ["m1", "turn_outcome"]
     assert _payload_ids(records) == frozenset({"m1"})
@@ -263,7 +266,8 @@ def test_export_skips_record(tmp_path):
 def test_export_ts_last_is_last_message(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_user("m1"))
-    records_before, _ = _store(thread).read_all_events(_TID)
+    segments, _ = _store(thread).read_history(_TID)
+    records_before = segments[-1]["messages"]
     thread.outcome()
 
     data = json.loads(_export(thread, "json"))
@@ -279,7 +283,8 @@ def _records(tmp_path, *, with_record: bool) -> list[dict]:
     if with_record:
         thread.outcome()
     thread.append(_user("m3", "ещё"), _assistant("m4", "ещё ответ"))
-    records, _ = _store(thread).read_all_events(_TID)
+    segments, _ = _store(thread).read_history(_TID)
+    records = segments[-1]["messages"]
     return records
 
 
@@ -358,9 +363,9 @@ async def test_live_feed_skips_record_of_unrendered_reply(tmp_path):
 
 def _preview_app(segments: list[dict]):
     """Приложение с одним превью сегментов (отрисовщик кусков истории)."""
-    from trace_readonly import render_segments_history
     from textual.app import App
     from textual.containers import VerticalScroll
+    from trace_readonly import render_segments_history
 
     class _A(App):
         def compose(self):

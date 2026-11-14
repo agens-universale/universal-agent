@@ -41,7 +41,7 @@ def _write_meta(tmp_path, tid):
 def _records(tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
 
-    return FileTaskStore(str(tmp_path)).read_all_events(TID)[0]
+    return FileTaskStore(str(tmp_path)).read_history(TID)[0][-1]["messages"]
 
 
 def _order(tmp_path) -> list[str]:

@@ -300,7 +300,7 @@ async def test_bang_clear_after_trim(tmp_path):
         await pilot.pause()
         texts = [t for _c, t, _ in feed_dump(_trace(scr))]
         assert not any("echo hi" in t for t in texts)
-        assert not scr._ephemera.has_bang()
+        assert scr._ephemera.bang_clear(None) == []
 
 
 async def _forgotten_and_back(pilot, scr) -> list:
@@ -327,7 +327,7 @@ async def test_ephemera_cleared_on_switch_and_rebuild(tmp_path, how):
             assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
         await pilot.pause()
         restored = await _forgotten_and_back(pilot, scr)
-        assert not scr._ephemera.has_bang()
+        assert scr._ephemera.bang_clear(None) == []
     assert without_ephemeral(restored) == restored
     assert not any("картинка не принята" in t for _c, t, _ in restored)
 
