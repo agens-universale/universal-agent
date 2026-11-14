@@ -2,7 +2,9 @@
 
 Esc → dismiss(False) (назад). Enter → dismiss(True) (продолжить сессию).
 Лента — как живая (`TraceFollowMixin`): открывается у низа, «не внизу» —
-липкая реплика и плашка «в конец» (клик или End — к низу).
+липкая реплика и плашка «в конец» (клик или End — к низу). Окно ленты то
+же, что в сессии (`TraceWindowMixin`): смонтирован хвост, старое
+домонтируется при прокрутке вверх, по возвращении вниз окно ужимается.
 Шапка: слева «превью · сессия <id>», справа — путь проекта. Футер — подсказки клавиш.
 Промпт сессии виден в самом трейсе ниже, поэтому в шапку не дублируется."""
 
@@ -17,6 +19,7 @@ from textual.widgets import Static
 from gc_tui import textual_compat
 from gc_tui.messages import BlockToggle, CopyBlockRequest, OpenImageRequest
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
+from gc_tui.screens.trace_window import TraceWindowMixin
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.image_open import open_image
 from gc_tui.services.skill_view import truncate_path_left
@@ -29,7 +32,7 @@ _FOOTER_HINTS = (
 )
 
 
-class PreviewScreen(TraceFollowMixin, Screen[bool]):
+class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
     # priority=True: Enter/Esc срабатывают ДО фокусной строки. Иначе focusable
     # ToolCallRow/TraceRow перехватывают Enter (open-detail + stop) и тред не
     # открывается. В превью нет ввода — Enter всегда = открыть тред, Esc = назад.
@@ -61,6 +64,10 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
         self._mcp_snapshot = mcp_snapshot
         # Блоки вызовов превью (P4): исполнители уровней и маршрут тогла.
         self._blocks = None
+        # Окно ленты: модель истории, параметры отрисовки и вложенное.
+        self._model = None
+        self._chunk_options = None
+        self._nested = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -90,61 +97,79 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
             HistoryInputs,
             build_history,
         )
-        from gc_tui.services.history_render import (
-            ChunkOptions,
-            FeedHost,
-            render_turns,
-        )
+        from gc_tui.services.history_render import ChunkOptions
         from gc_tui.services.nested_trace import NestedSource
 
-        trace = self.query_one("#trace", VerticalScroll)
         segments = self._segments
         records = self._subagent_records or []
         # корень из шапки превью: пути в подписях вызовов — от него
         root = self._project_path or None
         injected = self._injected_fields()
-        model = build_history(
+        self._model = build_history(
             segments,
             inputs=HistoryInputs(root=root, injected_fields=tuple(injected)),
         )
         blocks = self._blocks = self._preview_blocks()
-        mcp_tools = mcp_tools_from_snapshot(self._mcp_snapshot)
-        mcp_servers = mcp_servers_of(self._mcp_snapshot)
         window_parents = subagent_parent_ids_in_window(segments)
-        nested = NestedSource(
+        self._nested = NestedSource(
             lambda: records,
             window_parent_ids=lambda: window_parents,
             root=root,
             injected=injected,
         )
-        refs = render_turns(
-            FeedHost(trace),
-            model,
-            range(model.turn_count()),
-            before=None,
-            options=ChunkOptions(
-                focusable_compaction=False,
-                edits_lookup=blocks.edits_lookup,
-                diff_preview=blocks.diff_preview,
-                expanded_turns=blocks.expanded_turns,
-                mcp_tools=mcp_tools,
-                mcp_servers=mcp_servers,
-                model_slots=self._model_slots or {},
-                timers=blocks.timers,
-            ),
-            nested=nested,
+        self._chunk_options = ChunkOptions(
+            focusable_compaction=False,
+            edits_lookup=blocks.edits_lookup,
+            diff_preview=blocks.diff_preview,
+            expanded_turns=blocks.expanded_turns,
+            mcp_tools=mcp_tools_from_snapshot(self._mcp_snapshot),
+            mcp_servers=mcp_servers_of(self._mcp_snapshot),
+            model_slots=self._model_slots or {},
+            timers=blocks.timers,
         )
+        refs = self._window_mount_tail()
         blocks.views = refs.block_views
         # В превью нет итога «сейчас»: строка последнего хода — как все.
         if refs.fresh_turn_line is not None:
             refs.fresh_turn_line.settle()
-        # Сырьё сегментов и sidecar после монтажа не держим: в виджетах уже
-        # короткий трейс, тяжёлые tool output / nested вне окна не нужны.
+        # Сырые сегменты после построения модели не держим; трасса
+        # субагентов остаётся у узла вложенного — для кусков сверху.
         self._segments = []
         self._subagent_records = []
         # Как живая лента после открытия сессии — у низа.
         self._watch_trace_follow()
         self._scroll_trace_end()
+
+    # ---- окно ленты ------------------------------------------------------
+
+    def _window_feed(self):
+        return self.query_one("#trace", VerticalScroll)
+
+    def _window_model(self):
+        return self._model
+
+    def _window_options(self):
+        return self._chunk_options
+
+    def _window_nested(self):
+        return self._nested
+
+    def _window_adopt_chunk(self, refs) -> None:
+        """Виды блоков куска сверху — в маршрут раскрытия превью."""
+        self._blocks.views.update(refs.block_views)
+
+    def _window_forget(self, turns: range) -> list:
+        """Снятые ходы уходят и из маршрута раскрытия: уровни ходов и
+        уровни субагентов (ключ — call_id строки `Agent`)."""
+        from gc_tui.services.history_render import history_level
+
+        removed = super()._window_forget(turns)
+        views = self._blocks.views
+        for turn in turns:
+            views.pop(history_level(turn), None)
+        for widget in removed:
+            views.pop(getattr(widget, "call_id", None), None)
+        return removed
 
     def on_resize(self, _event) -> None:
         self.call_after_refresh(self._refresh_trace_overlays)

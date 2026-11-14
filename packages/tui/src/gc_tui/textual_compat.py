@@ -28,12 +28,21 @@
 якорную прокрутку от высоты той же раскладки, не ниже нуля; на иной
 версии Textual — обычный якорь. Прямая запись позиции ползунка также
 обходит сброс кеша рисунка: при якорной раскладке сбрасываем его явно.
+
+Удержание первой видимой строки (спека шага 2 окна ленты, §5.3): кадр
+Textual 8.2.8 рисуется раньше сигнала раскладки, `call_after_refresh` —
+тоже после кадра, поэтому сдвиг «после раскладки» даёт прыжок на кадр.
+Компоновщик читает `scroll_offset` контейнера после его `arrange`
+(_compositor.py:601 против 623/631): `AnchoredScroll.arrange` сдвигает
+прокрутку на смещение удерживаемого виджета в новой раскладке и пишет её
+через `set_reactive`, как якорь низа. Только для `PATCHED_TEXTUAL`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from bisect import bisect_right
 from collections.abc import Callable
 
 import textual
@@ -102,13 +111,55 @@ class AnchoredScroll(VerticalScroll):
     на иной версии — обычный якорь Textual."""
 
     _anchor_y = 0
+    # Удерживаемый виджет и последняя полная раскладка (её размещения —
+    # прежние места при следующей).
+    _held: Widget | None = None
+    _arranged = None
 
     def arrange(self, size: Size, optimal: bool = False):
         result = super().arrange(size, optimal)
         if not optimal and textual_is_patched_version():
             bottom = result.spatial_map.total_region.bottom
             self._anchor_y = max(0, bottom - size.height)
+            previous, self._arranged = self._arranged, result
+            if previous is not None and previous is not result:
+                self._keep_held_row(previous, result, size)
         return result
+
+    def hold_first_visible(self, widget: Widget | None) -> None:
+        """Пока лента не прилипла к низу, каждая новая раскладка держит
+        ``widget`` на той же экранной строке: прокрутка сдвигается на его
+        смещение (домонтирование сверху, смена ширины). ``None`` — не
+        держать."""
+        self._held = widget
+
+    def first_visible(self) -> Widget | None:
+        """Первый виджет, видимый в окне ленты, по последней раскладке —
+        без пересборки карты экрана. Иная версия Textual или раскладки
+        ещё не было — ``None``."""
+        arranged = self._arranged
+        if arranged is None or not textual_is_patched_version():
+            return None
+        placements = arranged.placements
+        at = bisect_right(
+            placements, self.scroll_y, key=lambda p: p.region.bottom
+        )
+        return placements[at].widget if at < len(placements) else None
+
+    def _keep_held_row(self, previous, result, size: Size) -> None:
+        held = self._held
+        if held is None or self._anchor_held():
+            return
+        old, new = _placed_y(previous, held), _placed_y(result, held)
+        if old is None or new is None or old == new:
+            return
+        bottom = result.spatial_map.total_region.bottom
+        top = min(self.scroll_y + new - old, bottom - size.height)
+        top = max(0, top)
+        super().set_reactive(Widget.scroll_y, top)
+        super().set_reactive(Widget.scroll_target_y, top)
+        # Наблюдатель прокрутки обойдён: ползунок — явно.
+        self.vertical_scrollbar.position = top
 
     def set_reactive(self, reactive, value) -> None:
         scroll = reactive in (Widget.scroll_y, Widget.scroll_target_y)
@@ -125,26 +176,36 @@ class AnchoredScroll(VerticalScroll):
         return self._anchored and not self._anchor_released
 
 
+def _placed_y(arranged, widget: Widget) -> int | None:
+    """Верх ``widget`` в раскладке ``arranged``; нет в ней — ``None``."""
+    for placement in arranged.placements:
+        if placement.widget is widget:
+            return placement.region.y
+    return None
+
+
 async def mounted(parent: Widget, widgets: list[Widget]) -> None:
     """Дождаться монтирования детей, уже отданных `parent.mount()`."""
     await AwaitMount(parent, widgets)
 
 
-def paint_after_mount(widget: Widget) -> None:
-    """Экран не рисует, пока ``widget``, уже отданный `mount()`, не
-    смонтирован (его дети собираются следующим тактом): перемены соседей,
-    сделанные до того, ложатся одним кадром с ним. Уже смонтированный или
-    без родителя — ничего не ждёт."""
-    parent = widget.parent
-    if widget.is_mounted or not isinstance(parent, Widget):
-        return
-    batch = widget.app.batch_update()
+def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
+    """Экран не рисует, пока ``widgets``, уже отданные `mount()` одному
+    родителю, не смонтированы (их дети собираются следующим тактом):
+    перемены соседей, сделанные до того, ложатся одним кадром с ними. Уже
+    смонтированные или без родителя — не ждутся. Задача отпускания —
+    чтобы продолжить после монтажа; ждать нечего — ``None``."""
+    pending = [
+        w for w in widgets if not w.is_mounted and isinstance(w.parent, Widget)
+    ]
+    if not pending:
+        return None
+    parent = pending[0].parent
+    batch = pending[0].app.batch_update()
 
     async def release() -> None:
         try:
-            await asyncio.wait_for(
-                mounted(parent, [widget]), _PAINT_HOLD_LIMIT
-            )
+            await asyncio.wait_for(mounted(parent, pending), _PAINT_HOLD_LIMIT)
         except TimeoutError:
             _log.debug("строка не смонтирована за %s с", _PAINT_HOLD_LIMIT)
         finally:
@@ -156,6 +217,7 @@ def paint_after_mount(widget: Widget) -> None:
     batch.__enter__()
     _PAINT_HOLDS.add(task)
     task.add_done_callback(_PAINT_HOLDS.discard)
+    return task
 
 
 def is_visible(widget: Widget | None) -> bool:

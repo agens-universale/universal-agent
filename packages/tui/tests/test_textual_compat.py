@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 import json
 from pathlib import Path
 
@@ -766,3 +767,87 @@ def test_static_markup_reads_flag():
 def test_other_version_static_markup_is_on(monkeypatch):
     monkeypatch.setattr(textual, "__version__", "9.0.0")
     assert textual_compat.static_markup(Static(markup=False)) is True
+
+
+# ---- удержание первой видимой строки (спека шага 2 окна, §5.3) ----------
+
+
+class _Held(App):
+    """Отлистанная якорная лента: строки, зависящие от ширины."""
+
+    CSS = "#a {height: 10; width: 60;} Static {height: auto;}"
+
+    def compose(self):
+        with textual_compat.AnchoredScroll(id="a"):
+            for i in range(60):
+                text = f"line {i} " + "слово " * (i % 7)
+                yield Static(text, id=f"l{i}")
+
+
+async def _scrolled_held(pilot, y: int):
+    scroll = pilot.app.query_one("#a")
+    await pilot.pause()
+    scroll.scroll_to(y=y, animate=False)
+    await pilot.pause()
+    held = scroll.first_visible()
+    scroll.hold_first_visible(held)
+    return scroll, held, held.region.y
+
+
+@asynccontextmanager
+async def _prepend_and_layout(app, scroll, *, width: int | None = None):
+    """Домонтировать сверху под удержанием отрисовки и разложить экран,
+    как компоновщик перед кадром, — без `pilot.pause()`."""
+    news = [Static(f"new {i} " + "x " * i) for i in range(25)]
+    with app.batch_update():
+        if width is not None:
+            scroll.styles.width = width
+        await scroll.mount_all(news, before=scroll.children[0])
+        app.screen._refresh_layout(app.screen.size)
+        yield
+
+
+@pytest.mark.asyncio
+async def test_prepend_keeps_visible_row_no_frame_jump():
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll, held, row = await _scrolled_held(pilot, 30)
+        before = scroll.scroll_y
+        async with _prepend_and_layout(app, scroll):
+            assert held.region.y == row
+            assert scroll.scroll_y > before
+
+
+@pytest.mark.asyncio
+async def test_prepend_keeps_row_after_width_change():
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll, held, row = await _scrolled_held(pilot, 40)
+        async with _prepend_and_layout(app, scroll, width=24):
+            assert held.region.y == row
+
+
+@pytest.mark.asyncio
+async def test_hold_off_and_anchored_keep_textual_behaviour():
+    """Без удержания домонтирование сдвигает строку (контроль); якорь
+    низа удержанию не уступает."""
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll, held, row = await _scrolled_held(pilot, 30)
+        scroll.hold_first_visible(None)
+        async with _prepend_and_layout(app, scroll):
+            assert held.region.y != row
+        scroll.hold_first_visible(held)
+        scroll.anchor()
+        await pilot.pause()
+        assert scroll.scroll_y == scroll.max_scroll_y
+
+
+@pytest.mark.asyncio
+async def test_other_version_hold_is_off(monkeypatch):
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll = app.query_one("#a")
+        await pilot.pause()
+        assert scroll.first_visible() is None
