@@ -11,7 +11,12 @@ from __future__ import annotations
 import json
 
 import pytest
-from feed_dump import feed_dump
+from feed_dump import (
+    HISTORY_THREAD,
+    feed_dump,
+    load_history_fixture,
+    write_history,
+)
 from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_testkit.thread_writes import model_choice_record
 from gc_testkit.tui_support import wait_until
@@ -370,6 +375,39 @@ async def test_rebuild_midrun_unfinished_turn_live(tmp_path, monkeypatch):
         scr._poll_trace_tail()
         await pilot.pause()
         assert "c_live" not in scr._active_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rebuild", [False, True])
+async def test_open_after_turn_end_compaction_all_from_chunks(
+    tmp_path, monkeypatch, rebuild
+):
+    """Тред кончается сжатием после итога хода: последний ход закончен —
+    открытие и пересборка рисуют все ходы кусками, живого хода нет."""
+    from gc_tui.screens import trace_window
+
+    write_history(str(tmp_path), load_history_fixture("compaction"))
+    drawn: list[range] = []
+    render = trace_window.render_turns
+
+    def spy(host, model, turns, **kw):
+        drawn.append(turns)
+        return render(host, model, turns, **kw)
+
+    async with _app(tmp_path).run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        if rebuild:
+            assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+            await pilot.pause()
+            drawn.clear()
+            monkeypatch.setattr(trace_window, "render_turns", spy)
+            scr._rebuild_from_store()
+        else:
+            monkeypatch.setattr(trace_window, "render_turns", spy)
+            assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause()
+        assert scr._feed_history.open_turn() is None
+        assert drawn[0].stop == scr._feed_history.turn_count()
 
 
 # ---- окно экрана сессии ---------------------------------------------------

@@ -17,6 +17,7 @@ from gc_core.persistence.turn_outcome import parse_turn_outcome
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.history_model import (
     HistoryInputs,
+    HistoryItem,
     HistoryModel,
     build_history,
 )
@@ -161,6 +162,24 @@ def test_reply_after_outcome_supersedes_it():
     model = build_history(_raw([*records, reply]), inputs=_INPUTS)
     assert model.outcome_superseded is True
     assert model.turn_count() == 4
+
+
+@pytest.mark.parametrize(
+    ("kinds", "expected"),
+    [
+        (("event", "outcome", "compaction"), None),
+        (("event", "outcome", "model_choice", "compaction"), None),
+        (("event", "compaction"), 0),
+        (("event", "outcome", "event"), 0),
+    ],
+)
+def test_open_turn_skips_compaction_marker(kinds, expected):
+    """Маркер сжатия встаёт после итога последнего хода части треда: ход
+    за ним закончен, как и за чертой смены модели."""
+    model = HistoryModel(
+        items=[HistoryItem(kind) for kind in kinds], turn_starts=[0]
+    )
+    assert model.open_turn() == expected
 
 
 def test_unanswered_questions():

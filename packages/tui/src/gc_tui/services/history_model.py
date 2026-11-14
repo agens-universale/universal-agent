@@ -157,15 +157,16 @@ class HistoryModel:
 
     def open_turn(self) -> int | None:
         """Последний ход, если он не закончен: после его последнего
-        события нет записи итога (ход идёт или оборван). Закончен или
-        ходов нет — None."""
+        события нет записи итога (ход идёт или оборван). Черта смены
+        модели и маркер сжатия встают после итога и ход не продолжают.
+        Закончен или ходов нет — None."""
         if not self.turn_starts:
             return None
         last = len(self.turn_starts) - 1
         for item in reversed(self.turn_items(last)):
             if item.kind == "outcome":
                 return None
-            if item.kind != "model_choice":
+            if item.kind not in ("model_choice", "compaction"):
                 return last
         return last
 
