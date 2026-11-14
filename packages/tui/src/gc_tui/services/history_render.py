@@ -156,7 +156,6 @@ class ChunkRefs:
     fresh_turn_line: Widget | None = None
     call_rows: dict[str, Widget] = field(default_factory=dict)
     question_rows: dict[str, Widget] = field(default_factory=dict)
-    last_model_mark: Widget | None = None
     summary_markers: dict[int, Widget] = field(default_factory=dict)
     summary_bodies: dict[int, Widget] = field(default_factory=dict)
     block_views: BlockViews = field(default_factory=BlockViews)
@@ -334,9 +333,6 @@ class _Chunk:
         refs = self.refs
         refs.widgets = [w for w in self._mounted if not is_being_removed(w)]
         refs.turn_heads = self._turn_heads()
-        mark = refs.last_model_mark
-        if mark is not None and is_being_removed(mark):
-            refs.last_model_mark = None
         return refs
 
     @staticmethod
@@ -381,7 +377,6 @@ class _Chunk:
         mark = restored_mark(record, self._opts.model_slots)
         self.mount(mark)
         drop_mark_before(mark)
-        self.refs.last_model_mark = mark
 
     def _outcome(self, index: int, rec: dict) -> None:
         """Строка итога хода: свежая — только итог последнего хода, пока

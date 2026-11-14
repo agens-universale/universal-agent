@@ -216,9 +216,8 @@ async def test_model_marks_collapse_across_chunk_boundary():
     from gc_tui.widgets.model_mark import ModelMark
 
     model = _marks_model()
-    whole, refs = await _render(model)
+    whole, _refs = await _render(model)
     assert [c for c, _t, _cl in whole].count("ModelMark") == 1
-    assert refs.last_model_mark is not None
     async with _Feed().run_test(size=_SIZE) as pilot:
         host = FeedHost(_feed(pilot.app))
         opts = ChunkOptions()
