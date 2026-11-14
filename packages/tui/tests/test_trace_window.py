@@ -86,6 +86,13 @@ async def _read_to_start(pilot, screen) -> None:
     assert screen._window_first == 0
 
 
+async def _filled(pilot, screen) -> None:
+    """Догрузка открытия закончилась: кусок не встаёт и не ждёт."""
+    for _ in range(3):
+        await wait_until(pilot, lambda: not screen._window_busy, "встал")
+        await pilot.pause(0.2)
+
+
 def _focusable(screen) -> list:
     return [w for w in _trace(screen).children if w.can_focus and w.display]
 
@@ -110,16 +117,71 @@ async def test_preview_mounts_tail_then_history_on_scroll(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_prefetch_only_after_user_scroll(tmp_path):
+async def test_prefetch_only_after_user_scroll(tmp_path, monkeypatch):
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         screen = await _preview(pilot)
+        await _filled(pilot, screen)
         first = screen._window_first
-        trace = _trace(screen)
         assert screen._stick_bottom is True
-        assert policy.near_top(trace.scroll_y, trace.container_size.height)
+        monkeypatch.setattr(policy, "near_top", lambda *_: True)
         screen._window_prefetch()
         await pilot.pause(0.3)
         assert screen._window_first == first
+
+
+@pytest.mark.asyncio
+async def test_underfilled_tail_loads_history_without_input(tmp_path):
+    """Хвост по оценке ниже запаса ленты — история догружается сама, у
+    низа, пока ленте не хватит запаса."""
+    async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
+        screen = await _preview(pilot)
+        tail = policy.tail_turns(
+            screen._window_estimates(screen._model), policy.TAIL_MIN
+        )
+        await _filled(pilot, screen)
+        trace = _trace(screen)
+        assert 0 < screen._window_first < tail.start
+        assert not policy.underfilled(
+            trace.max_scroll_y, trace.container_size.height
+        )
+        assert screen._stick_bottom is True
+        assert trace.scroll_y == trace.max_scroll_y
+
+
+@pytest.mark.asyncio
+async def test_underfilled_short_history_loads_to_start(tmp_path):
+    async with _app(tmp_path).run_test(size=(100, 200)) as pilot:
+        screen = await _preview(pilot)
+        await _filled(pilot, screen)
+        assert screen._window_first == 0
+        assert _replies(screen) == [f"запрос {i}" for i in range(TURNS)]
+
+
+@pytest.mark.asyncio
+async def test_shrink_after_return_while_chunk_mounting(tmp_path, monkeypatch):
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        screen = await _preview(pilot)
+        await _filled(pilot, screen)
+        monkeypatch.setattr(screen, "_window_prefetch", lambda: None)
+        await _user_scroll(pilot, screen, 0)
+        assert screen._stick_bottom is False
+        limit = policy.WINDOW_LIMIT + policy.CHUNK_MIN
+        while _subtree(screen) <= limit:
+            assert screen._window_prepend(focus=False)
+            await wait_until(pilot, lambda: not screen._window_busy, "встал")
+        assert screen._window_first > 0
+
+        def prepend_then_bottom() -> None:
+            screen._window_prepend(focus=False)
+            screen._scroll_to_bottom()
+
+        pilot.app.call_later(prepend_then_bottom)
+        await wait_until(
+            pilot,
+            lambda: _subtree(screen) <= policy.WINDOW_LIMIT,
+            "окно ужато после куска",
+        )
+        assert screen._stick_bottom is True
 
 
 @pytest.mark.asyncio

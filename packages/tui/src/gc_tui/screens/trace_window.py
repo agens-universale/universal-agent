@@ -51,6 +51,8 @@ class TraceWindowMixin:
     _window_busy = False
     # Лента прилипла к низу — на прошлой смене липкости.
     _window_stuck = True
+    # Вернулась к низу, пока кусок вставал: ужатие — когда встанет.
+    _window_trim_due = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -86,6 +88,8 @@ class TraceWindowMixin:
         ленты. Прежнее поколение окна больше не действует."""
         self._window_gen += 1
         self._window_busy = False
+        self._window_stuck = True
+        self._window_trim_due = False
         self._window_heads = {}
         self._window_feed().hold_first_visible(None)
         model = self._window_model()
@@ -93,7 +97,9 @@ class TraceWindowMixin:
             self._window_estimates(model), policy.TAIL_MIN
         )
         self._window_first = turns.start
-        return self._window_render(turns, before=None)
+        refs = self._window_render(turns, before=None)
+        self.call_after_refresh(self._window_fill)
+        return refs
 
     def _window_render(
         self, turns: range, *, before: Widget | None
@@ -134,6 +140,21 @@ class TraceWindowMixin:
         if policy.near_top(feed.scroll_y, feed.container_size.height):
             self._window_prepend(focus=False)
 
+    def _window_fill(self) -> None:
+        """Часть открытия: хвост по оценке мог не заполнить ленту (блоки
+        свёрнуты, ходы короткие) — тогда прокрутить нельзя и история выше
+        недостижима. Пока ленте не хватает запаса ``PREFETCH_SCREENS``,
+        кусок сверху домонтируется и у низа: якорь держит вид."""
+        if (
+            self._window_busy
+            or self._window_first <= 0
+            or self._ui_frozen_for_select()
+        ):
+            return
+        feed = self._window_feed()
+        if policy.underfilled(feed.max_scroll_y, feed.container_size.height):
+            self._window_prepend(focus=False)
+
     def _window_edge_up(self) -> bool:
         """↑ в режиме событий на верхнем краю смонтированного: кусок
         сверху и фокус на его последнее событие. ``False`` — домонтировать
@@ -170,7 +191,8 @@ class TraceWindowMixin:
         self, gen: int, widgets: list[Widget], focus: bool
     ) -> None:
         """Кусок встал. Окно сменилось (другая сессия) — результат
-        выброшен. Запас ещё мал — следующий кусок после раскладки, когда
+        выброшен. Пока вставал, лента вернулась к низу — ужатие сейчас;
+        иначе запас ещё мал — следующий кусок после раскладки, когда
         прокрутка уже сдвинута."""
         if gen != self._window_gen:
             return
@@ -179,7 +201,10 @@ class TraceWindowMixin:
             events = [w for w in widgets if w.can_focus and w.display]
             if events:
                 events[-1].focus()
+        if self._window_trim_due and self._window_stuck:
+            self._window_on_bottom()
         self.call_after_refresh(self._window_prefetch)
+        self.call_after_refresh(self._window_fill)
 
     def _window_top(self) -> Widget | None:
         """Первый виджет окна в ленте."""
@@ -191,8 +216,12 @@ class TraceWindowMixin:
     def _window_on_bottom(self) -> None:
         """Лента вернулась к низу: накопленное при чтении вверх ужимается
         до лимита целыми ходами — с запасом против петли с домонтированием
-        (§3.1, вариант А). Пока идёт выделение или встаёт кусок — нет."""
-        if self._window_busy or self._ui_frozen_for_select():
+        (§3.1, вариант А). Пока идёт выделение — нет; пока встаёт кусок —
+        когда встанет (если лента всё ещё у низа)."""
+        if self._ui_frozen_for_select():
+            return
+        self._window_trim_due = self._window_busy
+        if self._window_busy:
             return
         turns, counts = self._window_mounted_counts()
         excess = policy.trim_to(

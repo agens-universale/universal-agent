@@ -8,6 +8,7 @@ from gc_tui.services.trace_window_policy import (
     prev_chunk,
     tail_turns,
     trim_to,
+    underfilled,
 )
 
 
@@ -55,3 +56,10 @@ def test_near_top_by_screens():
     below = policy.PREFETCH_SCREENS * height
     assert near_top(below - 1, height) is True
     assert near_top(below, height) is False
+
+
+def test_underfilled_by_screens():
+    height = 20
+    margin = policy.PREFETCH_SCREENS * height
+    assert underfilled(margin - 1, height) is True
+    assert underfilled(margin, height) is False

@@ -69,3 +69,9 @@ def drop_count(widget_counts: Sequence[int], excess: int) -> int:
 def near_top(scroll_y: float, height: int) -> bool:
     """До верха смонтированного меньше запаса ``PREFETCH_SCREENS``."""
     return scroll_y < PREFETCH_SCREENS * height
+
+
+def underfilled(max_scroll_y: float, height: int) -> bool:
+    """Лента ниже запаса ``PREFETCH_SCREENS``: смонтированного не хватает,
+    чтобы прокрутить к истории выше."""
+    return max_scroll_y < PREFETCH_SCREENS * height

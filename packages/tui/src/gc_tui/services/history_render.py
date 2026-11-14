@@ -221,7 +221,8 @@ class _Chunk:
             before = self._before
         self._host.mount(widget, before=before, after=after)
         self._mounted.append(widget)
-        self._turn_of[widget] = self._turn or 0
+        if self._turn is not None:
+            self._turn_of[widget] = self._turn
         view = self._view
         if view is not None and not view.issued(widget):
             view.event_closing()
