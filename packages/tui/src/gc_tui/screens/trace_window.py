@@ -8,7 +8,9 @@
 ни сдвига, ни прыжка на кадр. Пока лента у низа или идёт выделение —
 ничего. ↑ в режиме событий на верхнем краю домонтирует кусок и переводит
 фокус (`_window_edge_up`). По возвращении вниз окно ужимается до лимита
-(`_window_on_bottom`). Числа и решения — `services.trace_window_policy`.
+(`_window_on_bottom`), а лента, растущая живым путём у низа, снимает
+старые ходы (`_window_appended`). Числа и решения —
+`services.trace_window_policy`.
 
 Экран ставит миксин перед `TraceFollowMixin` и даёт ленту
 (`_window_feed`) и модель истории (`_window_model`); параметры отрисовки,
@@ -54,6 +56,10 @@ class TraceWindowMixin:
     _window_stuck = True
     # Вернулась к низу, пока кусок вставал: ужатие — когда встанет.
     _window_trim_due = False
+    # Дописано в конец с прошлой сверки с лимитом — по оценке виджетов.
+    _window_grown = 0
+    # Сверка с лимитом после роста уже ждёт раскладки.
+    _window_grow_queued = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -97,6 +103,7 @@ class TraceWindowMixin:
         self._window_busy = False
         self._window_stuck = True
         self._window_trim_due = False
+        self._window_grown = 0
         self._window_heads = {}
         self._window_feed().hold_first_visible(None)
         model = self._window_model()
@@ -228,8 +235,43 @@ class TraceWindowMixin:
         if self._ui_frozen_for_select():
             return
         self._window_trim_due = self._window_busy
-        if self._window_busy:
+        if not self._window_busy:
+            self._window_trim()
+
+    def _window_appended(self, turn: int, widget: Widget) -> None:
+        """Живой путь дописал ``widget`` хода ``turn`` (последнего в
+        модели). Сверка с лимитом — не на каждый виджет (это пересчёт
+        окна): с началом хода и после роста на кусок по оценке, после
+        раскладки."""
+        if turn < 0:
             return
+        new_turn = turn not in self._window_heads
+        if new_turn:
+            self._window_heads[turn] = widget
+        self._window_grown += policy.ITEM_WIDGETS
+        if not new_turn and self._window_grown < policy.CHUNK_MIN:
+            return
+        self._window_grown = 0
+        if not self._window_grow_queued:
+            self._window_grow_queued = True
+            self.call_after_refresh(self._window_on_grown)
+
+    def _window_on_grown(self) -> None:
+        """Лента выросла у низа: снять старые ходы сверх лимита — только
+        пока она прилипла к низу, без выделения и пока кусок не встаёт
+        (читающему вверх окно ужмётся по возвращении)."""
+        self._window_grow_queued = False
+        if (
+            self._window_busy
+            or not self._stick_bottom
+            or self._ui_frozen_for_select()
+        ):
+            return
+        self._window_trim()
+
+    def _window_trim(self) -> None:
+        """Ужать окно до лимита целыми ходами сверху, если оно больше
+        «лимит + кусок» (запас против петли с домонтированием)."""
         turns, counts = self._window_mounted_counts()
         excess = policy.trim_to(
             sum(counts), policy.WINDOW_LIMIT, policy.CHUNK_MIN

@@ -2864,22 +2864,32 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         """«Забыть ход» (§5.3): верхний ход окна ``turn`` снимается с ленты
         одной операцией — эфемерное и снимок вида уходят в память, ни один
         реестр экрана не держит снятый виджет; события остаются в модели.
-        Не снимаются (False): не верхний ход, текущий (последний) ход и
-        ход со строкой, на которую держит ссылку живое состояние или фокус."""
-        widgets = self._window_turn_widgets(turn)
-        gone = {
-            w for top in widgets for w in top.walk_children(with_self=True)
-        }
-        if (
-            turn != self._window_first
-            or turn >= self._feed_history.turn_count() - 1
-            or gone & self._live_widgets()
-            or any(pins_to_bottom(w) for w in widgets)
-        ):
+        Не снимаются (False): не верхний ход и живой (`_turn_pinned`)."""
+        if turn != self._window_first or self._turn_pinned(turn):
             return False
+        gone = self._turn_subtree(turn)
         self._remember_turn(turn, gone)
         self._forget_widgets(gone)
         return super()._window_forget_turn(turn)
+
+    def _turn_pinned(self, turn: int) -> bool:
+        """Ход нельзя снимать (§5.3): текущий (последний) ход, ход с
+        прижатым хвостом и ход со строкой, на которую держит ссылку живое
+        состояние или фокус (`_live_widgets`)."""
+        if turn >= self._feed_history.turn_count() - 1:
+            return True
+        widgets = self._window_turn_widgets(turn)
+        return any(pins_to_bottom(w) for w in widgets) or bool(
+            self._turn_subtree(turn) & self._live_widgets()
+        )
+
+    def _turn_subtree(self, turn: int) -> set:
+        """Все виджеты поддерева ленты хода ``turn``."""
+        return {
+            w
+            for top in self._window_turn_widgets(turn)
+            for w in top.walk_children(with_self=True)
+        }
 
     def _live_widgets(self) -> set:
         """Строки, на которые держит ссылку живое состояние (§5.3), и
@@ -3886,12 +3896,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._drawing_model -= 1
 
     def _note_turn_head(self, widget) -> None:
-        """Виджет живого пути — первый виджет своего хода в окне (§5.3:
-        окно режет ленту по ходам; ход живого пути — последний в
-        модели)."""
-        turn = self._feed_history.turn_count() - 1
-        if turn >= 0:
-            self._window_heads.setdefault(turn, widget)
+        """Виджет живого пути — в окно своего хода (§5.3: окно режет
+        ленту по ходам; ход живого пути — последний в модели)."""
+        self._window_appended(self._feed_history.turn_count() - 1, widget)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение
