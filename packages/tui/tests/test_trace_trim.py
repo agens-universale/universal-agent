@@ -296,6 +296,10 @@ async def test_never_trims_current_focused_queue_live_refs(tmp_path):
         await _feed(pilot, scr, 4, 30)
         first = scr._window_first
         row = scr._window_turn_widgets(first)[-1]
+        # Ссылки живого состояния ставятся вручную, без бегущей задачи:
+        # тик опроса финализировал бы «идущий вызов» как осиротевший.
+        # На время пинов тик стоит — проверяется снятие, а не тик.
+        scr._poll_tick = lambda: None
         for name, pin, unpin in _pins(scr, row):
             pin()
             assert scr._turn_pinned(first), name
@@ -305,6 +309,7 @@ async def test_never_trims_current_focused_queue_live_refs(tmp_path):
             assert row.is_attached, name
             unpin()
             assert not scr._turn_pinned(first), name
+        del scr._poll_tick
         last = scr._feed_history.turn_count() - 1
         assert scr._turn_pinned(last)
         # Реплика в очереди прижата к низу — в текущем ходе, не снимается.
