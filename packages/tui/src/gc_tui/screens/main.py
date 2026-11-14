@@ -254,6 +254,7 @@ from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.model_mark import (
     ModelMark,
     drop_mark_before,
+    mark_model,
     pins_to_bottom,
     restored_mark,
 )
@@ -782,6 +783,18 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Свежая строка хода — та, что последней получила `freshen`
         # (`_freshen_turn_line`); снятую `_fresh_turn_line` не отдаёт.
         self._fresh_line: Optional[TurnLine] = None
+        # Черта смены модели, поставленная живым путём, пока её запись не
+        # дочитана хвостом в модель истории (`_last_model_change`).
+        self._live_mark: Optional[ModelMark] = None
+        # Строки вопросов агента по call_id — «без ответа» находит свой
+        # вопрос и тогда, когда его ход снят с ленты (заполняет отрисовка).
+        self._question_rows: dict[str, TraceRow] = {}
+        # Решение человека по плану `(текст, принят)`, ещё не дошедшее до
+        # сессии: рамка, вставленная в ленту позже, получает его же.
+        self._plan_marked: Optional[tuple[str, bool]] = None
+        # Счётчик добавлений в ленту (`_feed_mount`): число её детей меняет
+        # и снятие старых ходов.
+        self._feed_appended = 0
         # Сводка правок закрытого хода открытого треда (`_close_turn_edits`):
         # строка итога получает её, когда встанет, — запись стопа может
         # дочитаться позже спадающего фронта.
@@ -2285,6 +2298,9 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._feed_history = HistoryModel()
+        self._live_mark = None
+        self._question_rows.clear()
+        self._plan_marked = None
         self._answer_flow.new_turn()
         self._reset_new_replies()
         self._stick_bottom = True  # новый трейс → показываем низ (latest)
@@ -2787,9 +2803,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         живым путём) и в ленту."""
         history = self._feed_history
         if is_model_choice_record(rec):
-            # Живой хвост записи не рисует: черту уже дала живая смена.
-            if history.add_model_choice(rec) and not live:
-                self._restore_model_mark(rec)
+            # Живой хвост записи не рисует: черту уже дала живая смена;
+            # модель теперь знает смену сама.
+            if history.add_model_choice(rec):
+                if live:
+                    self._live_mark = None
+                else:
+                    self._restore_model_mark(rec)
             return
         if is_turn_outcome_record(rec):
             outcome = history.add_outcome(rec)
@@ -3463,11 +3483,17 @@ class TraceScreen(TraceFollowMixin, Screen):
             else self._pinned_tail(trace, sent=above_sent)
         )
         if queue:
-            trace.mount(widget, before=queue[0])
+            self._feed_mount(trace, widget, before=queue[0])
         else:
-            trace.mount(widget)
+            self._feed_mount(trace, widget)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
+
+    def _feed_mount(self, trace, widget, **where) -> None:
+        """Добавить виджет в ленту (``where`` — `before` / `after`) с
+        отметкой в счётчике добавлений."""
+        self._feed_appended += 1
+        trace.mount(widget, **where)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение
@@ -3949,10 +3975,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
             if is_plan:
                 # План — в рамке с подписью: он не обычный ответ, его одобряют.
-                self._trace_mount(
-                    PlanPanel(*mounted_widgets, plan_text=ev.summary),
-                    scroll=False,
-                )
+                panel = PlanPanel(*mounted_widgets, plan_text=ev.summary)
+                panel.set_accepted(self._plan_panel_accepted(ev.summary))
+                self._trace_mount(panel, scroll=False)
             else:
                 for w in mounted_widgets:
                     self._trace_mount(w, scroll=False)
@@ -4106,22 +4131,19 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
 
     def _note_unanswered(self, call_id: str | None) -> bool:
-        """«└ без ответа» под вопросом `call_id` в его рамке. Вопроса в ленте
-        нет (ушёл в сжатие) — False: событие рисуется строкой, как было."""
+        """«└ без ответа» под вопросом `call_id` в его рамке — по реестру
+        строк вопросов, и когда ход вопроса снят с ленты. Вопроса не
+        рисовали (ушёл в сжатие) — False: событие рисуется строкой."""
         from gc_tui.services.trace_render import (
             QUESTION_UNANSWERED,
             note_question,
         )
-        from gc_tui.widgets.trace_row import QuestionRow
 
-        if not call_id:
+        question = self._question_rows.get(call_id) if call_id else None
+        if question is None:
             return False
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        for question in trace.query(QuestionRow):
-            if question.call_id == call_id:
-                note_question(question, QUESTION_UNANSWERED)
-                return True
-        return False
+        note_question(question, QUESTION_UNANSWERED)
+        return True
 
     def _render_error_msg(self, ev) -> None:
         """error_msg с известным call_id финализирует соответствующую строку-вызов
@@ -4165,7 +4187,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._trace_mount(widget)
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        trace.mount(widget, before=before, after=after)
+        self._feed_mount(trace, widget, before=before, after=after)
         if self._stick_bottom:
             self._scroll_trace_end()
 
@@ -4314,13 +4336,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         widget.add_class("-in-agent")
         try:
             if before is not None:
-                trace.mount(widget, before=before)
+                self._feed_mount(trace, widget, before=before)
             else:
                 level = self._nested_widgets_by_parent.get(parent_call_id)
                 anchor = after or nested_tail(
                     trace.children, level or (), parent
                 )
-                trace.mount(widget, after=anchor)
+                self._feed_mount(trace, widget, after=anchor)
         except Exception:
             # Якоря нет в ленте — в конец, но над очередью; группы верхнего
             # уровня вложенный виджет не закрывает.
@@ -4765,6 +4787,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             extra_classes="ask-human-question hidden",
             call_id=ev.call_id,
         )
+        if ev.call_id:
+            self._question_rows[ev.call_id] = self._ask_human_question_row
         self._trace_mount(self._ask_human_question_row, scroll=False)
         banner = AskHumanBanner(question=ev.summary)
         self._ask_human_banner = banner
@@ -4973,9 +4997,20 @@ class TraceScreen(TraceFollowMixin, Screen):
         except Exception:
             return []
 
+    def _plan_panel_accepted(self, plan_text: str) -> bool:
+        """Состояние рамки плана при вставке в ленту (живой путь, копия,
+        домонтирование снятого хода): решение человека по этому плану, ещё
+        не дошедшее до сессии, иначе статус плана в сессии."""
+        text = str(plan_text or "").strip()
+        marked = self._plan_marked
+        if marked is not None and marked[0] == text:
+            return marked[1]
+        return plan_is_accepted(self._session_plan(), text)
+
     def _mark_plan_accepted(self, accepted: bool, plan_text: str) -> None:
         """Все рамки этого плана в ленте (исходная и копии): серые, пока план
         ждёт решения; цвета режима plan — когда принят и идёт реализация."""
+        self._plan_marked = (str(plan_text or "").strip(), accepted)
         for panel in self._plan_panels():
             if panel.shows(plan_text):
                 panel.set_accepted(accepted)
@@ -4984,6 +5019,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Привести рамки к сессии: утверждённой остаётся только рамка плана,
         принятого в сессии; прежние (заменённые) планы — серые. Зовётся там,
         где лента перерисована или статус мог смениться."""
+        self._plan_marked = None
         plan = self._session_plan()
         for panel in self._plan_panels():
             panel.set_accepted(plan_is_accepted(plan, panel.plan_text))
@@ -5029,13 +5065,13 @@ class TraceScreen(TraceFollowMixin, Screen):
             # Идёт потоковый ответ: копия встаёт ПЕРЕД ним, иначе готовый
             # ответ потом перепрыгнул бы через план.
             self._note_top_event(panel)
-            trace.mount(panel, before=live)
+            self._feed_mount(trace, panel, before=live)
         elif anchor is not None:
             self._note_top_event(panel)
-            trace.mount(panel, before=anchor)
+            self._feed_mount(trace, panel, before=anchor)
         else:
             self._trace_mount(panel)
-        panel.set_accepted(plan_is_accepted(plan, text))
+        panel.set_accepted(self._plan_panel_accepted(text))
 
     def _present_session_plan(self) -> None:
         """Ход закончился планом: рамка в ленте (её может не быть, если агент
@@ -5439,14 +5475,23 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._refresh_footer()
 
     def _last_model_choice(self) -> str | None:
-        """Выбор последней отметки модели в ленте; отметок нет — None."""
-        mark = self._last_model_mark()
-        return mark.choice if mark is not None else None
+        """Выбор последней смены модели в ленте; смен нет — None."""
+        shown = self._last_model_change()
+        return shown[0] if shown is not None else None
 
-    def _last_model_mark(self) -> Optional[ModelMark]:
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        marks = trace.query(ModelMark)
-        return marks.last() if marks else None
+    def _last_model_change(self) -> Optional[tuple[str, str]]:
+        """Последняя смена модели в ленте — `(выбор, модель)`; смен нет —
+        None. Черта живого пути новее модели истории, пока её запись не
+        дочитана хвостом; дальше — последняя смена в модели (снятые с
+        ленты ходы её не теряют)."""
+        live = self._live_mark
+        if live is not None:
+            return live.choice, live.model
+        rec = self._feed_history.last_model_choice
+        record = parse_model_choice(rec) if rec is not None else None
+        if record is None:
+            return None
+        return record.choice, mark_model(record.choice, record.alias)
 
     def _follow_next_model(self, baseline: str | None = None) -> None:
         """Смена между ходами (профиль, «модель по умолчанию», перечитанный
@@ -5460,8 +5505,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         pending = self._pending_model_mark()
         if not self._between_turns() or pending is not None:
             return
-        last = self._last_model_mark()
-        shown = last.model if last is not None else baseline
+        last = self._last_model_change()
+        shown = last[1] if last is not None else baseline
         if shown is None or model_name(self.app) == shown:
             return
         choice = current_choice(self.app)
@@ -5488,6 +5533,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         tail = [w for w in self._pinned_tail(trace) if w is not mark]
         mark.set_choice(choice, alias)
         mark.apply()
+        self._live_mark = mark
         self._note_top_event(mark)
         if tail:
             trace.move_child(mark, before=tail[0])
@@ -5495,6 +5541,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _mount_applied_mark(self, choice: str, before: str | None) -> None:
         mark = self._new_model_mark(choice, pending=False, before=before)
+        self._live_mark = mark
         self._trace_mount(mark)
         drop_mark_before(mark)
 
@@ -5638,7 +5685,12 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _trace_note_owner(self, note):
         """Владелец пометки в ленте: строка вызова `call_id` (верхняя или
-        вложенная) или реплика — последняя с картинками, иначе последняя."""
+        вложенная) или реплика — последняя с картинками, иначе последняя.
+
+        Какая реплика последняя, решает модель истории: смонтированным
+        может остаться старый ход (в фокусе), когда новые сняты. Реплики,
+        которых в модели ещё нет (номер события 0: отправленные, из meta),
+        новее её. Реплика-владелец снята — на экране владельца нет."""
         from gc_tui.widgets.tool_call_row import ToolCallRow
         from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -5647,8 +5699,17 @@ class TraceScreen(TraceFollowMixin, Screen):
             rows = trace.query(ToolCallRow)
             return next((r for r in rows if r.call_id == note.call_id), None)
         replies = list(trace.query(UserReplyContainer))
-        with_images = [r for r in replies if r.has_images]
-        return (with_images or replies or [None])[-1]
+        for with_images in (True, False):
+            shown = [r for r in replies if r.has_images or not with_images]
+            last = shown[-1] if shown else None
+            latest = self._feed_history.last_reply(with_images=with_images)
+            if latest is not None and (
+                last is None or 0 < last.event_no < latest.no
+            ):
+                return None  # реплика-владелец снята с ленты
+            if last is not None:
+                return last
+        return None
 
     def _mount_standalone(
         self,
@@ -8813,7 +8874,16 @@ class TraceScreen(TraceFollowMixin, Screen):
             for w in self.query(TurnLine)
             if w.opened_by != msg_id and not textual_compat.is_being_removed(w)
         ]
-        if lines:
+        # Строка последней записи итога снята с ленты, а смонтированной
+        # осталась строка более старого хода (в фокусе) — её не трогаем:
+        # прошлый ход снова последний в модели (`restore_outcome`), его
+        # строку свежей поставит отрисовка из модели.
+        outcome = self._feed_history.last_turn_outcome
+        if lines and not (
+            outcome is not None
+            and lines[-1].recorded
+            and lines[-1].opened_by != outcome.opened_by
+        ):
             line = lines[-1]
             self._freshen_turn_line(line, line.summary, line.error)
         snapshot, self._pre_run_tui_meta = self._pre_run_tui_meta, None
@@ -9638,10 +9708,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         её результат показываем безусловно, даже если юзер отскроллен вверх
         (в отличие от агентских событий). Команды, открывающие экран, трейс не
         растят → счётчик не меняется → позиция чтения истории не сбивается."""
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        before = len(trace.children)
+        before = self._feed_appended
         await self._dispatch_command(raw)
-        if len(trace.children) > before:
+        if self._feed_appended > before:
             self._stick_bottom = True  # команда юзера = re-engage
             self._scroll_trace_end()
 

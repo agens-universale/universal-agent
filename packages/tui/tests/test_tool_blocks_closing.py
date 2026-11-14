@@ -375,7 +375,8 @@ async def test_issued_widgets_do_not_close(tmp_path):
 
 
 def _mount_owners(path) -> dict[str, set[str]]:
-    """Функции экрана с `trace.mount(` и что ещё они зовут."""
+    """Функции экрана с `trace.mount(` или `self._feed_mount(` и что ещё
+    они зовут."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     owners: dict[str, set[str]] = {}
     for func in ast.walk(tree):
@@ -392,9 +393,9 @@ def _mount_owners(path) -> dict[str, set[str]]:
             for node in ast.walk(func)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "mount"
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "trace"
+            and (node.func.value.id, node.func.attr)
+            in {("trace", "mount"), ("self", "_feed_mount")}
         ]
         if mounts:
             owners[func.name] = calls
@@ -410,6 +411,7 @@ def test_top_mounts_go_through_closing_point():
         "_mount_block_widget",  # виджеты модели блоков
         "_nested_mount_after",  # вложенные субагента
         "_show_brand",  # пустая лента, групп ещё нет
+        "_feed_mount",  # сам монтаж со счётчиком добавлений
     }
     assert set(owners) <= through_point | exempt, sorted(owners)
     for name in through_point:

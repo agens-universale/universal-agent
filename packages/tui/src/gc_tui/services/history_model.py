@@ -121,6 +121,19 @@ class HistoryModel:
     def turn_count(self) -> int:
         return len(self.turn_starts)
 
+    def last_reply(self, *, with_images: bool = False) -> TraceEvent | None:
+        """Последняя реплика пользователя в ленте (снятые откатом не в
+        счёт); ``with_images`` — последняя с картинками."""
+        for item in reversed(self.items):
+            ev = item.event
+            if ev is None or ev.kind != "user" or ev.hidden:
+                continue
+            if ev.message_id is not None and ev.message_id in self.withdrawn:
+                continue
+            if not with_images or ev.attachments:
+                return ev
+        return None
+
     def is_withdrawn(self, payload: dict) -> bool:
         mid = payload.get("id")
         return mid is not None and mid in self.withdrawn

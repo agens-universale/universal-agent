@@ -409,6 +409,12 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         self.add_class("has-consequence")
         self._consequence_slot.set_bodies(self._consequences)
 
+    @property
+    def event_no(self) -> int:
+        """Номер события треда; 0 — реплики в треде ещё нет (отправлена,
+        в очереди, «не отправлено» из meta)."""
+        return self._event_no
+
     def set_event_no(self, event_no: int) -> None:
         """Номер события треда: живая реплика получает его при сверке с записью треда —
         до этого Ctrl+клик и Enter экрана события не открывают."""
