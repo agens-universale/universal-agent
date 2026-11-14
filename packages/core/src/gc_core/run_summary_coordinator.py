@@ -11,6 +11,7 @@ import gc
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from gc_core.config_modules.gc import gc_run_collect_enabled
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
@@ -178,6 +179,10 @@ class RunSummaryCoordinator:
         return self._proj_tags
 
     def _collect_garbage(self) -> None:
+        if not gc_run_collect_enabled(
+            is_tui=bool(getattr(self._ctx, "is_tui", False))
+        ):
+            return
         collect = getattr(self._ctx, "collect_garbage", None) or gc.collect
         collect()
 

@@ -340,10 +340,10 @@ async def test_sdk_run_passes_attachments_and_the_tail_carries_its_own(
 
     original_teardown = ae._aclose_mcp_and_release
 
-    async def _teardown(owner_reset):
+    async def _teardown(owner_reset, **kw):
         if teardown_steps:
             teardown_steps.pop(0)()
-        await original_teardown(owner_reset)
+        await original_teardown(owner_reset, **kw)
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", _teardown)

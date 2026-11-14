@@ -60,18 +60,18 @@ def _meta(tmp_path):
     return load_thread_meta(str(tmp_path), "cli", "t")
 
 
-async def _close_raises_cancel(_token):
+async def _close_raises_cancel(_token, **_kw):
     raise asyncio.CancelledError()
 
 
-async def _close_cancels_task(_token):
+async def _close_cancels_task(_token, **_kw):
     task = asyncio.current_task()
     assert task is not None
     task.cancel()
     await asyncio.sleep(0)
 
 
-async def _close_ok(_token):
+async def _close_ok(_token, **_kw):
     return None
 
 

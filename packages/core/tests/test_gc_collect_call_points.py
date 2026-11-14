@@ -27,6 +27,7 @@ def _coord(
     backend="chat_completions",
     turn_end_trigger_chars=10_000,
     threshold_exceeded=True,
+    is_tui=False,
 ):
     """Собирает coordinator с замоканными compaction и gc.collect.
 
@@ -40,7 +41,7 @@ def _coord(
         messages=[{"role": "user", "content": "x" * 20_000}],
     )
     coord = rsc.RunSummaryCoordinator(
-        ctx=fake_ctx(),
+        ctx=fake_ctx(is_tui=is_tui),
         state=state,
         thread_session=None,
         summary_trigger_chars=10_000,
@@ -85,6 +86,15 @@ class TestC1PreRunCompact:
         coord = _coord(monkeypatch, calls, gc_calls, backend="responses")
         run_coro(coord.apre_run_compact_if_needed())
         assert calls == []
+        assert gc_calls == []
+
+
+class TestC1NotInTui:
+    def test_no_collect_after_compaction_in_tui(self, monkeypatch):
+        calls, gc_calls = [], []
+        coord = _coord(monkeypatch, calls, gc_calls, is_tui=True)
+        run_coro(coord.aforce_compact_once())
+        assert len(calls) == 1
         assert gc_calls == []
 
 
@@ -241,6 +251,32 @@ class TestC2AgentExecutorFinally:
         assert len(gc_calls) == 1, (
             "finally должен вызвать gc.collect даже при исключении"
         )
+
+    async def test_no_collect_in_tui(self, monkeypatch, tmp_path):
+        """TUI (system="cli" и is_tui) прогон без C2."""
+        from gc_core.run_context import acreate_run_context
+
+        ae = importlib.import_module("gc_core.agent_executor")
+        gc_calls = []
+        monkeypatch.setattr(
+            ae, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+        )
+
+        async def _arun_agent_stub(*_a, **_kw):
+            return {"finished": True}
+
+        monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
+        ctx = await acreate_run_context(
+            self._make_cfg(tmp_path), auth_connector=None, is_tui=True
+        )
+        ex = ae.AgentExecutor(ctx)
+        await ex.arun(
+            [{"role": "user", "content": "x"}],
+            thread_id="t",
+            start_new_thread=True,
+            system="cli",
+        )
+        assert gc_calls == []
 
 
 # ---------------------------------------------------------------------------

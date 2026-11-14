@@ -46,9 +46,9 @@ async def _executor(monkeypatch, tmp_path, seen: list, on_teardown):
 
     original_teardown = ae._aclose_mcp_and_release
 
-    async def _teardown(owner_reset):
+    async def _teardown(owner_reset, **kw):
         on_teardown()
-        await original_teardown(owner_reset)
+        await original_teardown(owner_reset, **kw)
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", _teardown)

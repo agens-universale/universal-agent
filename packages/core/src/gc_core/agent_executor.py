@@ -22,6 +22,7 @@ from gc_core.attachments.store import (
     awith_committed_attachments,
 )
 from gc_core.auto_routing import state_ops
+from gc_core.config_modules.gc import gc_run_collect_enabled
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
@@ -178,7 +179,9 @@ async def _aappend_trace_id_to_meta(
                 pass
 
 
-async def _aclose_mcp_and_release(owner_reset: Any) -> None:
+async def _aclose_mcp_and_release(
+    owner_reset: Any, *, collect: bool = True
+) -> None:
     """Уборка после прогона: stdio-сессии, stream-сессии, владение.
 
     Отмену КОПИМ, а не пробрасываем сразу. Раньше `CancelledError` из первого
@@ -210,8 +213,9 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     except Exception:
         pass
     # C2: после закрытия MCP/stdio — подбираем циклический мусор
-    # (pipes, ClientSession, loop buffers).
-    gc.collect()
+    # (pipes, ClientSession, loop buffers); режим решает вызывающий.
+    if collect:
+        gc.collect()
     # Владение снимаем последним: всё выше его требует.
     reset_owner(owner_reset)
     if cancelled is not None:
@@ -1480,7 +1484,12 @@ class AgentExecutor:
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
             if cleanup is None:
-                await _aclose_mcp_and_release(owner_reset)
+                await _aclose_mcp_and_release(
+                    owner_reset,
+                    collect=gc_run_collect_enabled(
+                        is_tui=bool(getattr(self._ctx, "is_tui", False))
+                    ),
+                )
             else:
                 try:
                     await cleanup()
