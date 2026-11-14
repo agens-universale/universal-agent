@@ -141,6 +141,32 @@ async def test_open_mounts_tail_only(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_open_tall_tail_mounts_no_chunk(tmp_path):
+    """Хвост выше двух экранов: догрузка открытия решает по высоте после
+    раскладки — ни одного куска сверху (боевые числа политики). Открытие,
+    как из списка сессий: хвост монтируется под другим экраном, раскладка
+    ленты — только когда экран сессии снова наверху."""
+    from textual.screen import Screen
+
+    _write_turns(tmp_path, 60, calls=False)
+    async with _app(tmp_path).run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        await pilot.app.push_screen(Screen())
+        await pilot.pause()
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause(0.3)
+        pilot.app.pop_screen()
+        await pilot.pause()
+        tail = policy.tail_turns(
+            scr._window_estimates(scr._window_model()), policy.TAIL_MIN
+        )
+        await _filled(pilot, scr)
+        trace = _trace(scr)
+        assert trace.max_scroll_y >= 2 * trace.container_size.height
+        assert scr._window_first == tail.start
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("small_window")
 async def test_open_then_scroll_reveals_history(tmp_path):
     _write_turns(tmp_path)
@@ -155,6 +181,33 @@ async def test_open_then_scroll_reveals_history(tmp_path):
             await pilot.pause(0.1)
         assert scr._window_first == 0
         assert _replies(scr) == [f"запрос {i}" for i in range(TURNS)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("small_window")
+async def test_prepend_at_top_keeps_reading_row(tmp_path, monkeypatch):
+    """Лента в самом верху (видна шапка начала сессии над окном): кусок
+    сверху встаёт под шапку, а на месте остаётся строка, которую читает
+    пользователь, — прокрутка сдвигается на высоту куска и цепочки кусков
+    нет."""
+    _write_turns(tmp_path)
+    async with _app(tmp_path).run_test(size=_SIZE) as pilot:
+        scr = await _open(pilot)
+        await _filled(pilot, scr)
+        trace = _trace(scr)
+        monkeypatch.setattr(scr, "_window_prefetch", lambda: None)
+        await _user_scroll(pilot, scr, 0)
+        assert scr._stick_bottom is False
+        assert trace.scroll_y == 0
+        row = scr._window_top()
+        at = row.region.y
+        first = scr._window_first
+        assert scr._window_prepend(focus=False)
+        await wait_until(pilot, lambda: not scr._window_busy, "встал")
+        await pilot.pause()
+        assert scr._window_first < first
+        assert trace.scroll_y > 0
+        assert row.region.y == at
 
 
 async def _dump_open(tmp_path, monkeypatch, tail_min: int):

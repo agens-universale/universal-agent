@@ -111,7 +111,8 @@ class TraceWindowMixin:
         turns = policy.tail_turns(estimates, policy.TAIL_MIN)
         self._window_first = turns.start
         refs = self._window_render(turns, before=None)
-        self.call_after_refresh(self._window_fill)
+        # Догрузка решает по высоте разложенного хвоста.
+        self._window_feed().call_after_layout(self._window_fill)
         return refs
 
     def _window_render(
@@ -158,7 +159,8 @@ class TraceWindowMixin:
         """Часть открытия: хвост по оценке мог не заполнить ленту (блоки
         свёрнуты, ходы короткие) — тогда прокрутить нельзя и история выше
         недостижима. Пока ленте не хватает запаса ``PREFETCH_SCREENS``,
-        кусок сверху домонтируется и у низа: якорь держит вид."""
+        кусок сверху домонтируется и у низа: якорь держит вид. Решает по
+        высоте после раскладки хвоста."""
         if (
             self._window_busy
             or self._window_first <= 0
@@ -186,7 +188,7 @@ class TraceWindowMixin:
         if not turns:
             return False
         feed = self._window_feed()
-        feed.hold_first_visible(feed.first_visible())
+        feed.hold_first_visible(self._window_reading_row())
         refs = self._window_render(turns, before=self._window_top())
         self._window_first = turns.start
         self._window_adopt_chunk(refs)
@@ -217,6 +219,11 @@ class TraceWindowMixin:
                 events[-1].focus()
         if self._window_trim_due and self._window_stuck:
             self._window_on_bottom()
+        if self._stick_bottom:
+            # Лента выросла у низа (догрузка открытия): низ — заново и
+            # запомнен, иначе уход вверх меряется от прежнего низа и
+            # прилипание не снимается.
+            self._scroll_trace_end()
         self.call_after_refresh(self._window_prefetch)
         self.call_after_refresh(self._window_fill)
 
@@ -224,6 +231,24 @@ class TraceWindowMixin:
         """Первый виджет окна в ленте."""
         heads = self._window_heads
         return heads[min(heads)] if heads else None
+
+    def _window_reading_row(self) -> Widget | None:
+        """Строка, которую держит якорь: первая видимая. Видимое выше окна
+        (шапка начала сессии) — не строка чтения: кусок встаёт между ним и
+        окном, держится первая строка окна, иначе содержимое под шапкой
+        уезжает, а лента остаётся у верха — и следующий кусок, и так до
+        начала истории."""
+        feed = self._window_feed()
+        row, top = feed.first_visible(), self._window_top()
+        if row is None or top is None or row is top:
+            return row
+        children = list(feed.children)
+        above = (
+            row in children
+            and top in children
+            and children.index(row) < children.index(top)
+        )
+        return top if above else row
 
     # ---- ужатие у низа ---------------------------------------------------
 
@@ -344,7 +369,7 @@ class TraceWindowMixin:
             return
         feed = self._window_feed()
         feed.hold_first_visible(
-            None if self._stick_bottom else feed.first_visible()
+            None if self._stick_bottom else self._window_reading_row()
         )
         self._window_prefetch()
         # Лента стала ниже запаса (свёртка, снятие) — догрузить сверху.

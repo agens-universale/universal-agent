@@ -120,6 +120,8 @@ class AnchoredScroll(VerticalScroll):
     # прежние места при следующей).
     _held: Widget | None = None
     _arranged = None
+    # Ждут следующей полной раскладки (`call_after_layout`).
+    _after_layout: tuple[Callable[[], None], ...] = ()
 
     def arrange(self, size: Size, optimal: bool = False):
         result = super().arrange(size, optimal)
@@ -129,6 +131,9 @@ class AnchoredScroll(VerticalScroll):
             previous, self._arranged = self._arranged, result
             if previous is not None and previous is not result:
                 self._keep_held_row(previous, result, size)
+            pending, self._after_layout = self._after_layout, ()
+            for callback in pending:
+                self.call_later(callback)
         return result
 
     def hold_first_visible(self, widget: Widget | None) -> None:
@@ -137,6 +142,15 @@ class AnchoredScroll(VerticalScroll):
         смещение (домонтирование сверху, смена ширины). ``None`` — не
         держать."""
         self._held = widget
+
+    def call_after_layout(self, callback: Callable[[], None]) -> None:
+        """``callback`` — после следующей полной раскладки ленты: решения
+        по её высоте (под чужим экраном раскладки нет — ждёт). Иная версия
+        Textual — после кадра."""
+        if not textual_is_patched_version():
+            self.call_after_refresh(callback)
+            return
+        self._after_layout = (*self._after_layout, callback)
 
     def first_visible(self) -> Widget | None:
         """Первый виджет, видимый в окне ленты, по последней раскладке —

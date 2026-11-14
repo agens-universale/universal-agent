@@ -13,6 +13,11 @@ from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.history_model import HistoryInputs, build_history
 
 TURNS = 30
+# Боевые числа политики — до подмены фикстурой.
+_POLICY = {
+    name: getattr(policy, name)
+    for name in ("TAIL_MIN", "CHUNK_MIN", "WINDOW_LIMIT", "ITEM_WIDGETS")
+}
 
 
 @pytest.fixture(autouse=True)
@@ -21,18 +26,19 @@ def _small_window(monkeypatch):
     monkeypatch.setattr(policy, "TAIL_MIN", 30)
     monkeypatch.setattr(policy, "CHUNK_MIN", 24)
     monkeypatch.setattr(policy, "WINDOW_LIMIT", 80)
-    monkeypatch.setattr(policy, "ITEM_WIDGETS", 6)
 
 
 def _msg(mid, role, content):
     return {"payload": {"id": mid, "role": role, "content": content}}
 
 
-def _segments(tag: str = "запрос", turns: int = TURNS) -> list[dict]:
+def _segments(
+    tag: str = "запрос", turns: int = TURNS, lines: int = 10
+) -> list[dict]:
     msgs = []
     for i in range(turns):
         msgs.append(_msg(f"u{i}", "user", f"{tag} {i}"))
-        answer = "\n".join(f"ответ {i} строка {k}" for k in range(10))
+        answer = "\n".join(f"ответ {i} строка {k}" for k in range(lines))
         msgs.append(_msg(f"a{i}", "assistant", answer))
     return [{"messages": msgs, "index": 0, "compacted_by": None}]
 
@@ -115,6 +121,43 @@ async def test_preview_mounts_tail_then_history_on_scroll(tmp_path):
         )
         await _read_to_start(pilot, screen)
         assert _replies(screen) == [f"запрос {i}" for i in range(TURNS)]
+
+
+@pytest.mark.asyncio
+async def test_wheel_up_after_open_fill_reaches_history(tmp_path, monkeypatch):
+    """Короткий хвост (боевые числа политики): догрузка открытия растит
+    ленту у низа. Колесо вверх снимает прилипание к низу и домонтирует
+    кусок сверху — история выше хвоста достижима."""
+    from textual import events
+
+    for name, value in _POLICY.items():
+        monkeypatch.setattr(policy, name, value)
+    # Хвост ниже одного экрана: лента прижата к низу на нуле.
+    async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
+        from gc_tui.screens.preview import PreviewScreen
+
+        screen = PreviewScreen(
+            segments=_segments(turns=200, lines=1),
+            thread_id="abc12345",
+            project_path="/p",
+        )
+        await pilot.app.push_screen(screen)
+        await _filled(pilot, screen)
+        trace = _trace(screen)
+        tail = policy.tail_turns(
+            screen._window_estimates(screen._model), policy.TAIL_MIN
+        )
+        assert screen._window_first < tail.start
+        first = screen._window_first
+        for _ in range(40):
+            trace.post_message(
+                events.MouseScrollUp(trace, 5, 5, 0, 0, 0, False, False, False)
+            )
+            await pilot.pause(0.02)
+        await wait_until(
+            pilot, lambda: screen._window_first < first, "кусок сверху"
+        )
+        assert screen._stick_bottom is False
 
 
 @pytest.mark.asyncio
