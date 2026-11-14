@@ -21,6 +21,7 @@ def _small_window(monkeypatch):
     monkeypatch.setattr(policy, "TAIL_MIN", 30)
     monkeypatch.setattr(policy, "CHUNK_MIN", 24)
     monkeypatch.setattr(policy, "WINDOW_LIMIT", 80)
+    monkeypatch.setattr(policy, "ITEM_WIDGETS", 6)
 
 
 def _msg(mid, role, content):
