@@ -556,16 +556,10 @@ class SessionsScreen(Screen):
         on_ready,
         withdrawn: set[str] | frozenset = frozenset(),
     ) -> None:
-        card = self._selected_card()
-        task = self._selected_task()
         self._opening = (thread_id, kind)
-        if card is not None and task is not None:
+        if self._selected_card() is not None:
             self._indicator = OpenIndicator(
-                _OPEN_LABELS[kind],
-                host=self,
-                paint=lambda frame: card.update(
-                    self._card_text(task, selected=True, opening=frame)
-                ),
+                _OPEN_LABELS[kind], host=self, paint=self._paint_opening
             )
         self._loader.start(
             thread_id,
@@ -580,6 +574,14 @@ class SessionsScreen(Screen):
         остаётся."""
         self._stop_indicator()
         self.app.notify(f"Не удалось открыть: {exc}", severity="error")
+
+    def _paint_opening(self, frame) -> None:
+        """Кадр индикатора — в карточку выбранной сессии, какой она стоит
+        сейчас: список мог перерисоваться (смена выбора отменяет
+        открытие)."""
+        card, task = self._selected_card(), self._selected_task()
+        if card is not None and task is not None:
+            card.update(self._card_text(task, selected=True, opening=frame))
 
     def _selected_card(self) -> Optional[Static]:
         cards = self.query("#sessions-list .card.selected")

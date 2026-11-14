@@ -100,6 +100,25 @@ async def test_load_failure_keeps_list_and_clears_indicator(
 
 
 @pytest.mark.asyncio
+async def test_indicator_survives_list_redraw(tmp_path, gate):
+    """Список перерисован во время открытия (обновление времени и т. п.):
+    индикатор рисуется в новую карточку выбранной сессии."""
+    write_threads(tmp_path)
+    async with make_app(tmp_path).run_test() as pilot:
+        pilot.app.screen.attach_active_task(A, is_resume=True)
+        lst = await open_list(pilot, tmp_path)
+        gate.close()
+        await pilot.press("enter")
+        await pilot.pause(0.7)
+        assert f"• {LABEL}" in card_text(lst)
+        lst._render_list()
+        await pilot.pause(0.3)
+        assert f"• {LABEL}" in card_text(lst)
+        gate.open()
+        await settle(pilot)
+
+
+@pytest.mark.asyncio
 async def test_fast_open_shows_nothing(tmp_path):
     write_threads(tmp_path)
     async with make_app(tmp_path).run_test() as pilot:
