@@ -44,6 +44,7 @@ import asyncio
 import logging
 from bisect import bisect_right
 from collections.abc import Callable
+from functools import cache
 
 import textual
 from textual import selection
@@ -67,8 +68,12 @@ _PAINT_HOLDS: set[asyncio.Task] = set()
 _log = logging.getLogger(__name__)
 
 
+@cache
 def textual_is_patched_version() -> bool:
-    """Установлена ли версия Textual, под которую написан патч."""
+    """Установлена ли версия Textual, под которую написан патч. Ответ
+    запоминается: модуль Textual на каждое обращение к ``__version__``
+    разбирает METADATA пакета, а проверка зовётся на каждую строку ленты.
+    Подмена версии (тесты) — со сбросом ``cache_clear()``."""
     return textual.__version__ == PATCHED_TEXTUAL
 
 

@@ -31,6 +31,21 @@ from gc_tui.textual_compat import (
 
 
 @pytest.fixture(autouse=True)
+def _fresh_version_check():
+    """Проверка версии запоминает ответ: сброс до и после каждого теста."""
+    check = textual_compat.textual_is_patched_version
+    check.cache_clear()
+    yield
+    check.cache_clear()
+
+
+def _other_version(monkeypatch) -> None:
+    """Иная версия Textual — с той же минуты, и для запомненной проверки."""
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    textual_compat.textual_is_patched_version.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _pilot_mouse_deltas(monkeypatch):
     """Пилот шлёт движения мыши без сдвига, терминал — со сдвигом от
     прошлой точки: без него не отличить вертикальное движение от
@@ -49,6 +64,27 @@ def _pilot_mouse_deltas(monkeypatch):
         return out
 
     monkeypatch.setattr(pilot, "_get_mouse_message_arguments", with_deltas)
+
+
+def test_version_check_reads_version_once(monkeypatch):
+    """Модуль Textual на каждое обращение к `__version__` разбирает
+    METADATA пакета; проверка зовётся на каждую строку ленты — версия
+    читается один раз."""
+    import importlib.metadata
+
+    reads = []
+    real = importlib.metadata.version
+
+    def version(name):
+        reads.append(name)
+        return real(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    if "__version__" in vars(textual):
+        monkeypatch.delattr(textual, "__version__")
+    assert textual_compat.textual_is_patched_version() is True
+    assert textual_compat.textual_is_patched_version() is True
+    assert len(reads) <= 1
 
 
 def test_textual_version_guard():
@@ -128,7 +164,7 @@ def test_other_version_not_patched(monkeypatch, caplog):
     monkeypatch.setattr(
         selection.SelectStart, "pointer_start_offset", original
     )
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert apply_textual_patches() is False
     assert selection.SelectStart.pointer_start_offset is original
     assert "пересмотреть" in caplog.text
@@ -146,7 +182,7 @@ def test_other_version_without_private_module_imports(monkeypatch):
         monkeypatch.setattr(gc_tui, name, getattr(gc_tui, name))
         monkeypatch.delitem(sys.modules, f"gc_tui.{name}")
     monkeypatch.setitem(sys.modules, "textual._auto_scroll", None)
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     importlib.import_module("gc_tui.app")
     fresh = importlib.import_module("gc_tui.textual_compat")
     assert fresh.apply_textual_patches() is False
@@ -183,7 +219,7 @@ async def test_anchored_scroll_not_negative():
 async def test_other_version_anchored_scroll_is_plain_anchor(monkeypatch):
     """На чужой версии Textual поправки якоря не ставятся: лента ведёт
     себя как обычный якорь Textual (здесь — его прокрутка в минус)."""
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert await _anchored_scroll_y() < 0
 
 
@@ -192,7 +228,7 @@ def test_other_version_scroll_skips_private_anchor_state(monkeypatch):
     его может не быть, и тогда падала бы каждая прокрутка ленты."""
     from textual.widget import Widget
 
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     scroll = textual_compat.AnchoredScroll()
     del scroll._anchored, scroll._anchor_released
 
@@ -255,7 +291,7 @@ async def test_anchor_layout_repaints_scrollbar_after_stale_frame():
 @pytest.mark.asyncio
 async def test_other_version_anchored_arrange_is_plain(monkeypatch):
     """На чужой версии раскладка якорную прокрутку не считает."""
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert await _tall_anchor_y() == 0
 
 
@@ -281,7 +317,7 @@ async def test_watch_selecting_reports_start_and_end():
 
 @pytest.mark.asyncio
 async def test_other_version_watch_selecting_off(monkeypatch):
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert await _selecting_seen() == (False, [])
 
 
@@ -363,7 +399,7 @@ async def test_drag_below_scrolls_to_end_and_stops():
 async def test_other_version_no_drag_below(monkeypatch):
     app = _BelowScreenApp()
     async with app.run_test(size=(40, 30)) as pilot:
-        monkeypatch.setattr(textual, "__version__", "9.0.0")
+        _other_version(monkeypatch)
         await pilot.mouse_down("#t", offset=(2, 2))
         await pilot.hover("#t", offset=(5, 10))
         await pilot.hover("#f", offset=(2, 1))
@@ -621,7 +657,7 @@ async def test_other_version_trace_screen_keeps_stock_auto_scroll(
         return stock(self, *args, **kwargs)
 
     monkeypatch.setattr(Screen, "_check_auto_scroll", recorded)
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     async with _trace_app(tmp_path, "sel4").run_test(size=(80, 24)) as pilot:
         scr = await _tall_trace(pilot, "sel4")
         assert scr._check_auto_scroll.__func__ is recorded
@@ -765,7 +801,7 @@ def test_static_markup_reads_flag():
 
 
 def test_other_version_static_markup_is_on(monkeypatch):
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert textual_compat.static_markup(Static(markup=False)) is True
 
 
@@ -845,7 +881,7 @@ async def test_hold_off_and_anchored_keep_textual_behaviour():
 
 @pytest.mark.asyncio
 async def test_other_version_hold_is_off(monkeypatch):
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     app = _Held()
     async with app.run_test(size=(80, 20)) as pilot:
         scroll = app.query_one("#a")
