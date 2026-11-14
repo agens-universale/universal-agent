@@ -557,7 +557,4 @@ def _fresh_outcome_index(model: HistoryModel) -> int | None:
     хода, если после него не началась реплика."""
     if model.last_turn_outcome is None or model.outcome_superseded:
         return None
-    for i in range(len(model.items) - 1, -1, -1):
-        if model.items[i].kind == "outcome":
-            return i
-    return None
+    return model.last_outcome_index()

@@ -96,6 +96,7 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
+from gc_tui.screens.trace_window import TraceWindowMixin
 from gc_tui.services import image_hints, image_paste, model_sign, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.block_edits import (
@@ -136,6 +137,7 @@ from gc_tui.services.history_model import (
     HistoryModel,
     build_history,
 )
+from gc_tui.services.history_render import ChunkOptions, ChunkRefs
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
 from gc_tui.services.keyboard_layout import swap_layout
@@ -150,6 +152,7 @@ from gc_tui.services.model_picker import (
     model_choice_refusal,
     model_name,
 )
+from gc_tui.services.nested_trace import NestedSource
 from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
@@ -184,7 +187,6 @@ from gc_tui.services.subagent_sidecar_mapper import (
     apply_sidecar_nested_actions,
     nested_raw_texts,
     nested_result_event,
-    plan_sidecar_nested_actions,
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
 )
@@ -218,7 +220,6 @@ from gc_tui.services.trace_render import (
     tool_caption,
 )
 from gc_tui.services.trace_retention import (
-    filter_sidecar_to_parents,
     is_light_payload,
     nested_call_parent_id,
     parent_outside_retention,
@@ -303,6 +304,16 @@ _log = logging.getLogger(__name__)
 _DIALOG_CONTINUATION_KINDS = frozenset(
     {"user", "agent", "call", "result", "error", "error_msg"}
 )
+
+
+def _answers_question(ev, call_id: Optional[str]) -> bool:
+    """Событие — ответ на вопрос агента ``call_id`` (и пустой: «без
+    ответа»); у ответа без call_id — на любой."""
+    return (
+        ev.tool_name == "ask_human"
+        and ev.kind in ("user", "system")
+        and (not ev.call_id or ev.call_id == call_id)
+    )
 
 
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
@@ -560,7 +571,7 @@ class _NestedBlockHost:
         )
 
 
-class TraceScreen(TraceFollowMixin, Screen):
+class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
     # Ctrl+A — select-all в #cmdinput (CommandTextArea); git add всего — только на /diff.
@@ -634,6 +645,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         # исполнители моделей — по уровню (`""` — верхний).
         self._call_timers = CallTimers()
         self._block_views = BlockViews()
+        # Виды блоков ходов, нарисованных отрисовщиком кусков (и их
+        # вложенных уровней), — только маршрут раскрытия: итог хода и
+        # живые уровни их не трогают.
+        self._history_views = BlockViews()
+        # Узел вложенного трейса открытой сессии (§5.9).
+        self._nested_source: NestedSource | None = None
         # Nested progress под subagent_*: live sink + reopen из data_subagents_*.
         self._subagent_progress = SubagentProgressConsumer()
         self._nested_tool_rows: dict[
@@ -943,6 +960,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._refresh_footer()  # адаптивная вёрстка usage (стек сессии) под новую ширину
         self._sync_chrome_caps()  # потолки хрома под новую высоту экрана
         self.call_after_refresh(self._refresh_trace_overlays)
+        # Выше экран — смонтированного может не хватить на запас окна.
+        self.call_after_refresh(self._window_fill)
 
     def on_click(self, event: events.Click) -> None:
         """Клик в ЛЮБОЙ части трейса → фокус на #trace, чтобы колесо/стрелки/PgUp-
@@ -2308,6 +2327,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._active_calls.clear()
         self._call_timers.clear()
         self._block_views.clear()
+        self._history_views.clear()
         self._subagent_progress.reset()
         self._nested_tool_rows.clear()
         self._nested_widgets_by_parent.clear()
@@ -2415,17 +2435,52 @@ class TraceScreen(TraceFollowMixin, Screen):
     def attach_active_task(
         self, task_id: str, *, is_resume: bool = False
     ) -> bool:
-        """Attach a thread for polling. Initial state loads via read_all_events.
+        """Attach a thread for polling: история одним чтением — в модель и
+        в ленту (`open_thread_with_history`).
 
         is_resume=True (переключение/возобновление сессии через пикер): промпт
         заголовка АВТОРИТЕТНО берётся из стора (даже если None — у пустой сессии).
         is_resume=False (auto-create после send): не затираем только что
         отправленный _resumed_prompt, если стор ещё не успел записать сообщение.
 
+        Модель строится после настроек сессии: её входы (служебные поля
+        схем) — сессионные.
+
         Returns False если сессия занята другим TUI (не attach).
         """
         prev = self._active_task_id
         withdrawn = self._withdrawn_in(task_id)
+        if not self._enter_thread(task_id, is_resume=is_resume):
+            return False
+        segments, cursor = self._store.read_history(task_id)
+        history = build_history(
+            segments, inputs=self._history_inputs(), withdrawn=withdrawn
+        )
+        self._show_thread(task_id, history, cursor, prev, is_resume=is_resume)
+        return True
+
+    def open_thread_with_history(
+        self,
+        task_id: str,
+        history: HistoryModel,
+        cursor: TaskCursor,
+        *,
+        is_resume: bool,
+    ) -> bool:
+        """Открыть сессию с готовой моделью истории — синхронно (§5.7):
+        замок, сброс, настройки сессии, хвост окна, засев живого
+        состояния, шапка и футер. Состояния «сессия открыта, а история
+        ещё грузится» нет. False — сессия занята другим TUI."""
+        prev = self._active_task_id
+        if not self._enter_thread(task_id, is_resume=is_resume):
+            return False
+        self._show_thread(task_id, history, cursor, prev, is_resume=is_resume)
+        return True
+
+    def _enter_thread(self, task_id: str, *, is_resume: bool) -> bool:
+        """Начало открытия: замок, сброс состояния прежнего треда,
+        настройки сессии, пустая лента. False — сессия занята."""
+        prev = self._active_task_id
         if not self._session_lock_acquire(task_id):
             return False
         if prev and prev != task_id:
@@ -2470,8 +2525,22 @@ class TraceScreen(TraceFollowMixin, Screen):
         # session A → session B (через /sessions) трейсы склеиваются
         # (виджеты A остаются, B дорисовывается поверх).
         self._clear_trace()
-        self._open_history(task_id, withdrawn)
-        self._merge_sidecar_nested(task_id)
+        return True
+
+    def _show_thread(
+        self,
+        task_id: str,
+        history: HistoryModel,
+        cursor: TaskCursor,
+        prev: Optional[str],
+        *,
+        is_resume: bool,
+    ) -> None:
+        """Конец открытия: модель — в ленту окном, засев живого
+        состояния, шапка и футер."""
+        self._feed_history = history
+        self._cursor = cursor
+        self._show_history(task_id, remnant=True)
         self._refresh_header()
         self._refresh_footer()
         sp = self._session_last_prompt()
@@ -2497,7 +2566,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # баннер для уже отвеченного вопроса (его output суммаризован) — см. helper.
         # Висячий вопрос (реально последний, без живого агента) → remnant с меткой.
         self._reconcile_ask_human_after_render(allow_remnant=True)
-        return True
 
     def on_unmount(self) -> None:
         """App exit / снятие экрана — отпустить lock удерживаемого tid и закрыть сеанс
@@ -2648,14 +2716,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             message_id=message_id,
         )
 
-    def _open_history(
-        self, task_id: str, withdrawn: set[str] | frozenset
-    ) -> None:
-        """История треда одним чтением (сегменты и курсор из одного
-        снимка) — в модель и в ленту."""
-        segments, self._cursor = self._store.read_history(task_id)
-        self._render_segments(segments, withdrawn=withdrawn)
-
     def _withdrawn_in(self, task_id: str) -> set[str]:
         """Реплики треда, снятые откатом: отметка модели открытого треда и
         заявки на удаление, ещё не исполненные."""
@@ -2679,22 +2739,71 @@ class TraceScreen(TraceFollowMixin, Screen):
         self,
         segments: list[dict],
         *,
+        task_id: str = "",
         withdrawn: set[str] | frozenset = frozenset(),
     ) -> None:
-        """Модель истории из ВСЕХ сегментов — и вся она в ленту (полный
-        трейс, маркер сжатия между сегментами; дедуп preserved-копий и
-        окно удержания — в построении модели)."""
+        """Модель истории из ВСЕХ сегментов (маркер сжатия между
+        сегментами; дедуп preserved-копий и окно удержания — в построении
+        модели) — в ленту окном. ``task_id`` — тред трассы субагентов."""
         self._feed_history = build_history(
             segments, inputs=self._history_inputs(), withdrawn=withdrawn
         )
-        self._render_history()
+        self._show_history(task_id, remnant=False)
 
-    def _render_history(self) -> None:
-        """Модель целиком — в ленту теми же виджетами, что живой путь
-        рисует запись за записью."""
+    def _show_history(self, task_id: str, *, remnant: bool) -> None:
+        """Модель истории — в ленту окном (§5.6, §5.7): хвост законченных
+        ходов — отрисовщиком кусков, незаконченный последний ход — живым
+        путём (его вызовы, вопрос и вложенное — живое состояние экрана);
+        засев живого состояния из ссылок куска и модели. ``remnant`` —
+        висячий вопрос истории помечается «прервано» (открытие)."""
         history = self._feed_history
-        replies = Counter(history.reply_points)
-        for i, item in enumerate(history.items):
+        self._nested_source = self._history_nested(task_id)
+        open_turn = history.open_turn()
+        stop = history.turn_count() if open_turn is None else open_turn
+        refs = self._window_mount_tail(stop)
+        self._adopt_history_refs(refs)
+        self._seed_fresh_line(refs.fresh_turn_line)
+        live_from = self._live_items_start(stop)
+        self._seed_from_history(live_from)
+        self._draw_live_items(live_from)
+        self._merge_live_turn_nested()
+        if remnant:
+            self._interrupt_history_question(stop)
+
+    def _history_nested(self, task_id: str) -> NestedSource:
+        """Узел вложенного трейса треда: трасса читается по требованию,
+        родители — субагенты модели в окне удержания."""
+
+        def read() -> list[dict]:
+            if self._store is None or not task_id:
+                return []
+            return self._store.read_subagent_trace(task_id)
+
+        return NestedSource(
+            read,
+            window_parent_ids=lambda: subagent_parent_ids_from_events(
+                self._feed_history.events()
+            ),
+            root=self._current_cwd(),
+            injected=self._injected_fields(),
+        )
+
+    def _live_items_start(self, stop: int) -> int:
+        """Первый элемент модели, который рисует живой путь: начало хода
+        ``stop``; ходов нет — все элементы, все ходы законченные — ни
+        одного."""
+        history = self._feed_history
+        if stop < history.turn_count():
+            return history.turn_starts[stop]
+        return len(history.items) if history.turn_starts else 0
+
+    def _draw_live_items(self, start: int) -> None:
+        """Элементы модели с ``start`` — в ленту теми же виджетами, что
+        живой путь рисует запись за записью."""
+        history = self._feed_history
+        replies = Counter(p for p in history.reply_points if p >= start)
+        for i in range(start, len(history.items)):
+            item = history.items[i]
             self._settle_for_replies(replies[i])
             if item.kind == "model_choice":
                 self._restore_model_mark(item.side)
@@ -2706,6 +2815,134 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._draw_event(item.event, live=False)
         # Повтор реплики последней записью — тоже начало хода.
         self._settle_for_replies(replies[len(history.items)])
+
+    # ---- окно ленты (§5.3) -----------------------------------------------
+
+    def _window_feed(self):
+        return self.query_one(_SEL_TRACE, VerticalScroll)
+
+    def _window_model(self) -> HistoryModel:
+        return self._feed_history
+
+    def _window_options(self) -> ChunkOptions:
+        mcp_tools, mcp_servers = self._mcp_tool_info()
+        return ChunkOptions(
+            focusable_compaction=True,
+            edits_lookup=self._edits_lookup_for_thread(),
+            diff_preview=self._trace_diff_preview_lines(),
+            expanded_turns=self._replay_expanded_turns(),
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
+            model_slots=self._footer_slots(),
+            timers=self._call_timers,
+            plan_accepted=self._plan_panel_accepted,
+        )
+
+    def _window_nested(self) -> NestedSource | None:
+        return self._nested_source
+
+    def _window_adopt_chunk(self, refs: ChunkRefs) -> None:
+        self._adopt_history_refs(refs)
+
+    def _adopt_history_refs(self, refs: ChunkRefs) -> None:
+        """Ссылки куска истории — в реестры экрана: виды блоков (маршрут
+        раскрытия), строки вопросов, маркеры и тела сводок сжатия."""
+        self._history_views.update(refs.block_views)
+        self._question_rows.update(refs.question_rows)
+        self._summary_marker_widgets.update(refs.summary_markers)
+        self._summary_body_widgets.update(refs.summary_bodies)
+
+    def _seed_fresh_line(self, line: Optional[TurnLine]) -> None:
+        """Свежая строка итога из куска — ссылкой экрана; пока стоит бар
+        хода (пересборка посреди прогона), она ждёт за ним, как вживую."""
+        if line is None:
+            return
+        self._fresh_line = line
+        if self._bar_wanted():
+            line.hold()
+            self._held_reveals.append(line.reveal)
+
+    def _seed_from_history(self, stop: int) -> None:
+        """Состояние, которое живой путь берёт из событий истории, — по
+        элементам модели до ``stop`` (их рисует отрисовщик кусков):
+        вид последнего события для индикатора и имя сессии из
+        финализатора (`_seed_or_update_task_from_submit`)."""
+        events = [
+            it.event
+            for it in self._feed_history.items[:stop]
+            if it.kind == "event" and it.event is not None
+        ]
+        if not events:
+            return
+        last = events[-1]
+        finalized = (
+            last.kind == "agent" and last.tool_name == "submit_solution"
+        )
+        self._last_event_kind = "_finalized" if finalized else last.kind
+        submits = [
+            ev
+            for ev in events
+            if ev.kind == "agent" and ev.tool_name == "submit_solution"
+        ]
+        # Первый финализатор сеет имя; дальше имя меняет только ход с
+        # работой — тогда каждый перезаписывает, итог — последнего.
+        if submits:
+            self._seed_or_update_task_from_submit(submits[0])
+        if len(submits) > 1 and self._live_turn_tool_calls > 0:
+            self._seed_or_update_task_from_submit(submits[-1])
+
+    def _merge_live_turn_nested(self) -> None:
+        """Вложенный трейс субагентов незаконченного хода (его рисует
+        живой путь): действия — от узла вложенного трейса, монтаж — живым
+        путём, в реестры экрана: живые события прогресса продолжают те же
+        уровни."""
+        source = self._nested_source
+        parents = set(self._subagent_parent_rows)
+        if source is None or not parents:
+            return
+        actions = source.actions_for(parents)
+        if not actions:
+            return
+        apply_sidecar_nested_actions(
+            actions,
+            mount_nested_tool=partial(self._mount_nested_tool, live=False),
+            finish_nested_tool=self._finish_nested_tool,
+            mount_nested_prose=self._mount_nested_prose,
+            mount_nested_summary=self._mount_nested_child_summary,
+            mount_nested_user=self._mount_nested_user,
+            mount_nested_todo=self._mount_nested_todo,
+        )
+        # Исход хода родителя — уровням, домонтированным после записи итога.
+        self._block_views.settle_levels()
+
+    def _interrupt_history_question(self, stop: int) -> None:
+        """Последний вопрос агента в ходе, нарисованном отрисовщиком кусков
+        (там баннера нет): ответа нет, диалог не продолжился и живого
+        агента нет — «прервано» под его строкой, как сверка баннера при
+        открытии (`_reconcile_ask_human_after_render`)."""
+        from gc_tui.services.trace_render import (
+            QUESTION_INTERRUPTED,
+            note_question,
+        )
+
+        history = self._feed_history
+        events = history.events()
+        at = self._last_ask_human_index(events)
+        if at is None or history.turn_index_of(events[at].no) >= stop:
+            return
+        question, after = events[at], events[at + 1 :]
+        meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
+        if any(
+            _answers_question(ev, question.call_id) or ev.kind in meaningful
+            for ev in after
+        ):
+            return
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            return
+        row = self._question_rows.get(question.call_id or "")
+        if row is not None:
+            note_question(row, QUESTION_INTERRUPTED)
 
     def _settle_for_replies(self, count: int) -> None:
         """Реплики (и повторы preserved-копий) перед элементом — столько
@@ -3494,6 +3731,15 @@ class TraceScreen(TraceFollowMixin, Screen):
         отметкой в счётчике добавлений."""
         self._feed_appended += 1
         trace.mount(widget, **where)
+        self._note_turn_head(widget)
+
+    def _note_turn_head(self, widget) -> None:
+        """Виджет живого пути — первый виджет своего хода в окне (§5.3:
+        окно режет ленту по ходам; ход живого пути — последний в
+        модели)."""
+        turn = self._feed_history.turn_count() - 1
+        if turn >= 0:
+            self._window_heads.setdefault(turn, widget)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение
@@ -3559,6 +3805,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             return True
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         events_ = [w for w in trace.children if w.can_focus and w.display]
+        if key == "up" and events_ and current is events_[0]:
+            # Верхний край окна: кусок истории сверху и фокус на него.
+            self._window_edge_up()
+            return True
         step = -1 if key == "up" else 1
         at = events_.index(current) + step if current in events_ else -1
         if 0 <= at < len(events_):
@@ -3902,6 +4152,8 @@ class TraceScreen(TraceFollowMixin, Screen):
                     widget.set_state("normal")
                     self._top_blocks().queued_admitted()
                     widget.set_event_no(ev.no)
+                    # Реплика встала раньше, чем ядро открыло её ход.
+                    self._note_turn_head(widget)
                     # Картинки из треда — копии, закоммиченные ядром; у pending-реплики
                     # пути кармана процесса, который чистится на выходе (дизайн картинок §3).
                     if ev.attachments:
@@ -4224,9 +4476,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         end_turn(self._block_views, self._call_timers, outcome, settled=False)
 
     def on_block_toggle(self, message: BlockToggle) -> None:
-        """Раскрыть / свернуть блок; прокрутка — общая для лент (§9.3)."""
+        """Раскрыть / свернуть блок; прокрутка — общая для лент (§9.3).
+        Уровень живой ленты — в живые виды, иначе — в виды кусков
+        истории."""
         message.stop()
-        self._toggle_trace_block(self._block_views, message)
+        live = self._block_views
+        views = live if message.level in live else self._history_views
+        self._toggle_trace_block(views, message)
 
     def _drain_subagent_progress(self) -> None:
         """Слить live-события субагента из app-очереди и отрисовать nested."""
@@ -4264,38 +4520,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         return self._active_calls.get(
             parent_call_id
         ) or self._subagent_parent_rows.get(parent_call_id)
-
-    def _merge_sidecar_nested(self, task_id: str) -> None:
-        """После rebuild parent-трейса: nested только для parent'ов из окна.
-
-        read_subagent_trace читает файл целиком (разовый spike). В поля экрана
-        полный список не кладём: фильтр и локальные actions умирают с вызовом.
-        """
-        if self._store is None or not task_id:
-            return
-        records = self._store.read_subagent_trace(task_id)
-        if not records:
-            return
-        records = filter_sidecar_to_parents(
-            records,
-            subagent_parent_ids_from_events(self._feed_history.events()),
-        )
-        if not records:
-            return
-        actions = plan_sidecar_nested_actions(
-            records, root=self._current_cwd(), injected=self._injected_fields()
-        )
-        apply_sidecar_nested_actions(
-            actions,
-            mount_nested_tool=partial(self._mount_nested_tool, live=False),
-            finish_nested_tool=self._finish_nested_tool,
-            mount_nested_prose=self._mount_nested_prose,
-            mount_nested_summary=self._mount_nested_child_summary,
-            mount_nested_user=self._mount_nested_user,
-            mount_nested_todo=self._mount_nested_todo,
-        )
-        # Исход хода родителя — уровням, домонтированным после записи итога.
-        self._block_views.settle_levels()
 
     def _nested_blocks(self, parent_call_id: str) -> Optional[ToolBlocksView]:
         """Исполнитель блоков уровня субагента (ключ — строка `Agent`);
@@ -6720,8 +6944,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         withdrawn = self._withdrawn_in(tid)
         self._clear_trace()
         self._reset_render_state()
-        self._open_history(tid, withdrawn)
-        self._merge_sidecar_nested(tid)
+        segments, self._cursor = self._store.read_history(tid)
+        self._render_segments(segments, task_id=tid, withdrawn=withdrawn)
         # После компакции (stream_reset) баннер мог пере-монтироваться для уже
         # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
         self._reconcile_ask_human_after_render(allow_remnant=False)

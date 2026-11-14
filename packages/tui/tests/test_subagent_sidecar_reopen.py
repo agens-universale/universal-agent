@@ -247,8 +247,15 @@ async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
         assert scr.attach_active_task(tid, is_resume=True) is True
         await pilot.pause(0.3)
 
-        assert "call_sub_arch" in scr._subagent_parent_rows
-        nested = scr._nested_tool_rows.get("child_arch_1")
+        # Ход закончен — его рисует отрисовщик кусков с узлом вложенного
+        # трейса: строки в ленте, не в живых реестрах экрана.
+        from gc_tui.widgets.tool_call_row import ToolCallRow
+
+        rows = {
+            r.call_id: r for r in scr.query_one("#trace").query(ToolCallRow)
+        }
+        assert "call_sub_arch" in rows
+        nested = rows.get("child_arch_1")
         assert nested is not None
         assert nested._level == 1
         assert str(nested._render_content()).startswith("Find  ")

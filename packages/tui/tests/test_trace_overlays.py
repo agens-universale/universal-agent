@@ -609,9 +609,12 @@ async def test_click_on_detached_reply_is_ignored(tmp_path):
         first, _ = _replies(scr)
         await _scroll(pilot, scr, 30)
         await first.remove()
+        await pilot.pause()
+        # Снятие выше видимой строки держит её на месте (окно ленты, §5.3).
+        y = _trace(scr).scroll_offset.y
         scr.on_scroll_to_reply(ScrollToReply(first))
         await pilot.pause()
-        assert _trace(scr).scroll_offset.y == 30
+        assert _trace(scr).scroll_offset.y == y
 
 
 @pytest.mark.asyncio

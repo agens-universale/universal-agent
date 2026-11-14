@@ -356,8 +356,7 @@ async def test_render_segments_keeps_prose_and_lights_tools_outside_window(
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar())
-        scr._render_segments(_three_segments())
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(_three_segments(), task_id="t")
         await pilot.pause()
 
         texts = [r._text for r in scr.query(UserReplyContainer)]
@@ -452,8 +451,7 @@ async def test_stream_reset_rebuild_drops_former_window_tools(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar())
-        scr._render_segments(two)
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(two, task_id="t")
         await pilot.pause()
         _assert_tool_full(_event(scr, "call_old", "call"))
         assert "child_old" in {
@@ -462,8 +460,7 @@ async def test_stream_reset_rebuild_drops_former_window_tools(tmp_path):
 
         scr._clear_trace()
         scr._reset_render_state()
-        scr._render_segments(_three_segments())
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(_three_segments(), task_id="t")
         await pilot.pause()
 
         _assert_prose_full(scr)
@@ -594,8 +591,9 @@ async def test_preserved_id_in_window_keeps_first_row_full(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar_kept())
-        scr._render_segments(_preserved_subagent_segments(copy_in_window=True))
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(
+            _preserved_subagent_segments(copy_in_window=True), task_id="t"
+        )
         await pilot.pause()
 
         rows = [
@@ -637,9 +635,8 @@ async def test_preserved_id_outside_window_stays_light(tmp_path):
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar_kept())
         scr._render_segments(
-            _preserved_subagent_segments(copy_in_window=False)
+            _preserved_subagent_segments(copy_in_window=False), task_id="t"
         )
-        scr._merge_sidecar_nested("t")
         await pilot.pause()
 
         rows = [

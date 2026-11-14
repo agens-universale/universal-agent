@@ -182,8 +182,7 @@ async def _live_trace(pilot):
 
     scr = pilot.app.screen
     scr._store = _Store()
-    scr._render_segments(_SEGMENTS)
-    scr._merge_sidecar_nested("t")
+    scr._render_segments(_SEGMENTS, task_id="t")
     await pilot.pause()
     return scr.query_one("#trace", VerticalScroll)
 

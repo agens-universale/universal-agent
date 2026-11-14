@@ -279,6 +279,31 @@ async def test_only_last_turn_line_fresh():
 
 
 @pytest.mark.asyncio
+async def test_withdrawn_last_turn_falls_back_to_previous_line():
+    """Откат реплики последнего хода, чей итог уже в модели: итог и
+    свежая строка — прошлого хода (как `_close_undone_run` вживую)."""
+    from gc_core.persistence.turn_outcome import parse_turn_outcome
+    from gc_tui.widgets.turn_line import TurnLine
+
+    model = _model("model_change")
+    openers = [
+        parse_turn_outcome(it.side).opened_by
+        for it in model.items
+        if it.kind == "outcome"
+    ]
+    model.mark_withdrawn(openers[-1])
+    model.restore_outcome()
+    assert model.last_turn_outcome.opened_by == openers[-2]
+    async with _Feed().run_test(size=_SIZE) as pilot:
+        refs = render_model(_feed(pilot.app), model)
+        await pilot.pause()
+        lines = list(_feed(pilot.app).query(TurnLine))
+        assert [line.opened_by for line in lines] == openers[:-1]
+        assert refs.fresh_turn_line is lines[-1]
+        assert lines[-1].is_fresh
+
+
+@pytest.mark.asyncio
 async def test_levels_namespaced():
     from gc_tui.services.history_render import HISTORY_LEVEL_PREFIX
 

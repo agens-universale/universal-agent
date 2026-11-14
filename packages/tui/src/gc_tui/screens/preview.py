@@ -173,6 +173,7 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
 
     def on_resize(self, _event) -> None:
         self.call_after_refresh(self._refresh_trace_overlays)
+        self.call_after_refresh(self._window_fill)
 
     def _injected_fields(self) -> list[str]:
         """Служебные поля схем тулов (`agent.inject_tool_fields`); хост

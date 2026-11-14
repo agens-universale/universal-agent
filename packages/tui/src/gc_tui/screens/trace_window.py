@@ -83,9 +83,11 @@ class TraceWindowMixin:
 
     # ---- хвост и куски ---------------------------------------------------
 
-    def _window_mount_tail(self) -> ChunkRefs:
+    def _window_mount_tail(self, stop: int | None = None) -> ChunkRefs:
         """Новое окно: последние ходы на ``TAIL_MIN`` виджетов в конец
-        ленты. Прежнее поколение окна больше не действует."""
+        ленты. Прежнее поколение окна больше не действует. ``stop`` —
+        ходы от него рисует сам экран (незаконченный ход — живым путём);
+        None — хвост до конца модели."""
         self._window_gen += 1
         self._window_busy = False
         self._window_stuck = True
@@ -93,9 +95,8 @@ class TraceWindowMixin:
         self._window_heads = {}
         self._window_feed().hold_first_visible(None)
         model = self._window_model()
-        turns = policy.tail_turns(
-            self._window_estimates(model), policy.TAIL_MIN
-        )
+        estimates = self._window_estimates(model)[:stop]
+        turns = policy.tail_turns(estimates, policy.TAIL_MIN)
         self._window_first = turns.start
         refs = self._window_render(turns, before=None)
         self.call_after_refresh(self._window_fill)
@@ -232,6 +233,7 @@ class TraceWindowMixin:
         dropped = turns[: policy.drop_count(counts, excess)]
         if dropped:
             self._window_forget(range(self._window_first, dropped[-1] + 1))
+            self.call_after_refresh(self._window_fill)
 
     def _window_mounted_counts(self) -> tuple[list[int], list[int]]:
         """Смонтированные ходы с виджетами и число виджетов поддерева
@@ -281,6 +283,8 @@ class TraceWindowMixin:
             None if self._stick_bottom else feed.first_visible()
         )
         self._window_prefetch()
+        # Лента стала ниже запаса (свёртка, снятие) — догрузить сверху.
+        self._window_fill()
 
     def _sync_trace_anchor(self) -> None:
         """Смена липкости: вернулась к низу — ужатие окна."""

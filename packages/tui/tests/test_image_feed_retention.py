@@ -173,8 +173,7 @@ async def test_main_screen_keeps_images_of_a_segment_outside_the_window(
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _Store(_SIDECAR)
-        scr._render_segments(_segments(a1, a3))
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(_segments(a1, a3), task_id="t")
         await pilot.pause()
         replies = {r._text: r._images for r in scr.query(UserReplyContainer)}
         assert replies[f"{chip_text(1)} старое"] == (a1,)

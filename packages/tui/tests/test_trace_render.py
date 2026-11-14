@@ -551,6 +551,8 @@ def test_history_renders_todo_checklist():
     mounted = []
 
     class _FakeTarget:
+        children = ()  # хост-лента куска: головы ходов
+
         def mount(self, w):
             mounted.append(w)
 
@@ -602,6 +604,8 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     mounted = []
 
     class _Target:
+        children = ()  # хост-лента куска: головы ходов
+
         def mount(self, w, **kw):
             mounted.append(w)
 
@@ -636,6 +640,8 @@ def test_readonly_error_msg_finalizes_its_call_row():
     mounted = []
 
     class _Target:
+        children = ()  # хост-лента куска: головы ходов
+
         def mount(self, w, **kw):
             mounted.append(w)
 
@@ -674,6 +680,8 @@ def test_readonly_error_msg_without_call_row_still_shown():
     mounted = []
 
     class _Target:
+        children = ()  # хост-лента куска: головы ходов
+
         def mount(self, w, **kw):
             mounted.append(w)
 
@@ -761,6 +769,8 @@ def _readonly_orphan(kind: str):
     mounted = []
 
     class _Target:
+        children = ()  # хост-лента куска: головы ходов
+
         def mount(self, w, **kw):
             mounted.append(w)
 
@@ -860,6 +870,8 @@ def test_history_finish_after_reply_is_summary():
     mounted = []
 
     class _Target:
+        children = ()  # хост-лента куска: головы ходов
+
         def mount(self, w):
             mounted.append(w)
 

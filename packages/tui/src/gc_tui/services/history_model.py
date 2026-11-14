@@ -134,6 +134,32 @@ class HistoryModel:
                 return ev
         return None
 
+    def last_outcome_index(self) -> int | None:
+        """Индекс записи итога последнего хода: последняя запись итога,
+        чья реплика не снята откатом; таких нет — None."""
+        for i in range(len(self.items) - 1, -1, -1):
+            item = self.items[i]
+            if item.kind != "outcome":
+                continue
+            outcome = parse_turn_outcome(item.side)
+            if outcome is not None and outcome.opened_by not in self.withdrawn:
+                return i
+        return None
+
+    def open_turn(self) -> int | None:
+        """Последний ход, если он не закончен: после его последнего
+        события нет записи итога (ход идёт или оборван). Закончен или
+        ходов нет — None."""
+        if not self.turn_starts:
+            return None
+        last = len(self.turn_starts) - 1
+        for item in reversed(self.turn_items(last)):
+            if item.kind == "outcome":
+                return None
+            if item.kind != "model_choice":
+                return last
+        return last
+
     def is_withdrawn(self, payload: dict) -> bool:
         mid = payload.get("id")
         return mid is not None and mid in self.withdrawn
@@ -240,12 +266,16 @@ class HistoryModel:
     def mark_withdrawn(self, message_id: str) -> None:
         """Откат реплики: отметка постоянная — реплика не входит в модель
         ни пересборкой, ни хвостом, даже когда её записи в файле уже нет.
-        Запись итога её хода становится сиротой."""
+        Запись итога её хода становится сиротой: итог последнего хода —
+        снова прошлого."""
         self.withdrawn.add(message_id)
         self.rendered_ids.discard(message_id)
         last = self.last_turn_outcome
         if last is not None and last.opened_by == message_id:
-            self.last_turn_outcome = None
+            i = self.last_outcome_index()
+            self.last_turn_outcome = (
+                None if i is None else parse_turn_outcome(self.items[i].side)
+            )
 
     def apply_retention(self, window_ids: set[str] | frozenset) -> None:
         """Шаг сжатия сдвинул окно удержания: события частей вне окна
