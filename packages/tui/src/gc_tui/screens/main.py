@@ -260,6 +260,7 @@ from gc_tui.widgets.model_mark import (
     pins_to_bottom,
     restored_mark,
 )
+from gc_tui.widgets.open_indicator import open_indicator_text
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.respawn import respawn
 from gc_tui.widgets.start_header import StartHeader
@@ -296,6 +297,8 @@ _SEL_TRACE = "#trace"
 # высота постоянна — индикатор и нижний ряд (на нём плашка «в конец»).
 _BAR_TURN = "-turn"
 _BAR_HEIGHT = 2
+# Надпись бара, пока пересборка ленты ждёт кадра (§3.4).
+_REBUILD_LABEL = "обновляю ленту"
 # Нижний зазор ленты (`margin-bottom` #trace): в `region` ленты не входит.
 _TRACE_GAP = 1
 
@@ -773,6 +776,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # Память эфемерного ленты (§5.4): снятые ходы возвращаются с ней;
         # в ней же блоки bang для `! clear` / `! clear N`.
         self._ephemera = Ephemera()
+        # Надпись «обновляю ленту», пока пересборка ждёт кадра (§5.8).
+        self._rebuild_label: Optional[Static] = None
         # Идёт отрисовка элемента модели истории: смонтированное — не
         # эфемерное (`_note_ephemeral`).
         self._drawing_model = 0
@@ -7100,7 +7105,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self, before_record: Callable[[dict], None] | None = None
     ) -> None:
         """Дочитать и отрисовать хвост записей активного треда;
-        ``before_record`` — как у `_render_records`."""
+        ``before_record`` — как у `_render_records`. Пока ждёт
+        пересборка (`_schedule_rebuild`), тик пропускается."""
+        if self._rebuild_label is not None:
+            return
         if (
             self._store is None
             or self._active_task_id is None
@@ -7136,13 +7144,38 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._apply_compaction(tail.compaction, tail.next_cursor)
             return
         if tail.stream_reset:
-            self._rebuild_from_store()
+            self._schedule_rebuild()
             return
         self._cursor = tail.next_cursor
         self._render_records(
             tail.new_records, live=True, before_record=before_record
         )
         self._refresh_header()
+
+    def _schedule_rebuild(self) -> None:
+        """Пересборка ленты (§3.4, §5.8): сначала кадр с неподвижной
+        надписью «• обновляю ленту» в баре над вводом, затем сама
+        пересборка. Пока она ждёт, тик опроса хвоста пропускается — иначе
+        дописал бы в ленту, которую сейчас выбросят, негодным курсором."""
+        if self._rebuild_label is not None:
+            return
+        self._rebuild_label = Static(
+            open_indicator_text(_REBUILD_LABEL, 0), id="rebuild-label"
+        )
+        self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(self._rebuild_label)
+        self._sync_indicator_bar()
+        self.call_after_refresh(
+            self._rebuild_after_label, self._active_task_id
+        )
+
+    def _rebuild_after_label(self, task_id: Optional[str]) -> None:
+        """Кадр с надписью нарисован: пересборка, если сессия та же."""
+        label, self._rebuild_label = self._rebuild_label, None
+        if label is not None:
+            label.remove()
+        if task_id == self._active_task_id and self._store is not None:
+            self._rebuild_from_store()
+        self._sync_indicator_bar()
 
     def _rebuild_from_store(self) -> None:
         """Полная перерисовка трейса из хранилища: сброс потока и откат
@@ -7177,7 +7210,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._append_compaction_step(step)
         except Exception:
             _log.exception("шаг сжатия не применён, трейс перерисован")
-            self._rebuild_from_store()
+            self._schedule_rebuild()
             return
         self._refresh_header()
 
@@ -9957,6 +9990,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if self._active_task_id is None:
             return False
         if self._run_pending or self._stopping_alive():
+            return True
+        if self._rebuild_label is not None:
             return True
         runner = getattr(self.app, "active_runner", None)
         if runner is None or not runner.is_running():
