@@ -189,10 +189,16 @@ class PreviewScreen(
 
     def _window_forget_turn(self, turn: int) -> bool:
         """Снятый ход уходит и из маршрута раскрытия: уровень хода и
-        уровни субагентов (ключ — call_id строки `Agent`)."""
+        уровни субагентов (ключ — call_id строки `Agent`). Ход со строкой
+        в фокусе не снимается (§5.3)."""
         from gc_tui.services.history_render import history_level
 
         removed = self._window_turn_widgets(turn)
+        focused = self.focused
+        if focused is not None and set(focused.ancestors_with_self) & set(
+            removed
+        ):
+            return False
         if not super()._window_forget_turn(turn):
             return False
         views = self._blocks.views

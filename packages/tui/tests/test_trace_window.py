@@ -261,6 +261,25 @@ async def test_preview_shrinks_on_return_to_bottom(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_preview_shrink_spares_focused_turn(tmp_path):
+    """Фокус на строке старого хода: возврат к низу его не снимает —
+    ужатие останавливается на нём, фокус на месте."""
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        screen = await _preview(pilot)
+        await _read_to_start(pilot, screen)
+        await _filled(pilot, screen)
+        top = _focusable(screen)[0]
+        top.focus()
+        await pilot.pause()
+        screen._scroll_to_bottom()
+        await pilot.pause(0.3)
+        await _filled(pilot, screen)
+        assert screen._window_first == 0
+        assert top.is_attached
+        assert screen.focused is top
+
+
+@pytest.mark.asyncio
 async def test_prepend_keeps_first_visible_row(tmp_path, monkeypatch):
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         screen = await _preview(pilot)
