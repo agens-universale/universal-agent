@@ -219,6 +219,32 @@ async def test_trim_twice_restores_again(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ephemera_before_first_reply_restored(tmp_path, monkeypatch):
+    """Блок «!» в пустой сессии до первой реплики встаёт раньше любого
+    хода и в окно ни одного хода не входит: снятие первого хода его не
+    уносит, ход возвращается под него — порядок ленты прежний."""
+    records = _records()
+    with pinned_snapshot_clock(monkeypatch):
+        async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD)
+            scr._mount_bang_row(
+                prefix="[!] ", content="$ echo early", kind_class="line-bang"
+            )
+            scr._close_bang_block()
+            feed_live(scr, records, splits=(), sidecar=_sidecar())
+            before = await _settled_dump(pilot)
+            assert "echo early" in before[0][1]
+            assert scr.forget_turn(0)
+            await pilot.pause()
+            after = feed_dump(_trace(scr))
+            assert "echo early" in after[0][1]
+            assert "turn 1" not in after[1][1]
+            restore(scr, 0)
+            assert await _settled_dump(pilot) == before
+
+
+@pytest.mark.asyncio
 async def test_thoughts_follow_current_flag(tmp_path):
     """Снятая мысль возвращается по нынешнему флагу показа мыслей и
     дальше следует его сменам."""
