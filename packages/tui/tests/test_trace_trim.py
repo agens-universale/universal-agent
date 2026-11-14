@@ -327,3 +327,24 @@ async def test_never_trims_current_focused_queue_live_refs(tmp_path):
         await _feed(pilot, scr, 30, 60)
         assert queued.is_attached
         assert _window_turns(scr)[-1] == 59
+
+
+@pytest.mark.asyncio
+async def test_admitted_pending_reply_heads_its_turn(tmp_path):
+    """Отправленная реплика встаёт раньше, чем ядро открыло её ход, — в
+    окне прошлого хода; впуск записью ядра переносит её в начало своего
+    хода: снятие прошлого хода её не уносит."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _session(pilot)
+        await _feed(pilot, scr, 0, 4)
+        scr._pending_wire_cache["c1"] = "запрос 4"
+        reply = scr._mount_user_reply(
+            "запрос 4", state="pending", client_id="c1"
+        )
+        await pilot.pause()
+        assert reply in scr._window_turn_widgets(3)
+        await _feed(pilot, scr, 4, 5)
+        assert "c1" not in scr._pending_user_widgets
+        assert scr._window_heads[4] is reply
+        assert reply not in scr._window_turn_widgets(3)
+        assert scr._window_turn_widgets(4)[0] is reply
