@@ -160,6 +160,12 @@ class HistoryModel:
                 return last
         return last
 
+    def retention_start(self) -> int:
+        """Первый элемент окна удержания payload: элементы до него — в
+        частях треда, ушедших за окно (§3.5)."""
+        i = retention_window_start_index(len(self.segment_starts))
+        return self.segment_starts[i] if i > 0 else 0
+
     def is_withdrawn(self, payload: dict) -> bool:
         mid = payload.get("id")
         return mid is not None and mid in self.withdrawn

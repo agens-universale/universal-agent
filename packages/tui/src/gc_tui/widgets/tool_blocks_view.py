@@ -362,6 +362,42 @@ class ToolBlocksView:
             head = self._widgets.get(self.model.first_call(block) or "")
         return head
 
+    # --- снятие хода (память эфемерного, окно ленты) -----------------------
+
+    def holds(self, widgets: set) -> bool:
+        """Среди виджетов уровня есть один из ``widgets``."""
+        return any(w in widgets for w in self._widgets.values())
+
+    def view_state(self, widgets: set) -> dict[str, bool]:
+        """Снимок вида блоков, чьи строки среди снятых ``widgets``:
+        раскрытие и «дифф показан телом» (тело вернётся и тогда, когда по
+        возрасту хода дифф был бы компактным)."""
+        calls = {k for k, w in self._widgets.items() if w in widgets}
+        state = {
+            self._view_key(key): flag
+            for key, flag in self.model.view_state(calls).items()
+        }
+        for key, edit in self._edits.items():
+            if key in calls and edit.record is not None and not edit.compact:
+                state[diff_view_key(key)] = True
+        return state
+
+    def restore_view(self, view: Callable[[str], Optional[bool]]) -> None:
+        """Раскрытие из снимка вида (`view_state`)."""
+        decisions = self.model.restore_view(lambda k: view(self._view_key(k)))
+        self.apply(decisions)
+
+    def _view_key(self, key: str) -> str:
+        """Окно субагента — ключом его уровня (call_id родителя)."""
+        return f"window:{self.level}" if key == "window" else key
+
+    def forget(self, widgets: set) -> None:
+        """Снятые с ленты ``widgets`` уровень больше не держит; модель
+        блоков (текст, без виджетов) остаётся."""
+        for key in [k for k, w in self._widgets.items() if w in widgets]:
+            del self._widgets[key]
+        self._issued -= widgets
+
     def turn_ended(self, *, stopped: bool, settled: bool = False) -> None:
         """Запись итога хода; ``stopped`` — ход остановлен пользователем.
         ``settled`` — поток хода давно вышел (превью, уровень, домонтированный
@@ -466,8 +502,9 @@ class ToolBlocksView:
             target.focus()
 
     def _set_header(self, d: SetHeader) -> None:
-        header = self._widgets[d.block]
-        assert isinstance(header, ToolCallRow)
+        header = self._widgets.get(d.block)
+        if not isinstance(header, ToolCallRow):
+            return  # заголовок снят с ленты вместе с ходом
         header.set_header(d.word, glyph=d.glyph, tail=parts_text(d.tail))
 
     def _set_phrase(self, d: SetPhrase) -> None:
@@ -545,6 +582,11 @@ class ToolBlocksView:
                     phrase_key(d.block, OUTPUT_SLOT),
                 ),
             )
+
+
+def diff_view_key(call_id: str) -> str:
+    """Ключ снимка вида «дифф вызова показан телом»."""
+    return f"diff:{call_id}"
 
 
 def _last_call(model: ToolBlocks, block: str) -> Callable[[], Optional[str]]:

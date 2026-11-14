@@ -24,6 +24,7 @@ from gc_core.persistence.turn_outcome import parse_turn_outcome
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.think_text import think_rejected
 from gc_tui.services.tool_blocks import CallTimers, ToolBlocks
+from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS, anchor_key
 from gc_tui.services.trace_mapper import PROPOSE_PLAN_ID
 from gc_tui.services.trace_render import (
     QUESTION_UNANSWERED,
@@ -50,9 +51,11 @@ from gc_tui.widgets.model_mark import (
     drop_mark_before,
     restored_mark,
 )
+from gc_tui.widgets.thought_row import ThoughtRow
 from gc_tui.widgets.tool_blocks_view import (
     BlockViews,
     ToolBlocksView,
+    diff_view_key,
     end_turn,
 )
 
@@ -62,6 +65,7 @@ if TYPE_CHECKING:
 
     from gc_tui.models import TraceEvent
     from gc_tui.services.history_model import HistoryItem, HistoryModel
+    from gc_tui.services.trace_ephemera import Ephemera
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
 #: Пространство имён уровней блоков кусков: не пересекается ни с уровнем
@@ -116,16 +120,14 @@ class NestedSource(Protocol):
     ) -> list[Widget]: ...
 
 
-class Ephemera(Protocol):
-    """Память эфемерного (§5.4) — подключается отдельно."""
-
-
 @dataclass
 class ChunkOptions:
     """Параметры хоста. ``focusable_compaction`` — метка сжатия ловит
     фокус (в превью нет: Enter там открывает сессию). ``timers`` — реестр
     застывших таймеров вызовов хоста; ``plan_accepted`` — состояние рамки
-    плана при вставке (решение человека принадлежит экрану)."""
+    плана при вставке (решение человека принадлежит экрану);
+    ``thoughts`` — строки мыслей из памяти эфемерного показаны (флаг
+    показа мыслей сейчас)."""
 
     focusable_compaction: bool = False
     edits_lookup: Any = None
@@ -136,6 +138,7 @@ class ChunkOptions:
     model_slots: Mapping[str, str | None] = field(default_factory=dict)
     timers: CallTimers = field(default_factory=CallTimers)
     plan_accepted: Callable[[str], bool] | None = None
+    thoughts: bool = True
 
 
 @dataclass
@@ -146,7 +149,7 @@ class ChunkRefs:
     по ним окно режет ленту на ходы; ``block_views`` — виды блоков ходов
     куска (по одному на ход, уровень в пространстве
     ``HISTORY_LEVEL_PREFIX``) — только для маршрута раскрытия, не в живой
-    реестр видов."""
+    реестр видов; ``thoughts`` — строки мыслей из памяти эфемерного."""
 
     widgets: list[Widget] = field(default_factory=list)
     turn_heads: dict[int, Widget] = field(default_factory=dict)
@@ -157,6 +160,7 @@ class ChunkRefs:
     summary_markers: dict[int, Widget] = field(default_factory=dict)
     summary_bodies: dict[int, Widget] = field(default_factory=dict)
     block_views: BlockViews = field(default_factory=BlockViews)
+    thoughts: list[Widget] = field(default_factory=list)
 
 
 def render_turns(
@@ -166,13 +170,14 @@ def render_turns(
     *,
     before: Widget | None,
     options: ChunkOptions,
-    ephemera: Ephemera | None = None,  # noqa: ARG001  # подключает §5.4
+    ephemera: Ephemera | None = None,
     nested: NestedSource | None = None,
 ) -> ChunkRefs:
     """Ходы ``turns`` модели целиком — в ленту перед ``before`` (None — в
     конец). Черта смены модели на стыке с куском ниже схлопывается с ним
-    так же, как подряд. ``nested`` — вложенный трейс под вызовами куска."""
-    chunk = _Chunk(host, model, before, options)
+    так же, как подряд. ``nested`` — вложенный трейс под вызовами куска;
+    ``ephemera`` — снятое эфемерное и снимок вида ходов куска (§5.4)."""
+    chunk = _Chunk(host, model, before, options, ephemera)
     for i in turns:
         chunk.turn(i)
     if nested is not None:
@@ -194,8 +199,10 @@ class _Chunk:
         model: HistoryModel,
         before: Widget | None,
         options: ChunkOptions,
+        ephemera: Ephemera | None = None,
     ) -> None:
         self._host = host
+        self._ephemera = ephemera
         self._model = model
         self._before = before
         self._opts = options
@@ -251,10 +258,27 @@ class _Chunk:
         self._attempts = []
         self._ended = i + 1 < self._model.turn_count()
         start = self._model.turn_starts[i]
+        rows = (
+            self._ephemera.for_turn(self._model, i) if self._ephemera else []
+        )
         for k, item in enumerate(self._model.turn_items(i), start):
             self._item(k, item)
+            rows = self._mount_ephemeral(rows, k + 1)
+        self._mount_ephemeral(rows, None)
         if self._ended:
             self._interrupt_open()
+
+    def _mount_ephemeral(self, rows: list, at: int | None) -> list:
+        """Снятое эфемерное за элементом ``at - 1`` (None — всё
+        оставшееся); мысли — по нынешнему флагу показа."""
+        while rows and (at is None or rows[0][0] <= at):
+            widget = rows.pop(0)[1]
+            widget.add_class(EPHEMERAL_CLASS)
+            if isinstance(widget, ThoughtRow):
+                widget.display = self._opts.thoughts
+                self.refs.thoughts.append(widget)
+            self.mount(widget)
+        return rows
 
     def _interrupt_open(self) -> None:
         """Ход кончился (есть итог или следующий ход): вызовы без исхода
@@ -284,6 +308,8 @@ class _Chunk:
         )
 
     def finish(self) -> ChunkRefs:
+        if self._ephemera is not None:
+            self._restore_view(self._ephemera)
         below = self._before
         if isinstance(below, ModelMark) and not is_being_removed(below):
             drop_mark_before(below)
@@ -294,6 +320,20 @@ class _Chunk:
         if mark is not None and is_being_removed(mark):
             refs.last_model_mark = None
         return refs
+
+    def _restore_view(self, ephemera: Ephemera) -> None:
+        """Пометки снятых владельцев и снимок вида — виджетам куска."""
+        for widget in self._mounted:
+            for body in ephemera.restore_decorations(
+                anchor_key(widget), widget
+            ):
+                widget.add_consequence(body)
+            view_key = getattr(widget, "view_key", None)
+            flag = ephemera.view(view_key()) if view_key else None
+            if flag is not None:
+                widget.restore_view(flag)
+        for view in self.refs.block_views.values():
+            view.restore_view(ephemera.view)
 
     def _turn_heads(self) -> dict[int, Widget]:
         """Первый в ленте виджет каждого хода: заголовок блока встаёт
@@ -464,12 +504,16 @@ class _Chunk:
         opened = self._open.pop(ev.call_id, None) if ev.call_id else None
         if opened is not None:
             row, view = opened
+            ephemera = self._ephemera
             result_with_edits(
                 view,
                 row,
                 ev,
                 edits_lookup=self._opts.edits_lookup,
                 window=self._opts.expanded_turns,
+                body=bool(
+                    ephemera and ephemera.view(diff_view_key(row.call_id))
+                ),
             )
         elif think_rejected((ev.full_payload or {}).get("output")):
             return  # отказ пустого Think: строки вызова нет

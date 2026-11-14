@@ -80,6 +80,7 @@ class TraceRow(ClickModelMixin, Widget):
         self._prefix = prefix
         self._content = content
         self._event_no = event_no
+        self._kind_class = kind_class
         # Apply kind_class to TraceRow itself so CSS rules (margin-top etc.)
         # push the whole row, keeping prefix-Static and content-Static aligned.
         for cls in kind_class.split():
@@ -99,6 +100,17 @@ class TraceRow(ClickModelMixin, Widget):
             )
         except Exception:
             pass
+
+    def respawn(self) -> TraceRow:
+        """Копия строки для памяти эфемерного (снятый ход вернётся с ней):
+        простая строка — префикс, текст и классы вида."""
+        return TraceRow(
+            prefix=self._prefix,
+            content=self._content,
+            kind_class=self._kind_class,
+            event_no=self._event_no,
+            focusable=self.can_focus,
+        )
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -201,6 +213,16 @@ class CompactionRule(SummaryMarker):
         self.set_class(expanded, "expanded")
         self._sync()
 
+    # Протокол вида (память эфемерного): метка раскрыта.
+    def view_key(self) -> str:
+        return f"summary-rule:{self._event_no}"
+
+    def view_state(self) -> bool:
+        return self._expanded
+
+    def restore_view(self, flag: bool) -> None:
+        self.set_expanded(flag)
+
 
 class CompactionBody(SummaryMarker):
     """Тело сводки под меткой сжатия, свёрнуто по умолчанию: сколько
@@ -222,6 +244,16 @@ class CompactionBody(SummaryMarker):
         )
         self._head = _compaction_head(messages)
         self._text = text
+
+    # Протокол вида (память эфемерного): тело показано.
+    def view_key(self) -> str:
+        return f"summary-body:{self._event_no}"
+
+    def view_state(self) -> bool:
+        return not self.has_class("hidden")
+
+    def restore_view(self, flag: bool) -> None:
+        self.set_class(not flag, "hidden")
 
     def _make_content(self) -> Widget:
         from gc_tui.widgets.no_select import NoSelectStatic

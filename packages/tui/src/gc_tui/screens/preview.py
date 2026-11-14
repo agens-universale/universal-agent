@@ -158,18 +158,19 @@ class PreviewScreen(TraceWindowMixin, TraceFollowMixin, Screen[bool]):
         """Виды блоков куска сверху — в маршрут раскрытия превью."""
         self._blocks.views.update(refs.block_views)
 
-    def _window_forget(self, turns: range) -> list:
-        """Снятые ходы уходят и из маршрута раскрытия: уровни ходов и
+    def _window_forget_turn(self, turn: int) -> bool:
+        """Снятый ход уходит и из маршрута раскрытия: уровень хода и
         уровни субагентов (ключ — call_id строки `Agent`)."""
         from gc_tui.services.history_render import history_level
 
-        removed = super()._window_forget(turns)
+        removed = self._window_turn_widgets(turn)
+        if not super()._window_forget_turn(turn):
+            return False
         views = self._blocks.views
-        for turn in turns:
-            views.pop(history_level(turn), None)
+        views.pop(history_level(turn), None)
         for widget in removed:
             views.pop(getattr(widget, "call_id", None), None)
-        return removed
+        return True
 
     def on_resize(self, _event) -> None:
         self.call_after_refresh(self._refresh_trace_overlays)

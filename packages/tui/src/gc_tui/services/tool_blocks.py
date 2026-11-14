@@ -15,7 +15,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Iterable, Literal, Mapping, Optional, Sequence, Union
+from typing import (
+    Callable,
+    Iterable,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+)
 
 from gc_core.agent_edits.journal import CREATED_FLAG, EditRecord
 from gc_core.config_modules.agent_edits import DEFAULT_TRACE_DIFF_PREVIEW_LINES
@@ -958,6 +966,50 @@ class ToolBlocks:
             return None
         return found.members[-1].key
 
+    # --- снимок вида (память эфемерного) ---------------------------------
+
+    def view_state(self, calls: Iterable[str]) -> dict[str, bool]:
+        """Раскрытие блоков с членами из ``calls`` по ключам, которые не
+        зависят от уровня и счёта блоков (блок — по первому вызову): так
+        их находит отрисовка того же хода заново. Окно субагента —
+        ``window``."""
+        calls = set(calls)
+        out: dict[str, bool] = {}
+        for block in self._blocks:
+            keys = {m.key for m in block.members}
+            if not calls & keys:
+                continue
+            first = block.members[0].key
+            out[f"block:{first}"] = block.expanded
+            for owner in self._owners(block):
+                stable = _stable_key(block, first, owner)
+                out[f"open:{stable}"] = owner in self._open
+        if self._window is not None and calls & set(self._members):
+            out["window"] = self._window.expanded
+        return out
+
+    def restore_view(
+        self, view: Callable[[str], Optional[bool]]
+    ) -> list[Decision]:
+        """Раскрытие из снимка (`view_state`): ключа нет — как есть."""
+        out: list[Decision] = []
+        for block in self._blocks:
+            if not block.members:
+                continue
+            first = block.members[0].key
+            changed = _restore_flag(block, view(f"block:{first}"))
+            for owner in self._owners(block):
+                flag = view(f"open:{_stable_key(block, first, owner)}")
+                if flag is not None and flag != (owner in self._open):
+                    self._open ^= {owner}
+                    changed = True
+            if changed:
+                out += self._render(block)
+        window = self._window
+        if window is not None and _restore_flag(window, view("window")):
+            out += self._window_changes()
+        return out
+
     # --- отрисовка -------------------------------------------------------
 
     def _resolve(self, key: str) -> Optional[_Block]:
@@ -1421,6 +1473,22 @@ class ToolBlocks:
         if not executed:
             return None
         return SetTimer(member.key, self._timers.get(member.key))
+
+
+def _stable_key(block: _Block, first: str, owner: str) -> str:
+    """Ключ раскрытого владельца без счёта блоков: фразы частей `Ran`
+    (``<блок>:<место>``) — по первому вызову блока."""
+    if owner.startswith(f"{block.key}:"):
+        return first + owner[len(block.key) :]
+    return owner
+
+
+def _restore_flag(block: _Block, flag: Optional[bool]) -> bool:
+    """Раскрытие блока из снимка; True — сменилось."""
+    if flag is None or flag == block.expanded:
+        return False
+    block.expanded = flag
+    return True
 
 
 def _ran_keys(block: _Block) -> tuple[str, ...]:

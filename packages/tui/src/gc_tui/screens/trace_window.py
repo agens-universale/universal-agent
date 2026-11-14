@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         HistoryHost,
         NestedSource,
     )
+    from gc_tui.services.trace_ephemera import Ephemera
 
 
 class TraceWindowMixin:
@@ -78,6 +79,10 @@ class TraceWindowMixin:
     def _window_nested(self) -> NestedSource | None:
         return None
 
+    def _window_ephemera(self) -> Ephemera | None:
+        """Память эфемерного экрана: снятые ходы возвращаются с ней."""
+        return None
+
     def _window_adopt_chunk(self, refs: ChunkRefs) -> None:
         """Кусок сверху смонтирован: принять его ссылки (виды блоков)."""
 
@@ -111,6 +116,7 @@ class TraceWindowMixin:
             turns,
             before=before,
             options=self._window_options(),
+            ephemera=self._window_ephemera(),
             nested=self._window_nested(),
         )
         self._window_heads.update(refs.turn_heads)
@@ -251,24 +257,40 @@ class TraceWindowMixin:
                 counts[-1] += len(widget.walk_children(with_self=True))
         return turns, counts
 
-    def _window_forget(self, turns: range) -> list[Widget]:
-        """Снять ходы ``turns`` (первые в окне) целиком; снятые виджеты
-        ленты — экрану, чтобы забыть ссылки на них."""
+    def _window_forget(self, turns: range) -> None:
+        """Снять ходы ``turns`` (первые в окне) по одному сверху; ход,
+        который снять нельзя, останавливает снятие."""
+        for turn in turns:
+            if not self._window_forget_turn(turn):
+                return
+
+    def _window_forget_turn(self, turn: int) -> bool:
+        """Снять верхний ход окна целиком; не верхний — False."""
+        if turn != self._window_first:
+            return False
+        widgets = self._window_turn_widgets(turn)
+        self._window_heads.pop(turn, None)
+        self._window_first = turn + 1
+        self._window_feed().remove_children(widgets)
+        return True
+
+    def _window_turn_widgets(self, turn: int) -> list[Widget]:
+        """Виджеты ленты хода ``turn``: от его первого виджета до первого
+        виджета следующего смонтированного хода. Ход без виджетов —
+        пусто."""
         heads = self._window_heads
-        start = self._window_top()
-        later = [t for t in heads if t >= turns.stop]
+        start = heads.get(turn)
+        if start is None:
+            return []
+        later = [t for t in heads if t > turn]
         stop = heads[min(later)] if later else None
-        removed: list[Widget] = []
+        widgets: list[Widget] = []
         for widget in self._window_feed().children:
             if widget is stop:
                 break
-            if removed or widget is start:
-                removed.append(widget)
-        for turn in turns:
-            heads.pop(turn, None)
-        self._window_first = turns.stop
-        self._window_feed().remove_children(removed)
-        return removed
+            if widgets or widget is start:
+                widgets.append(widget)
+        return widgets
 
     # ---- отклик на прокрутку ---------------------------------------------
 

@@ -429,11 +429,16 @@ def build_answered_question_widget(
 
 def note_question(question, note: str) -> None:
     """Следствие вопроса `└ note` серым — один вид для ленты и превью."""
+    question.add_consequence(question_note_body(note))
+
+
+def question_note_body(note: str) -> Text:
+    """Тело следствия вопроса (`note_question`)."""
     from rich.text import Text
 
     from gc_tui.palette import DIM
 
-    question.add_consequence(Text(note, style=DIM))
+    return Text(note, style=DIM)
 
 
 # Промежуточный ответ субагента, который ядро не приняло (решение
@@ -841,10 +846,12 @@ def result_with_edits(
     *,
     edits_lookup,
     window: int,
+    body: bool = False,
 ) -> None:
     """Исход вызова истории — через модель уровня, с правкой из журнала
     треда тем же билдером, что вживую; сбой журнала — без правки, причина
-    — в лог."""
+    — в лог. ``body`` — дифф телом и вне окна раскрытых (ход вернулся
+    таким, каким был снят)."""
     from gc_tui.services.block_edits import call_edit, ran_result_of
     from gc_tui.services.tool_blocks import BlockKind
 
@@ -858,4 +865,4 @@ def result_with_edits(
     except Exception as exc:
         _log.warning("правки вызова %s не прочитаны: %r", ev.call_id, exc)
         edit, compact, ran = None, False, None
-    view.result(row, ev, edit, compact=compact, ran=ran)
+    view.result(row, ev, edit, compact=compact and not body, ran=ran)

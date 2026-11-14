@@ -389,6 +389,21 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     def images(self) -> tuple[Attachment, ...]:
         return self._images
 
+    def respawn(self) -> UserReplyContainer | None:
+        """Копия реплики, которой нет в треде («не отправлено»), для
+        памяти эфемерного; реплика из треда вернётся из модели — None."""
+        if self._event_no:
+            return None
+        return UserReplyContainer(
+            self._text,
+            state=self._state,
+            images=self._images,
+            skill=self._skill,
+            skill_error=self._skill_error,
+            message_id=self.message_id,
+            client_id=self.client_id,
+        )
+
     def set_state(self, new_state: _State) -> None:
         """Переключить состояние реплики: цвет маркера и вид очереди."""
         self._state = new_state

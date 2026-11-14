@@ -44,6 +44,7 @@ from gc_testkit.thread_writes import (
     turn_outcome_record,
 )
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS
 
 if TYPE_CHECKING:
     from gc_tui.screens.main import TraceScreen
@@ -52,9 +53,10 @@ if TYPE_CHECKING:
 #: Тред фикстуры в хранилище теста.
 HISTORY_THREAD = "historyfixtureaaaaaaaaaaaaaaaaaa"
 #: Классы виджета, которые входят в дамп: вложенность в агента, скрытость,
-#: состояния строк итога и рамки плана; строки «!» — признак эфемерного.
+#: состояния строк итога и рамки плана, строки «!», признак эфемерного.
 FEED_DUMP_CLASSES = frozenset(
     {
+        EPHEMERAL_CLASS,
         "-in-agent",
         "hidden",
         "-latest",
@@ -65,9 +67,6 @@ FEED_DUMP_CLASSES = frozenset(
         "line-bang-fail",
     }
 )
-#: Виджеты эфемерного (из файла треда не восстанавливаются): строки мыслей.
-_EPHEMERAL_WIDGETS = frozenset({"ThoughtRow"})
-_EPHEMERAL_CLASSES = frozenset({"line-bang", "line-bang-fail"})
 _SIDE_TYPES = frozenset({"turn_outcome", "model_choice"})
 
 DumpRow = tuple[str, str, frozenset[str]]
@@ -153,14 +152,10 @@ def feed_dump(feed: Widget) -> list[DumpRow]:
 
 
 def without_ephemeral(rows: list[DumpRow]) -> list[DumpRow]:
-    """Дамп без эфемерного: строки мыслей и «!». Строки вывода команд и
-    последствия заметки трейса дамп пока не отличает (у них нет своего
-    класса) — в живой подаче фикстур их нет."""
-    return [
-        row
-        for row in rows
-        if row[0] not in _EPHEMERAL_WIDGETS and not row[2] & _EPHEMERAL_CLASSES
-    ]
+    """Дамп без эфемерного (виджеты с классом `EPHEMERAL_CLASS`: мысли,
+    «!», вывод команд, строки без события). Пометки трейса под строкой
+    владельца живут внутри неё — в живой подаче фикстур их нет."""
+    return [row for row in rows if EPHEMERAL_CLASS not in row[2]]
 
 
 # ---- запись треда фикстуры в хранилище -----------------------------------

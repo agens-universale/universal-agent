@@ -203,6 +203,7 @@ from gc_tui.services.tool_blocks import (
     ToolBlocks,
     block_kind,
 )
+from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS, Ephemera
 from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
@@ -260,6 +261,7 @@ from gc_tui.widgets.model_mark import (
     restored_mark,
 )
 from gc_tui.widgets.plan_panel import PlanPanel
+from gc_tui.widgets.respawn import respawn
 from gc_tui.widgets.start_header import StartHeader
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -304,6 +306,14 @@ _log = logging.getLogger(__name__)
 _DIALOG_CONTINUATION_KINDS = frozenset(
     {"user", "agent", "call", "result", "error", "error_msg"}
 )
+
+
+def _bound_widget(fn) -> object:
+    """Чей метод ``fn`` (и `partial` метода) — для реестров колбэков."""
+    owner = getattr(fn, "__self__", None)
+    if owner is None:
+        owner = getattr(getattr(fn, "func", None), "__self__", None)
+    return owner
 
 
 def _answers_question(ev, call_id: Optional[str]) -> bool:
@@ -760,9 +770,12 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
-        # Блоки bang в трейсе (header + result) для `! clear` / `! clear N`.
-        self._bang_blocks: list[list] = []
-        self._bang_open_block: Optional[list] = None
+        # Память эфемерного ленты (§5.4): снятые ходы возвращаются с ней;
+        # в ней же блоки bang для `! clear` / `! clear N`.
+        self._ephemera = Ephemera()
+        # Идёт отрисовка элемента модели истории: смонтированное — не
+        # эфемерное (`_note_ephemeral`).
+        self._drawing_model = 0
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
@@ -2340,8 +2353,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._pending_user_widgets.clear()  # spec 2026-05-26
         self._held_client_ids.clear()
         self._pending_wire_cache.clear()
-        self._bang_blocks.clear()
-        self._bang_open_block = None
+        self._ephemera.clear()
         self._streamed_thoughts.clear()
         # clear ask_human state (banner lives in #root, not #trace)
         if self._ask_human_banner is not None:
@@ -2836,10 +2848,116 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             model_slots=self._footer_slots(),
             timers=self._call_timers,
             plan_accepted=self._plan_panel_accepted,
+            thoughts=self._thoughts_on(),
         )
 
     def _window_nested(self) -> NestedSource | None:
         return self._nested_source
+
+    def _window_ephemera(self) -> Ephemera:
+        return self._ephemera
+
+    def _window_forget_turn(self, turn: int) -> bool:
+        return self.forget_turn(turn)
+
+    def forget_turn(self, turn: int) -> bool:
+        """«Забыть ход» (§5.3): верхний ход окна ``turn`` снимается с ленты
+        одной операцией — эфемерное и снимок вида уходят в память, ни один
+        реестр экрана не держит снятый виджет; события остаются в модели.
+        Не снимаются (False): не верхний ход, текущий (последний) ход и
+        ход со строкой, на которую держит ссылку живое состояние или фокус."""
+        widgets = self._window_turn_widgets(turn)
+        gone = {
+            w for top in widgets for w in top.walk_children(with_self=True)
+        }
+        if (
+            turn != self._window_first
+            or turn >= self._feed_history.turn_count() - 1
+            or gone & self._live_widgets()
+            or any(pins_to_bottom(w) for w in widgets)
+        ):
+            return False
+        self._remember_turn(turn, gone)
+        self._forget_widgets(gone)
+        return super()._window_forget_turn(turn)
+
+    def _live_widgets(self) -> set:
+        """Строки, на которые держит ссылку живое состояние (§5.3), и
+        виджет в фокусе: их ход снимать нельзя."""
+        live = {
+            self.focused,
+            self._fresh_line,
+            self._ask_human_question_row,
+            self._stream_block,
+            self._stream_answer_row,
+            *self._active_calls.values(),
+            *self._pending_user_widgets.values(),
+            *self._ephemera.bang_open_widgets(),
+        }
+        for widgets in self._submit_solution_widgets:
+            live.update(widgets)
+        live.discard(None)
+        return live
+
+    def _remember_turn(self, turn: int, gone: set) -> None:
+        """Эфемерное и снимок вида снимаемого хода — в память (§5.4)."""
+        ephemera = self._ephemera
+        at = self._feed_history.turn_starts[turn]
+        for widget in gone:
+            view_key = getattr(widget, "view_key", None)
+            key = view_key() if view_key else ""
+            if key:
+                ephemera.note_view(key, widget.view_state(), at=at)
+        for views in (self._block_views, self._history_views):
+            for view in views.values():
+                for key, flag in view.view_state(gone).items():
+                    ephemera.note_view(key, flag, at=at)
+        ephemera.freeze(gone, at=at, gone=self._gone_widget, respawn=respawn)
+
+    @staticmethod
+    def _gone_widget(widget) -> bool:
+        """Виджет уже снят с ленты (не снятием хода)."""
+        return not widget.is_attached or textual_compat.is_being_removed(
+            widget
+        )
+
+    def _forget_widgets(self, gone: set) -> None:
+        """Реестры экрана со ссылками на виджеты (§5.3) забывают снятые
+        ``gone``."""
+        for registry in (
+            self._active_calls,
+            self._subagent_parent_rows,
+            self._nested_tool_rows,
+            self._summary_marker_widgets,
+            self._summary_body_widgets,
+            self._question_rows,
+        ):
+            for key in [k for k, w in registry.items() if w in gone]:
+                del registry[key]
+        nested = self._nested_widgets_by_parent
+        for pid in list(nested):
+            nested[pid] = [w for w in nested[pid] if w not in gone]
+            if not nested[pid]:
+                del nested[pid]
+        for views in (self._block_views, self._history_views):
+            for level, view in list(views.items()):
+                if level == "":
+                    view.forget(gone)
+                elif view.holds(gone):
+                    del views[level]
+        self._streamed_thoughts = [
+            w for w in self._streamed_thoughts if w not in gone
+        ]
+        self._submit_solution_widgets = [
+            ws
+            for ws in self._submit_solution_widgets
+            if not any(w in gone for w in ws)
+        ]
+        self._held_reveals = [
+            fn for fn in self._held_reveals if _bound_widget(fn) not in gone
+        ]
+        if self._live_mark in gone:
+            self._live_mark = None
 
     def _window_adopt_chunk(self, refs: ChunkRefs) -> None:
         self._adopt_history_refs(refs)
@@ -2851,6 +2969,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._question_rows.update(refs.question_rows)
         self._summary_marker_widgets.update(refs.summary_markers)
         self._summary_body_widgets.update(refs.summary_bodies)
+        self._streamed_thoughts += refs.thoughts
 
     def _seed_fresh_line(self, line: Optional[TurnLine]) -> None:
         """Свежая строка итога из куска — ссылкой экрана; пока стоит бар
@@ -2920,10 +3039,6 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         (там баннера нет): ответа нет, диалог не продолжился и живого
         агента нет — «прервано» под его строкой, как сверка баннера при
         открытии (`_reconcile_ask_human_after_render`)."""
-        from gc_tui.services.trace_render import (
-            QUESTION_INTERRUPTED,
-            note_question,
-        )
 
         history = self._feed_history
         events = history.events()
@@ -2942,7 +3057,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             return
         row = self._question_rows.get(question.call_id or "")
         if row is not None:
-            note_question(row, QUESTION_INTERRUPTED)
+            self._note_interrupted(row)
 
     def _settle_for_replies(self, count: int) -> None:
         """Реплики (и повторы preserved-копий) перед элементом — столько
@@ -3069,7 +3184,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         записи. Сирота (сообщения её хода в истории нет: откат, сброс) в
         модель не входит и строки не даёт."""
         self._end_turn_blocks(outcome)
-        self._mount_turn_line(outcome)
+        with self._model_drawing():
+            self._mount_turn_line(outcome)
 
     def _draw_event(self, ev, *, live: bool) -> None:
         self._render_event(ev, live=live)
@@ -3732,6 +3848,40 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._feed_appended += 1
         trace.mount(widget, **where)
         self._note_turn_head(widget)
+        self._note_ephemeral(widget)
+
+    def _note_ephemeral(self, widget) -> None:
+        """Виджет, за которым нет элемента модели истории, — в память
+        эфемерного (§5.4): место — за последним элементом модели. Не
+        эфемерное: отрисовка элемента модели, вложенный трейс (его
+        вернёт узел), стрим ответа, черты модели и реплики, которых ядро
+        ещё не записало (станут событиями)."""
+        from gc_tui.widgets.user_reply import UserReplyContainer
+
+        if (
+            self._drawing_model
+            or widget.has_class("-in-agent")
+            or isinstance(widget, ModelMark)
+            or pins_to_bottom(widget)
+            or widget is self._stream_block
+            or widget is self._stream_answer_row
+            or (
+                isinstance(widget, UserReplyContainer)
+                and widget.state != "failed"
+            )
+        ):
+            return
+        widget.add_class(EPHEMERAL_CLASS)
+        self._ephemera.capture(widget, after=len(self._feed_history.items))
+
+    @contextlib.contextmanager
+    def _model_drawing(self):
+        """Отрисовка элемента модели истории (`_note_ephemeral`)."""
+        self._drawing_model += 1
+        try:
+            yield
+        finally:
+            self._drawing_model -= 1
 
     def _note_turn_head(self, widget) -> None:
         """Виджет живого пути — первый виджет своего хода в окне (§5.3:
@@ -4097,6 +4247,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._destroy_thinking_indicator()
 
     def _render_event(self, ev, *, live: bool = False) -> None:
+        """Событие модели истории — в ленту."""
+        with self._model_drawing():
+            self._render_model_event(ev, live=live)
+
+    def _render_model_event(self, ev, *, live: bool) -> None:
         if ev.hidden:
             return
 
@@ -4434,12 +4589,15 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
 
     def _mount_block_widget(self, widget, *, before=None, after=None) -> None:
         """Виджет блока: в конец ленты — по правилу очереди, рядом со своим
-        виджетом — прямо (якорь — прямой ребёнок `#trace`)."""
-        if before is None and after is None:
-            self._trace_mount(widget)
-            return
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        self._feed_mount(trace, widget, before=before, after=after)
+        виджетом — прямо (якорь — прямой ребёнок `#trace`). Виджеты блоков
+        следуют из событий модели (и раскрытие — из снимка вида), не
+        эфемерное."""
+        with self._model_drawing():
+            if before is None and after is None:
+                self._trace_mount(widget)
+                return
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
+            self._feed_mount(trace, widget, before=before, after=after)
         if self._stick_bottom:
             self._scroll_trace_end()
 
@@ -5587,18 +5745,30 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             return
         from gc_tui.services.trace_render import (
             QUESTION_INTERRUPTED,
-            note_question,
         )
 
         if question is not None:
             # Следствие — строкой `└` в рамке вопроса «? …» (её монтирует
             # _on_ask_human_event), не отдельной строкой ленты.
-            note_question(question, QUESTION_INTERRUPTED)
+            self._note_interrupted(question)
             return
         # Строки вопроса в ленте нет (баннер ребёнка) — отдельной строкой.
         self._mount_trace_row(
             prefix="", content=QUESTION_INTERRUPTED, kind_class="line-meta"
         )
+
+    def _note_interrupted(self, question) -> None:
+        """«Прервано» под строкой вопроса — и в память эфемерного: из
+        модели оно не следует."""
+        from gc_tui.services.trace_render import (
+            QUESTION_INTERRUPTED,
+            question_note_body,
+        )
+
+        body = question_note_body(QUESTION_INTERRUPTED)
+        question.add_consequence(body)
+        at = len(self._feed_history.items)
+        self._ephemera.decorate(question, body, at=at)
 
     def _mount_user_reply(
         self,
@@ -5674,10 +5844,19 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             elif not item.at_run_end:
                 self._apply_choice_event(item)
         self._waiting_notes = []
+        at = len(self._feed_history.items)
         for note, ticks in waiting + fresh:
             owner = self._trace_note_owner(note)
+            trimmed = self._trimmed_note_reply(note, owner)
             if owner is not None:
-                owner.add_consequence(note_consequence(note))
+                body = note_consequence(note)
+                owner.add_consequence(body)
+                self._ephemera.decorate(owner, body, at=at)
+            elif trimmed is not None:
+                # Реплика-владелец снята с ленты — пометка вернётся с ней.
+                self._ephemera.decorate_key(
+                    f"event:{trimmed}", note_consequence(note), at=at
+                )
             elif note.owner == "call" and ticks > 0:
                 # Строка вызова ещё не в ленте — ждём её несколько тиков.
                 self._waiting_notes.append((tid, note, ticks - 1))
@@ -5777,7 +5956,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if record is None:
             return
         mark = restored_mark(record, self._footer_slots())
-        self._trace_mount(mark, scroll=False)
+        with self._model_drawing():
+            self._trace_mount(mark, scroll=False)
         drop_mark_before(mark)
 
     def _write_model_choice(self, choice: str, before: str) -> None:
@@ -5934,6 +6114,15 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             if last is not None:
                 return last
         return None
+
+    def _trimmed_note_reply(self, note, owner) -> Optional[int]:
+        """Номер события реплики-владельца пометки, снятой с ленты
+        (`_trace_note_owner` её не нашёл, а модель её знает); иначе None."""
+        if owner is not None or note.owner == "call":
+            return None
+        history = self._feed_history
+        latest = history.last_reply(with_images=True) or history.last_reply()
+        return latest.no if latest is not None else None
 
     def _mount_standalone(
         self,
@@ -6990,6 +7179,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # Retention: сегмент, выпавший из окна, облегчаем как полная
         # перерисовка. Вложенные строки субагентов не трогаем (спека 3.4).
         self._feed_history.apply_retention(step.window_ids)
+        # Ходы за окном удержания вернутся как после переоткрытия (§3.5).
+        self._ephemera.drop_before(self._feed_history.retention_start())
         self._drop_answered_ask_human_banner(start)
 
     def _mount_compaction_marker(self, step: CompactionStep) -> None:
@@ -9844,14 +10035,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             kind_class=kind_class,
             focusable=False,
         )
-        if self._bang_open_block is None:
-            self._bang_open_block = []
-            self._bang_blocks.append(self._bang_open_block)
-        self._bang_open_block.append(row)
+        self._ephemera.bang_row(row)
         return row
 
     def _close_bang_block(self) -> None:
-        self._bang_open_block = None
+        self._ephemera.bang_close()
 
     def _clear_bang_blocks(self, count: Optional[int]) -> None:
         """Удалить bang-блоки из трейса. count=None — все; иначе последние N."""
@@ -9863,21 +10051,12 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             )
             self._close_bang_block()
             return
-        if not self._bang_blocks:
-            return
-        if count is None or count >= len(self._bang_blocks):
-            to_remove = self._bang_blocks[:]
-            self._bang_blocks.clear()
-        else:
-            to_remove = self._bang_blocks[-count:]
-            del self._bang_blocks[-count:]
-        self._bang_open_block = None
-        for block in to_remove:
-            for row in block:
-                try:
-                    row.remove()
-                except Exception:
-                    pass
+        # Блоки снятых ходов — тоже: из памяти, чтобы не вернулись.
+        for row in self._ephemera.bang_clear(count):
+            try:
+                row.remove()
+            except Exception:
+                pass
 
     def _on_bang_done(self, result) -> None:
         """Смонтировать результат bang-shell в трейс (UI-поток)."""
