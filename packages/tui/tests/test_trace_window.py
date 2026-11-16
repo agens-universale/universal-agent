@@ -276,7 +276,10 @@ async def test_preview_to_end_moves_focus_off_old_turn(tmp_path):
         assert screen._window_gap
         top = _focusable(screen)[0]
         top.focus()
-        await pilot.pause()
+        # Фокус докручивает ленту к строке анимацией: её шаг вверх после
+        # перехода в конец — настоящий уход вверх, он снял бы липкость.
+        await pilot.wait_for_scheduled_animations()
+        assert screen.focused is top
         screen._scroll_to_bottom()
         await pilot.pause(0.3)
         await _filled(pilot, screen)
@@ -285,6 +288,32 @@ async def test_preview_to_end_moves_focus_off_old_turn(tmp_path):
         assert not screen._window_gap
         assert screen._window_first > 0
         assert _replies(screen)[-1] == f"запрос {TURNS - 1}"
+
+
+@pytest.mark.asyncio
+async def test_to_end_with_gap_survives_scroll_during_anchor(tmp_path):
+    """Якорь низа может прокрутить ленту прямо в смене липкости (событие
+    прокрутки приходит синхронно). Разрыв ещё открыт, лента ниже
+    прежнего низа — это не уход вверх: переход в конец не теряется."""
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        screen = await _preview(pilot)
+        await _read_to_start(pilot, screen)
+        await _filled(pilot, screen)
+        assert screen._window_gap
+        trace = _trace(screen)
+        screen._last_auto_y = 10**6
+        anchor = trace.anchor
+
+        def anchor_then_scroll(*args, **kwargs):
+            anchor(*args, **kwargs)
+            screen._on_trace_scrolled(trace.scroll_y)
+
+        trace.anchor = anchor_then_scroll
+        screen._scroll_to_bottom()
+        assert screen._stick_bottom is True
+        assert screen._window_stuck is True
+        await _filled(pilot, screen)
+        assert not screen._window_gap
 
 
 @pytest.mark.asyncio
