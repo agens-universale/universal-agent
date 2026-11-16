@@ -161,13 +161,18 @@ def test_apply_is_idempotent():
 
 
 def test_other_version_not_patched(monkeypatch, caplog):
+    from textual._styles_cache import StylesCache
+
     original = property(_upstream_pointer_start_offset)
     monkeypatch.setattr(
         selection.SelectStart, "pointer_start_offset", original
     )
+    inner_outer = _upstream_inner_outer()
+    monkeypatch.setattr(StylesCache, "get_inner_outer", inner_outer)
     _other_version(monkeypatch)
     assert apply_textual_patches() is False
     assert selection.SelectStart.pointer_start_offset is original
+    assert StylesCache.get_inner_outer is inner_outer
     assert "пересмотреть" in caplog.text
 
 
@@ -981,15 +986,20 @@ class _Rows(App):
                 yield Static(f"line {i}")
 
 
-@functools.lru_cache(1024)
-def _upstream_inner_outer(cls, base_background, background):
-    """`StylesCache.get_inner_outer` Textual 8.2.8 как есть."""
+def _upstream_inner_outer():
+    """Копия `StylesCache.get_inner_outer` Textual 8.2.8: `lru_cache` на
+    методе экземпляра. Свежий кеш на каждый вызов — не живёт весь
+    прогон набора."""
     from textual.style import Style
 
-    return (
-        Style(background=base_background + background),
-        Style(background=base_background),
-    )
+    @functools.lru_cache(1024)
+    def get_inner_outer(cls, base_background, background):
+        return (
+            Style(background=base_background + background),
+            Style(background=base_background),
+        )
+
+    return get_inner_outer
 
 
 async def _removed_line_caches() -> int:
@@ -1018,10 +1028,15 @@ async def test_removed_widget_line_cache_is_freed():
 
 @pytest.mark.asyncio
 async def test_upstream_inner_outer_keeps_removed_line_caches(monkeypatch):
-    """Контроль: `StylesCache.get_inner_outer` Textual 8.2.8 — `lru_cache`
-    на методе экземпляра, ключ держит кеш строк каждого отрисованного
-    виджета (до 1024) и после его снятия."""
+    """Контроль стенда: с копией формулы Textual 8.2.8 (`lru_cache` на
+    методе экземпляра) кеши строк снятых виджетов переживают сборку —
+    тест выше умеет падать. О починке в апстриме этот тест не скажет:
+    на неё укажет страж версии."""
     from textual._styles_cache import StylesCache
 
-    monkeypatch.setattr(StylesCache, "get_inner_outer", _upstream_inner_outer)
-    assert await _removed_line_caches() > 0
+    inner_outer = _upstream_inner_outer()
+    monkeypatch.setattr(StylesCache, "get_inner_outer", inner_outer)
+    try:
+        assert await _removed_line_caches() > 0
+    finally:
+        inner_outer.cache_clear()
