@@ -82,12 +82,13 @@ _PAINT_HOLDS: set[asyncio.Task] = set()
 @dataclass
 class _HoldSeries:
     """Удержания экрана приложения внахлёст — одна серия: сколько держат
-    сейчас, до какого времени (`loop.time()`) она может длиться и ждёт
-    ли экран кадра после неё."""
+    сейчас, до какого времени (`loop.time()`) она может длиться и до
+    какого времени после неё ждётся кадр (сигнал кадра потерялся —
+    удержания возвращаются по сроку)."""
 
     count: int = 0
     until: float = 0.0
-    awaiting_frame: bool = False
+    frame_by: float = 0.0
 
 
 _HOLD_SERIES: WeakKeyDictionary[App, _HoldSeries] = WeakKeyDictionary()
@@ -301,12 +302,12 @@ def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
         series.until = now + _PAINT_HOLD_LIMIT
     # Серия не дольше потолка, следующая — только после кадра: опоздавшее
     # ждёт монтажа без удержания, иначе внахлёст кадра нет вовсе.
-    hold = not series.awaiting_frame and now < series.until
+    hold = now >= series.frame_by and now < series.until
     batch = app.batch_update() if hold else None
     limit = series.until - now if hold else _PAINT_HOLD_LIMIT
 
     def frame_passed() -> None:
-        series.awaiting_frame = False
+        series.frame_by = 0.0
 
     async def release() -> None:
         try:
@@ -317,10 +318,8 @@ def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
             if batch is not None:
                 batch.__exit__(None, None, None)
                 series.count -= 1
-                if not series.count:
-                    series.awaiting_frame = app.call_after_refresh(
-                        frame_passed
-                    )
+                if not series.count and app.call_after_refresh(frame_passed):
+                    series.frame_by = loop.time() + _PAINT_HOLD_LIMIT
 
     # Сначала путь отпускания, потом удержание: задача стартует не раньше
     # следующего такта, а не заведённая задача экран не держит.

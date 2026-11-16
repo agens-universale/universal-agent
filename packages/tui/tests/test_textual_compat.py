@@ -630,6 +630,27 @@ async def test_back_to_back_paint_holds_let_a_frame_through(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lost_frame_callback_does_not_disable_holds(monkeypatch):
+    """Сигнал кадра после серии потерялся (его принял снятый экран) —
+    удержания возвращаются по сроку, а не выключаются навсегда."""
+
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.1)
+    app = _Host()
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "call_after_refresh", lambda *_a: True)
+        _, held = await _in_app(pilot, lambda: _mount_and_hold(app))
+        await _released(pilot)
+        await asyncio.sleep(0.25)
+        _, again = await _in_app(pilot, lambda: _mount_and_hold(app))
+        assert (held, again) == (1, 1)
+        await _released(pilot)
+
+
+@pytest.mark.asyncio
 async def test_paint_after_mount_noop_when_mounted_or_orphan():
     app = _Host()
     async with app.run_test() as pilot:
