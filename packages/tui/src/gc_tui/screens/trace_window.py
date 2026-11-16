@@ -279,8 +279,8 @@ class TraceWindowMixin:
         """Кусок встал на краю ``side`` (``top``, ``bottom`` или ``end`` —
         закрытие разрыва). Окно сменилось (другая сессия) — результат
         выброшен. Пока вставал, лента вернулась к низу — переход к низу
-        сейчас; отлистана — после раскладки снимается противоположный
-        край; запас ещё мал — следующий кусок после раскладки."""
+        сейчас; отлистана — снимается противоположный край; запас ещё
+        мал — следующий кусок после раскладки."""
         if gen != self._window_gen:
             return
         self._window_busy = False
@@ -288,14 +288,17 @@ class TraceWindowMixin:
             events = [w for w in widgets if w.can_focus and w.display]
             if events:
                 events[-1 if side == "top" else 0].focus()
-        feed = self._window_feed()
         if self._window_trim_due and self._window_stuck:
             self._window_on_bottom()
         elif not self._stick_bottom:
-            edge = "bottom" if side == "top" else "top"
-            feed.call_after_layout(lambda: self._window_trim(edge))
+            # Снятие — сразу, как кусок встал, до следующего куска: иначе
+            # при подъёме подряд следующий кусок всякий раз опережает
+            # снятие. Раскладка прошлая и прокрутка прошлая — согласованы;
+            # новый кусок на своём краю, снятие идёт с другого и
+            # останавливается на удерживаемом.
+            self._window_trim("bottom" if side == "top" else "top")
         elif side == "end":
-            feed.call_after_layout(lambda: self._window_trim("top"))
+            self._window_trim("top")
         if self._stick_bottom:
             # Лента выросла у низа (догрузка открытия, хвост перехода в
             # конец): низ — заново и запомнен, иначе уход вверх меряется
@@ -461,16 +464,20 @@ class TraceWindowMixin:
         Рост живого хода при чтении снятия не запускает (§5.11): его
         проверит следующий кусок или переход в конец."""
         self._window_grow_queued = False
-        if not self._stick_bottom:
-            return
-        self._window_trim("top")
+        if self._stick_bottom and not self._window_busy:
+            self._window_trim("top")
 
     def _window_trim(self, edge: str) -> None:
         """Ужать окно до лимита целыми ходами с края ``edge`` (``top`` /
         ``bottom``), если оно больше «лимит + кусок» (запас против петли с
         домонтированием). Закреплённое считается в лимите; снимаются ходы
         от края до удерживаемых (видимое с запасами) или закреплённого."""
-        if self._window_busy or self._ui_frozen_for_select():
+        if self._ui_frozen_for_select() or (
+            # Низ снимается только при чтении: у низа там живой ход.
+            edge == "bottom" and self._stick_bottom
+        ):
+            return
+        if self._window_busy:
             return
         turns, counts = self._window_mounted_counts()
         excess = policy.trim_to(

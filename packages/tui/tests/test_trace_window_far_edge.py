@@ -251,6 +251,37 @@ async def test_reading_up_bounded_with_gap_before_live_turn(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_continuous_climb_trims_between_chunks(tmp_path, monkeypatch):
+    """Подъём подряд: следующий кусок начинается сразу, как встал
+    прежний (прокрутка к верху пришла до раскладки), — снятие низа всё
+    равно встаёт между кусками, окно не копится."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_session(pilot, tmp_path / "t")
+        trace = _trace(scr)
+        settle = scr._window_settle
+
+        def settle_then_next(*args) -> None:
+            settle(*args)
+            trace.scroll_to(y=0, animate=False, immediate=True)
+            if not scr._window_busy and scr._window_first > 0:
+                scr._window_prepend(focus=False)
+
+        monkeypatch.setattr(scr, "_window_settle", settle_then_next)
+        trace.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        assert scr._stick_bottom is False
+        worst = 0
+        for _ in range(2000):
+            if scr._window_first <= TURNS - DEPTH:
+                break
+            await pilot.pause()
+            worst = max(worst, _window_widgets(scr, pinned=TURNS - 1))
+        assert scr._window_first <= TURNS - DEPTH
+        # Кусок в полёте — сверх «лимит + кусок» не больше хода-двух.
+        assert worst <= _bound() + 200
+
+
+@pytest.mark.asyncio
 async def test_top_trim_while_reading_keeps_reading_row(tmp_path, monkeypatch):
     """Снятие сверху, пока пользователь не у низа, держит читаемую
     строку на месте (якорь, как у домонтирования сверху)."""
