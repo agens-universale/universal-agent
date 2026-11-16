@@ -382,3 +382,80 @@ async def test_render_turns_does_not_touch_live_state(tmp_path):
     assert after == before
     assert list(refs.call_rows) == ["c1"]
     assert list(refs.question_rows) == ["q1"]
+
+
+_ANSWER = (
+    "## Итог\n\nТекст **жирный**.\n\n"
+    "```python\nprint('x')\n```\n\nЕщё абзац.\n\n"
+    "| a | b |\n|---|---|\n| 1 | 2 |\n\nКонец."
+)
+
+
+def _prose_turns(n: int):
+    """Ходы без вызовов: реплика и ответ в markdown — много виджетов."""
+    from gc_tui.services.history_model import HistoryInputs, build_history
+
+    records = []
+    for i in range(n):
+        records += [
+            {
+                "type": "message",
+                "payload": {
+                    "role": "user",
+                    "id": f"m_u{i}",
+                    "content": f"запрос {i}",
+                },
+            },
+            {
+                "type": "message",
+                "payload": {
+                    "id": f"msg_a{i}",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "annotations": [],
+                            "text": _ANSWER,
+                        }
+                    ],
+                },
+            },
+        ]
+    return build_history(
+        [{"messages": records, "compacted_by": None}],
+        inputs=HistoryInputs(root=None, injected_fields=()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_chunk_mounts_feed_in_one_call():
+    """Кусок без блоков вызовов уходит в ленту одним `mount`: каждый
+    вызов `Widget.mount` кладёт в очередь ленты снимок всех её детей, и
+    поштучный монтаж при подъёме копит их быстрее, чем лента разбирает."""
+    from gc_tui.services.history_render import (
+        ChunkOptions,
+        FeedHost,
+        render_turns,
+    )
+
+    batches: list[int] = []
+
+    class _Counting(FeedHost):
+        def mount(self, *widgets, before=None, after=None) -> None:
+            batches.append(len(widgets))
+            super().mount(*widgets, before=before, after=after)
+
+    model = _prose_turns(3)
+    async with _Feed().run_test(size=_SIZE) as pilot:
+        feed = _feed(pilot.app)
+        render_turns(
+            _Counting(feed),
+            model,
+            range(model.turn_count()),
+            before=None,
+            options=ChunkOptions(),
+        )
+        await pilot.pause()
+        assert batches == [len(feed.children)]

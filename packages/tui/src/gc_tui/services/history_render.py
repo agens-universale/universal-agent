@@ -81,8 +81,7 @@ class HistoryHost(Protocol):
 
     def mount(
         self,
-        widget: Widget,
-        *,
+        *widgets: Widget,
         before: Widget | None = None,
         after: Widget | None = None,
     ) -> None: ...
@@ -94,13 +93,25 @@ class FeedHost:
 
     feed: Widget
 
-    def mount(self, widget, *, before=None, after=None) -> None:
+    def mount(self, *widgets, before=None, after=None) -> None:
         if before is not None:
-            self.feed.mount(widget, before=before)
+            self.feed.mount(*widgets, before=before)
         elif after is not None:
-            self.feed.mount(widget, after=after)
+            self.feed.mount(*widgets, after=after)
         else:
-            self.feed.mount(widget)
+            self.feed.mount(*widgets)
+
+
+@dataclass
+class _FlushingHost:
+    """Хост видов блоков куска: их виджеты встают в ленту сразу (виды
+    ставят соседей по ним, держат экран до их монтажа)."""
+
+    chunk: _Chunk
+
+    def mount(self, widget, *, before=None, after=None) -> None:
+        self.chunk.mount(widget, before=before, after=after)
+        self.chunk.flush()
 
 
 class NestedSource(Protocol):
@@ -190,7 +201,15 @@ def history_level(turn: int) -> str:
 
 
 class _Chunk:
-    """Один проход отрисовки куска: состояние только своё."""
+    """Один проход отрисовки куска: состояние только своё.
+
+    Свои виджеты в позицию куска (без якоря) кусок копит и отдаёт ленте
+    пачкой: каждый вызов `Widget.mount` кладёт в очередь ленты снимок всех
+    её детей, и поштучный монтаж при подъёме копит их быстрее, чем лента
+    разбирает, — снимки держат снятые виджеты. Всё, что смотрит на ленту
+    как она есть (якорь, соседи, вложенное, удаление, пометки и вид
+    виджетов), сначала сбрасывает пачку — `flush`; виды блоков получают
+    хост, который сбрасывает её на каждый свой монтаж."""
 
     def __init__(
         self,
@@ -207,6 +226,8 @@ class _Chunk:
         self._opts = options
         self.refs = ChunkRefs()
         self._mounted: list[Widget] = []
+        # Виджеты позиции куска, ещё не отданные ленте (`flush`).
+        self._pending: list[Widget] = []
         self._turn_of: dict[Widget, int] = {}
         self._view: ToolBlocksView | None = None
         self._turn: int | None = None
@@ -226,14 +247,22 @@ class _Chunk:
         """Хост блоков и событий куска: без якоря — перед ``before``
         куска; событие не из блоков закрывает открытую группу."""
         if before is None and after is None:
-            before = self._before
-        self._host.mount(widget, before=before, after=after)
+            self._pending.append(widget)
+        else:
+            self.flush()
+            self._host.mount(widget, before=before, after=after)
         self._mounted.append(widget)
         if self._turn is not None:
             self._turn_of[widget] = self._turn
         view = self._view
         if view is not None and not view.issued(widget):
             view.event_closing()
+
+    def flush(self) -> None:
+        """Накопленное — в ленту одним вызовом перед ``before`` куска."""
+        pending, self._pending = self._pending, []
+        if pending:
+            self._host.mount(*pending, before=self._before)
 
     def _mount_all(self, widgets: Iterable[Widget]) -> None:
         for widget in widgets:
@@ -246,7 +275,9 @@ class _Chunk:
         if view is None:
             opts = self._opts
             model = ToolBlocks(opts.timers, diff_preview=opts.diff_preview)
-            view = ToolBlocksView(self, model, level=level, depth=0)
+            view = ToolBlocksView(
+                _FlushingHost(self), model, level=level, depth=0
+            )
             self.refs.block_views[level] = view
             self._view = view
         return view
@@ -307,6 +338,7 @@ class _Chunk:
 
     def nest(self, nested: NestedSource) -> None:
         """Вложенное для вызовов куска — под их строками."""
+        self.flush()
         calls = self.refs.call_rows
         self._turn = None
         self._nested_from = len(self._mounted)
@@ -319,6 +351,7 @@ class _Chunk:
         )
 
     def finish(self) -> ChunkRefs:
+        self.flush()
         if self._ephemera is not None and self._nested_from is not None:
             nested = [
                 view
@@ -335,14 +368,15 @@ class _Chunk:
         refs.turn_heads = self._turn_heads()
         return refs
 
-    @staticmethod
     def _restore_view(
+        self,
         ephemera: Ephemera,
         widgets: list[Widget],
         views: list[ToolBlocksView],
     ) -> None:
         """Пометки снятых владельцев и снимок вида — виджетам и видам
         блоков (хода или вложенного трейса)."""
+        self.flush()
         for widget in widgets:
             for body in ephemera.restore_decorations(
                 anchor_key(widget), widget
@@ -376,6 +410,7 @@ class _Chunk:
             return
         mark = restored_mark(record, self._opts.model_slots)
         self.mount(mark)
+        self.flush()
         drop_mark_before(mark)
 
     def _outcome(self, index: int, rec: dict) -> None:
@@ -467,6 +502,7 @@ class _Chunk:
         self._attempts.append(widgets)
 
     def _drop_attempts(self) -> None:
+        self.flush()
         for widgets in self._attempts:
             for widget in widgets:
                 widget.remove()
