@@ -3994,7 +3994,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         step = -1 if key == "up" else 1
         at = events_.index(current) + step if current in events_ else -1
         following = events_[at] if 0 <= at < len(events_) else None
-        if key == "down" and self._window_edge_down(following):
+        if key == "down" and self._window_edge_down(current, following):
             # Нижний край перед разрывом: кусок снизу и фокус на него.
             return True
         if following is not None:

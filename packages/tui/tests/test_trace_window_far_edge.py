@@ -459,12 +459,23 @@ async def test_preview_reading_up_bounded_then_to_end(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_wheel_reversals_do_not_pulse(tmp_path, monkeypatch):
+@pytest.mark.parametrize("edge", ["top", "bottom"])
+async def test_wheel_reversals_do_not_pulse(tmp_path, monkeypatch, edge):
     """Колесо туда-обратно на глубине: снятый ход не домонтируется снова
-    — снятие лежит дальше двух запасов, кусок встаёт на одном."""
+    — снятие лежит дальше двух запасов, кусок встаёт на одном. ``bottom``
+    — у порога домонтирования перед разрывом."""
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await _open_session(pilot, tmp_path / "t")
         await _lift(pilot, scr, pinned=TURNS - 1)
+        trace = _trace(scr)
+        if edge == "bottom":
+            # До разрыва — на строку дальше запаса: первый же щелчок вниз
+            # домонтирует кусок перед ним.
+            height = trace.container_size.height
+            reach = (policy.PREFETCH_SCREENS + 1) * height + 1
+            trace.scroll_to(y=scr._window_gap_y() - reach, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
         forgotten: list[int] = []
         forget = scr.forget_turn
 
@@ -489,44 +500,80 @@ async def test_wheel_reversals_do_not_pulse(tmp_path, monkeypatch):
         await _settled(pilot, scr)
         assert not set(forgotten) & set(mounted)
         assert len(mounted) <= 1
+        if edge == "bottom":
+            # Край разрыва достигнут: кусок встал, разрыв ещё открыт.
+            assert mounted
+            assert scr._window_gap
+
+
+def _turns_on_screen(scr) -> set[int]:
+    """Ходы, чьи строки на экране, — по карте экрана, не по раскладке
+    окна."""
+    view = _trace(scr).content_region
+    return {
+        turn
+        for turn in scr._window_heads
+        if any(view.overlaps(w.region) for w in scr._window_turn_widgets(turn))
+    }
 
 
 @pytest.mark.asyncio
 async def test_turns_on_screen_never_trimmed(tmp_path, monkeypatch):
-    """Лимит меньше видимого: снятие не трогает ходы на экране и рядом —
-    окно остаётся выше лимита (ход — минимальная единица)."""
+    """Лимит меньше видимого, удержание — только видимое: снятие с обоих
+    краёв снимает всё, кроме ходов на экране (ход — минимальная
+    единица)."""
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await _open_session(pilot, tmp_path / "t")
         await _jump_up(pilot, scr)
         monkeypatch.setattr(policy, "WINDOW_LIMIT", 10)
         monkeypatch.setattr(policy, "CHUNK_MIN", 1)
-        trace = _trace(scr)
-        visible = scr._window_kept_turns()
-        assert visible
+        monkeypatch.setattr(policy, "PREFETCH_SCREENS", 0)
+        on_screen = _turns_on_screen(scr)
+        first, gap = scr._window_first, scr._window_gap
+        assert on_screen
         scr._window_trim("bottom")
         scr._window_trim("top")
-        await pilot.pause()
-        assert visible <= set(scr._window_heads)
-        assert trace.first_visible().is_attached
+        # Сняты ходы с обоих краёв, ходы на экране — на месте.
+        assert scr._window_first > first
+        assert scr._window_gap.start < gap.start
+        assert on_screen <= set(scr._window_heads)
+        assert _trace(scr).first_visible().is_attached
 
 
 @pytest.mark.asyncio
-async def test_pinned_turn_in_read_range_stops_trim(tmp_path):
-    """Ход в фокусе ниже читаемого: снятие снизу на нём останавливается,
-    второго разрыва нет."""
+@pytest.mark.parametrize("how", ["focus", "hook"])
+async def test_pinned_turn_in_read_range_stops_trim(
+    tmp_path, monkeypatch, how
+):
+    """Закреплённый ход в середине прочитанного: снятие снизу снимает ходы
+    под ним и на нём останавливается, второго разрыва нет. ``hook`` —
+    закрепление, которое знает только окно (`_window_pinned`): «забыть
+    ход» сам его не откажет."""
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await _open_session(pilot, tmp_path / "t")
         await _jump_up(pilot, scr)
+        monkeypatch.setattr(policy, "PREFETCH_SCREENS", 0)
         gap = scr._window_gap
-        pinned = gap.start - 1
-        row = scr._window_turn_widgets(pinned)[0]
-        row.can_focus = True
-        scr.set_focus(row, scroll_visible=False)
+        pinned = gap.start - 2
+        assert pinned > scr._window_first
+        assert pinned not in scr._window_kept_turns()
+        if how == "focus":
+            row = scr._window_turn_widgets(pinned)[0]
+            row.can_focus = True
+            scr.set_focus(row, scroll_visible=False)
+            await pilot.pause()
+        else:
+            pinned_turn = scr._window_pinned
+            monkeypatch.setattr(
+                scr,
+                "_window_pinned",
+                lambda turn: turn == pinned or pinned_turn(turn),
+            )
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 10)
+        monkeypatch.setattr(policy, "CHUNK_MIN", 1)
+        scr._window_trim("bottom")
         await pilot.pause()
-        for _ in range(4):
-            if not scr._window_prepend(focus=False):
-                break
-            await _settled(pilot, scr)
+        assert gap.start - 1 not in scr._window_heads
         assert pinned in scr._window_heads
         assert scr._window_gap.start == pinned + 1
         _consecutive(scr)
@@ -610,3 +657,172 @@ async def test_event_down_at_gap_mounts_and_focuses(tmp_path):
             if trace.children.index(w) >= trace.children.index(first_new)
         )
         _consecutive(scr)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["inside", "last"])
+async def test_event_down_in_pinned_bottom_stays_there(tmp_path, where):
+    """↓ в закреплённом низу при открытом разрыве — не край разрыва:
+    фокус на следующее событие низа (на последнем — на месте), кусок не
+    домонтируется, фокус вверх не уходит."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_session(pilot, tmp_path / "t")
+        await _jump_up(pilot, scr)
+        gap = scr._window_gap
+        children = list(_trace(scr).children)
+        tail = [
+            w
+            for w in children[children.index(scr._window_gap_head()) :]
+            if w.can_focus and w.display
+        ]
+        assert len(tail) >= 2
+        current = tail[0] if where == "inside" else tail[-1]
+        scr.set_focus(current, scroll_visible=False)
+        await pilot.pause()
+        assert scr._event_nav_key("down")
+        assert not scr._window_busy
+        assert scr._window_gap == gap
+        await pilot.pause()
+        assert scr.focused is (tail[1] if where == "inside" else current)
+
+
+@pytest.mark.asyncio
+async def test_island_does_not_block_sticking(tmp_path, monkeypatch):
+    """Остров: в прочитанном остался только закреплённый ход (открытый
+    «!»), разрыв под ним не закрыть. Он не мешает «у низа»: колесо к низу
+    возвращает липкость, прокрутка в хвосте разрыв заново не
+    закрывает."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_session(pilot, tmp_path / "t")
+        await _jump_up(pilot, scr)
+        island = scr._window_first + 1
+        bang = scr._window_heads[island]
+        monkeypatch.setattr(scr._ephemera, "bang_open_widgets", lambda: [bang])
+        trace = _trace(scr)
+        for _ in range(5):
+            trace.scroll_to(y=trace.max_scroll_y, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+        assert scr._window_first == island
+        assert scr._window_gap.start == island + 1
+        assert scr._stick_bottom is True
+        closes: list[int] = []
+        close = scr._window_close_gap
+
+        def counted() -> None:
+            closes.append(1)
+            close()
+
+        monkeypatch.setattr(scr, "_window_close_gap", counted)
+        for _ in range(10):
+            if not scr._stick_bottom:
+                break
+            await _wheel(pilot, scr, up=True)
+        await _wheel(pilot, scr, up=True)
+        assert scr._stick_bottom is False
+        assert scr._window_gap_y() <= trace.scroll_y
+        assert closes == []
+        for _ in range(10):
+            if scr._stick_bottom:
+                break
+            await _wheel(pilot, scr, up=False)
+        assert scr._stick_bottom is True
+        assert scr._window_gap
+
+
+async def _short_gap_reading_top(pilot, scr, monkeypatch, *, pinned):
+    """Разрыв в один ход и короткий, окно сверх «лимит + кусок», читаемая
+    строка — у верха прочитанного (пока копится, снятие и предзагрузка
+    стоят)."""
+    await _jump_up(pilot, scr, pinned=pinned)
+    monkeypatch.setattr(scr, "_window_trim", lambda *_: None)
+    monkeypatch.setattr(scr, "_window_prefetch", lambda: None)
+    estimates = scr._window_estimates(scr._window_model())
+
+    def gap_widgets() -> int:
+        gap = scr._window_gap
+        return sum(estimates[gap.start : gap.stop])
+
+    while len(scr._window_gap) > 1:
+        assert scr._window_append(focus=False)
+        await _settled(pilot, scr)
+    while _window_widgets(scr, pinned=pinned) <= _bound() + 200:
+        assert scr._window_prepend(focus=False)
+        await _settled(pilot, scr)
+    assert scr._window_gap
+    _trace(scr).scroll_to(y=0, animate=False)
+    await pilot.pause()
+    monkeypatch.undo()
+    # Ход истории с итогом чуть больше хвоста по оценке — разрыв в один ход
+    # короткий.
+    monkeypatch.setattr(
+        policy, "TAIL_MIN", max(policy.TAIL_MIN, gap_widgets())
+    )
+    assert policy.short_gap(gap_widgets())
+
+
+@pytest.mark.asyncio
+async def test_to_end_short_gap_trims_by_view_at_end(tmp_path, monkeypatch):
+    """Короткий разрыв, переход в конец: снятие сверху меряет по виду у
+    низа, а не по прочитанному месту — окно в пределах «лимит + кусок»."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_session(pilot, tmp_path / "t")
+        last = TURNS - 1
+        await _short_gap_reading_top(pilot, scr, monkeypatch, pinned=last)
+        scr._scroll_to_bottom()
+        await pilot.pause()
+        await _settled(pilot, scr)
+        assert not scr._window_gap
+        assert scr._stick_bottom is True
+        assert _window_widgets(scr, pinned=last) <= _bound()
+        _consecutive(scr)
+
+
+@pytest.mark.asyncio
+async def test_preview_to_end_short_gap_trims_by_view_at_end(
+    tmp_path, monkeypatch
+):
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=_SIZE) as pilot:
+        screen = await _open_preview(pilot)
+        await _short_gap_reading_top(pilot, screen, monkeypatch, pinned=None)
+        screen.action_to_end()
+        await pilot.pause()
+        await _settled(pilot, screen)
+        assert not screen._window_gap
+        assert screen._stick_bottom is True
+        assert _window_widgets(screen) <= _bound()
+        _consecutive(screen)
+
+
+@pytest.mark.asyncio
+async def test_stuck_trim_without_layout_keeps_last_turn(
+    tmp_path, monkeypatch
+):
+    """Раскладки нет (иная версия Textual): у низа удерживаемых нет, но
+    последний ход не снимается — даже больше лимита (превью: живого хода
+    нет, закреплённого нет)."""
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=_SIZE) as pilot:
+        screen = await _open_preview(pilot)
+        assert screen._stick_bottom is True
+        monkeypatch.setattr(_trace(screen), "placed_between", lambda *_: None)
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 0)
+        monkeypatch.setattr(policy, "CHUNK_MIN", 0)
+        screen._window_trim("top")
+        assert set(screen._window_heads) == {TURNS - 1}
+        assert screen._window_first == TURNS - 1

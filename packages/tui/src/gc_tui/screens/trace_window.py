@@ -25,7 +25,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from itertools import takewhile
+from typing import TYPE_CHECKING, Literal
 
 from gc_tui import textual_compat
 from gc_tui.services import trace_window_policy as policy
@@ -45,6 +46,12 @@ if TYPE_CHECKING:
         NestedSource,
     )
     from gc_tui.services.trace_ephemera import Ephemera
+
+#: Край окна, у которого встал кусок: сверху, перед разрывом или хвост
+#: при закрытии разрыва.
+Side = Literal["top", "bottom", "end"]
+#: Край, с которого снимаются ходы.
+Edge = Literal["top", "bottom"]
 
 
 class TraceWindowMixin:
@@ -178,7 +185,8 @@ class TraceWindowMixin:
         if gap_y is None:
             return
         if gap_y <= feed.scroll_y:
-            self._window_close_gap()
+            if not self._window_island():
+                self._window_close_gap()
         elif policy.near_edge(gap_y - feed.scroll_y - height, height):
             self._window_append(focus=False)
 
@@ -209,12 +217,19 @@ class TraceWindowMixin:
             return True
         return self._window_prepend(focus=True)
 
-    def _window_edge_down(self, following: Widget | None) -> bool:
-        """↓ в режиме событий на последнем событии перед разрывом
-        (``following`` — следующее событие ленты, None — нет): кусок перед
-        разрывом и фокус на его первое событие. ``False`` — не край
-        разрыва; кусок уже встаёт — клавиша съедена."""
-        if not self._window_gap or not self._window_past_gap(following):
+    def _window_edge_down(
+        self, current: Widget, following: Widget | None
+    ) -> bool:
+        """↓ в режиме событий с ``current`` на ``following`` (следующее
+        событие ленты, None — нет). Край разрыва — ``current`` перед
+        разрывом, ``following`` за ним: кусок перед разрывом и фокус на
+        его первое событие. ``False`` — не край разрыва; кусок уже встаёт
+        — клавиша съедена."""
+        if (
+            not self._window_gap
+            or self._window_past_gap(current)
+            or not self._window_past_gap(following)
+        ):
             return False
         if self._window_busy:
             return True
@@ -259,7 +274,7 @@ class TraceWindowMixin:
         return refs
 
     def _window_settle_later(
-        self, refs: ChunkRefs, side: str, focus: bool
+        self, refs: ChunkRefs, side: Side, focus: bool
     ) -> None:
         """Кусок встаёт под удержанием отрисовки до монтажа; потом —
         `_window_settle`."""
@@ -274,7 +289,7 @@ class TraceWindowMixin:
             )
 
     def _window_settle(
-        self, gen: int, widgets: list[Widget], side: str, focus: bool
+        self, gen: int, widgets: list[Widget], side: Side, focus: bool
     ) -> None:
         """Кусок встал на краю ``side`` (``top``, ``bottom`` или ``end`` —
         закрытие разрыва). Окно сменилось (другая сессия) — результат
@@ -363,8 +378,19 @@ class TraceWindowMixin:
 
     def _trace_is_at_bottom(self) -> bool:
         """Пока разрыв открыт, физический низ — не конец истории: лента
-        не «у низа», касание низа липкость не включает (§5.11)."""
-        return not self._window_gap and super()._trace_is_at_bottom()
+        не «у низа», касание низа липкость не включает (§5.11). Кроме
+        острова: закрыть разрыв нельзя — он низу не мешает."""
+        return super()._trace_is_at_bottom() and (
+            not self._window_gap or self._window_island()
+        )
+
+    def _window_island(self) -> bool:
+        """Остров: в прочитанном остались только закреплённые ходы —
+        снять нечего, разрыв под ними не закрыть."""
+        return all(
+            self._window_pinned(turn)
+            for turn in range(self._window_first, self._window_gap.start)
+        )
 
     def _window_on_bottom(self) -> None:
         """Переход к низу — одна точка всех путей (отправка, команда,
@@ -467,7 +493,7 @@ class TraceWindowMixin:
         if self._stick_bottom and not self._window_busy:
             self._window_trim("top")
 
-    def _window_trim(self, edge: str) -> None:
+    def _window_trim(self, edge: Edge) -> None:
         """Ужать окно до лимита целыми ходами с края ``edge`` (``top`` /
         ``bottom``), если оно больше «лимит + кусок» (запас против петли с
         домонтированием). Закреплённое считается в лимите; снимаются ходы
@@ -489,11 +515,12 @@ class TraceWindowMixin:
         if kept is None:
             return
         order = self._window_edge_order(edge, list(zip(turns, counts)))
-        removable: list[tuple[int, int]] = []
-        for turn, count in order:
-            if turn in kept or self._window_pinned(turn):
-                break
-            removable.append((turn, count))
+        removable = list(
+            takewhile(
+                lambda m: m[0] not in kept and not self._window_pinned(m[0]),
+                order,
+            )
+        )
         dropped = removable[
             : policy.edge_drops([c for _t, c in removable], excess)
         ]
@@ -507,7 +534,7 @@ class TraceWindowMixin:
         self.call_after_refresh(self._window_fill)
 
     def _window_edge_order(
-        self, edge: str, mounted: list[tuple[int, int]]
+        self, edge: Edge, mounted: list[tuple[int, int]]
     ) -> list[tuple[int, int]]:
         """Смонтированные ходы от края ``edge`` внутрь прочитанного
         диапазона. Снизу: при разрыве — сначала незакреплённые ходы в
@@ -530,9 +557,9 @@ class TraceWindowMixin:
         return rest
 
     def _window_kept_turns(self) -> set[int] | None:
-        """Ходы, задевающие видимое с запасами (`policy.keep_rows`);
-        раскладки не было — None (у низа — пусто: снимается только
-        старое сверху, как раньше)."""
+        """Ходы, задевающие видимое с запасами (`policy.keep_rows`).
+        Раскладки не было — None; у низа — только последний ход, как
+        раньше."""
         feed = self._window_feed()
         rows = policy.keep_rows(
             feed.scroll_y,
@@ -541,7 +568,9 @@ class TraceWindowMixin:
         )
         widgets = feed.placed_between(*rows)
         if widgets is None:
-            return set() if self._stick_bottom else None
+            if not self._stick_bottom:
+                return None
+            widgets = set()
         turn_at = {w: t for t, w in self._window_heads.items()}
         kept: set[int] = set()
         turn = None
@@ -549,6 +578,9 @@ class TraceWindowMixin:
             turn = turn_at.get(widget, turn)
             if turn is not None and widget in widgets:
                 kept.add(turn)
+        if not kept and self._window_heads:
+            # Удерживаемых нет — последний ход остаётся, даже гигантский.
+            kept.add(max(self._window_heads))
         return kept
 
     def _window_mounted_counts(self) -> tuple[list[int], list[int]]:
