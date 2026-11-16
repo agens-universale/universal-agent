@@ -51,10 +51,13 @@ import asyncio
 import logging
 from bisect import bisect_right
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import cache, lru_cache
+from weakref import WeakKeyDictionary
 
 import textual
 from textual import selection
+from textual.app import App
 from textual.color import Color
 from textual.containers import VerticalScroll
 from textual.dom import NoScreen
@@ -68,11 +71,26 @@ PATCHED_TEXTUAL = "8.2.8"
 
 # Потолок скорости протяжки ниже ленты (доля скорости Textual).
 _MAX_BELOW_SPEED = 2.0
-# Сколько экран ждёт монтирования строки, прежде чем рисовать без неё:
-# страховка от строки, снятой до монтирования, — экран не замирает.
+# Сколько экран может ждать монтирования подряд, прежде чем рисовать без
+# него: страховка от строки, снятой до монтирования, и от удержаний
+# внахлёст (непрерывный подъём ленты) — экран не замирает.
 _PAINT_HOLD_LIMIT = 1.0
 # Ждущие монтирования задачи — ссылка, чтобы их не собрал сборщик.
 _PAINT_HOLDS: set[asyncio.Task] = set()
+
+
+@dataclass
+class _HoldSeries:
+    """Удержания экрана приложения внахлёст — одна серия: сколько держат
+    сейчас, до какого времени (`loop.time()`) она может длиться и ждёт
+    ли экран кадра после неё."""
+
+    count: int = 0
+    until: float = 0.0
+    awaiting_frame: bool = False
+
+
+_HOLD_SERIES: WeakKeyDictionary[App, _HoldSeries] = WeakKeyDictionary()
 
 _log = logging.getLogger(__name__)
 
@@ -264,27 +282,52 @@ def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
     родителю, не смонтированы (их дети собираются следующим тактом):
     перемены соседей, сделанные до того, ложатся одним кадром с ними. Уже
     смонтированные или без родителя — не ждутся. Задача отпускания —
-    чтобы продолжить после монтажа; ждать нечего — ``None``."""
+    чтобы продолжить после монтажа; ждать нечего — ``None``.
+
+    Удержания внахлёст — одна серия не дольше `_PAINT_HOLD_LIMIT`, между
+    сериями — кадр: пока экран держится, `Screen._dirty_widgets` копит
+    перерисованные виджеты, в том числе снятые, и держит их с отрисовкой
+    до кадра."""
     pending = [
         w for w in widgets if not w.is_mounted and isinstance(w.parent, Widget)
     ]
     if not pending:
         return None
-    parent = pending[0].parent
-    batch = pending[0].app.batch_update()
+    parent, app = pending[0].parent, pending[0].app
+    series = _HOLD_SERIES.setdefault(app, _HoldSeries())
+    loop = asyncio.get_running_loop()
+    now = loop.time()
+    if not series.count:
+        series.until = now + _PAINT_HOLD_LIMIT
+    # Серия не дольше потолка, следующая — только после кадра: опоздавшее
+    # ждёт монтажа без удержания, иначе внахлёст кадра нет вовсе.
+    hold = not series.awaiting_frame and now < series.until
+    batch = app.batch_update() if hold else None
+    limit = series.until - now if hold else _PAINT_HOLD_LIMIT
+
+    def frame_passed() -> None:
+        series.awaiting_frame = False
 
     async def release() -> None:
         try:
-            await asyncio.wait_for(mounted(parent, pending), _PAINT_HOLD_LIMIT)
+            await asyncio.wait_for(mounted(parent, pending), limit)
         except TimeoutError:
-            _log.debug("строка не смонтирована за %s с", _PAINT_HOLD_LIMIT)
+            _log.debug("строка не смонтирована за %.2f с", limit)
         finally:
-            batch.__exit__(None, None, None)
+            if batch is not None:
+                batch.__exit__(None, None, None)
+                series.count -= 1
+                if not series.count:
+                    series.awaiting_frame = app.call_after_refresh(
+                        frame_passed
+                    )
 
     # Сначала путь отпускания, потом удержание: задача стартует не раньше
     # следующего такта, а не заведённая задача экран не держит.
-    task = asyncio.get_running_loop().create_task(release())
-    batch.__enter__()
+    task = loop.create_task(release())
+    if batch is not None:
+        series.count += 1
+        batch.__enter__()
     _PAINT_HOLDS.add(task)
     task.add_done_callback(_PAINT_HOLDS.discard)
     return task

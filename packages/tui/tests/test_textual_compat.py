@@ -569,6 +569,67 @@ async def test_paint_after_mount_releases_on_timeout(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_overlapping_paint_holds_let_a_frame_through(monkeypatch):
+    """Удержания подряд внахлёст (непрерывный подъём ленты) не держат
+    экран дольше потолка: иначе кадра нет, а `Screen._dirty_widgets`
+    копит каждый перерисованный виджет, в том числе снятые, с их
+    отрисовкой."""
+
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.2)
+    app = _Host()
+    async with app.run_test() as pilot:
+        counts = []
+        for _ in range(16):
+            counts.append(app._batch_count)
+            await _in_app(pilot, lambda: _mount_and_hold(app))
+            await asyncio.sleep(0.05)
+        assert 0 in counts[1:]
+        await _released(pilot)
+
+
+@pytest.mark.asyncio
+async def test_back_to_back_paint_holds_let_a_frame_through(monkeypatch):
+    """Новое удержание сразу по отпусканию прежнего (кусок за куском при
+    подъёме) ждёт кадра: иначе серии смыкаются и экран не рисует."""
+    from textual.screen import Screen
+
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    frames: list[int] = []
+    refresh = Screen._compositor_refresh
+
+    def counted(self) -> None:
+        frames.append(1)
+        refresh(self)
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.1)
+    app = _Host()
+    async with app.run_test() as pilot:
+        going = [True]
+
+        def next_hold(_task=None) -> None:
+            if not going[0]:
+                return
+            row = Static("row")
+            app.query_one("#host").mount(row)
+            textual_compat.paint_after_mount(row).add_done_callback(next_hold)
+
+        await _in_app(pilot, next_hold)
+        await asyncio.sleep(0.15)
+        monkeypatch.setattr(Screen, "_compositor_refresh", counted)
+        await asyncio.sleep(0.5)
+        going[0] = False
+        assert frames
+        await _released(pilot)
+
+
+@pytest.mark.asyncio
 async def test_paint_after_mount_noop_when_mounted_or_orphan():
     app = _Host()
     async with app.run_test() as pilot:
