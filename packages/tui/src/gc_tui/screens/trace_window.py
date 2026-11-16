@@ -285,12 +285,16 @@ class TraceWindowMixin:
         task = textual_compat.paint_after_mount(*refs.widgets)
         if task is None:
             self._window_settle(gen, refs.widgets, side, focus)
-        else:
-            task.add_done_callback(
-                lambda _t: self._window_feed().call_later(
-                    self._window_settle, gen, refs.widgets, side, focus
-                )
+            return
+        # Лента — сейчас, пока экран жив: отпускание приходит из цикла
+        # asyncio, а снятый к тому времени экран ленты уже не найдёт.
+        # Закрытая очередь ленты просто не примет сообщение.
+        feed = self._window_feed()
+        task.add_done_callback(
+            lambda _t: feed.call_later(
+                self._window_settle, gen, refs.widgets, side, focus
             )
+        )
 
     def _window_settle(
         self, gen: int, widgets: list[Widget], side: Side, focus: bool

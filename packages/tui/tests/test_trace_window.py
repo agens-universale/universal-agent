@@ -436,3 +436,39 @@ async def test_stale_window_result_dropped_after_switch(tmp_path):
         assert host._window_first == fresh_first
         assert host._window_busy is True
         assert host.focused in (None, _trace(host))
+
+
+@pytest.mark.asyncio
+async def test_settle_after_screen_gone_raises_nothing(tmp_path, monkeypatch):
+    """Кусок домонтировался, когда ленту экрана уже не найти (экран снят):
+    отпускание куска из цикла asyncio ленту заново не ищет и не бросает в
+    обработчик исключений цикла. Снятие экрана здесь — поиск ленты, который
+    бросает `NoMatches` после постановки куска."""
+    import asyncio
+
+    from textual.css.query import NoMatches
+
+    def gone():
+        raise NoMatches("#trace")
+
+    async with _app(tmp_path).run_test() as pilot:
+        screen = await _preview(pilot)
+        await _filled(pilot, screen)
+        await _user_scroll(pilot, screen, 0)
+        await _filled(pilot, screen)
+        assert screen._window_first > 0
+        loop = asyncio.get_running_loop()
+        errors: list[dict] = []
+        settled: list[int] = []
+        handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, ctx: errors.append(ctx))
+        try:
+            assert screen._window_prepend(focus=False)
+            monkeypatch.setattr(screen, "_window_feed", gone)
+            monkeypatch.setattr(
+                screen, "_window_settle", lambda gen, *_a: settled.append(gen)
+            )
+            await wait_until(pilot, lambda: settled or errors, "отпущено")
+        finally:
+            loop.set_exception_handler(handler)
+        assert errors == []
