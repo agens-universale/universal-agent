@@ -29,6 +29,13 @@
 версии Textual — обычный якорь. Прямая запись позиции ползунка также
 обходит сброс кеша рисунка: при якорной раскладке сбрасываем его явно.
 
+Утечка Textual 8.2.8: `StylesCache.get_inner_outer` — `lru_cache(1024)`
+на методе экземпляра, и в ключ попадает `self`. Общий для класса кеш
+держит кеш строк (`Strip` и их кеши) последних 1024 отрисованных
+виджетов и после их снятия: окно ленты снимает ходы, а их отрисовка
+остаётся в памяти. Патч кеширует ответ по одним цветам. Стенд —
+`test_textual_compat.py`.
+
 Удержание первой видимой строки (спека шага 2 окна ленты, §5.3): кадр
 Textual 8.2.8 рисуется раньше сигнала раскладки, `call_after_refresh` —
 тоже после кадра, поэтому сдвиг «после раскладки» даёт прыжок на кадр.
@@ -44,14 +51,16 @@ import asyncio
 import logging
 from bisect import bisect_right
 from collections.abc import Callable
-from functools import cache
+from functools import cache, lru_cache
 
 import textual
 from textual import selection
+from textual.color import Color
 from textual.containers import VerticalScroll
 from textual.dom import NoScreen
 from textual.geometry import Offset, Size
 from textual.screen import Screen
+from textual.style import Style
 from textual.widget import AwaitMount, Widget
 from textual.widgets import Static
 
@@ -90,8 +99,22 @@ def _pointer_start_offset(self: selection.SelectStart) -> Offset:
 _PATCHED_PROPERTY = property(_pointer_start_offset)
 
 
+@lru_cache(1024)
+def _inner_outer(base_background: Color, background: Color):
+    """Фоны внутри и снаружи рамки — как у Textual, ключ только цвета."""
+    return (
+        Style(background=base_background + background),
+        Style(background=base_background),
+    )
+
+
+def _get_inner_outer(_styles_cache, base_background, background):
+    return _inner_outer(base_background, background)
+
+
 def apply_textual_patches() -> bool:
-    """Поставить патч знака `SelectStart`; идемпотентно.
+    """Поставить патчи знака `SelectStart` и кеша фонов `StylesCache`;
+    идемпотентно.
 
     `False` — версия Textual не та, патч не ставится (предупреждение
     в журнал)."""
@@ -103,7 +126,11 @@ def apply_textual_patches() -> bool:
             PATCHED_TEXTUAL,
         )
         return False
+    # Приватный модуль — после стража версии: на иной его может не быть.
+    from textual._styles_cache import StylesCache
+
     selection.SelectStart.pointer_start_offset = _PATCHED_PROPERTY
+    StylesCache.get_inner_outer = _get_inner_outer
     return True
 
 

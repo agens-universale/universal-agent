@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+import functools
 import json
 from pathlib import Path
 
@@ -887,3 +888,58 @@ async def test_other_version_hold_is_off(monkeypatch):
         scroll = app.query_one("#a")
         await pilot.pause()
         assert scroll.first_visible() is None
+
+
+class _Rows(App):
+    """Лента строк: снятие строк, как окно ленты."""
+
+    def compose(self):
+        with VerticalScroll(id="a"):
+            for i in range(20):
+                yield Static(f"line {i}")
+
+
+@functools.lru_cache(1024)
+def _upstream_inner_outer(cls, base_background, background):
+    """`StylesCache.get_inner_outer` Textual 8.2.8 как есть."""
+    from textual.style import Style
+
+    return (
+        Style(background=base_background + background),
+        Style(background=base_background),
+    )
+
+
+async def _removed_line_caches() -> int:
+    """Сколько кешей строк снятых и отрисованных виджетов переживают
+    полную сборку мусора."""
+    import gc
+    import weakref
+
+    app = _Rows()
+    async with app.run_test(size=(40, 30)) as pilot:
+        await pilot.pause()
+        rows = list(app.query(Static))
+        caches = [weakref.ref(row._styles_cache) for row in rows]
+        await app.query_one("#a").remove_children()
+        await pilot.pause()
+        del rows
+    gc.collect()
+    return sum(ref() is not None for ref in caches)
+
+
+@pytest.mark.asyncio
+async def test_removed_widget_line_cache_is_freed():
+    assert apply_textual_patches() is True
+    assert await _removed_line_caches() == 0
+
+
+@pytest.mark.asyncio
+async def test_upstream_inner_outer_keeps_removed_line_caches(monkeypatch):
+    """Контроль: `StylesCache.get_inner_outer` Textual 8.2.8 — `lru_cache`
+    на методе экземпляра, ключ держит кеш строк каждого отрисованного
+    виджета (до 1024) и после его снятия."""
+    from textual._styles_cache import StylesCache
+
+    monkeypatch.setattr(StylesCache, "get_inner_outer", _upstream_inner_outer)
+    assert await _removed_line_caches() > 0
