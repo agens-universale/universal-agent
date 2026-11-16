@@ -41,7 +41,8 @@ async def test_open_many_turns_one_fresh_line(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
         lines = _turn_lines(scr)
-        assert len(lines) == TURNS
+        # Окно монтирует хвост: строк много, но не все ходы.
+        assert 1 < len(lines) <= TURNS
         assert _fresh_lines(scr) == [lines[-1]]
         assert scr._fresh_turn_line() is lines[-1]
 
@@ -64,7 +65,7 @@ async def test_render_turns_does_not_query_turn_lines(tmp_path, monkeypatch):
         scr.attach_active_task(TID, is_resume=True)
         await pilot.pause()
 
-        assert len(_turn_lines(scr)) == TURNS
+        assert len(_turn_lines(scr)) > 1
         assert TurnLine not in selectors
         assert "TurnLine" not in selectors
 
