@@ -277,7 +277,9 @@ class TraceWindowMixin:
         self, refs: ChunkRefs, side: Side, focus: bool
     ) -> None:
         """Кусок встаёт под удержанием отрисовки до монтажа; потом —
-        `_window_settle`."""
+        `_window_settle` очередью ленты: после того, как лента разобрала
+        сообщения монтажа куска. Иначе подъём кусок за куском обгоняет её
+        очередь, а ждущие в ней сообщения держат снятые ходы."""
         self._window_busy = True
         gen = self._window_gen
         task = textual_compat.paint_after_mount(*refs.widgets)
@@ -285,7 +287,9 @@ class TraceWindowMixin:
             self._window_settle(gen, refs.widgets, side, focus)
         else:
             task.add_done_callback(
-                lambda _t: self._window_settle(gen, refs.widgets, side, focus)
+                lambda _t: self._window_feed().call_later(
+                    self._window_settle, gen, refs.widgets, side, focus
+                )
             )
 
     def _window_settle(

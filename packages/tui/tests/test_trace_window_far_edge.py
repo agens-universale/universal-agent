@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import json
+import weakref
 
 import pytest
 from feed_dump import (
@@ -826,3 +829,43 @@ async def test_stuck_trim_without_layout_keeps_last_turn(
         screen._window_trim("top")
         assert set(screen._window_heads) == {TURNS - 1}
         assert screen._window_first == TURNS - 1
+
+
+# ---- (е) память при непрерывном подъёме -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_continuous_climb_frees_trimmed_turns(tmp_path, monkeypatch):
+    """Подъём кусок за куском без простоя (следующий — сразу, как встал
+    прежний): снятые ходы освобождаются по ходу подъёма, а не копятся до
+    простоя ленты."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_session(pilot, tmp_path / "t")
+        trace = _trace(scr)
+        settle, forget = scr._window_settle, scr._window_forget_turn
+        trimmed: weakref.WeakSet = weakref.WeakSet()
+
+        def settle_then_next(*args) -> None:
+            settle(*args)
+            trace.scroll_to(y=0, animate=False, immediate=True)
+            if not scr._window_busy and scr._window_first > 0:
+                scr._window_prepend(focus=False)
+
+        def forget_noted(turn: int) -> bool:
+            for widget in scr._window_turn_widgets(turn):
+                trimmed.update(widget.walk_children(with_self=True))
+            return forget(turn)
+
+        monkeypatch.setattr(scr, "_window_settle", settle_then_next)
+        monkeypatch.setattr(scr, "_window_forget_turn", forget_noted)
+        trace.scroll_to(y=0, animate=False)
+        for _ in range(3000):
+            await asyncio.sleep(0.02)
+            if scr._window_first == 0 and not scr._window_busy:
+                break
+        assert scr._window_first == 0
+        gc.collect()
+        # Снятое держат только ссылки окна на последний кусок открытия —
+        # не всё снятое за подъём.
+        alive = [w for w in trimmed if not w.is_attached]
+        assert len(alive) <= policy.WINDOW_LIMIT // 4
