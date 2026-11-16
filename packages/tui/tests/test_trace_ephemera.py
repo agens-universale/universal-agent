@@ -96,13 +96,16 @@ def _thought(attempt: str, text: str):
     return ThoughtSnapshot(attempt, text, 2.0, False, datetime.now(UTC))
 
 
-async def live_session(pilot):
+async def live_session(pilot, prelude: list[dict] | None = None):
     """Экран на пустом треде; первый ход — живым путём с эфемерным: мысль,
     блок «!», строка команды, пометка трейса под вызовом, после итога —
     копия рамки плана над свежей строкой и реплика, ставшая «не
-    отправлено»; второй ход — текущий."""
+    отправлено»; второй ход — текущий. ``prelude`` — записи ходов до
+    них."""
     scr = pilot.app.screen
     assert scr.attach_active_task(HISTORY_THREAD)
+    if prelude:
+        feed_live(scr, prelude, splits=())
     records = _records()
     sidecar = _sidecar()
     feed_live(scr, records[:1], splits=())

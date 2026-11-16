@@ -165,6 +165,30 @@ class AnchoredScroll(VerticalScroll):
         )
         return placements[at].widget if at < len(placements) else None
 
+    def placed_top(self, widget: Widget) -> int | None:
+        """Верх ``widget`` в ленте по последней раскладке; нет в ней (или
+        иная версия Textual) — ``None``."""
+        arranged = self._arranged
+        if arranged is None or not textual_is_patched_version():
+            return None
+        return _placed_y(arranged, widget)
+
+    def placed_between(self, top: float, bottom: float) -> set[Widget] | None:
+        """Дети ленты, задевающие строки ``[top, bottom)`` по последней
+        раскладке, — без пересборки карты экрана. Раскладки не было (или
+        иная версия Textual) — ``None``."""
+        arranged = self._arranged
+        if arranged is None or not textual_is_patched_version():
+            return None
+        placements = arranged.placements
+        at = bisect_right(placements, top, key=lambda p: p.region.bottom)
+        found: set[Widget] = set()
+        for placement in placements[at:]:
+            if placement.region.y >= bottom:
+                break
+            found.add(placement.widget)
+        return found
+
     def _keep_held_row(self, previous, result, size: Size) -> None:
         held = self._held
         if held is None or self._anchor_held():

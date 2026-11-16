@@ -187,17 +187,21 @@ class PreviewScreen(
         """Виды блоков куска сверху — в маршрут раскрытия превью."""
         self._blocks.views.update(refs.block_views)
 
+    def _window_pinned(self, turn: int) -> bool:
+        """Ход со строкой в фокусе не снимается (§5.3)."""
+        focused = self.focused
+        return focused is not None and bool(
+            set(focused.ancestors_with_self)
+            & set(self._window_turn_widgets(turn))
+        )
+
     def _window_forget_turn(self, turn: int) -> bool:
         """Снятый ход уходит и из маршрута раскрытия: уровень хода и
-        уровни субагентов (ключ — call_id строки `Agent`). Ход со строкой
-        в фокусе не снимается (§5.3)."""
+        уровни субагентов (ключ — call_id строки `Agent`)."""
         from gc_tui.services.history_render import history_level
 
         removed = self._window_turn_widgets(turn)
-        focused = self.focused
-        if focused is not None and set(focused.ancestors_with_self) & set(
-            removed
-        ):
+        if self._window_pinned(turn):
             return False
         if not super()._window_forget_turn(turn):
             return False

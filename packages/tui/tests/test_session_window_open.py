@@ -185,7 +185,12 @@ async def test_open_then_scroll_reveals_history(tmp_path):
             await _user_scroll(pilot, scr, 0)
             await pilot.pause(0.1)
         assert scr._window_first == 0
-        assert _replies(scr) == [f"запрос {i}" for i in range(TURNS)]
+        # Второй край окна (§5.11): низ прочитанного снят до живого хода.
+        gap = scr._window_gap
+        assert _replies(scr) == [
+            f"запрос {i}" for i in range(TURNS) if i not in gap
+        ]
+        assert _replies(scr)[-1] == f"запрос {TURNS - 1}"
 
 
 @pytest.mark.asyncio

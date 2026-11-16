@@ -2867,12 +2867,22 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     def _window_forget_turn(self, turn: int) -> bool:
         return self.forget_turn(turn)
 
+    def _window_pinned(self, turn: int) -> bool:
+        return self._turn_pinned(turn)
+
+    def _window_focus_home(self) -> None:
+        self.set_focus(
+            self.query_one(_SEL_CMDINPUT, CommandTextArea),
+            scroll_visible=False,
+        )
+
     def forget_turn(self, turn: int) -> bool:
-        """«Забыть ход» (§5.3): верхний ход окна ``turn`` снимается с ленты
-        одной операцией — эфемерное и снимок вида уходят в память, ни один
-        реестр экрана не держит снятый виджет; события остаются в модели.
-        Не снимаются (False): не верхний ход и живой (`_turn_pinned`)."""
-        if turn != self._window_first or self._turn_pinned(turn):
+        """«Забыть ход» (§5.3, §5.11): ход ``turn`` на конце прочитанного
+        диапазона снимается с ленты одной операцией — эфемерное и снимок
+        вида уходят в память, ни один реестр экрана не держит снятый
+        виджет; события остаются в модели. Не снимаются (False): ход не на
+        конце и живой (`_turn_pinned`)."""
+        if not self._window_removable(turn) or self._turn_pinned(turn):
             return False
         gone = self._turn_subtree(turn)
         self._remember_turn(turn, gone)
@@ -3983,8 +3993,12 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             return True
         step = -1 if key == "up" else 1
         at = events_.index(current) + step if current in events_ else -1
-        if 0 <= at < len(events_):
-            events_[at].focus()
+        following = events_[at] if 0 <= at < len(events_) else None
+        if key == "down" and self._window_edge_down(following):
+            # Нижний край перед разрывом: кусок снизу и фокус на него.
+            return True
+        if following is not None:
+            following.focus()
         return True
 
     def _withdraw_last_queued(self) -> bool:

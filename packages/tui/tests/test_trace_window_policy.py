@@ -3,9 +3,12 @@
 
 from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.trace_window_policy import (
-    drop_count,
-    near_top,
+    edge_drops,
+    keep_rows,
+    near_edge,
+    next_chunk,
     prev_chunk,
+    short_gap,
     tail_turns,
     trim_to,
     underfilled,
@@ -16,16 +19,16 @@ def test_tail_covers_budget():
     assert tail_turns([50, 40, 30, 20], 45) == range(2, 4)
     assert tail_turns([50, 40, 30, 20], 50) == range(2, 4)
     assert tail_turns([50, 40, 30, 20], 51) == range(1, 4)
-    assert tail_turns([50, 40, 30, 20], 1000) == range(0, 4)
-    assert tail_turns([], 100) == range(0, 0)
+    assert tail_turns([50, 40, 30, 20], 1000) == range(4)
+    assert tail_turns([], 100) == range(0)
 
 
 def test_prev_chunk_whole_turns():
     counts = [10, 20, 30, 40, 50]
     assert prev_chunk(4, counts, 45) == range(2, 4)
     assert prev_chunk(4, counts, 40) == range(3, 4)
-    assert prev_chunk(2, counts, 1000) == range(0, 2)
-    assert prev_chunk(0, counts, 10) == range(0, 0)
+    assert prev_chunk(2, counts, 1000) == range(2)
+    assert prev_chunk(0, counts, 10) == range(0)
 
 
 def test_trim_hysteresis():
@@ -34,11 +37,35 @@ def test_trim_hysteresis():
     assert trim_to(1301, 1000, 300) == 301
 
 
-def test_drop_count_keeps_last_turn():
-    assert drop_count([100, 200, 300], 150) == 2
-    assert drop_count([100, 200, 300], 100) == 1
-    assert drop_count([100, 200, 300], 10_000) == 2
-    assert drop_count([500], 100) == 0
+def test_next_chunk_whole_turns_up_to_gap_end():
+    counts = [10, 20, 30, 40, 50]
+    assert next_chunk(1, 5, counts, 45) == range(1, 3)
+    assert next_chunk(1, 5, counts, 20) == range(1, 2)
+    assert next_chunk(1, 3, counts, 1000) == range(1, 3)
+    assert next_chunk(3, 3, counts, 10) == range(3, 3)
+
+
+def test_edge_drops_whole_turns_from_edge():
+    assert edge_drops([100, 200, 300], 150) == 2
+    assert edge_drops([100, 200, 300], 100) == 1
+    # Снимаемых меньше, чем нужно, — снимаются все снимаемые.
+    assert edge_drops([100, 200, 300], 10_000) == 3
+    assert edge_drops([], 100) == 0
+
+
+def test_short_gap_up_to_open_tail():
+    assert short_gap(policy.TAIL_MIN) is True
+    assert short_gap(policy.TAIL_MIN + 1) is False
+
+
+def test_keep_rows_margin_only_off_bottom():
+    height = 20
+    margin = 2 * policy.PREFETCH_SCREENS * height
+    assert keep_rows(100, height, stuck=True) == (100, 120)
+    assert keep_rows(100, height, stuck=False) == (
+        100 - margin,
+        120 + margin,
+    )
 
 
 def test_invariant_limit():
@@ -48,14 +75,14 @@ def test_invariant_limit():
 def test_giant_turn_is_one_unit():
     assert tail_turns([10, 5000], 600) == range(1, 2)
     assert prev_chunk(2, [10, 5000], 300) == range(1, 2)
-    assert drop_count([5000, 10], 4000) == 1
+    assert edge_drops([5000, 10], 4000) == 1
 
 
-def test_near_top_by_screens():
+def test_near_edge_by_screens():
     height = 20
     below = policy.PREFETCH_SCREENS * height
-    assert near_top(below - 1, height) is True
-    assert near_top(below, height) is False
+    assert near_edge(below - 1, height) is True
+    assert near_edge(below, height) is False
 
 
 def test_underfilled_by_screens():

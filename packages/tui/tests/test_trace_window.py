@@ -2,15 +2,14 @@
 история домонтируется сверху после прокрутки пользователем, по
 возвращении вниз окно ужимается до лимита. Превью — на окне."""
 
-from gc_testkit.tui_support import tui_settings, wait_until
 import pytest
-from textual.screen import Screen
-
+from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui import textual_compat
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
 from gc_tui.screens.trace_window import TraceWindowMixin
 from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.history_model import HistoryInputs, build_history
+from textual.screen import Screen
 
 TURNS = 30
 # Боевые числа политики — до подмены фикстурой.
@@ -120,7 +119,13 @@ async def test_preview_mounts_tail_then_history_on_scroll(tmp_path):
             pilot, lambda: screen._window_first < first, "кусок сверху"
         )
         await _read_to_start(pilot, screen)
-        assert _replies(screen) == [f"запрос {i}" for i in range(TURNS)]
+        # Второй край окна (§5.11): низ прочитанного снят, разрыв — до
+        # конца истории (живого хода в превью нет).
+        gap = screen._window_gap
+        assert gap.stop in (0, TURNS)
+        assert _replies(screen) == [
+            f"запрос {i}" for i in range(TURNS) if i not in gap
+        ]
 
 
 @pytest.mark.asyncio
@@ -167,7 +172,7 @@ async def test_prefetch_only_after_user_scroll(tmp_path, monkeypatch):
         await _filled(pilot, screen)
         first = screen._window_first
         assert screen._stick_bottom is True
-        monkeypatch.setattr(policy, "near_top", lambda *_: True)
+        monkeypatch.setattr(policy, "near_edge", lambda *_: True)
         screen._window_prefetch()
         await pilot.pause(0.3)
         assert screen._window_first == first
@@ -261,22 +266,25 @@ async def test_preview_shrinks_on_return_to_bottom(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_preview_shrink_spares_focused_turn(tmp_path):
-    """Фокус на строке старого хода: возврат к низу его не снимает —
-    ужатие останавливается на нём, фокус на месте."""
+async def test_preview_to_end_moves_focus_off_old_turn(tmp_path):
+    """Фокус на строке прочитанного хода, разрыв открыт: явный переход в
+    конец уводит фокус со старой строки и снимает прочитанное (§5.11)."""
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         screen = await _preview(pilot)
         await _read_to_start(pilot, screen)
         await _filled(pilot, screen)
+        assert screen._window_gap
         top = _focusable(screen)[0]
         top.focus()
         await pilot.pause()
         screen._scroll_to_bottom()
         await pilot.pause(0.3)
         await _filled(pilot, screen)
-        assert screen._window_first == 0
-        assert top.is_attached
-        assert screen.focused is top
+        assert screen.focused is None
+        assert not top.is_attached
+        assert not screen._window_gap
+        assert screen._window_first > 0
+        assert _replies(screen)[-1] == f"запрос {TURNS - 1}"
 
 
 @pytest.mark.asyncio
