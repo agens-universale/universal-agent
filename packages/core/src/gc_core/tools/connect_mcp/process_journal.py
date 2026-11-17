@@ -467,12 +467,25 @@ def _orphan_verdict(directory: Path) -> bool | None:
     """
     found = _read_own_json(directory / _OWNER_FILE)
     owner = found[0] if found else None
-    if not isinstance(owner, dict) or owner.get("node") != platform.node():
+    if not isinstance(owner, dict) or not _same_host(owner):
         return None
     pid = owner.get("pid")
     if not _is_int(pid) or _owner_alive(pid, owner.get("mark")):
         return None
     return owner.get("boot_id") == boot_id()
+
+
+def _same_host(owner: dict) -> bool:
+    """Журнал этого узла: имя узла совпало, а на macOS — ещё и загрузка
+    (``boot_id`` известен и совпал): там имя меняется со сменой сети.
+
+    На Linux загрузка не в счёт: контейнеры делят ядро и ``boot_id``, но
+    не пространство pid — журнал соседнего контейнера сочли бы своим.
+    """
+    if owner.get("node") == platform.node():
+        return True
+    boot = owner.get("boot_id")
+    return sys.platform == "darwin" and boot != "0" and boot == boot_id()
 
 
 def _owner_alive(pid: int, mark: object) -> bool:

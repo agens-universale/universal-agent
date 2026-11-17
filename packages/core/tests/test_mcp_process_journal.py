@@ -967,3 +967,37 @@ def test_sweep_spares_live_neighbour_when_query_fails(
 
     assert jdir.exists()
     assert owner.poll() is None and server.poll() is None
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "boot", "ours"),
+    [
+        ("darwin", "BOOT-1", True),
+        ("linux", "BOOT-1", False),
+        ("darwin", "0", False),
+    ],
+    ids=["darwin-same-boot", "linux-same-boot", "darwin-unknown-boot"],
+)
+def test_renamed_node_is_same_host_only_on_darwin_by_boot(
+    mcp_home, monkeypatch, platform_name, boot, ours
+):
+    """macOS меняет имя узла со сменой сети: свой журнал узнаётся по
+    загрузке. На Linux контейнеры делят ядро и ``boot_id``, но не
+    пространство pid — там только имя узла."""
+    if not Path("/bin/ps").exists():
+        pytest.skip("нет /bin/ps")
+    jdir = _journal_dir(ProcessJournal())
+    _rewrite(
+        jdir / "owner.json",
+        pid=999999999,
+        mark=None,
+        node="old-name",
+        boot_id=boot,
+    )
+    monkeypatch.setattr(process_journal.platform, "node", lambda: "new-name")
+    monkeypatch.setattr(process_journal, "boot_id", lambda: boot)
+    monkeypatch.setattr(sys, "platform", platform_name)
+
+    sweep_orphans(wait_sec=0.1)
+
+    assert jdir.exists() is not ours
