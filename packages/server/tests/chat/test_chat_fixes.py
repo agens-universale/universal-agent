@@ -33,8 +33,10 @@ async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
     discoveries = []
 
     async def discover(name, config, **kwargs):
+        # Сервер с тулом: пустой список потребитель считает неизвестным и
+        # подключает сервер сам, а здесь проверяется общий каталог.
         discoveries.append(name)
-        return []
+        return [{"name": "echo", "inputSchema": {"type": "object"}}]
 
     monkeypatch.setattr(
         "gc_core.tools.connect_mcp.consumer_connections.alist_raw_tools",
