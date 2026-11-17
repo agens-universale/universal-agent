@@ -138,7 +138,8 @@ class ChunkOptions:
     застывших таймеров вызовов хоста; ``plan_accepted`` — состояние рамки
     плана при вставке (решение человека принадлежит экрану);
     ``thoughts`` — строки мыслей из памяти эфемерного показаны (флаг
-    показа мыслей сейчас)."""
+    показа мыслей сейчас); ``fresh_line`` — у хоста есть итог «сейчас»:
+    строка итога последнего хода свежая (в превью нет — как все)."""
 
     focusable_compaction: bool = False
     edits_lookup: Any = None
@@ -150,6 +151,7 @@ class ChunkOptions:
     timers: CallTimers = field(default_factory=CallTimers)
     plan_accepted: Callable[[str], bool] | None = None
     thoughts: bool = True
+    fresh_line: bool = True
 
 
 @dataclass
@@ -237,7 +239,9 @@ class _Chunk:
         self._open: dict[str, tuple[ToolCallRow, ToolBlocksView]] = {}
         self._finish_ids: set[str] = set()
         self._ended = False
-        self._fresh_at = _fresh_outcome_index(model)
+        self._fresh_at = (
+            _fresh_outcome_index(model) if options.fresh_line else None
+        )
         # Первое вложенное в ``_mounted`` (`nest`); вложенного нет — None.
         self._nested_from: int | None = None
 

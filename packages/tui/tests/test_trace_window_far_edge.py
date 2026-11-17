@@ -134,13 +134,14 @@ async def _open_session(pilot, threads_dir):
     return scr
 
 
-async def _open_preview(pilot):
+async def _open_preview(pilot, *, outcomes: bool = False):
+    """Превью истории; ``outcomes`` — с записями итога ходов."""
     from gc_tui.screens.preview import PreviewScreen
 
     messages = [
-        {"payload": rec["payload"]}
+        {"payload": rec["payload"]} if rec["type"] == "message" else rec
         for rec in _records()
-        if rec["type"] == "message"
+        if rec["type"] == "message" or outcomes
     ]
     screen = PreviewScreen(
         segments=[{"messages": messages, "index": 0, "compacted_by": None}],
@@ -456,6 +457,32 @@ async def test_preview_reading_up_bounded_then_to_end(tmp_path):
         )
         assert _replies(screen) == list(range(screen._window_first, TURNS))
         assert screen._stick_bottom is True
+
+
+@pytest.mark.asyncio
+async def test_preview_bottom_trimmed_last_turn_returns_settled(tmp_path):
+    """В превью итога «сейчас» нет: последний ход, снятый снизу при
+    подъёме, возвращается со строкой итога, как у всех, — не свежей."""
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.turn_line import TurnLine
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=_SIZE) as pilot:
+        screen = await _open_preview(pilot, outcomes=True)
+        await _jump_up(pilot, screen, pinned=None)
+        assert TURNS - 1 in screen._window_gap
+        screen.action_to_end()
+        await pilot.pause()
+        await _settled(pilot, screen)
+        lines = list(_trace(screen).query(TurnLine))
+        assert TURNS - 1 not in screen._window_gap
+        assert lines
+        assert [line for line in lines if line.is_fresh] == []
 
 
 # ---- пульсация, видимое, закреплённое --------------------------------------

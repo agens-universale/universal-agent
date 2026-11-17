@@ -156,12 +156,12 @@ class PreviewScreen(
             mcp_servers=mcp_servers_of(self._mcp_snapshot),
             model_slots=self._model_slots or {},
             timers=blocks.timers,
+            # В превью нет итога «сейчас»: строка последнего хода — как
+            # все, и при домонтировании после снятия.
+            fresh_line=False,
         )
         refs = self._window_mount_tail()
         blocks.views = refs.block_views
-        # В превью нет итога «сейчас»: строка последнего хода — как все.
-        if refs.fresh_turn_line is not None:
-            refs.fresh_turn_line.settle()
         # Трасса субагентов остаётся у узла вложенного — для кусков
         # сверху; сегменты ждут перехода в сессию.
         self._subagent_records = []
