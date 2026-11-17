@@ -166,6 +166,27 @@ async def test_relative_path_resolved_from_cwd(tmp_path, monkeypatch):
     assert _names(ctx.runtime.plugins) == ("alpha",)
 
 
+async def test_home_tilde_expanded(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    _plugin(home, "alpha")
+    cfg = parity_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(home))
+
+    ctx, _ = await _ctx_of(cfg, plugins=["~/alpha"])
+
+    assert _names(ctx.runtime.plugins) == ("alpha",)
+
+
+@pytest.mark.parametrize("single", ["plug", b"plug", "path"])
+async def test_single_path_value_rejected(tmp_path, monkeypatch, single):
+    root = _plugin(tmp_path / "plugs", "plug")
+    value = root if single == "path" else single
+    cfg = parity_config(tmp_path, monkeypatch)
+
+    with pytest.raises(TypeError, match="списком"):
+        await AsyncAgent.create(cfg, plugins=value)
+
+
 async def test_explicit_runtime_keeps_plugins(tmp_path, monkeypatch):
     root = _plugin(tmp_path / "plugs", "alpha")
     cfg = parity_config(tmp_path, monkeypatch)
@@ -196,7 +217,7 @@ def test_durable_rejects_plugins(tmp_path):
         async def open(self, settings):  # pragma: no cover - не дойдёт
             raise AssertionError("open не должен вызываться")
 
-    with pytest.raises(TypeError, match="durable"):
+    with pytest.raises(TypeError, match="plugins и параметры"):
         asyncio.run(
             AsyncAgent.create(
                 AppConfig(), durable=_Durable(), plugins=[tmp_path]

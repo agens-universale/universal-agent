@@ -325,9 +325,15 @@ def with_explicit_plugins(
 ) -> LoadedSettings:
     """Снимок из ровно переданных плагинов (SDK): без ``sources`` и
     установленных, все доверены — их передал сам разработчик.
-    Относительный путь — от текущего каталога."""
+    ``~`` раскрывается, относительный путь — от текущего каталога."""
+    if isinstance(plugins, (str, bytes, os.PathLike)):
+        raise TypeError(
+            "plugins передаются списком: plugins=[путь], а не plugins=путь"
+        )
     paths = [
-        os.path.abspath(p.root if isinstance(p, Plugin) else p)
+        os.path.abspath(
+            os.path.expanduser(p.root if isinstance(p, Plugin) else p)
+        )
         for p in plugins
     ]
     explicit = loaded.with_overrides(
