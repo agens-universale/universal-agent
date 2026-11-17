@@ -465,23 +465,31 @@ async def test_switch_resets_window_state(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("small_window")
 async def test_new_session_resets_window_state(tmp_path):
-    """/new — окно прежней сессии не действует: иначе догрузка по пустой
-    модели (IndexError) и кусок, вставший прежнему окну."""
+    """/new посреди встающего куска — окно прежней сессии не действует:
+    иначе догрузка по пустой модели (IndexError), а кусок прежнего окна
+    встаёт новой сессии."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
     _write_turns(tmp_path)
     async with _app(tmp_path).run_test(size=_SIZE) as pilot:
         scr = await _open(pilot)
         await _filled(pilot, scr)
         assert scr._window_first > 0
         gen = scr._window_gen
-        scr._window_busy = True
-        scr._window_set_gap(1, 3)
+        assert scr._window_prepend(focus=False)
+        assert scr._window_busy
         scr._switch_to_empty_state()
         assert scr._window_gen > gen
-        assert scr._window_heads == {}
         assert (scr._window_first, scr._window_gap) == (0, range(0))
         assert not scr._window_busy
+        # Кусок прежнего окна домонтировался и отпущен — его settle
+        # выброшен поколением.
+        await pilot.pause(0.5)
         scr._window_fill()
-        await pilot.pause()
+        await pilot.pause(0.3)
+        assert not scr._window_busy
+        assert scr._window_heads == {}
+        assert not _trace(scr).query(UserReplyContainer)
 
 
 @pytest.mark.asyncio

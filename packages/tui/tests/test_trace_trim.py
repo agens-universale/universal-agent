@@ -372,6 +372,37 @@ async def test_turn_head_removed_outside_window_leaves_it(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_turn_head_removed_at_open_gap_does_not_break_append(tmp_path):
+    """Разрыв открыт, за ним — живой ход, его голова — реплика; откат
+    снимает её: кусок перед разрывом не встаёт перед снятым виджетом, а
+    край разрыва ищется по живым."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _session(pilot)
+        await _feed(pilot, scr, 0, 5)
+        # Ход 5 без итога: свежая строка остаётся у хода 4, ход 5 снимаем.
+        feed_live(scr, _turn(5)[:2], splits=())
+        feed_live(scr, _turn(6)[:1], splits=())
+        await pilot.pause()
+        assert scr._window_forget_turn(5)
+        await pilot.pause()
+        assert (scr._window_gap, scr._window_gap_head()) == (
+            range(5, 6),
+            scr._window_heads[6],
+        )
+        reply = scr._window_heads[6]
+        scr._withdraw_from_history("m_u0006")
+        reply.remove()
+        await pilot.pause()
+        assert scr._window_gap_head() is None
+        last = scr._window_turn_widgets(4)[-1]
+        assert scr._window_past_gap(last) is False
+        assert scr._window_append(focus=False)
+        await wait_until(pilot, lambda: not scr._window_busy, "встал")
+        assert sorted(scr._window_heads) == [*range(scr._window_first, 6)]
+        assert reply not in _trace(scr).children
+
+
+@pytest.mark.asyncio
 async def test_reset_render_state_does_not_trim_old_feed(
     tmp_path, monkeypatch
 ):

@@ -610,6 +610,38 @@ async def test_hold_at_series_end_task_still_waits_mount(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_hold_expires_before_mount_task_waits_mount(monkeypatch):
+    """Главная ветка: удержание заведено, его срок истёк раньше монтажа —
+    экран отпущен, а задача (и settle куска за ней) кончается только
+    монтажом."""
+    real = textual_compat.mounted
+    mounted: list[bool] = []
+
+    async def slow(parent, widgets):
+        await asyncio.sleep(0.6)
+        await real(parent, widgets)
+        mounted.append(True)
+
+    monkeypatch.setattr(textual_compat, "mounted", slow)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.2)
+    app = _Host()
+    done: list[bool] = []
+
+    def hold() -> int:
+        _row, held = _mount_and_hold(app)
+        task = next(iter(textual_compat._PAINT_HOLDS))
+        task.add_done_callback(lambda _t: done.append(bool(mounted)))
+        return held
+
+    async with app.run_test() as pilot:
+        held = await _in_app(pilot, hold)
+        await wait_until(pilot, lambda: app._batch_count == 0, "отпущено")
+        assert (held, done) == (1, [])
+        await wait_until(pilot, lambda: bool(done), "задача кончилась")
+        assert done == [True]
+
+
+@pytest.mark.asyncio
 async def test_overlapping_paint_holds_let_a_frame_through(monkeypatch):
     """Удержания подряд внахлёст (непрерывный подъём ленты) не держат
     экран дольше потолка: иначе кадра нет, а `Screen._dirty_widgets`
