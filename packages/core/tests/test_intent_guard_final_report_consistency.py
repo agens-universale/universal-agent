@@ -6,7 +6,12 @@ from unittest.mock import patch
 from gc_core.intent_guard.final_report_consistency import (
     avalidate_final_report_vs_user_intent,
 )
+from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
+from gc_core.intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
+)
+from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
 
@@ -41,6 +46,70 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.digest = FinishGateTraceDigest(
             trace_digest_text='<message n="1">\n[user] спроси меня\n</message>',
             digest_chars=40,
+        )
+
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
+    @patch("gc_core.intent_guard.guard.build_finish_gate_trace_digest")
+    @patch(
+        "gc_core.intent_guard.final_report_consistency.build_finish_gate_trace_digest"
+    )
+    def test_first_judge_reply_reaches_turn_finish_with_all_findings(
+        self, mock_digest, mock_guard_digest, mock_llm
+    ) -> None:
+        mock_digest.return_value = self.digest
+        mock_guard_digest.return_value = self.digest
+        mock_llm.return_value = (
+            'Reasoning mentions empty handoff {} and {"trace_ok": true}.\n'
+            "</think>\n"
+            + _validator_json(
+                action="fix_report_and_continue",
+                trace_ok=False,
+                report_ok=False,
+                trace_gaps=["gap one", "gap two"],
+                report_mismatches=["mismatch one", "mismatch two"],
+            )
+        )
+        self.ctx.settings = fake_ctx(
+            {
+                "backend.api_mode": "chat_completions",
+                "agent.strict_turn_finish_validation": True,
+            }
+        ).settings
+        call_id = "call_finish"
+        base = run_coro(
+            SubmitSolution().acall(
+                solution_type="direct_answer", task_report="done", handoff="{}"
+            )
+        )
+        self.state.messages.append(
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": base,
+            }
+        )
+        decision = run_coro(
+            FinishGateGuard(
+                ctx=self.ctx, state=self.state
+            ).aevaluate_turn_finish(
+                finish_handoff_arguments={"solution_type": "direct_answer"}
+            )
+        )
+        self.assertEqual(mock_llm.call_count, 1)
+        self.assertEqual(decision.outcome, "reject")
+        run_coro(
+            apply_finish_gate_to_turn_finish_output_in_state(
+                state=self.state, finish_call_id=call_id, decision=decision
+            )
+        )
+        output = json.loads(self.state.messages[-1]["output"])
+        self.assertEqual(output["status"], "rejected_by_finish_gate")
+        self.assertEqual(
+            output["finish_gate"]["trace_gaps"], ["gap one", "gap two"]
+        )
+        self.assertEqual(
+            output["finish_gate"]["report_mismatches"],
+            ["mismatch one", "mismatch two"],
         )
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
@@ -115,6 +184,26 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn("not json", retry_user)
         self.assertIn("Do not reason out loud", retry_user)
         self.assertIn("trace_gaps", retry_user)
+
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
+    def test_competing_verdicts_use_normal_retry(self, mock_llm) -> None:
+        mock_llm.side_effect = [
+            _validator_json() + "\n" + _validator_json(),
+            _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            ),
+        ]
+        result = run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=self.ctx,
+                state=self.state,
+                current_user_requests=["x"],
+                finish_handoff_arguments={},
+                trace_digest=self.digest,
+            )
+        )
+        self.assertEqual(mock_llm.call_count, 2)
+        self.assertEqual(result.trace_gaps, ["gap"])
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_broken_json_with_axes_salvages_instead_of_fail_open(

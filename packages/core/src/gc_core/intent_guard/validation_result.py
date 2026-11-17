@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from gc_core.message_projection import project_text_for_model
-from gc_core.utils.json_text import parse_json_from_text
 
 _logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ _ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 _SALVAGE_RAW_MAX_CHARS = 4000
+_THINK_CLOSE_RE = re.compile(r"</think\s*>", re.IGNORECASE)
 
 
 @dataclass
@@ -190,6 +191,47 @@ def _normalized_action(
     return expected
 
 
+def _balanced_object_end(text: str, start: int) -> int | None:
+    """Find the end of an object, ignoring braces inside JSON strings."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
+def _top_level_json_objects(text: str) -> list[Any]:
+    """Decode balanced objects without accepting a child of a malformed object."""
+    objects: list[Any] = []
+    position = 0
+    while (start := text.find("{", position)) != -1:
+        end = _balanced_object_end(text, start)
+        if end is None:
+            break
+        try:
+            objects.append(json.loads(text[start:end]))
+        except json.JSONDecodeError:
+            pass
+        position = end
+    return objects
+
+
 def parse_validator_response(raw: str) -> ValidationResult | None:
     """
     Парсинг двухосного JSON валидатора (§7.1–7.2).
@@ -197,8 +239,22 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     ``None`` — битый JSON, нет обязательных ключей или невалидный ``action`` (fail-open).
     ``<think>`` всегда вырезается: парсер не зависит от ``strip_think`` конфига.
     """
-    cleaned = project_text_for_model(raw or "", strip_think=True)
-    parsed = parse_json_from_text(cleaned, default=None)
+    source = raw or ""
+    closing_tags = list(_THINK_CLOSE_RE.finditer(source))
+    if closing_tags:
+        source = source[closing_tags[-1].end() :]
+    cleaned = project_text_for_model(source, strip_think=True)
+    verdicts: list[ValidationResult] = []
+    for parsed in _top_level_json_objects(cleaned):
+        verdict = _parse_verdict_object(parsed)
+        if verdict is not None:
+            verdicts.append(verdict)
+            if len(verdicts) > 1:
+                return None
+    return verdicts[0] if verdicts else None
+
+
+def _parse_verdict_object(parsed: Any) -> ValidationResult | None:
     if not isinstance(parsed, dict):
         return None
 

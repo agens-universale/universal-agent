@@ -147,6 +147,49 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.action, "accept")
 
+    def test_unpaired_closing_think_with_braces_preserves_verdict(
+        self,
+    ) -> None:
+        raw = (
+            'Reasoning mentions handoff {} and {"trace_ok": true}.\n'
+            "</think>\n"
+            + _raw(
+                action="fix_report_and_continue",
+                trace_ok=False,
+                report_ok=False,
+                trace_gaps=["missing evidence", "missing check"],
+                report_mismatches=["unsupported claim", "empty handoff"],
+            )
+        )
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(
+            result.trace_gaps, ["missing evidence", "missing check"]
+        )
+        self.assertEqual(
+            result.report_mismatches, ["unsupported claim", "empty handoff"]
+        )
+
+    def test_json_inside_reasoning_is_ignored(self) -> None:
+        self.assertIsNone(
+            parse_validator_response("</think> is absent <think>" + _raw())
+        )
+
+    def test_multiple_valid_verdicts_are_ambiguous(self) -> None:
+        self.assertIsNone(parse_validator_response(_raw() + "\n" + _raw()))
+
+    def test_invalid_verdict_after_closing_think_is_rejected(self) -> None:
+        self.assertIsNone(
+            parse_validator_response("</think>\n" + _raw(is_question="false"))
+        )
+
+    def test_nested_valid_verdict_in_broken_outer_object_is_rejected(
+        self,
+    ) -> None:
+        self.assertIsNone(
+            parse_validator_response('{"wrapper": ' + _raw() + ",}")
+        )
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(
             parse_validator_response(
