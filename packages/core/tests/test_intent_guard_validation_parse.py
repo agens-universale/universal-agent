@@ -190,6 +190,43 @@ class ParseValidatorResponseTest(unittest.TestCase):
             parse_validator_response('{"wrapper": ' + _raw() + ",}")
         )
 
+    def test_closing_think_literal_inside_json_string_is_preserved(
+        self,
+    ) -> None:
+        result = parse_validator_response(
+            _raw(trace_gaps=["Check literal </think> in feedback."])
+        )
+        assert result is not None
+        self.assertEqual(
+            result.trace_gaps, ["Check literal </think> in feedback."]
+        )
+
+    def test_reasoning_boundary_precedes_literal_tag_in_verdict(self) -> None:
+        raw = '{"action": "accept", "trace_ok": true}\n</think>\n' + _raw(
+            action="continue_work",
+            trace_ok=False,
+            trace_gaps=["Check literal </think> in feedback."],
+        )
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.action, "continue_work")
+        self.assertEqual(
+            result.trace_gaps, ["Check literal </think> in feedback."]
+        )
+
+    def test_closing_think_literal_inside_fenced_json_is_preserved(
+        self,
+    ) -> None:
+        result = parse_validator_response(
+            "```json\n"
+            + _raw(trace_gaps=["Check literal </think> in feedback."])
+            + "\n```"
+        )
+        assert result is not None
+        self.assertEqual(
+            result.trace_gaps, ["Check literal </think> in feedback."]
+        )
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(
             parse_validator_response(

@@ -216,20 +216,39 @@ def _balanced_object_end(text: str, start: int) -> int | None:
     return None
 
 
-def _top_level_json_objects(text: str) -> list[Any]:
-    """Decode balanced objects without accepting a child of a malformed object."""
-    objects: list[Any] = []
+def _object_ranges(text: str) -> list[tuple[int, int]]:
+    """Return balanced top-level brace ranges, including malformed JSON."""
+    ranges: list[tuple[int, int]] = []
     position = 0
     while (start := text.find("{", position)) != -1:
         end = _balanced_object_end(text, start)
         if end is None:
             break
+        ranges.append((start, end))
+        position = end
+    return ranges
+
+
+def _top_level_json_objects(text: str) -> list[Any]:
+    """Decode balanced objects without accepting a child of a malformed object."""
+    objects: list[Any] = []
+    for start, end in _object_ranges(text):
         try:
             objects.append(json.loads(text[start:end]))
         except json.JSONDecodeError:
             pass
-        position = end
     return objects
+
+
+def _reasoning_boundary(raw: str) -> int:
+    """Find the last closing tag outside JSON objects."""
+    ranges = _object_ranges(raw)
+    boundaries = [
+        match.end()
+        for match in _THINK_CLOSE_RE.finditer(raw)
+        if not any(start <= match.start() < end for start, end in ranges)
+    ]
+    return boundaries[-1] if boundaries else 0
 
 
 def parse_validator_response(raw: str) -> ValidationResult | None:
@@ -240,9 +259,7 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     ``<think>`` всегда вырезается: парсер не зависит от ``strip_think`` конфига.
     """
     source = raw or ""
-    closing_tags = list(_THINK_CLOSE_RE.finditer(source))
-    if closing_tags:
-        source = source[closing_tags[-1].end() :]
+    source = source[_reasoning_boundary(source) :]
     cleaned = project_text_for_model(source, strip_think=True)
     verdicts: list[ValidationResult] = []
     for parsed in _top_level_json_objects(cleaned):
