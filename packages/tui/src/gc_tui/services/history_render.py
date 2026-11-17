@@ -623,14 +623,7 @@ class _Chunk:
         """«Без ответа» вопроса уже стоит под его строкой (её рисует
         вопрос по модели). Вопроса в истории нет (ушёл в сжатие) —
         событие рисуется строкой."""
-        if not call_id:
-            return False
-        return any(
-            item.event is not None
-            and item.event.kind == "ask_human"
-            and item.event.call_id == call_id
-            for item in self._model.items
-        )
+        return self._model.has_question(call_id)
 
     def _row(self, prefix: str, content: str, kind: str, no: int) -> None:
         from gc_tui.widgets.trace_row import TraceRow

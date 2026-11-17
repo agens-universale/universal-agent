@@ -273,3 +273,31 @@ async def test_model_matches_open_path(tmp_path, name):
         assert model.outcome_superseded == screen.outcome_superseded
         assert model.response_tail == screen.response_tail
         assert model.segment_starts == screen.segment_starts
+
+
+@pytest.mark.parametrize("name", ["subagents", "ask_human", "calls"])
+def test_call_indexes_match_events(tmp_path, name):
+    """Индексы модели (вызовы субагентов, вопросы агента) — те же, что
+    проход по событиям: их держит ``append_event``, горячие пути ленты
+    не копируют все события."""
+    model = _model(name, tmp_path)
+    events = model.events()
+    subagents = [
+        ev
+        for ev in events
+        if ev.kind == "call"
+        and ev.call_id
+        and str(ev.tool_name or "").startswith("subagent_")
+    ]
+    questions = {
+        ev.call_id for ev in events if ev.kind == "ask_human" and ev.call_id
+    }
+    assert list(model.subagent_calls()) == subagents
+    assert all(model.has_question(cid) for cid in questions)
+    assert not model.has_question("нет-такого")
+    assert not model.has_question(None)
+    assert (bool(subagents), bool(questions)) == {
+        "subagents": (True, False),
+        "ask_human": (False, True),
+        "calls": (False, False),
+    }[name]

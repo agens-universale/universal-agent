@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -107,6 +107,12 @@ class HistoryModel:
     window_ids: set[str] = field(default_factory=set)
     # Номер события → его индекс в ``items``.
     _item_of_no: dict[int, int] = field(default_factory=dict, repr=False)
+    # call_id → событие вызова субагента (`subagent_*`), первое с ним.
+    _subagent_calls: dict[str, TraceEvent] = field(
+        default_factory=dict, repr=False
+    )
+    # call_id вопросов агента (`ask_human`).
+    _question_ids: set[str] = field(default_factory=set, repr=False)
 
     def event_by_no(self, no: int) -> TraceEvent | None:
         i = self._item_of_no.get(no)
@@ -116,6 +122,15 @@ class HistoryModel:
         """События ленты (и маркеры сжатия) по порядку, с элемента
         ``since``."""
         return [it.event for it in self.items[since:] if it.event is not None]
+
+    def subagent_calls(self) -> Iterable[TraceEvent]:
+        """События вызовов субагентов по порядку ленты — без прохода по
+        всем событиям."""
+        return self._subagent_calls.values()
+
+    def has_question(self, call_id: str | None) -> bool:
+        """В ленте есть вопрос агента с этим call_id."""
+        return bool(call_id) and call_id in self._question_ids
 
     def turn_index_of(self, no: int) -> int:
         """Ход события с номером ``no``; номера нет — ``KeyError``."""
@@ -189,6 +204,14 @@ class HistoryModel:
         self.next_no = ev.no + 1
         if ev.tool_name == "ask_human" and ev.kind == "system" and ev.call_id:
             self.unanswered.add(ev.call_id)
+        if not ev.call_id:
+            return
+        if ev.kind == "ask_human":
+            self._question_ids.add(ev.call_id)
+        elif ev.kind == "call" and str(ev.tool_name or "").startswith(
+            "subagent_"
+        ):
+            self._subagent_calls.setdefault(ev.call_id, ev)
 
     def append_side(self, rec: dict, kind: ItemKind) -> None:
         """Запись сбоку (итог хода, смена модели) — в конец ленты."""

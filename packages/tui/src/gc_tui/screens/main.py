@@ -2800,7 +2800,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         return NestedSource(
             read,
             window_parent_ids=lambda: subagent_parent_ids_from_events(
-                self._feed_history.events()
+                self._feed_history.subagent_calls()
             ),
             root=self._current_cwd(),
             injected=self._injected_fields(),
@@ -4584,10 +4584,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
 
         question = self._question_rows.get(call_id) if call_id else None
         if question is None:
-            return bool(call_id) and any(
-                ev.kind == "ask_human" and ev.call_id == call_id
-                for ev in self._feed_history.events()
-            )
+            return self._feed_history.has_question(call_id)
         note_question(question, QUESTION_UNANSWERED)
         return True
 
@@ -4711,7 +4708,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         Нет call-события в ленте — якорь оставляем (live до записи сегментов).
         """
         if parent_outside_retention(
-            self._feed_history.events(), parent_call_id
+            self._feed_history.subagent_calls(), parent_call_id
         ):
             return None
         return self._active_calls.get(
@@ -10535,7 +10532,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             records = self._store.read_subagent_trace(self._active_task_id)
         parent = nested_call_parent_id(records or [], call_id)
         if parent and parent_outside_retention(
-            self._feed_history.events(), parent
+            self._feed_history.subagent_calls(), parent
         ):
             return None, None
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
