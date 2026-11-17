@@ -75,6 +75,13 @@ _MAX_BELOW_SPEED = 2.0
 # него: страховка от строки, снятой до монтирования, и от удержаний
 # внахлёст (непрерывный подъём ленты) — экран не замирает.
 _PAINT_HOLD_LIMIT = 1.0
+# Удержание короче этого не заводится: остаток серии меньше — кадр почти
+# сразу, а монтажа задача дождётся и без удержания.
+_PAINT_HOLD_MIN = 0.1
+# Сколько задача ждёт монтирования, чтобы продолжить после него, — не
+# удержание: страховка только от виджета, снятого до монтирования (его
+# монтаж не наступит), чтобы задача не держала его вечно.
+_MOUNT_WAIT_LIMIT = 5.0
 # Ждущие монтирования задачи — ссылка, чтобы их не собрал сборщик.
 _PAINT_HOLDS: set[asyncio.Task] = set()
 
@@ -282,13 +289,14 @@ def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
     """Экран не рисует, пока ``widgets``, уже отданные `mount()` одному
     родителю, не смонтированы (их дети собираются следующим тактом):
     перемены соседей, сделанные до того, ложатся одним кадром с ними. Уже
-    смонтированные или без родителя — не ждутся. Задача отпускания —
-    чтобы продолжить после монтажа; ждать нечего — ``None``.
+    смонтированные или без родителя — не ждутся. Задача — чтобы
+    продолжить после монтажа: она кончается монтажом, а не сроком
+    удержания (удержание только гасит отрисовку); ждать нечего — ``None``.
 
     Удержания внахлёст — одна серия не дольше `_PAINT_HOLD_LIMIT`, между
     сериями — кадр: пока экран держится, `Screen._dirty_widgets` копит
     перерисованные виджеты, в том числе снятые, и держит их с отрисовкой
-    до кадра."""
+    до кадра. Остаток серии короче `_PAINT_HOLD_MIN` — без удержания."""
     pending = [
         w for w in widgets if not w.is_mounted and isinstance(w.parent, Widget)
     ]
@@ -302,24 +310,35 @@ def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
         series.until = now + _PAINT_HOLD_LIMIT
     # Серия не дольше потолка, следующая — только после кадра: опоздавшее
     # ждёт монтажа без удержания, иначе внахлёст кадра нет вовсе.
-    hold = now >= series.frame_by and now < series.until
+    limit = series.until - now
+    hold = now >= series.frame_by and limit >= _PAINT_HOLD_MIN
     batch = app.batch_update() if hold else None
-    limit = series.until - now if hold else _PAINT_HOLD_LIMIT
 
     def frame_passed() -> None:
         series.frame_by = 0.0
 
+    def unhold() -> None:
+        nonlocal batch
+        if batch is None:
+            return
+        batch.__exit__(None, None, None)
+        batch = None
+        series.count -= 1
+        if not series.count and app.call_after_refresh(frame_passed):
+            series.frame_by = loop.time() + _PAINT_HOLD_LIMIT
+
     async def release() -> None:
+        mount = asyncio.ensure_future(mounted(parent, pending))
         try:
-            await asyncio.wait_for(mounted(parent, pending), limit)
-        except TimeoutError:
-            _log.debug("строка не смонтирована за %.2f с", limit)
-        finally:
             if batch is not None:
-                batch.__exit__(None, None, None)
-                series.count -= 1
-                if not series.count and app.call_after_refresh(frame_passed):
-                    series.frame_by = loop.time() + _PAINT_HOLD_LIMIT
+                await asyncio.wait({mount}, timeout=limit)
+                unhold()
+            await asyncio.wait_for(mount, _MOUNT_WAIT_LIMIT)
+        except TimeoutError:
+            _log.debug("строка не смонтирована за %.2f с", _MOUNT_WAIT_LIMIT)
+        finally:
+            unhold()
+            mount.cancel()
 
     # Сначала путь отпускания, потом удержание: задача стартует не раньше
     # следующего такта, а не заведённая задача экран не держит.

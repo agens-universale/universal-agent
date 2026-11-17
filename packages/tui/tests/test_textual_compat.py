@@ -566,11 +566,47 @@ async def test_paint_after_mount_releases_on_timeout(monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(textual_compat, "mounted", never)
-    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.05)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.15)
     app = _Host()
     async with app.run_test() as pilot:
         _, held = await _in_app(pilot, lambda: _mount_and_hold(app))
         assert (held, await _released(pilot)) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_hold_at_series_end_task_still_waits_mount(monkeypatch):
+    """Остаток серии почти ноль: удержания нет, а задача кончается только
+    монтажом — продолжение после монтажа (кусок окна ленты встаёт по
+    новой раскладке) не зависит от срока удержания."""
+    real = textual_compat.mounted
+    mounted: list[bool] = []
+
+    async def slow(parent, widgets):
+        await asyncio.sleep(0.3)
+        await real(parent, widgets)
+        mounted.append(True)
+
+    monkeypatch.setattr(textual_compat, "mounted", slow)
+    app = _Host()
+
+    def hold_at_series_end():
+        row = Static("row")
+        app.query_one("#host").mount(row)
+        series = textual_compat._HOLD_SERIES.setdefault(
+            app, textual_compat._HoldSeries()
+        )
+        series.count += 1  # серия идёт: держит другой кусок
+        series.until = asyncio.get_running_loop().time() + 0.01
+        task = textual_compat.paint_after_mount(row)
+        task.add_done_callback(lambda _t: done.append(bool(mounted)))
+        return app._batch_count
+
+    done: list[bool] = []
+    async with app.run_test() as pilot:
+        held = await _in_app(pilot, hold_at_series_end)
+        await wait_until(pilot, lambda: bool(done), "задача кончилась")
+        assert (held, done) == (0, [True])
 
 
 @pytest.mark.asyncio
@@ -584,6 +620,7 @@ async def test_overlapping_paint_holds_let_a_frame_through(monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
     monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.2)
     app = _Host()
     async with app.run_test() as pilot:
@@ -613,6 +650,7 @@ async def test_back_to_back_paint_holds_let_a_frame_through(monkeypatch):
         refresh(self)
 
     monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
     monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.1)
     app = _Host()
     async with app.run_test() as pilot:
@@ -643,6 +681,7 @@ async def test_lost_frame_callback_does_not_disable_holds(monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
     monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.1)
     app = _Host()
     async with app.run_test() as pilot:
