@@ -746,13 +746,14 @@ async def test_scroll_position_kept_after_compaction(tmp_path):
         trace = app.screen.query_one("#trace")
         assert trace.max_scroll_y > 5
         await pilot.pause(0.05)  # отложенное прижатие attach отработало
-        # Пользователь ушёл вверх.
+        # Пользователь ушёл вверх. У верха окно домонтирует историю и
+        # держит читаемую строку — позицию снимаем, когда кусок встал.
         trace.scroll_to(y=3, animate=False)
         await pilot.pause(0.05)
         scr._poll_active()  # тик замечает уход вверх
+        await _wait_until(pilot, lambda: not scr._window_busy, "встал")
         assert scr._stick_bottom is False
         y_before = trace.scroll_y
-        assert y_before == 3
         _compact_ticking(thread, scr, "S1", _user("u29", "реплика 29"))
         await pilot.pause(0.05)
 
