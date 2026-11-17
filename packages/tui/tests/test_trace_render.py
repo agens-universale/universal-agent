@@ -872,8 +872,8 @@ def test_history_finish_after_reply_is_summary():
     class _Target:
         children = ()  # хост-лента куска: головы ходов
 
-        def mount(self, w):
-            mounted.append(w)
+        def mount(self, *widgets):
+            mounted.extend(widgets)
 
     render_events(_Target(), ev)
 
