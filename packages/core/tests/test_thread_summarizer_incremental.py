@@ -15,9 +15,14 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_core.summarize.summary_spec import assemble_summary_xml
 from gc_core.summarize.thread_summarizer import (
+    _arun_patch_step,
     asummarize_dialog_via_chat_completions,
 )
-from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_core.summarize.working_memory_gateway import (
+    WorkingMemoryDeltas,
+    WorkingMemorySnapshot,
+    apply_summary_memory_patch,
+)
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
@@ -343,6 +348,32 @@ def test_memory_patch_uses_final_registers_after_formatter_preamble(
     assert state.shared.working_memory["goal"] == "finish task"
     assert state.shared.working_memory["state"] == "next action"
     assert state.shared.working_memory["knowledge"] == "verified fact"
+
+
+def test_memory_patch_applies_markdown_literal_without_format_repair():
+    knowledge = "Keep the `<state>` element in the exported document."
+    raw = (
+        "<goal>Validate XML export</goal>"
+        "<constraints>Keep its schema</constraints>"
+        "<state>Validate the rendered XML next</state>"
+        f"<knowledge>{knowledge}</knowledge>"
+    )
+    result = types.SimpleNamespace(raw_response=raw)
+
+    deltas, touched, repaired, _, _ = run_coro(
+        _arun_patch_step(None, None, result, None)
+    )
+    updated = apply_summary_memory_patch(
+        WorkingMemorySnapshot(knowledge="old fact"),
+        deltas,
+        replace_touched=touched,
+    )
+
+    assert repaired is False
+    assert updated.goal == "Validate XML export"
+    assert updated.constraints == "Keep its schema"
+    assert updated.state == "Validate the rendered XML next"
+    assert updated.knowledge == knowledge
 
 
 def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):

@@ -318,12 +318,35 @@ _REGISTER_NAMES = frozenset(REGISTER_ORDER)
 _RESERVED_REGISTER_TAG = re.compile(
     rf"<(/?)({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>"
 )
+_MARKDOWN_CODE_SPAN = re.compile(r"(`+)(.*?)\1", re.DOTALL)
 _REGISTER_WRAPPER_END = re.compile(
     r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
 )
 
 
-def _parse_register_block(text: str, start: int) -> dict[str, str] | None:
+def _is_markdown_literal(position: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= position < end for start, end in spans)
+
+
+def _next_unquoted_tag(
+    pattern: re.Pattern[str],
+    text: str,
+    start: int,
+    spans: list[tuple[int, int]],
+) -> re.Match[str] | None:
+    return next(
+        (
+            tag
+            for tag in pattern.finditer(text, start)
+            if not _is_markdown_literal(tag.start(), spans)
+        ),
+        None,
+    )
+
+
+def _parse_register_block(
+    text: str, start: int, spans: list[tuple[int, int]]
+) -> dict[str, str] | None:
     """Parse one contiguous, balanced run of register tags from ``start``."""
     bodies: dict[str, str] = {}
     cursor = start
@@ -336,7 +359,9 @@ def _parse_register_block(text: str, start: int) -> dict[str, str] | None:
         ):
             return None
         name = opening.group(2)
-        closing = _RESERVED_REGISTER_TAG.search(text, opening.end())
+        closing = _next_unquoted_tag(
+            _RESERVED_REGISTER_TAG, text, opening.end(), spans
+        )
         if (
             closing is None
             or closing.group(1) != "/"
@@ -347,7 +372,7 @@ def _parse_register_block(text: str, start: int) -> dict[str, str] | None:
         cursor = closing.end()
         if _REGISTER_WRAPPER_END.fullmatch(text[cursor:].strip()):
             return bodies
-        next_tag = _REGISTER_TAG_TOKEN.search(text, cursor)
+        next_tag = _next_unquoted_tag(_REGISTER_TAG_TOKEN, text, cursor, spans)
         if next_tag is None:
             return bodies
         if next_tag.group(1) or next_tag.group(2) not in _REGISTER_NAMES:
@@ -356,9 +381,13 @@ def _parse_register_block(text: str, start: int) -> dict[str, str] | None:
     return None
 
 
-def _has_unclosed_register_prefix(text: str, stop: int) -> bool:
+def _has_unclosed_register_prefix(
+    text: str, stop: int, spans: list[tuple[int, int]]
+) -> bool:
     stack: list[str] = []
     for tag in _REGISTER_TAG_TOKEN.finditer(text, 0, stop):
+        if _is_markdown_literal(tag.start(), spans):
+            continue
         name = tag.group(2)
         if name not in _REGISTER_NAMES:
             continue
@@ -371,12 +400,15 @@ def _has_unclosed_register_prefix(text: str, stop: int) -> bool:
 
 
 def _extract_balanced_registers(s: str) -> dict[str, str]:
+    spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]
     for token in _REGISTER_TAG_TOKEN.finditer(s):
+        if _is_markdown_literal(token.start(), spans):
+            continue
         if token.group(1) or token.group(2) not in _REGISTER_NAMES:
             continue
-        if _has_unclosed_register_prefix(s, token.start()):
+        if _has_unclosed_register_prefix(s, token.start(), spans):
             continue
-        bodies = _parse_register_block(s, token.start())
+        bodies = _parse_register_block(s, token.start(), spans)
         if bodies is not None:
             return bodies
     return {}

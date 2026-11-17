@@ -98,6 +98,21 @@ def test_register_body_keeps_generic_type_parameters():
     assert deltas.knowledge == value
 
 
+def test_register_body_keeps_markdown_quoted_register_tag():
+    value = "Keep the `<state>` element in the exported document."
+    raw = (
+        "<goal>Validate XML export</goal>"
+        "<constraints>Keep its schema</constraints>"
+        "<state>Validate the rendered XML next</state>"
+        f"<knowledge>{value}</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.knowledge == value
+
+
 def test_register_body_keeps_literal_think_closing_tag():
     value = "Generic <Result> comes from transport; keep </think> literal."
 
