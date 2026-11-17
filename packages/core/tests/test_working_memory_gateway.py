@@ -89,6 +89,37 @@ def test_partial_register_patch_and_empty_clear_remain_valid():
     assert present == frozenset({"goal", "knowledge"})
 
 
+def test_register_body_keeps_generic_type_parameters():
+    value = "Use std::vector<int> and preserve the result."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_register_body_keeps_literal_think_closing_tag():
+    value = "Generic <Result> comes from transport; keep </think> literal."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_final_register_body_keeps_literal_think_after_preamble():
+    value = "Use std::vector<int> and keep </think> in the fixture."
+    raw = (
+        "Format the <knowledge>: register as follows.\n</think>\n"
+        f"<knowledge>{value}</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
 def test_unclosed_or_nested_registers_do_not_apply():
     old = WorkingMemorySnapshot(knowledge="old fact")
     for raw in (

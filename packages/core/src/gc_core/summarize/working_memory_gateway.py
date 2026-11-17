@@ -315,6 +315,9 @@ def _build_register_body_patterns() -> dict[str, re.Pattern[str]]:
 _REGISTER_BODY_PATTERNS = _build_register_body_patterns()
 _REGISTER_TAG_TOKEN = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9_]*)>")
 _REGISTER_NAMES = frozenset(REGISTER_ORDER)
+_RESERVED_REGISTER_TAG = re.compile(
+    rf"<(/?)({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>"
+)
 _REGISTER_WRAPPER_END = re.compile(
     r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
 )
@@ -333,7 +336,7 @@ def _parse_register_block(text: str, start: int) -> dict[str, str] | None:
         ):
             return None
         name = opening.group(2)
-        closing = _REGISTER_TAG_TOKEN.search(text, opening.end())
+        closing = _RESERVED_REGISTER_TAG.search(text, opening.end())
         if (
             closing is None
             or closing.group(1) != "/"
@@ -367,13 +370,7 @@ def _has_unclosed_register_prefix(text: str, stop: int) -> bool:
     return bool(stack)
 
 
-def extract_register_bodies(text: str) -> dict[str, str]:
-    """Extract the final unambiguous run of balanced register tags."""
-    s = (text or "").strip()
-    if not s:
-        return {}
-    if "</think>" in s:
-        s = s.rsplit("</think>", 1)[1].strip()
+def _extract_balanced_registers(s: str) -> dict[str, str]:
     for token in _REGISTER_TAG_TOKEN.finditer(s):
         if token.group(1) or token.group(2) not in _REGISTER_NAMES:
             continue
@@ -383,6 +380,19 @@ def extract_register_bodies(text: str) -> dict[str, str]:
         if bodies is not None:
             return bodies
     return {}
+
+
+def extract_register_bodies(text: str) -> dict[str, str]:
+    """Extract a balanced register block, excluding a formatter preamble."""
+    s = (text or "").strip()
+    if not s:
+        return {}
+    full = _extract_balanced_registers(s)
+    for boundary in re.finditer(r"</think>", s):
+        after_think = _extract_balanced_registers(s[boundary.end() :].strip())
+        if after_think:
+            return after_think
+    return full
 
 
 def parse_memory_deltas(
