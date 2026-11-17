@@ -247,8 +247,14 @@ class _BatchRun:
             self.batch_total,
             text,
         )
-        text = extract_final_summary_xml(text) or text
+        ambiguous_draft = False
+        try:
+            text = extract_final_summary_xml(text) or text
+        except SummaryRejectedError:
+            ambiguous_draft = True
         is_valid, reason = validate_summary_text(text)
+        if ambiguous_draft:
+            is_valid, reason = False, "ambiguous_structure"
         if not is_valid:
             text = await self._arepair(
                 batch_index,
@@ -257,6 +263,7 @@ class _BatchRun:
                 batch_history_text,
                 accumulated_summary,
                 trace_batch,
+                preserve_partial=not ambiguous_draft,
             )
         accumulated_summary = text
         body_chars = summary_body_chars(accumulated_summary)
@@ -288,6 +295,7 @@ class _BatchRun:
         batch_history_text: str,
         accumulated_summary: str,
         trace_batch: Dict[str, Any],
+        preserve_partial: bool = True,
     ) -> str:
         self.log.warning(
             "summary_batch_invalid batch=%s/%s reason=%s text_chars=%s text_preview=%s",
@@ -320,9 +328,10 @@ class _BatchRun:
         )
         repaired = extract_final_summary_xml(repaired) or repaired
         merged = merge_repaired_summary(
-            invalid_text=text, repaired_text=repaired
+            invalid_text=text if preserve_partial else "",
+            repaired_text=repaired,
         )
-        merged_valid, _ = validate_summary_text(merged)
+        merged_valid = preserve_partial and validate_summary_text(merged)[0]
         repaired_valid, _ = validate_summary_text(repaired)
         if merged_valid:
             final_text, repair_resolution = merged, "merged_valid"

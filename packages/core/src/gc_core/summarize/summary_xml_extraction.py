@@ -2,10 +2,47 @@
 
 import re
 
+from gc_core.summarize.summary_spec import section_tags
 from gc_core.summarize.summary_validation import SummaryRejectedError
 
-_OPEN = re.compile(r"<summary>")
-_CLOSE = re.compile(r"</summary>")
+_SECTIONS = "|".join(re.escape(tag) for tag in section_tags())
+_TOKEN = re.compile(
+    rf"<!\[CDATA\[.*?\]\]>|</think>|</?summary>|</?(?:{_SECTIONS})>",
+    re.DOTALL,
+)
+_SUMMARY_OPEN = "<summary>"
+_SUMMARY_CLOSE = "</summary>"
+_THINK_CLOSE = "</think>"
+_OUTER_TOKENS = {_SUMMARY_OPEN, _SUMMARY_CLOSE, _THINK_CLOSE}
+
+
+def _outside_cdata(source: str):
+    for match in _TOKEN.finditer(source):
+        if not match.group().startswith("<![CDATA["):
+            yield match
+
+
+def _outer_tokens(source: str) -> list[re.Match[str]]:
+    """Ignore section text and CDATA while locating the summary envelope."""
+    tokens: list[re.Match[str]] = []
+    in_summary = False
+    active_section: str | None = None
+    for match in _outside_cdata(source):
+        token = match.group()
+        if active_section is not None:
+            if token == f"</{active_section}>":
+                active_section = None
+            continue
+        if in_summary and token not in _OUTER_TOKENS:
+            if not token.startswith("</"):
+                active_section = token[1:-1]
+            continue
+        tokens.append(match)
+        if token == _SUMMARY_OPEN:
+            in_summary = True
+        elif token == _SUMMARY_CLOSE:
+            in_summary = False
+    return tokens
 
 
 def extract_final_summary_xml(text: str) -> str | None:
@@ -14,9 +51,19 @@ def extract_final_summary_xml(text: str) -> str | None:
     An absent complete document remains available to the existing partial
     summary repair path. Multiple documents in the final answer are ambiguous.
     """
-    answer = (text or "").rsplit("</think>", 1)[-1]
-    opens = list(_OPEN.finditer(answer))
-    closes = list(_CLOSE.finditer(answer))
+    source = text or ""
+    tokens = _outer_tokens(source)
+    boundary = max(
+        (match.end() for match in tokens if match.group() == _THINK_CLOSE),
+        default=0,
+    )
+    answer_tokens = [match for match in tokens if match.start() >= boundary]
+    opens = [
+        match for match in answer_tokens if match.group() == _SUMMARY_OPEN
+    ]
+    closes = [
+        match for match in answer_tokens if match.group() == _SUMMARY_CLOSE
+    ]
     if len(opens) > 1 or len(closes) > 1:
         raise SummaryRejectedError(
             "summary produced no usable summary (ambiguous final XML)"
@@ -25,4 +72,4 @@ def extract_final_summary_xml(text: str) -> str | None:
         return None
     if opens[0].start() >= closes[0].start():
         return None
-    return answer[opens[0].start() : closes[0].end()]
+    return source[opens[0].start() : closes[0].end()]

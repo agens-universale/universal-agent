@@ -47,6 +47,7 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         "incomplete_compression",
         "truncated_compression",
         "ambiguous_compression",
+        "ambiguous_primary",
     ],
 )
 async def test_failed_summary_preserves_live_and_saved_history(
@@ -91,6 +92,16 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if response_mode == "ambiguous_primary":
+            if kwargs["request_label"].startswith("summary_batch"):
+                return (
+                    valid_summary_xml_for_tests(seed="first")
+                    + "\n"
+                    + valid_summary_xml_for_tests(seed="second")
+                )
+            return assemble_summary_xml(
+                {"task_and_context": "partial repair"}, only_present=True
+            )
         if response_mode == "ambiguous_compression":
             if kwargs["request_label"] == "summary_compress":
                 return (

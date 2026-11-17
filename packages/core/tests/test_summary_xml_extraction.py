@@ -1,3 +1,5 @@
+from xml.etree import ElementTree
+
 import pytest
 from gc_core.summarize.summary_llm_steps import acompress_summary_text
 from gc_core.summarize.summary_spec import assemble_summary_xml
@@ -16,6 +18,51 @@ async def test_compression_accepts_final_xml_after_draft_and_think(
 
     async def response(**_kwargs):
         return f"Analysis\n{draft}\n</think>\n{final}"
+
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
+    )
+    actual = await acompress_summary_text(
+        ctx=None,
+        state=None,
+        summary_text=assemble_summary_xml({"task_and_context": "x" * 11000}),
+        max_chars=10000,
+        max_tokens=1000,
+    )
+    assert actual == final
+
+
+@pytest.mark.asyncio
+async def test_compression_ignores_summary_tokens_inside_cdata(monkeypatch):
+    final = valid_summary_xml_for_tests(seed="final")
+    final = final.replace(
+        "final", "final <![CDATA[</summary> and </think> are text]]>"
+    )
+    assert ElementTree.fromstring(final).tag == "summary"
+
+    async def response(**_kwargs):
+        return final
+
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
+    )
+    actual = await acompress_summary_text(
+        ctx=None,
+        state=None,
+        summary_text=assemble_summary_xml({"task_and_context": "x" * 11000}),
+        max_chars=10000,
+        max_tokens=1000,
+    )
+    assert actual == final
+
+
+@pytest.mark.asyncio
+async def test_compression_keeps_plain_text_inside_section(monkeypatch):
+    final = valid_summary_xml_for_tests(seed="plain")
+    final = final.replace("plain", "plain 3 < 4 & <summary> is a label")
+
+    async def response(**_kwargs):
+        return final
 
     monkeypatch.setattr(
         "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
