@@ -498,3 +498,24 @@ async def test_restored_group_phrase_belongs_to_its_turn():
         assert isinstance(head, UserReplyContainer)
         assert head.plain_text == "turn 2 calls=1 light"
     assert "    − свернуть группу" in texts
+
+
+class _Unrecorded:
+    """Владелец пометки без номера события и call_id — реплика «не
+    отправлено»."""
+
+    event_no = 0
+
+
+def test_note_under_unrecorded_reply_returns_with_its_copy():
+    """Пометка под репликой без ключа владельца не теряется при снятии
+    хода: она возвращается под копию реплики."""
+    ephemera = Ephemera()
+    reply, copy = _Unrecorded(), _Unrecorded()
+    ephemera.capture(reply, after=5)
+    ephemera.decorate(reply, "пометка", at=5)
+    ephemera.freeze(
+        {reply}, at=3, gone=lambda _w: False, respawn=lambda _w: copy
+    )
+    assert ephemera.restore_decorations(None, _Unrecorded()) == []
+    assert ephemera.restore_decorations(None, copy) == ["пометка"]

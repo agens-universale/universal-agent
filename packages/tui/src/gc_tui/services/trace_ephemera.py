@@ -56,34 +56,43 @@ class _Entry:
 
 @dataclass(eq=False)
 class _Decor:
-    """Пометка под владельцем: живым (``owner``) или снятым (``key``)."""
+    """Пометка под владельцем: живым (``owner``) или снятым — по ключу
+    (``key``), а владелец без ключа (эфемерный: реплика «не отправлено»)
+    — по своей копии (``copy``)."""
 
     at: int
     body: object
     owner: object = None
     key: str | None = None
+    copy: object = None
 
 
-def _freeze_entry(entry: _Entry, removed, respawn, gone) -> bool:
+def _freeze_entry(entry: _Entry, removed, respawn, gone, copies) -> bool:
     """Живой эфемерный виджет при снятии хода: снят с ходом — копией
-    (``respawn`` None — ход за окном удержания, не копируется); False —
-    забыть."""
+    (``respawn`` None — ход за окном удержания, не копируется; копия —
+    в ``copies`` по id снятого); False — забыть."""
     if entry.widget not in removed:
         return not gone(entry.widget)
     copy = respawn(entry.widget) if respawn is not None else None
     if copy is None:
         return False
+    copies[id(entry.widget)] = copy
     entry.widget, entry.frozen = copy, True
     return True
 
 
-def _freeze_decor(decor: _Decor, removed, at: int, kept: bool, gone) -> bool:
+def _freeze_decor(
+    decor: _Decor, removed, at: int, kept: bool, gone, copies
+) -> bool:
     """Пометка живого владельца при снятии хода: снят — по ключу
-    владельца; False — забыть."""
-    if decor.owner not in removed:
-        return not gone(decor.owner)
-    decor.owner, decor.key, decor.at = None, anchor_key(decor.owner), at
-    return kept and decor.key is not None
+    владельца, без ключа — по его копии; False — забыть."""
+    owner = decor.owner
+    if owner not in removed:
+        return not gone(owner)
+    decor.owner, decor.key, decor.at = None, anchor_key(owner), at
+    if decor.key is None:
+        decor.copy = copies.get(id(owner))
+    return kept and (decor.key is not None or decor.copy is not None)
 
 
 class Ephemera:
@@ -182,17 +191,20 @@ class Ephemera:
         откат, `! clear`), память забывает."""
         kept = at >= self._horizon
         copy = respawn if kept else None
+        copies: dict[int, object] = {}
         self._drop_entries(
             {
                 id(e)
                 for e in self._entries
-                if not e.frozen and not _freeze_entry(e, removed, copy, gone)
+                if not e.frozen
+                and not _freeze_entry(e, removed, copy, gone, copies)
             }
         )
         self._decor = [
             d
             for d in self._decor
-            if d.owner is None or _freeze_decor(d, removed, at, kept, gone)
+            if d.owner is None
+            or _freeze_decor(d, removed, at, kept, gone, copies)
         ]
 
     def for_turn(self, model: HistoryModel, turn: int) -> list:
@@ -213,13 +225,16 @@ class Ephemera:
         return [(e.at, e.widget) for e in out]
 
     def restore_decorations(self, key: str | None, owner: object) -> list:
-        """Пометки снятого владельца ``key`` — теперь под ``owner``."""
-        if key is None:
-            return []
+        """Пометки снятого владельца ``key`` (или того, чья копия —
+        ``owner``) — теперь под ``owner``."""
         bodies = []
         for d in self._decor:
-            if d.owner is None and d.key == key:
-                d.owner, d.key = owner, None
+            if d.owner is not None:
+                continue
+            if (key is not None and d.key == key) or (
+                d.copy is not None and d.copy is owner
+            ):
+                d.owner, d.key, d.copy = owner, None, None
                 bodies.append(d.body)
         return bodies
 
