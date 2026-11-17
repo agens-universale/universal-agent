@@ -351,6 +351,27 @@ async def test_admitted_pending_reply_heads_its_turn(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_turn_head_removed_outside_window_leaves_it(tmp_path):
+    """Голову хода снял не окно — откат реплики (`_cancel_with_undo`):
+    ход без виджетов уходит из окна, а соседний ход не тянет за собой
+    ленту до конца (граница — живая голова следующего хода)."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _session(pilot)
+        await _feed(pilot, scr, 0, 4)
+        feed_live(scr, _turn(4)[:1], splits=())
+        await pilot.pause()
+        reply = scr._window_heads[4]
+        scr._withdraw_from_history("m_u0004")
+        reply.remove()
+        await pilot.pause()
+        assert 4 not in scr._window_heads
+        await _feed(pilot, scr, 5, 6)
+        later = scr._window_heads[5]
+        assert later not in scr._window_turn_widgets(3)
+        assert scr._window_turn_widgets(5)[0] is later
+
+
+@pytest.mark.asyncio
 async def test_reset_render_state_does_not_trim_old_feed(
     tmp_path, monkeypatch
 ):

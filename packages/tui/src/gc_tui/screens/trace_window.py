@@ -78,8 +78,27 @@ class TraceWindowMixin:
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # Первый в ленте виджет каждого смонтированного хода.
-        self._window_heads: dict[int, Widget] = {}
+        # Первый в ленте виджет каждого смонтированного хода; читается
+        # только через `_window_heads`.
+        self._window_head_of: dict[int, Widget] = {}
+
+    @property
+    def _window_heads(self) -> dict[int, Widget]:
+        """Первый в ленте виджет каждого смонтированного хода. Голову мог
+        снять не окно (откат реплики) — ход без неё уходит из окна здесь,
+        одной точкой для всех путей снятия: иначе кусок встаёт перед
+        снятым виджетом, а соседний ход тянет ленту до конца."""
+        feed = self._window_feed()
+        heads = self._window_head_of
+        gone = [
+            turn
+            for turn, widget in heads.items()
+            if widget.parent is not feed
+            or textual_compat.is_being_removed(widget)
+        ]
+        for turn in gone:
+            del heads[turn]
+        return heads
 
     # ---- что даёт экран --------------------------------------------------
 
@@ -143,7 +162,7 @@ class TraceWindowMixin:
         self._window_stuck = True
         self._window_trim_due = False
         self._window_grown = 0
-        self._window_heads = {}
+        self._window_head_of = {}
         self._window_first = 0
         self._window_gap = range(0)
         self._window_feed().hold_first_visible(None)
@@ -160,7 +179,7 @@ class TraceWindowMixin:
             ephemera=self._window_ephemera(),
             nested=self._window_nested(),
         )
-        self._window_heads.update(refs.turn_heads)
+        self._window_head_of.update(refs.turn_heads)
         return refs
 
     @staticmethod
@@ -497,7 +516,7 @@ class TraceWindowMixin:
             return
         new_turn = turn not in self._window_heads
         if new_turn:
-            self._window_heads[turn] = widget
+            self._window_head_of[turn] = widget
         self._window_grown += policy.ITEM_WIDGETS
         if not new_turn and self._window_grown < policy.CHUNK_MIN:
             return
@@ -638,7 +657,7 @@ class TraceWindowMixin:
         if not self._window_removable(turn):
             return False
         widgets = self._window_turn_widgets(turn)
-        self._window_heads.pop(turn, None)
+        self._window_head_of.pop(turn, None)
         self._window_drop(turn)
         self._window_feed().remove_children(widgets)
         return True
