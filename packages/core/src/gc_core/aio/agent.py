@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
-from typing import Any, AsyncIterator
+import os
+from typing import TYPE_CHECKING, Any, AsyncIterator, Sequence
 
 from gc_core.agent_executor import AgentExecutor, undelivered_as_arun_args
 from gc_core.attachments.model import Attachment
 from gc_core.run_context import acreate_run_context
 from gc_core.stores import Stores
 from gc_core.utils.async_http import acquire_clients, release_clients
+
+if TYPE_CHECKING:
+    from gc_core.plugins.manifest import Plugin
+    from gc_core.settings import AppConfig, LoadedSettings
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,27 @@ def _unpack_stores(stores: Stores | None, context_kwargs: dict) -> None:
             raise ValueError(f"stores= и {name}= вместе: выберите одно")
     context_kwargs["thread_store"] = stores.threads
     context_kwargs["agent_store"] = stores.agent
+
+
+def _with_plugins(
+    settings: AppConfig | LoadedSettings,
+    plugins: Sequence[str | os.PathLike | Plugin],
+    context_kwargs: dict,
+) -> LoadedSettings:
+    """``plugins=`` → настройки со снимком ровно этих плагинов.
+
+    Явный ``runtime=`` сборки контекста заменил бы рантайм со снимком
+    целиком, поэтому он входит в настройки до сборки снимка.
+    """
+    from gc_core.plugins.catalog import with_explicit_plugins
+    from gc_core.settings import LoadedSettings
+
+    if not isinstance(settings, LoadedSettings):
+        settings = LoadedSettings(settings=settings)
+    runtime = context_kwargs.pop("runtime", None)
+    if runtime is not None:
+        settings = dataclasses.replace(settings, runtime=runtime)
+    return with_explicit_plugins(settings, plugins)
 
 
 class AsyncAgent:
@@ -83,9 +110,14 @@ class AsyncAgent:
         durable: Any = None,
         stores: Stores | None = None,
         ask_human_suspends: bool = False,
+        plugins: Sequence[str | os.PathLike | Plugin] | None = None,
         **context_kwargs: Any,
     ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
+
+        ``plugins`` — набор плагинов агента: каталоги или загруженные
+        ``Plugin``; установленные и плагины конфига не подхватываются,
+        ``[]`` — без плагинов, ``None`` — снимок из ``settings`` как есть.
 
         ``ask_human_suspends`` — канал без живого человека (A2A): вопрос
         модели (``turn_ask_human``) не ждёт ответа, а завершает ход
@@ -138,13 +170,22 @@ class AsyncAgent:
             # Ходы исполняет durable-рантайм (``gc_core.aio.durable``;
             # Temporal — ``gc_core_temporalio.TemporalDurability``): контекст,
             # MCP и модель — на его стороне, локально ничего не поднимается.
-            if context_kwargs or auth_connector or on_stream_delta:
+            if (
+                context_kwargs
+                or auth_connector
+                or on_stream_delta
+                or plugins is not None
+            ):
                 raise TypeError(
                     "durable=: контекст собирает рантайм; "
-                    "auth_connector, on_stream_delta и параметры контекста "
-                    "здесь не принимаются"
+                    "auth_connector, on_stream_delta, plugins и параметры "
+                    "контекста здесь не принимаются"
                 )
             return cls(None, set(), durable=await durable.open(settings))
+        if plugins is not None:
+            settings = await asyncio.to_thread(
+                _with_plugins, settings, plugins, context_kwargs
+            )
         # Набор ЖИВЫХ подписчиков вместо одной очереди на агента.
         #
         # Одна общая очередь давала два бага, оба воспроизводились замером:

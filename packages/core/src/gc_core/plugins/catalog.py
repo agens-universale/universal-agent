@@ -12,7 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.config_modules.plugins import PluginsConfig
@@ -318,3 +318,24 @@ def with_plugin_snapshot(
     return loaded.with_runtime(
         plugins=snap, notices=loaded.runtime.notices + snap.notices
     )
+
+
+def with_explicit_plugins(
+    loaded: LoadedSettings, plugins: Sequence[str | os.PathLike | Plugin]
+) -> LoadedSettings:
+    """Снимок из ровно переданных плагинов (SDK): без ``sources`` и
+    установленных, все доверены — их передал сам разработчик.
+    Относительный путь — от текущего каталога."""
+    paths = [
+        os.path.abspath(p.root if isinstance(p, Plugin) else p)
+        for p in plugins
+    ]
+    explicit = loaded.with_overrides(
+        {
+            "plugins.paths": paths,
+            "plugins.sources": [],
+            "plugins.use_installed": False,
+        },
+        layer="runtime",
+    ).with_runtime(untrusted_plugin_entries=frozenset())
+    return with_plugin_snapshot(explicit)
