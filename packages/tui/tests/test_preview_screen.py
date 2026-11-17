@@ -368,3 +368,26 @@ async def test_preview_escape_none():
         await pilot.press("escape")
         await pilot.pause()
     assert result["v"] is None
+
+
+@pytest.mark.asyncio
+async def test_preview_resume_without_session_screen_stays():
+    """Хост без экрана сессии: Enter в превью ничего не делает — не
+    падает на отсутствующем экране."""
+    from gc_tui.screens.preview import PreviewScreen
+    from textual.app import App
+
+    records = [_rec({"role": "user", "content": "вопрос", "id": "m1"})]
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(
+                PreviewScreen(segments=_segs(records), thread_id="abc12345")
+            )
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        await pilot.press("enter")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+        assert not scr._loader.busy

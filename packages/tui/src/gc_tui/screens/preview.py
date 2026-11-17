@@ -259,10 +259,13 @@ class PreviewScreen(
 
     def action_resume(self) -> None:
         """Enter: идёт ход — вопрос о стопе поверх превью, затем загрузка;
-        повторный Enter во время загрузки — ничего."""
+        повторный Enter во время загрузки и хост без экрана сессии —
+        ничего."""
         if self._loader.busy:
             return
         main = trace_screen_of(self.app)
+        if main is None:
+            return
         main.confirm_switch(self._session_id, lambda: self._open_session(main))
 
     def _open_session(self, main) -> None:
