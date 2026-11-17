@@ -30,7 +30,20 @@ _ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 _SALVAGE_RAW_MAX_CHARS = 4000
-_THINK_CLOSE_RE = re.compile(r"</think\s*>", re.IGNORECASE)
+_THINK_CLOSE_RE = re.compile(
+    r"^[ \t]*</think[ \t]*>[ \t]*$", re.IGNORECASE | re.MULTILINE
+)
+_FENCE_RE = re.compile(
+    r"^[ \t]*```(?P<lang>[\w-]*)[ \t]*\r?\n"
+    r"(?P<body>.*?)^[ \t]*```[ \t]*(?:\r?\n|$)",
+    re.MULTILINE | re.DOTALL,
+)
+_FENCE_OPEN_RE = re.compile(
+    r"^[ \t]*```(?:json)?[ \t]*\r?\n", re.IGNORECASE | re.MULTILINE
+)
+_VERDICT_KEY_RE = re.compile(
+    r'"(?:action|trace_ok|report_ok|is_question|trace_gaps|report_mismatches)"\s*:'
+)
 
 
 @dataclass
@@ -229,26 +242,48 @@ def _object_ranges(text: str) -> list[tuple[int, int]]:
     return ranges
 
 
-def _top_level_json_objects(text: str) -> list[Any]:
-    """Decode balanced objects without accepting a child of a malformed object."""
-    objects: list[Any] = []
-    for start, end in _object_ranges(text):
-        try:
-            objects.append(json.loads(text[start:end]))
-        except json.JSONDecodeError:
-            pass
-    return objects
-
-
 def _reasoning_boundary(raw: str) -> int:
-    """Find the last closing tag outside JSON objects."""
-    ranges = _object_ranges(raw)
-    boundaries = [
-        match.end()
-        for match in _THINK_CLOSE_RE.finditer(raw)
-        if not any(start <= match.start() < end for start, end in ranges)
-    ]
+    """Find a standalone closing tag, excluding quoted JSON literals."""
+    boundaries = [match.end() for match in _THINK_CLOSE_RE.finditer(raw)]
     return boundaries[-1] if boundaries else 0
+
+
+def _parse_json_verdict(text: str) -> ValidationResult | None:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return _parse_verdict_object(parsed)
+
+
+def _parse_fenced_verdict(text: str) -> tuple[bool, ValidationResult | None]:
+    fences = list(_FENCE_RE.finditer(text))
+    json_bodies = [
+        m.group("body") for m in fences if m.group("lang").lower() == "json"
+    ]
+    plain_bodies = [m.group("body") for m in fences if not m.group("lang")]
+    bodies = json_bodies or plain_bodies
+    if bodies:
+        if len(bodies) != 1:
+            return True, None
+        return True, _parse_json_verdict(bodies[0])
+    if _FENCE_OPEN_RE.search(text):
+        return True, None
+    return False, None
+
+
+def _parse_unfenced_verdict(text: str) -> ValidationResult | None:
+    ranges = _object_ranges(text)
+    if "{" in text[ranges[-1][1] if ranges else 0 :]:
+        return None
+    candidates = [
+        text[start:end]
+        for start, end in ranges
+        if _VERDICT_KEY_RE.search(text[start:end])
+    ]
+    if len(candidates) != 1:
+        return None
+    return _parse_json_verdict(candidates[0])
 
 
 def parse_validator_response(raw: str) -> ValidationResult | None:
@@ -261,14 +296,10 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     source = raw or ""
     source = source[_reasoning_boundary(source) :]
     cleaned = project_text_for_model(source, strip_think=True)
-    verdicts: list[ValidationResult] = []
-    for parsed in _top_level_json_objects(cleaned):
-        verdict = _parse_verdict_object(parsed)
-        if verdict is not None:
-            verdicts.append(verdict)
-            if len(verdicts) > 1:
-                return None
-    return verdicts[0] if verdicts else None
+    has_fence, fenced_verdict = _parse_fenced_verdict(cleaned)
+    if has_fence:
+        return fenced_verdict
+    return _parse_unfenced_verdict(_FENCE_RE.sub("", cleaned))
 
 
 def _parse_verdict_object(parsed: Any) -> ValidationResult | None:

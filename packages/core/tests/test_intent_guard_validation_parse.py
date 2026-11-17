@@ -227,6 +227,52 @@ class ParseValidatorResponseTest(unittest.TestCase):
             result.trace_gaps, ["Check literal </think> in feedback."]
         )
 
+    def test_fenced_rejection_takes_precedence_over_prose_example(
+        self,
+    ) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"```json\n{rejected}\n```\nA passing result would be {_raw()}"
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_invalid_fenced_verdict_does_not_fall_back_to_example(
+        self,
+    ) -> None:
+        invalid = _raw(action="continue_work", trace_ok=False)
+        invalid = invalid[:-1] + ",}"
+        raw = f"A passing result would be {_raw()}\nObserved:\n```json\n{invalid}\n```"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_incomplete_final_verdict_does_not_fall_back_to_example(
+        self,
+    ) -> None:
+        raw = (
+            f"A passing result would be {_raw()}\nObserved: "
+            + _raw(action="continue_work", trace_ok=False)[:-1]
+        )
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_stray_brace_before_fenced_verdict_is_ignored(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"The report printed a stray `{{` before failure.\n```json\n{rejected}\n```"
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_literal_closing_tag_after_fenced_verdict_is_ignored(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"```json\n{rejected}\n```\nThe log mentions literal `</think>`."
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(
             parse_validator_response(

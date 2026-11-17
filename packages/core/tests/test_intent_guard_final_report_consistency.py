@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from gc_core.intent_guard.final_report_consistency import (
     avalidate_final_report_vs_user_intent,
 )
@@ -400,6 +401,120 @@ def test_guard_prompt_evidence_before_verdict_no_think_invite():
     assert "Evidence before verdict" in prompt
     assert "<think>" not in prompt
     assert "Decide silently" not in prompt
+
+
+@pytest.mark.parametrize(
+    ("first", "retry", "expected_calls"),
+    [
+        (
+            "The report printed a stray `{` before failure.\n```json\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```",
+            "No verdict",
+            1,
+        ),
+        (
+            "```json\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```\nThe log mentions literal `</think>`.",
+            "No verdict",
+            1,
+        ),
+        (
+            "```json\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```\nA passing report would be "
+            + _validator_json(),
+            "No verdict",
+            1,
+        ),
+        (
+            "A passing report would be "
+            + _validator_json()
+            + "\nObserved:\n```json\n"
+            + _validator_json(action="continue_work", trace_ok=False)[:-1]
+            + ",}\n```",
+            _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            ),
+            2,
+        ),
+        (
+            "A passing report would be "
+            + _validator_json()
+            + "\nObserved: "
+            + _validator_json(action="continue_work", trace_ok=False)[:-1],
+            _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            ),
+            2,
+        ),
+    ],
+)
+def test_review_verdict_reaches_turn_finish_with_findings(
+    first: str, retry: str, expected_calls: int
+) -> None:
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": True,
+        },
+        logger=None,
+        auxiliary_llm=SimpleNamespace(
+            max_tokens=8192, judge_max_tokens=10000, completion_kwargs={}
+        ),
+    )
+    state = SimpleNamespace(
+        messages=[
+            {
+                "type": "function_call_output",
+                "call_id": "finish",
+                "output": json.dumps(
+                    {"tool": "turn_finish", "ok": True, "status": "submitted"}
+                ),
+            }
+        ],
+        parent_state_id=None,
+        current_user_intent=[],
+        user_intent_log=[],
+        finish_gate_rejection_count=0,
+    )
+    digest = FinishGateTraceDigest(trace_digest_text="trace", digest_chars=5)
+    with (
+        patch(
+            "gc_core.summarize.llm.arequest_chat_completion_text",
+            side_effect=[first, retry],
+        ) as model,
+        patch(
+            "gc_core.intent_guard.guard.build_finish_gate_trace_digest",
+            return_value=digest,
+        ),
+        patch(
+            "gc_core.intent_guard.final_report_consistency.build_finish_gate_trace_digest",
+            return_value=digest,
+        ),
+    ):
+        decision = run_coro(
+            FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(
+                finish_handoff_arguments={"solution_type": "direct_answer"}
+            )
+        )
+    assert model.call_count == expected_calls
+    assert decision.outcome == "reject"
+    assert run_coro(
+        apply_finish_gate_to_turn_finish_output_in_state(
+            state=state, finish_call_id="finish", decision=decision
+        )
+    )
+    output = json.loads(state.messages[0]["output"])
+    assert output["status"] == "rejected_by_finish_gate"
+    assert output["finish_gate"]["trace_gaps"] == ["gap"]
 
 
 if __name__ == "__main__":
