@@ -10,6 +10,10 @@ Linux — поле ``starttime`` из ``/proc/<pid>/stat``; macOS — ``lstart``
 абсолютным путям: ``PATH`` бывает чужим (окружение сервера) или без
 ``/bin``. На других ОС метки нет.
 
+Опрос, который не удался (``ps`` упал или завис, ``/proc`` не прочитан
+не из-за отсутствия процесса), — ``ProcessQueryFailed``: «неизвестно» не
+путается с «процесса нет», иначе живой процесс сочли бы вышедшим.
+
 Зомби хранит время старта до того, как родитель его пожмёт, и всё это
 время держит свой pid и номер группы. ``process_start_states`` отдаёт метку
 вместе с признаком «зомби» — для отбора групп под сигнал;
@@ -32,6 +36,13 @@ _PS = "/bin/ps"
 _SYSCTL = "/usr/sbin/sysctl"
 #: Потолок вызова ``ps`` и ``sysctl`` на macOS.
 _TOOL_TIMEOUT_SEC = 5.0
+
+
+class ProcessQueryFailed(Exception):
+    """Опрос ОС не удался: о процессах ничего не известно.
+
+    Не путать с «процесса нет» — тогда pid просто нет в ответе.
+    """
 
 
 def parse_linux_stat(text: str) -> tuple[str, str]:
@@ -63,7 +74,8 @@ def process_start_states(pids: Iterable[int]) -> dict[int, tuple[str, bool]]:
     """{pid: (метка, зомби ли)} для найденных процессов; один опрос ОС
     (``ps`` macOS, отклонивший вызов, — по одному pid).
 
-    Нет процесса, ошибка чтения, другая ОС — pid в ответе нет.
+    Нет процесса, другая ОС — pid в ответе нет; опрос не удался —
+    ``ProcessQueryFailed``.
     """
     wanted = sorted({pid for pid in pids if pid > 0})
     if not wanted:
@@ -82,7 +94,8 @@ def process_start_states(pids: Iterable[int]) -> dict[int, tuple[str, bool]]:
 
 
 def process_start_mark(pid: int) -> str | None:
-    """Метка живого процесса; зомби, нет процесса, другая ОС — ``None``."""
+    """Метка живого процесса; зомби, нет процесса, другая ОС — ``None``;
+    опрос не удался — ``ProcessQueryFailed``."""
     found = process_start_states([pid]).get(pid)
     if found is None or found[1]:
         return None
@@ -109,13 +122,20 @@ def boot_id() -> str:
 
 
 def _linux_states(pids: list[int]) -> dict[int, tuple[str, str]]:
+    """Нет файла (или процесс вышел при чтении) — процесса нет; любой
+    другой сбой чтения или разбора — ``ProcessQueryFailed``."""
     states: dict[int, tuple[str, str]] = {}
     for pid in pids:
         try:
             stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-            states[pid] = parse_linux_stat(stat)
-        except (OSError, ValueError, IndexError):
+        except (FileNotFoundError, ProcessLookupError):
             continue
+        except OSError as exc:
+            raise ProcessQueryFailed(f"/proc/{pid}/stat: {exc}") from exc
+        try:
+            states[pid] = parse_linux_stat(stat)
+        except (ValueError, IndexError) as exc:
+            raise ProcessQueryFailed(f"/proc/{pid}/stat: {exc}") from exc
     return states
 
 
@@ -136,12 +156,13 @@ def _ps_states(pids: list[int]) -> dict[int, tuple[str, str]]:
 
 
 def _ps_table(pids: list[int]) -> dict[int, tuple[str, str]] | None:
-    """Таблица ``ps`` по pid; ``ps`` отказал без вывода — ``None``."""
+    """Таблица ``ps`` по pid; ``ps`` отказал без вывода — ``None``;
+    не запустился или завис — ``ProcessQueryFailed``."""
     argv = [_PS, "-o", "pid=,stat=,lstart=", "-p", ",".join(map(str, pids))]
     try:
         result = _run(argv, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return {}
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProcessQueryFailed(f"{_PS}: {exc}") from exc
     if result.returncode and not result.stdout.strip():
         return None
     return parse_ps_table(result.stdout)
@@ -160,6 +181,7 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess:
 
 
 __all__ = [
+    "ProcessQueryFailed",
     "boot_id",
     "parse_linux_stat",
     "parse_ps_table",

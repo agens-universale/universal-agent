@@ -27,6 +27,7 @@ from gc_core.tools.connect_mcp.process_journal import (
 )
 from gc_core.utils import process_identity
 from gc_core.utils.process_identity import (
+    ProcessQueryFailed,
     boot_id,
     parse_linux_stat,
     parse_ps_table,
@@ -242,6 +243,58 @@ def test_ps_rejecting_one_pid_does_not_hide_others(monkeypatch, tmp_path):
     states = process_start_states([5, 7, 999999999])
 
     assert states == {5: ("Fri Nov 13 12:11:31 2026", False)}
+
+
+_REAL_RUN = process_identity._run
+_QUERY_ERRORS = [
+    subprocess.TimeoutExpired(["/bin/ps"], 5),
+    OSError("ps не запустился"),
+]
+
+
+def _failing_ps(monkeypatch, error: BaseException, *, times: int = -1):
+    """Ветка macOS: ``ps`` падает ``times`` раз (−1 — всегда), потом
+    настоящий; ``sysctl`` отдаёт постоянную загрузку."""
+    left = {"n": times}
+
+    def run(argv, *, check):
+        if argv[0] == process_identity._SYSCTL:
+            return subprocess.CompletedProcess(argv, 0, "BOOT-1\n", "")
+        if left["n"] != 0:
+            left["n"] -= 1
+            raise error
+        return _REAL_RUN(argv, check=check)
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(process_identity, "_run", run)
+
+
+@pytest.mark.parametrize("error", _QUERY_ERRORS, ids=["timeout", "oserror"])
+def test_failed_ps_is_unknown_not_missing(monkeypatch, error):
+    """Опрос не удался — «неизвестно», а не «процесса нет»."""
+    if not Path("/bin/ps").exists():
+        pytest.skip("нет /bin/ps")
+    _failing_ps(monkeypatch, error)
+    with pytest.raises(ProcessQueryFailed):
+        process_start_states([os.getpid()])
+    with pytest.raises(ProcessQueryFailed):
+        process_start_mark(os.getpid())
+
+
+@_linux_only
+def test_unreadable_proc_is_unknown_not_missing(monkeypatch):
+    real_read = Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if str(self) == f"/proc/{os.getpid()}/stat":
+            raise PermissionError(13, "нет доступа")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    with pytest.raises(ProcessQueryFailed):
+        process_start_states([os.getpid()])
+    # Процесса нет — это ответ, а не сбой.
+    assert process_start_states([999999999]) == {}
 
 
 # --- пускатель и запись ------------------------------------------------------
@@ -733,6 +786,52 @@ async def test_prune_and_kill_all_run_concurrently(
     await wait_for(lambda: not any(alive(p.pid) for p in started))
 
 
+@pytest.mark.parametrize("error", _QUERY_ERRORS, ids=["timeout", "oserror"])
+def test_prune_keeps_records_when_query_fails(
+    mcp_home, monkeypatch, procs, error
+):
+    if not Path("/bin/ps").exists():
+        pytest.skip("нет /bin/ps")
+    _failing_ps(monkeypatch, error, times=0)
+    server = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    procs.append(server)
+    journal = ProcessJournal()
+    jdir = _journal_dir(journal)
+    mark = process_start_mark(server.pid)
+    _fake_record(
+        jdir, str(server.pid), pid=server.pid, pgid=server.pid, mark=mark
+    )
+    _failing_ps(monkeypatch, error)
+    journal.prune()
+    journal.kill_all(wait_sec=0.2)
+    assert [r.pid for r in journal.records()] == [server.pid]
+    assert server.poll() is None
+    # Опрос снова отвечает — запись на месте, kill_all гасит процесс.
+    _failing_ps(monkeypatch, error, times=0)
+    journal.kill_all(wait_sec=2)
+    assert server.wait(_TIMEOUT) is not None
+
+
+def test_await_exit_waits_full_term_when_query_fails(monkeypatch, tmp_path):
+    def failing(pids):
+        list(pids)
+        raise ProcessQueryFailed("ps")
+
+    monkeypatch.setattr(process_journal, "process_start_states", failing)
+    record = process_journal.ProcessRecord(
+        pid=4242,
+        pgid=4242,
+        mark="m",
+        server="k",
+        error=None,
+        detail=None,
+        path=tmp_path / "4242.json",
+    )
+    started = time.monotonic()
+    process_journal._await_exit([record], started + 0.3)
+    assert time.monotonic() - started >= 0.3
+
+
 # --- сироты ------------------------------------------------------------------
 
 
@@ -837,3 +936,34 @@ def test_remove_drops_the_directory(mcp_home):
     # Удалённый журнал каталога заново не заводит: команда — как есть.
     assert journal.launch_argv("srv", ["-x"], "k") == ("srv", ["-x"])
     assert list(journal_root().iterdir()) == []
+
+
+@pytest.mark.parametrize("error", _QUERY_ERRORS, ids=["timeout", "oserror"])
+@pytest.mark.parametrize("times", [1, -1], ids=["once", "always"])
+def test_sweep_spares_live_neighbour_when_query_fails(
+    mcp_home, monkeypatch, procs, error, times
+):
+    """Сбой опроса при проверке хозяина — каталог не трогать, сигналов нет."""
+    if not Path("/bin/ps").exists():
+        pytest.skip("нет /bin/ps")
+    _failing_ps(monkeypatch, error, times=0)
+    owner = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    server = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    procs.extend([owner, server])
+    jdir = _journal_dir(ProcessJournal())
+    _rewrite(
+        jdir / "owner.json", pid=owner.pid, mark=process_start_mark(owner.pid)
+    )
+    _fake_record(
+        jdir,
+        str(server.pid),
+        pid=server.pid,
+        pgid=server.pid,
+        mark=process_start_mark(server.pid),
+    )
+    _failing_ps(monkeypatch, error, times=times)
+
+    assert sweep_orphans(wait_sec=0.3) == 0
+
+    assert jdir.exists()
+    assert owner.poll() is None and server.poll() is None

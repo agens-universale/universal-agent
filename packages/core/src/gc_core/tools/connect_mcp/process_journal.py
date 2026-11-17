@@ -17,6 +17,10 @@
 гасится глухой потомок вышедшего лидера). В ожидании выхода зомби —
 вышедший.
 
+Опрос ОС не удался — о процессах ничего не известно, и это не «процесса
+нет»: записи не снимаются, сигналов нет, каталог соседа не трогается,
+ожидание выхода идёт до срока.
+
 Между сверкой метки и сигналом есть окно. Оно безопасно, пока в группе
 есть хоть один процесс (зомби тоже): номер группы занят и никому не
 достанется. Опасен только полный оборот pid за время ожидания (≤ 2 с)
@@ -51,6 +55,7 @@ from pathlib import Path
 from gc_core.config_modules.env_vars import gc_paths
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.process_identity import (
+    ProcessQueryFailed,
     boot_id,
     process_start_mark,
     process_start_states,
@@ -151,6 +156,8 @@ class ProcessJournal:
         """
         records = self.records()
         states = _states_of(records)
+        if states is None:
+            return
         superseded = _superseded_errors(records)
         for record in records:
             gone = record.error is None and not _matches(record, states)
@@ -222,7 +229,7 @@ def sweep_orphans(
             targets.extend(_provably_ours(_read_records(directory)))
     signalled = [r for r in targets if _signal_group(r.pgid, signal.SIGTERM)]
     _await_exit(signalled, time.monotonic() + wait_sec)
-    states = _states_of(signalled)
+    states = _states_of(signalled) or {}
     for record in signalled:
         if _matches(record, states):
             _signal_group(record.pgid, signal.SIGKILL)
@@ -243,8 +250,13 @@ def _alnum(text: str) -> str:
 def _host_identity(pid: int) -> tuple[str | None, str]:
     """Метка и загрузка процесса хоста ``pid`` — константы процесса,
     читаются один раз (на macOS это запуск ``ps`` и ``sysctl``). Ключ —
-    pid: у форка хоста своя метка."""
-    return process_start_mark(pid), boot_id()
+    pid: у форка хоста своя метка. Метку не узнать — ``None``: хозяин без
+    метки сверяется по живости pid."""
+    try:
+        mark = process_start_mark(pid)
+    except ProcessQueryFailed:
+        mark = None
+    return mark, boot_id()
 
 
 def _create_dir(root: Path) -> Path | None:
@@ -335,8 +347,13 @@ def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _states_of(records: Iterable[ProcessRecord]) -> _States:
-    return process_start_states(r.pid for r in records)
+def _states_of(records: Iterable[ProcessRecord]) -> _States | None:
+    """Состояния процессов записей; опрос не удался — ``None``."""
+    try:
+        return process_start_states(r.pid for r in records)
+    except ProcessQueryFailed as exc:
+        logger.warning("[MCP] опрос процессов не удался: %s", exc)
+        return None
 
 
 def _superseded_errors(records: list[ProcessRecord]) -> set[Path]:
@@ -368,10 +385,11 @@ def _running(record: ProcessRecord, states: _States) -> bool:
 def _provably_ours(records: list[ProcessRecord]) -> list[ProcessRecord]:
     """Лидеры своих групп с совпавшей меткой — им можно групповой сигнал.
 
-    Своя группа хоста исключена на случай подделанной записи.
+    Своя группа хоста исключена на случай подделанной записи. Опрос не
+    удался — своих не доказать, список пуст.
     """
     own_group = os.getpgrp()
-    states = _states_of(records)
+    states = _states_of(records) or {}
     return [
         r
         for r in records
@@ -403,11 +421,13 @@ def _await_exit(records: list[ProcessRecord], deadline: float) -> None:
 
     Один опрос ОС на шаг (см. ``process_start_states``). Зомби считается
     вышедшим: лидера, которого хозяин ещё не пожал, по пустоте группы не
-    дождаться.
+    дождаться. Опрос не удался — лидеры считаются живыми.
     """
     while records:
         states = _states_of(records)
-        if not any(_running(r, states) for r in records):
+        if states is not None and not any(
+            _running(r, states) for r in records
+        ):
             return
         left = deadline - time.monotonic()
         if left <= 0:
@@ -456,8 +476,14 @@ def _orphan_verdict(directory: Path) -> bool | None:
 
 
 def _owner_alive(pid: int, mark: object) -> bool:
-    """Хозяин жив: метка совпала; без метки в ``owner.json`` — pid жив."""
-    current = process_start_mark(pid)
+    """Хозяин жив: метка совпала; без метки в ``owner.json`` — pid жив.
+    Опрос не удался — жив: удалить журнал живого соседа хуже, чем
+    оставить сироту до следующей уборки."""
+    try:
+        current = process_start_mark(pid)
+    except ProcessQueryFailed as exc:
+        logger.warning("[MCP] хозяин журнала не проверен: %s", exc)
+        return True
     if not isinstance(mark, str):
         return current is not None
     return current == mark
