@@ -31,6 +31,7 @@ from gc_core.summarize.summary_validation import (
     missing_section_tags,
     validate_summary_text,
 )
+from gc_core.summarize.summary_xml_extraction import extract_final_summary_xml
 from gc_core.summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
     parse_memory_deltas,
@@ -246,6 +247,7 @@ class _BatchRun:
             self.batch_total,
             text,
         )
+        text = extract_final_summary_xml(text) or text
         is_valid, reason = validate_summary_text(text)
         if not is_valid:
             text = await self._arepair(
@@ -316,6 +318,7 @@ class _BatchRun:
             missing_tags=missing_tags,
             max_tokens=self.max_tokens,
         )
+        repaired = extract_final_summary_xml(repaired) or repaired
         merged = merge_repaired_summary(
             invalid_text=text, repaired_text=repaired
         )
