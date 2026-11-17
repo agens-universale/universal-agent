@@ -432,11 +432,12 @@ class TraceWindowMixin:
         super()._update_stick_state()
 
     def _window_island(self) -> bool:
-        """Остров: в прочитанном остались только закреплённые ходы —
-        снять нечего, разрыв под ними не закрыть."""
-        return all(
-            self._window_pinned(turn)
-            for turn in range(self._window_first, self._window_gap.start)
+        """Остров: прочитанное не ужать — оба его конца закреплены.
+        Снятие идёт только с концов (второго разрыва не бывает), поэтому
+        разрыв под ним не закрыть, даже если между закреплёнными остались
+        обычные ходы."""
+        return self._window_pinned(self._window_first) and (
+            self._window_pinned(self._window_gap.start - 1)
         )
 
     def _window_on_bottom(self) -> None:

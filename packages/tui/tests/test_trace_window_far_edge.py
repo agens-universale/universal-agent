@@ -896,3 +896,94 @@ async def test_continuous_climb_frees_trimmed_turns(tmp_path, monkeypatch):
         # не всё снятое за подъём.
         alive = [w for w in trimmed if not w.is_attached]
         assert len(alive) <= policy.WINDOW_LIMIT // 4
+
+
+# ---- возврат к низу прокруткой при закреплённых в прочитанном --------------
+
+
+def _pin_turns(scr, monkeypatch, how: str) -> list[int]:
+    """Закрепить старые ходы прочитанного диапазона: открытый «!» (как в
+    `test_trace_trim`) или фокус на старой строке. ``two`` — «!» в двух
+    ходах с обычными между ними; ``one`` — в одном; ``focus`` — фокус на
+    старой строке; ``focus_and_bang`` — фокус в одном ходе, «!» в
+    другом. Возвращает ходы с «!»: фокус переход к низу уводит домой
+    (§5.11), его ход закреплённым не остаётся."""
+    low = scr._window_first + 1
+    high = scr._window_gap.start - 2
+    assert high - low >= 2
+    turns = {
+        "two": [low, high],
+        "one": [high],
+        "focus": [low],
+        "focus_and_bang": [low, high],
+    }[how]
+    banged = turns[1:] if how.startswith("focus") else turns
+    heads = [scr._window_heads[t] for t in banged]
+    monkeypatch.setattr(scr._ephemera, "bang_open_widgets", lambda: heads)
+    if how.startswith("focus"):
+        row = scr._window_turn_widgets(low)[0]
+        row.can_focus = True
+        scr.set_focus(row, scroll_visible=False)
+    for turn in turns:
+        assert scr._turn_pinned(turn)
+    return banged
+
+
+async def _down_to_bottom(pilot, scr, how: str) -> None:
+    """Вниз к физическому низу: колесом или прыжком (ползунок)."""
+    trace = _trace(scr)
+    at_bottom = 0
+    for _ in range(3000):
+        if scr._stick_bottom or at_bottom > 5:
+            return
+        bottom = trace.scroll_y >= trace.max_scroll_y
+        at_bottom = at_bottom + 1 if bottom else 0
+        if how == "jump":
+            trace.scroll_to(y=trace.max_scroll_y, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+        else:
+            await _wheel(pilot, scr, up=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("how", "move"),
+    [
+        ("two", "wheel"),
+        ("two", "jump"),
+        ("one", "jump"),
+        ("focus", "jump"),
+        ("focus_and_bang", "jump"),
+    ],
+)
+async def test_scroll_back_to_bottom_sticks_with_pinned_in_read_range(
+    tmp_path, monkeypatch, how, move
+):
+    """Идёт живой ход, пользователь ушёл вверх (разрыв), закрепил старые
+    ходы и вернулся к физическому низу прокруткой — колесом или прыжком
+    (ползунок): лента прилипла, закреплённые на месте, новый вывод живого
+    хода — у низа. Разрыв закрыт или остался под прочитанным, которое не
+    ужать (оба конца закреплены), — низу он не мешает."""
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_session(pilot, tmp_path / "t")
+        live = _turn(TURNS, outcome=False)
+        feed_live(scr, live[:4], splits=())
+        await pilot.pause()
+        await _settled(pilot, scr)
+        await _lift(pilot, scr, pinned=TURNS)
+        assert scr._window_gap
+        pinned = _pin_turns(scr, monkeypatch, how)
+        await _down_to_bottom(pilot, scr, move)
+        trace = _trace(scr)
+        assert scr._stick_bottom is True
+        assert set(pinned) <= set(scr._window_heads)
+        for n in range(4, len(live), 4):
+            feed_live(scr, live[n : n + 4], splits=())
+            await pilot.pause()
+            await _settled(pilot, scr)
+        await pilot.pause()
+        assert scr._stick_bottom is True
+        assert trace.scroll_y == trace.max_scroll_y
+        assert set(pinned) <= set(scr._window_heads)
+        _consecutive(scr)
