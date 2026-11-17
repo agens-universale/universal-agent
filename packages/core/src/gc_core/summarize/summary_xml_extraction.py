@@ -3,7 +3,10 @@
 import re
 
 from gc_core.summarize.summary_spec import section_tags
-from gc_core.summarize.summary_validation import SummaryRejectedError
+from gc_core.summarize.summary_validation import (
+    SummaryRejectedError,
+    validate_summary_text,
+)
 
 _SECTIONS = "|".join(re.escape(tag) for tag in section_tags())
 _TOKEN = re.compile(
@@ -45,19 +48,8 @@ def _outer_tokens(source: str) -> list[re.Match[str]]:
     return tokens
 
 
-def extract_final_summary_xml(text: str) -> str | None:
-    """Return the sole closed summary after the last reasoning boundary.
-
-    An absent complete document remains available to the existing partial
-    summary repair path. Multiple documents in the final answer are ambiguous.
-    """
-    source = text or ""
-    tokens = _outer_tokens(source)
-    boundary = max(
-        (match.end() for match in tokens if match.group() == _THINK_CLOSE),
-        default=0,
-    )
-    answer_tokens = [match for match in tokens if match.start() >= boundary]
+def _single_summary(source: str, boundary: int) -> str | None:
+    answer_tokens = _outer_tokens(source[boundary:])
     opens = [
         match for match in answer_tokens if match.group() == _SUMMARY_OPEN
     ]
@@ -72,4 +64,28 @@ def extract_final_summary_xml(text: str) -> str | None:
         return None
     if opens[0].start() >= closes[0].start():
         return None
-    return source[opens[0].start() : closes[0].end()]
+    return source[boundary + opens[0].start() : boundary + closes[0].end()]
+
+
+def extract_final_summary_xml(text: str) -> str | None:
+    """Return one final summary, keeping partial drafts for the repair path."""
+    source = text or ""
+    boundaries = [
+        match.end()
+        for match in _outside_cdata(source)
+        if match.group() == _THINK_CLOSE
+    ]
+    for boundary in reversed(boundaries):
+        if any(
+            match.group() == _SUMMARY_OPEN
+            for match in _outer_tokens(source[boundary:])
+        ):
+            candidate = _single_summary(source, boundary)
+            if (
+                candidate is not None
+                and validate_summary_text(
+                    candidate, require_closed_structure=True
+                )[0]
+            ):
+                return candidate
+    return _single_summary(source, 0)

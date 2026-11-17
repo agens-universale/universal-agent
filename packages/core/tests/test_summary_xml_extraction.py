@@ -59,10 +59,35 @@ async def test_compression_ignores_summary_tokens_inside_cdata(monkeypatch):
 @pytest.mark.asyncio
 async def test_compression_keeps_plain_text_inside_section(monkeypatch):
     final = valid_summary_xml_for_tests(seed="plain")
-    final = final.replace("plain", "plain 3 < 4 & <summary> is a label")
+    final = final.replace(
+        "plain", "plain 3 < 4 & </think> then <summary> is a label"
+    )
 
     async def response(**_kwargs):
         return final
+
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
+    )
+    actual = await acompress_summary_text(
+        ctx=None,
+        state=None,
+        summary_text=assemble_summary_xml({"task_and_context": "x" * 11000}),
+        max_chars=10000,
+        max_tokens=1000,
+    )
+    assert actual == final
+
+
+@pytest.mark.asyncio
+async def test_unclosed_reasoning_draft_precedes_final_summary(monkeypatch):
+    final = valid_summary_xml_for_tests(seed="confirmed context")
+
+    async def response(**_kwargs):
+        return (
+            "<summary><task_and_context>Unfinished reasoning draft\n"
+            "</think>\n" + final
+        )
 
     monkeypatch.setattr(
         "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
