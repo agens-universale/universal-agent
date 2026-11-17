@@ -58,6 +58,53 @@ def test_extract_register_bodies_unescaped_ampersand_and_last_match():
     assert bodies["state"] == "second"
 
 
+def test_final_register_block_excludes_open_tag_in_preamble():
+    raw = (
+        "<knowledge>: draft notes\n<goal>: draft objective\n"
+        "Let me format this properly:\n</think>\n"
+        "<goal>final goal</goal>\n<constraints>keep x < 5</constraints>\n"
+        "<state>next step</state>\n<knowledge>final fact</knowledge>"
+    )
+    old = WorkingMemorySnapshot(knowledge="old fact")
+
+    deltas, present = parse_memory_deltas(raw, full_replace=True)
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert updated.goal == "final goal"
+    assert updated.constraints == "keep x < 5"
+    assert updated.state == "next step"
+    assert updated.knowledge == "final fact"
+
+
+def test_partial_register_patch_and_empty_clear_remain_valid():
+    old = WorkingMemorySnapshot(goal="old goal", knowledge="old fact")
+    deltas, present = parse_memory_deltas(
+        "preface\n<goal>new goal</goal><knowledge></knowledge>"
+    )
+
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert updated.goal == "new goal"
+    assert updated.knowledge == ""
+    assert present == frozenset({"goal", "knowledge"})
+
+
+def test_unclosed_or_nested_registers_do_not_apply():
+    old = WorkingMemorySnapshot(knowledge="old fact")
+    for raw in (
+        "<knowledge>draft <goal>inner</goal></knowledge>",
+        "<goal>unfinished <state>valid</state>",
+        "<goal>new goal</goal><knowledge>unfinished",
+        "<goal>new goal</goal><unknown>unexpected</unknown>",
+    ):
+        deltas, present = parse_memory_deltas(raw)
+        updated = apply_summary_memory_patch(
+            old, deltas, replace_touched=present
+        )
+        assert updated == old
+        assert present == frozenset()
+
+
 def test_render_persistent_state_roundtrip_all_registers():
     snapshot = WorkingMemorySnapshot(
         **{name: f"body-{name}" for name in REGISTER_ORDER}

@@ -313,22 +313,76 @@ def _build_register_body_patterns() -> dict[str, re.Pattern[str]]:
 
 
 _REGISTER_BODY_PATTERNS = _build_register_body_patterns()
+_REGISTER_TAG_TOKEN = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9_]*)>")
+_REGISTER_NAMES = frozenset(REGISTER_ORDER)
+_REGISTER_WRAPPER_END = re.compile(
+    r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
+)
+
+
+def _parse_register_block(text: str, start: int) -> dict[str, str] | None:
+    """Parse one contiguous, balanced run of register tags from ``start``."""
+    bodies: dict[str, str] = {}
+    cursor = start
+    while cursor < len(text):
+        opening = _REGISTER_TAG_TOKEN.match(text, cursor)
+        if (
+            opening is None
+            or opening.group(1)
+            or opening.group(2) not in _REGISTER_NAMES
+        ):
+            return None
+        name = opening.group(2)
+        closing = _REGISTER_TAG_TOKEN.search(text, opening.end())
+        if (
+            closing is None
+            or closing.group(1) != "/"
+            or closing.group(2) != name
+        ):
+            return None
+        bodies[name] = text[opening.end() : closing.start()].strip()
+        cursor = closing.end()
+        if _REGISTER_WRAPPER_END.fullmatch(text[cursor:].strip()):
+            return bodies
+        next_tag = _REGISTER_TAG_TOKEN.search(text, cursor)
+        if next_tag is None:
+            return bodies
+        if next_tag.group(1) or next_tag.group(2) not in _REGISTER_NAMES:
+            return None
+        cursor = next_tag.start()
+    return None
+
+
+def _has_unclosed_register_prefix(text: str, stop: int) -> bool:
+    stack: list[str] = []
+    for tag in _REGISTER_TAG_TOKEN.finditer(text, 0, stop):
+        name = tag.group(2)
+        if name not in _REGISTER_NAMES:
+            continue
+        if tag.group(1):
+            if not stack or stack.pop() != name:
+                return True
+        else:
+            stack.append(name)
+    return bool(stack)
 
 
 def extract_register_bodies(text: str) -> dict[str, str]:
-    """Вырезает тела регистров ``<name>…</name>`` (последний match); пустое тело → ``''``."""
+    """Extract the final unambiguous run of balanced register tags."""
     s = (text or "").strip()
     if not s:
         return {}
-    bodies: dict[str, str] = {}
-    for reg in SESSION_MEMORY_REGISTERS:
-        pattern = _REGISTER_BODY_PATTERNS[reg.name]
-        last_match: re.Match[str] | None = None
-        for match in pattern.finditer(s):
-            last_match = match
-        if last_match is not None:
-            bodies[reg.name] = last_match.group(1).strip()
-    return bodies
+    if "</think>" in s:
+        s = s.rsplit("</think>", 1)[1].strip()
+    for token in _REGISTER_TAG_TOKEN.finditer(s):
+        if token.group(1) or token.group(2) not in _REGISTER_NAMES:
+            continue
+        if _has_unclosed_register_prefix(s, token.start()):
+            continue
+        bodies = _parse_register_block(s, token.start())
+        if bodies is not None:
+            return bodies
+    return {}
 
 
 def parse_memory_deltas(
