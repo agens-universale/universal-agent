@@ -522,12 +522,14 @@ class McpConnections:
         ``tools_ttl()`` назад, перечитывает список в фоне. Неподключённый
         сервер без своей попытки и без серии повторов получает попытку по
         правилу 30 с — у потребителя «на старте» всегда, у потребителя
-        «при первом вызове» только после своей неудачной попытки: у
-        ``failed`` тулов в срезе нет, и вызова, который подключил бы
-        сервер, не будет. Попытка начинается до закрепления среза: в том
-        же ходе сервер — ``connecting``, вызов ждёт её исхода. Сервер,
-        который потребитель ещё не пытался подключать, ждёт вызова.
-        Закрытый потребитель и остановленный сервис ничего не начинают.
+        «при первом вызове» — когда тулов сервера в срезе нет: после своей
+        неудачной попытки (у ``failed`` тулов нет) или когда список
+        неизвестен или пуст. Тулов в срезе нет — вызова не будет, поэтому
+        подключает вход в ход. Попытка начинается до закрепления среза: в
+        том же ходе сервер — ``connecting``, вызов ждёт её исхода. Сервер
+        с тулами, который потребитель ещё не пытался подключать, ждёт
+        вызова. Закрытый потребитель и остановленный сервис ничего не
+        начинают.
         """
         key = session_key_of(entry)
         with self._lock:
@@ -535,7 +537,11 @@ class McpConnections:
                 return
             connected = self._connected(key)
             idle = not self._attempting(key) and key not in self._series
-            wanted = self._service.connect_on_start or key in self._failures
+            wanted = (
+                self._service.connect_on_start
+                or key in self._failures
+                or not entry.tools
+            )
             relist = self._new_relist(entry, key) if connected else None
         if relist is not None:
             relist.add_done_callback(partial(self._on_relist_done, entry))

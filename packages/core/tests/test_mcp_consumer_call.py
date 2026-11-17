@@ -56,6 +56,7 @@ from gc_testkit.mcp import (
     exits,
     free_port,
     launches,
+    seed_catalog,
     set_behavior,
     stdio_cfg,
     stream_server,
@@ -301,8 +302,9 @@ async def _failed_by_call(reaper, settings, control, clock):
     return consumer
 
 
+@pytest.mark.parametrize("after", [30, 31])
 async def test_lazy_failed_server_reconnects_on_turn_after_interval(
-    mcp_home, tmp_path, mcp_reaper, mcp_owner
+    after, mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
     """Через 30 с после своего отказа вход в ход начинает попытку: тулы в
     срезе того же хода, вызов ждёт попытку и проходит."""
@@ -311,7 +313,7 @@ async def test_lazy_failed_server_reconnects_on_turn_after_interval(
     settings = _settings({"a": stdio_cfg(control)})
     _seed(settings)
     consumer = await _failed_by_call(mcp_reaper, settings, control, clock)
-    clock.advance(31)
+    clock.advance(after)
 
     await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
     view = await _view(consumer, settings)
@@ -323,8 +325,9 @@ async def test_lazy_failed_server_reconnects_on_turn_after_interval(
     assert _status(consumer).state == STATE_CONNECTED
 
 
+@pytest.mark.parametrize("after", [10, 29])
 async def test_lazy_failed_server_waits_interval_on_turn(
-    mcp_home, tmp_path, mcp_reaper, mcp_owner
+    after, mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
     clock = FakeClock()
     control = tmp_path / "a.json"
@@ -332,7 +335,7 @@ async def test_lazy_failed_server_waits_interval_on_turn(
     _seed(settings)
     consumer = await _failed_by_call(mcp_reaper, settings, control, clock)
     started = len(launches(control))
-    clock.advance(10)
+    clock.advance(after)
 
     await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
     view = await _view(consumer, settings)
@@ -341,6 +344,37 @@ async def test_lazy_failed_server_waits_interval_on_turn(
     assert _ECHO not in view.registry
     assert connections_of(consumer)._connects == {}
     assert len(launches(control)) == started
+
+
+@pytest.mark.parametrize("catalog", [None, []])
+async def test_lazy_server_without_tools_held_by_other_connects_on_turn(
+    catalog, mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Сервер без тулов (каталога нет или он пуст) у потребителя «при
+    первом вызове»: отказ другого потребителя не дал его сборке попытки,
+    своего отказа нет. Тулов в срезе нет — вызова не будет, поэтому через
+    30 с подключает вход в ход; тулы приходят на следующем входе."""
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    if catalog is not None:
+        seed_catalog(settings, "a", catalog)
+    service = McpService(connect_on_start=False, clock=clock.now)
+    set_behavior(control, fail_start=True)
+    await _ready(mcp_reaper, service, settings, "first")
+    consumer = await _ready(mcp_reaper, service, settings, "second")
+    assert connections_of(consumer).own_failure(_entry(consumer)) is None
+    set_behavior(control)
+    clock.advance(31)
+
+    await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
+
+    connected, attempt = connections_of(consumer).attempt_of(_entry(consumer))
+    assert (connected, attempt is not None) == (False, True)
+    await asyncio.wait({attempt}, timeout=_CEILING_SEC)
+    assert _status(consumer).state == STATE_CONNECTED
+    await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
+    assert _ECHO in (await _view(consumer, settings)).registry
 
 
 async def test_stop_cancels_the_wait(

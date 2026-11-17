@@ -359,6 +359,30 @@ async def test_on_start_with_empty_catalog_does_not_wait_at_build(
     await wait_for(lambda: _state(consumer, "a") == STATE_CONNECTED)
 
 
+async def test_lazy_empty_catalog_after_failure_does_not_wait_at_build(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Пустой каталог и уже бывший в процессе отказ: сборка начинает
+    попытку, но не ждёт её — как у сервера без каталога."""
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    set_behavior(control, fail_start=True)
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", [])
+    service = McpService(connect_on_start=False, clock=clock.now)
+    first = _open(mcp_reaper, service, "first")
+    await _ensure(first, settings)
+    assert first.servers()["a"].last_failure is not None
+    set_behavior(control, start_delay=1.5)
+    clock.advance(31)
+    consumer = _open(mcp_reaper, service, "second")
+
+    await _ensure(consumer, settings)
+
+    assert _state(consumer, "a") == STATE_CONNECTING
+    await wait_for(lambda: _state(consumer, "a") == STATE_CONNECTED)
+
+
 async def test_rebuild_does_not_hammer_failed_server(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
