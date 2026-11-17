@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -131,6 +132,13 @@ def alive(pid: int) -> bool:
     """Процесс существует и не зомби."""
     state = _process_state(pid)
     return bool(state) and state != "Z"
+
+
+def kill_group(pgid: int) -> None:
+    """SIGKILL группе процессов теста. Группы нет — тихо; группе из одних
+    зомби macOS отвечает EPERM — тоже тихо: убивать там уже некого."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pgid, signal.SIGKILL)
 
 
 async def wait_for(

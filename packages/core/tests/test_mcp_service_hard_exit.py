@@ -42,6 +42,7 @@ from gc_testkit.mcp import (
     connections_of,
     events,
     journal_records,
+    kill_group,
     launches,
     seed_catalog,
     set_behavior,
@@ -690,7 +691,7 @@ async def _killed_host(home: Path, tmp_path: Path, servers: dict) -> None:
         )
         assert line.strip() == b"ready", (tmp_path / "host.err").read_text()
     finally:
-        os.killpg(host.pid, signal.SIGKILL)
+        kill_group(host.pid)
         host.wait(_CEILING_SEC)
         host.stdout.close()
 

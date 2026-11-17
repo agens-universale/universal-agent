@@ -26,6 +26,7 @@ from gc_core.tools.connect_mcp.service import McpService
 from gc_testkit.mcp import (
     alive,
     events,
+    kill_group,
     launches,
     set_behavior,
     stdio_cfg,
@@ -119,8 +120,7 @@ async def _host(home: Path, tmp_path: Path, servers: dict, mode="main"):
         assert line.strip() == b"ready", (tmp_path / "host.err").read_text()
         yield host
     finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(host.pid, signal.SIGKILL)
+        kill_group(host.pid)
         await asyncio.to_thread(host.wait, _CEILING_SEC)
         host.stdout.close()
 

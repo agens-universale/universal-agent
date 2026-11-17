@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import signal
@@ -43,6 +42,7 @@ from gc_testkit.mcp import (
     count_attempts,
     events,
     exits,
+    kill_group,
     launches,
     set_behavior,
     stdio_cfg,
@@ -168,13 +168,26 @@ class _ParkedSleep:
             await asyncio.sleep(0.01)
 
 
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+def test_kill_group_ignores_missing_and_zombie_group(monkeypatch, error):
+    """macOS отвечает EPERM группе, где остались одни зомби."""
+    sent: list[tuple[int, int]] = []
+
+    def killpg(pgid: int, sig: int) -> None:
+        sent.append((pgid, sig))
+        raise error
+
+    monkeypatch.setattr(os, "killpg", killpg)
+    kill_group(4242)
+    assert sent == [(4242, signal.SIGKILL)]
+
+
 async def _kill_deaf(*pids: int) -> None:
     """Добить глухие серверы (это часть аварийного гашения, не закрытия) и
     дождаться фоновых задач: закрытия их сессий доигрывают в фоне, пока
     процессы живы."""
     for pid in pids:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(pid, signal.SIGKILL)
+        kill_group(pid)
     await wait_for(lambda: not any(alive(p) for p in pids), _CEILING_SEC)
     others = asyncio.all_tasks() - {asyncio.current_task()}
     if others:
