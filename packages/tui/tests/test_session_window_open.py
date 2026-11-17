@@ -463,6 +463,28 @@ async def test_switch_resets_window_state(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("small_window")
+async def test_new_session_resets_window_state(tmp_path):
+    """/new — окно прежней сессии не действует: иначе догрузка по пустой
+    модели (IndexError) и кусок, вставший прежнему окну."""
+    _write_turns(tmp_path)
+    async with _app(tmp_path).run_test(size=_SIZE) as pilot:
+        scr = await _open(pilot)
+        await _filled(pilot, scr)
+        assert scr._window_first > 0
+        gen = scr._window_gen
+        scr._window_busy = True
+        scr._window_set_gap(1, 3)
+        scr._switch_to_empty_state()
+        assert scr._window_gen > gen
+        assert scr._window_heads == {}
+        assert (scr._window_first, scr._window_gap) == (0, range(0))
+        assert not scr._window_busy
+        scr._window_fill()
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
 async def test_history_block_toggle_routes(tmp_path):
     """Блок вызовов хода, нарисованного отрисовщиком кусков, раскрывается
     на экране сессии; живой реестр видов его не держит."""

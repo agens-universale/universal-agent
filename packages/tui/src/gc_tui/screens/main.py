@@ -2340,8 +2340,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._plan_marked = None
         self._answer_flow.new_turn()
         self._reset_new_replies()
-        # Новая лента уже «у низа»: возврат к низу не ужимает старую.
-        self._window_stuck = True
+        self._window_reset()
         self._stick_bottom = True  # новый трейс → показываем низ (latest)
         self._last_auto_y = 0
         self._active_calls.clear()

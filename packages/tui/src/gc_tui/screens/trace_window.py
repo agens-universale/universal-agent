@@ -123,14 +123,7 @@ class TraceWindowMixin:
         ленты. Прежнее поколение окна больше не действует. ``stop`` —
         ходы от него рисует сам экран (незаконченный ход — живым путём);
         None — хвост до конца модели."""
-        self._window_gen += 1
-        self._window_busy = False
-        self._window_stuck = True
-        self._window_trim_due = False
-        self._window_grown = 0
-        self._window_heads = {}
-        self._window_gap = range(0)
-        self._window_feed().hold_first_visible(None)
+        self._window_reset()
         model = self._window_model()
         estimates = self._window_estimates(model)[:stop]
         turns = policy.tail_turns(estimates, policy.TAIL_MIN)
@@ -139,6 +132,21 @@ class TraceWindowMixin:
         # Догрузка решает по высоте разложенного хвоста.
         self._window_feed().call_after_layout(self._window_fill)
         return refs
+
+    def _window_reset(self) -> None:
+        """Окно пусто — новая лента (смена сессии, /new, пересборка):
+        прежнее поколение окна больше не действует, кусок прежнего окна
+        выброшен; новая лента уже «у низа» — возврат к низу не ужимает
+        старую."""
+        self._window_gen += 1
+        self._window_busy = False
+        self._window_stuck = True
+        self._window_trim_due = False
+        self._window_grown = 0
+        self._window_heads = {}
+        self._window_first = 0
+        self._window_gap = range(0)
+        self._window_feed().hold_first_visible(None)
 
     def _window_render(
         self, turns: range, *, before: Widget | None
