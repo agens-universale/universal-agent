@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import mcp_media_dir
-from gc_core.tools.connect_mcp.call_errors import McpCallOutcomeUnknown
+from gc_core.tools.connect_mcp.call_errors import (
+    CALL_TIMEOUTS,
+    McpCallOutcomeUnknown,
+    first_leaf,
+)
 from gc_core.tools.connect_mcp.durable_scope import (
     McpSessionLostError,
     durable_calls_enabled,
@@ -397,8 +401,20 @@ def _prepare_mcp_call(
 
 
 #: Не повторяются: вызов мог исполниться на сервере, повтор дублировал бы
-#: эффект. Ошибка тула — ответ сервера; остальные — ответа не было.
-_NOT_REPEATED = (McpToolCallError, McpCallOutcomeUnknown, McpSessionLostError)
+#: эффект. Ошибка тула — ответ сервера; остальные — ответа не было (в том
+#: числе истёкший срок вызова любого транспорта).
+_NOT_REPEATED = (
+    McpToolCallError,
+    McpCallOutcomeUnknown,
+    McpSessionLostError,
+    *CALL_TIMEOUTS,
+)
+
+
+def _repeatable(exc: BaseException) -> bool:
+    """Повторять ли вызов: решает первый лист группы исключений — SDK
+    отдаёт исход вызова из своих групп задач."""
+    return not isinstance(first_leaf(exc), _NOT_REPEATED)
 
 
 async def acall_mcp_tool(
@@ -459,7 +475,7 @@ async def acall_mcp_tool(
 
     @retry_with_backoff_async(
         interrupt_on_user_stop=True,
-        should_retry=lambda exc: not isinstance(exc, _NOT_REPEATED),
+        should_retry=_repeatable,
         operation_name=(
             f"MCP tool call ({target.server_key}:{target.base_tool_name})"
         ),

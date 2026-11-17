@@ -242,12 +242,17 @@ async def _stop(proc: subprocess.Popen) -> None:
 
 @contextlib.asynccontextmanager
 async def stream_server(
-    tmp_path: Path, transport: str, *, port: int | None = None
+    tmp_path: Path,
+    transport: str,
+    *,
+    port: int | None = None,
+    json_response: bool = False,
 ) -> AsyncIterator[tuple[dict, Path]]:
     """Поднять ``stream_server.py``; отдаёт ``(server_cfg, control)``.
 
     ``transport`` — транспорт ядра (``stream_http`` | ``stream_sse``);
-    порт — заданный или свободный. Выход из блока гасит сервер.
+    порт — заданный или свободный; ``json_response`` — ответ
+    ``stream_http`` одним JSON. Выход из блока гасит сервер.
     """
     port = free_port() if port is None else port
     control = Path(tmp_path) / f"stream-{port}.json"
@@ -257,6 +262,7 @@ async def stream_server(
             str(_STREAM_SERVER),
             _STREAM_TRANSPORTS[transport],
             str(port),
+            *(["json"] if json_response else []),
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

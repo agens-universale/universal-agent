@@ -1,6 +1,8 @@
 """Тестовый MCP-сервер FastMCP для потоковых транспортов.
 
-argv: транспорт FastMCP (``streamable-http`` | ``sse``) и порт. Журнал —
+argv: транспорт FastMCP (``streamable-http`` | ``sse``), порт и
+необязательный ``json`` — ответ ``streamable-http`` одним JSON вместо
+потока событий (``json_response``). Журнал —
 ``<GC_TEST_CONTROL>.mcp-journal`` в формате stdio-сервера: ``start <pid>``,
 ``exit <pid>`` и ``req <method> <id> <session>`` на КАЖДЫЙ запрос, включая
 ``initialize``. Перехват стоит в ``ServerSession._received_request``: туда
@@ -57,8 +59,13 @@ def log_every_request() -> None:
     ServerSession._received_request = logged
 
 
-def build_app(port: int) -> FastMCP:
-    app = FastMCP("gc-test-stream", host="127.0.0.1", port=port)
+def build_app(port: int, *, json_response: bool = False) -> FastMCP:
+    app = FastMCP(
+        "gc-test-stream",
+        host="127.0.0.1",
+        port=port,
+        json_response=json_response,
+    )
     counts: dict = {}
 
     @app.tool()
@@ -92,7 +99,9 @@ def main() -> None:
     log(f"start {PID}")
     log_every_request()
     try:
-        build_app(int(sys.argv[2])).run(transport=sys.argv[1])
+        json_response = sys.argv[3:] == ["json"]
+        app = build_app(int(sys.argv[2]), json_response=json_response)
+        app.run(transport=sys.argv[1])
     finally:
         log(f"exit {PID}")
 

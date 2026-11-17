@@ -12,14 +12,18 @@ import asyncio
 import os
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from gc_core.tools.connect_mcp import api
 from gc_core.tools.connect_mcp import registry as reg
 from gc_core.tools.connect_mcp import stream_client
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.call_errors import (
+    CALL_TIMEOUTS,
     McpCallOutcomeUnknown,
     McpCallTimedOut,
     McpServerGone,
+    first_leaf,
 )
 from gc_core.tools.connect_mcp.durable_scope import (
     McpSessionLostError,
@@ -172,6 +176,62 @@ async def test_one_shot_network_call_is_not_repeated(
             await _acall_with_retry(network, "action", arguments, timeout=1)
 
         assert len(_requests(control, "tools/call")) == 1
+
+
+async def test_read_timeout_of_json_response_is_not_repeated(
+    tmp_path, mcp_reaper, mcp_owner, monkeypatch
+):
+    """Сервер отвечает одним JSON: срок вызова приходит ``ReadTimeout``
+    httpx в группе задач SDK. Исход неизвестен — автоповтор смотрит на
+    лист группы и вызов не повторяет: тул исполняется один раз."""
+    monkeypatch.setattr(aretry, "_wait_before_retry", FakeClock().sleep)
+    async with stream_server(tmp_path, "stream_http", json_response=True) as (
+        network,
+        control,
+    ):
+        with pytest.raises(BaseException) as caught:
+            await _acall_with_retry(
+                network, "action", {"delay": 30}, timeout=1
+            )
+
+        assert isinstance(first_leaf(caught.value), CALL_TIMEOUTS)
+        assert len(_requests(control, "tools/call")) == 1
+
+
+@pytest.mark.parametrize(
+    "make_exc",
+    [
+        lambda: ExceptionGroup("g", [httpx.ReadTimeout("r")]),
+        lambda: ExceptionGroup(
+            "g",
+            [
+                ExceptionGroup("in", [McpCallTimedOut(1)]),
+                httpx.ReadTimeout("r"),
+            ],
+        ),
+        lambda: httpx.WriteTimeout("w"),
+    ],
+    ids=["read-timeout", "mixed", "write-timeout"],
+)
+async def test_call_timeout_in_any_group_is_not_repeated(
+    monkeypatch, make_exc
+):
+    """Решение о повторе — по первому листу группы, одно на все
+    транспорты."""
+    monkeypatch.setattr(aretry, "_wait_before_retry", FakeClock().sleep)
+    attempts: list[str] = []
+
+    class Client:
+        async def acall_tool(self, name, arguments, *, timeout):
+            attempts.append(name)
+            raise make_exc()
+
+    monkeypatch.setattr(api, "resolve_mcp_client", lambda *a, **k: Client())
+
+    with pytest.raises(BaseException):
+        await _acall_with_retry({"transport": "stream_http", "url": "u"}, "t")
+
+    assert attempts == ["t"]
 
 
 async def test_one_shot_stream_stdio_tool_error_is_not_repeated(
