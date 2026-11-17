@@ -8,6 +8,7 @@ from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import (
     SUMMARY_SECTIONS,
     agent_summary_slice_mode,
+    extract_summary_bodies,
     slice_summary,
 )
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
@@ -22,6 +23,14 @@ class CompactionSummarySliceTest(unittest.TestCase):
     def test_agent_summary_slice_mode(self) -> None:
         self.assertEqual(
             agent_summary_slice_mode(num_batches=1, patch_executed=True),
+            "full",
+        )
+        self.assertEqual(
+            agent_summary_slice_mode(
+                num_batches=1,
+                patch_executed=True,
+                constraints_transferred=True,
+            ),
             "short",
         )
         self.assertEqual(
@@ -74,7 +83,9 @@ class CompactionSummarySliceTest(unittest.TestCase):
             shared=types.SimpleNamespace(
                 working_memory={
                     "goal": "",
-                    "constraints": "",
+                    "constraints": extract_summary_bodies(full_xml)[
+                        "active_constraints"
+                    ],
                     "state": "",
                     "knowledge": "",
                 }

@@ -199,12 +199,10 @@ async def test_failed_summary_preserves_live_and_saved_history(
         assert "confirmed-prior-context" in str(state.messages)
 
 
-async def test_hidden_only_summary_does_not_replace_visible_context(
+async def test_constraints_only_summary_stays_visible_when_memory_patch_is_empty(
     monkeypatch,
 ):
-    """The memory patch may hide active_constraints from the main model."""
-    # Keep this case at the application boundary: a full XML document can be
-    # structurally valid while its short agent slice has no useful content.
+    """A constraints-only summary is useful when memory receives nothing."""
     from gc_core.summarize import compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
@@ -221,7 +219,6 @@ async def test_hidden_only_summary_does_not_replace_visible_context(
         current_user_intent=[],
         messages=[{"role": "user", "content": "Visible source fact"}],
     )
-    before = list(state.messages)
 
     async def summarize(**_kwargs):
         return {
@@ -236,11 +233,13 @@ async def test_hidden_only_summary_does_not_replace_visible_context(
     monkeypatch.setattr(
         compaction, "asummarize_dialog_via_chat_completions", summarize
     )
-    with pytest.raises(ValueError, match="usable summary"):
-        await arun_summary_compaction(
-            ctx=_ctx(), state=state, trigger_reason="test", is_cli_mode=False
-        )
-    assert state.messages == before
+    await arun_summary_compaction(
+        ctx=_ctx(), state=state, trigger_reason="test", is_cli_mode=False
+    )
+    assert (
+        "<active_constraints>keep hidden fact</active_constraints>"
+        in state.messages[-1]["content"]
+    )
 
 
 @pytest.mark.parametrize("summary_outcome", ["failed", "partial", "success"])
