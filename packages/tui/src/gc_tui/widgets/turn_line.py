@@ -282,8 +282,14 @@ class TurnLine(ClickModelMixin, Static):
         return fit_lines(flat, room, 1), True
 
     def _status_width(self) -> int:
-        """Своя ширина, иначе экрана, иначе страховка (вне DOM)."""
-        for probe in (lambda: self.size.width, lambda: self.app.size.width):
+        """Своя ширина по последней раскладке (не из карты экрана: строка
+        за экраном иначе пересобирает её на каждой отрисовке), иначе
+        экрана, иначе страховка (вне DOM)."""
+        probes = (
+            lambda: textual_compat.laid_out_width(self),
+            lambda: self.app.size.width,
+        )
+        for probe in probes:
             try:
                 width = int(probe())
             except Exception:

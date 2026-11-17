@@ -19,6 +19,7 @@ from gc_tui.services.mcp_peephole import McpPeephole
 from gc_tui.services.start_status import status_renderable
 from gc_tui.services.trace_glyphs import BLINK_TICK_S
 from gc_tui.widgets.column_static import ColumnStatic
+from gc_tui.widgets.missed_frame import miss_frame
 
 
 class StartHeader(ColumnStatic):
@@ -39,6 +40,8 @@ class StartHeader(ColumnStatic):
         self._update = False
         self._frame = 0
         self._timer: Timer | None = None
+        # Тик пропустил рисование: шапка была не видна.
+        self._frame_missed = False
         self._settled_generation: int | None = None
         self._redraw()
 
@@ -72,7 +75,26 @@ class StartHeader(ColumnStatic):
         self._peephole.tick()
         self._frame += 1
         # Строка загрузки не переносится: высота меняется только с фазой.
-        self._advance(layout=self._peephole.phase != phase)
+        if self._peephole.phase != phase:
+            self._advance(layout=True)
+            return
+        # Кадр анимации невидимой шапки не рисуется (перерисовка невидимого
+        # пересобирает карту экрана); таймер и итог — как всегда.
+        self._sync_timer()
+        if textual_compat.is_visible(self):
+            self._redraw(layout=False)
+        else:
+            miss_frame(self)
+        self._post_settled()
+
+    def redraw_if_missed(self) -> bool:
+        """Пропустила кадр за экраном и теперь видна — текущий кадр сразу
+        (П6); `True` — перерисовала."""
+        if not self._frame_missed or not textual_compat.is_visible(self):
+            return False
+        self._frame_missed = False
+        self._redraw(layout=False)
+        return True
 
     def _advance(self, *, layout: bool) -> None:
         self._sync_timer()

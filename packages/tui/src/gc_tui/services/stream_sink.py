@@ -52,9 +52,14 @@ class StreamSink:
         self._reasoning_ended_at = None  # float | None
         self._attempt = None  # str | None
         self._resets = 0
+        # Версия содержимого `snapshot()`: растёт на каждом его изменении,
+        # по ней экран не перерисовывает стрим без новых данных.
+        self._version = 0
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
+            if kind != "tool":
+                self._version += 1
             if kind == "reset":
                 self._stash_thought()
                 self._think = ""
@@ -98,6 +103,13 @@ class StreamSink:
         with self._lock:
             return self._think, self._answer
 
+    def versioned_snapshot(self) -> tuple[int, str, str]:
+        """(версия, мысль, ответ) одним чтением под локом: версия всегда
+        соответствует тексту. Дельты `tool` версию не двигают — они
+        меняют только счётчик прогресса."""
+        with self._lock:
+            return self._version, self._think, self._answer
+
     def attempt(self) -> str | None:
         """Метка попытки стрима: новая на каждом `reset` ядра (новый
         запрос к модели); None — `reset` ещё не было."""
@@ -131,11 +143,13 @@ class StreamSink:
         попытки и фаза мысли остаются — их сбрасывает `reset` ядра."""
         with self._lock:
             self._answer = ""
+            self._version += 1
 
     def reset(self) -> None:
         """Сброс экраном (конец хода, смена треда): мысль попытки уходит в
         законченные — лента её ещё заберёт; выбросить — `discard_thoughts`."""
         with self._lock:
+            self._version += 1
             self._stash_thought()
             self._think = ""
             self._answer = ""

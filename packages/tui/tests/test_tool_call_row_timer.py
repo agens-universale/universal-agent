@@ -3,14 +3,29 @@
 from types import SimpleNamespace
 
 import pytest
+from arrange_counter import count_arranges
+from gc_tui import textual_compat
 from gc_tui.palette import RUN_COLOR
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_call_row import ToolCallRow
+from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.containers import VerticalScroll
+from textual.widgets import Static
+
+
+# Колонки строки — как в `styles.tcss`: без них колонка текста нулевой
+# ширины и не видна.
+_TRACE_CSS = """
+.trace-prefix { width: auto; height: auto; }
+.trace-content { width: 1fr; height: auto; }
+"""
 
 
 def _make_app(row_factory=None):
     class _App(App):
+        CSS = _TRACE_CSS
+
         def compose(self) -> ComposeResult:
             if row_factory is not None:
                 yield row_factory()
@@ -205,3 +220,145 @@ async def test_elapsed_updates_content_only_on_change(monkeypatch):
         clock[0] += 1.0
         row.refresh_running_elapsed()
         assert row._content_static.content is not first
+
+
+class _Scrolled(App):
+    """Живая строка вызова первой в длинной прокрутке; после
+    `scroll_end` она за экраном."""
+
+    CSS = _TRACE_CSS
+
+    def __init__(self, row: ToolCallRow) -> None:
+        super().__init__()
+        self.row = row
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="host"):
+            yield self.row
+            for i in range(200):
+                yield Static(f"строка {i}")
+
+
+def _row_with_lines() -> ToolCallRow:
+    row = ToolCallRow(
+        call_id="c1", label="Run", target="tests/very/long/target.py"
+    )
+    for i in range(3):
+        row.add_consequence(Text(f"пометка {i}"))
+    return row
+
+
+async def _scroll(pilot, y: float | None = None) -> None:
+    host = pilot.app.query_one("#host", VerticalScroll)
+    if y is None:
+        host.scroll_end(animate=False)
+    else:
+        host.scroll_to(y=y, animate=False)
+    await pilot.pause()
+
+
+def _tick(row: ToolCallRow, times: int = 20) -> None:
+    for _ in range(times):
+        row._pulse_tick()
+        row.refresh_running_elapsed()
+
+
+@pytest.mark.asyncio
+async def test_offscreen_row_ticks_no_full_map():
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await _scroll(pilot)
+        with count_arranges() as counts:
+            _tick(app.row)
+        with count_arranges() as control:
+            app.row.is_on_screen  # карту пересобирает
+        assert (counts.full_map, control.full_map) == (0, 1)
+        assert app.row._frame_missed is True
+
+
+@pytest.mark.asyncio
+async def test_partially_visible_row_no_full_map():
+    """Глиф и подпись выше края, видны только строки `└`."""
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await _scroll(pilot, 1)
+        assert textual_compat.is_visible(app.row) is True
+        assert textual_compat.is_visible(app.row._prefix_static) is False
+        with count_arranges() as counts:
+            _tick(app.row)
+        assert counts.full_map == 0
+        assert app.row._frame_missed is True
+
+
+@pytest.mark.asyncio
+async def test_visible_row_ticks_draw():
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        before = app.row._prefix_static.content
+        app.row._pulse_tick()
+        assert app.row._prefix_static.content is not before
+
+
+@pytest.mark.asyncio
+async def test_row_widths_offscreen_no_full_map():
+    """Ширины колонки и строки — без чтения размеров невидимых виджетов:
+    строка за экраном и её путь отрисовки карту не пересобирают."""
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await _scroll(pilot)
+        with count_arranges() as counts:
+            app.row._content_width()
+            app.row._row_width()
+            app.row._render_content()
+        with count_arranges() as control:
+            app.row.is_on_screen  # карту пересобирает
+        assert (counts.full_map, control.full_map) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_row_widths_equal_laid_out_sizes():
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        row = app.row
+        assert row._content_width() == row._content_static.size.width
+        assert row._row_width() == row.size.width > 0
+
+
+@pytest.mark.asyncio
+async def test_unlaid_row_width_is_trace_width():
+    """Строка, скрытая с монтирования (ещё без раскладки), — ширина
+    ленты, как раньше."""
+    app = _Scrolled(_row_with_lines())
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        host = app.query_one("#host", VerticalScroll)
+        row = ToolCallRow(call_id="c2", label="t", target="x")
+        row.display = False
+        await host.mount(row, before=0)
+        await pilot.pause()
+        assert row.outer_size.width == 0
+        assert row._row_width() == host.scrollable_content_region.width
+
+
+@pytest.mark.asyncio
+async def test_refit_after_hidden_resize_uses_current_width():
+    """Строку скрыли, терминал сузился, строку показали: первый `refit`
+    подгоняет под текущую ширину ленты, а не под раскладку до скрытия."""
+    row = ToolCallRow(call_id="c1", label="Run", target="x" * 200)
+    app = _Scrolled(row)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause()
+        row.display = False
+        await pilot.pause()
+        await pilot.resize_terminal(60, 20)
+        await pilot.pause()
+        row.display = True
+        row.refit()
+        fitted = row._content_static.content.plain
+        host = app.query_one("#host", VerticalScroll)
+        await pilot.pause()
+        assert row._content_width() == row._content_static.size.width
+        assert row._row_width() == host.scrollable_content_region.width
+        assert row._content_static.content.plain == fitted
