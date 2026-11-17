@@ -319,6 +319,10 @@ _RESERVED_REGISTER_TAG = re.compile(
     rf"<(/?)({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>"
 )
 _MARKDOWN_CODE_SPAN = re.compile(r"(`+)(.*?)\1", re.DOTALL)
+_WHOLE_PATCH_FENCE = re.compile(r"\A```[^\n]*\n(.*?)\n```\Z", re.DOTALL)
+_REGISTER_END_TAG = re.compile(
+    rf"</({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>\Z"
+)
 _REGISTER_WRAPPER_END = re.compile(
     r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
 )
@@ -419,6 +423,14 @@ def extract_register_bodies(text: str) -> dict[str, str]:
     s = (text or "").strip()
     if not s:
         return {}
+    fenced = _WHOLE_PATCH_FENCE.fullmatch(s)
+    if fenced is not None:
+        s = fenced.group(1).strip()
+        if (
+            _RESERVED_REGISTER_TAG.match(s) is None
+            or _REGISTER_END_TAG.search(s) is None
+        ):
+            return {}
     full = _extract_balanced_registers(s)
     for boundary in re.finditer(r"</think>", s):
         after_think = _extract_balanced_registers(s[boundary.end() :].strip())

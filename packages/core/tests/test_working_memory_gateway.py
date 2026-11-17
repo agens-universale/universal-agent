@@ -113,6 +113,27 @@ def test_register_body_keeps_markdown_quoted_register_tag():
     assert deltas.knowledge == value
 
 
+def test_whole_response_fence_wraps_valid_register_patch():
+    raw = "```xml\n<knowledge>Use the newer offline cache.</knowledge>\n```"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == "Use the newer offline cache."
+
+
+def test_fenced_example_in_explanation_is_not_applied():
+    raw = (
+        "For example:\n```xml\n<knowledge>illustration</knowledge>\n```\n"
+        "Now decide what to store."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
 def test_register_body_keeps_literal_think_closing_tag():
     value = "Generic <Result> comes from transport; keep </think> literal."
 
