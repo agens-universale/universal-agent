@@ -494,14 +494,11 @@ async def test_vanished_tool_returns_server_error(
     [pid] = launches(control)
     set_behavior(control, tools=["echo"])
 
-    envelope = await asyncio.wait_for(
-        _wrapper(view, _NAP).acall(seconds=0), _CEILING_SEC
-    )
-    # Постоянный stdio отдаёт ответ JSON-RPC с ошибкой как есть.
-    assert json.loads(envelope)["result"]["error"] == {
-        "code": -32602,
-        "message": "unknown tool nap",
-    }
+    # Ответ JSON-RPC с ошибкой — ошибка тула от сервера, сессия жива.
+    with pytest.raises(McpToolCallError) as caught:
+        await _call(view, _NAP, seconds=0)
+    assert caught.value.error.code == -32602
+    assert caught.value.error.message == "unknown tool nap"
 
     assert _status(consumer).state == STATE_CONNECTED
     assert launches(control) == [pid]

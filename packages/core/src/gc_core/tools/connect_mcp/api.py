@@ -9,6 +9,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from mcp.types import INTERNAL_ERROR, ErrorData
+
 from gc_core.config_modules.env_vars import mcp_media_dir
 from gc_core.tools.connect_mcp.call_errors import (
     CALL_TIMEOUTS,
@@ -401,6 +403,20 @@ def _prepare_mcp_call(
     )
 
 
+def _rpc_error(error: Any) -> McpToolCallError:
+    """Ответ JSON-RPC ``error`` легаси-транспорта — ошибкой тула, как у
+    SDK-транспортов: модель видит отказ сервера, а не пустой успех."""
+    fields = error if isinstance(error, dict) else {}
+    code = fields.get("code")
+    return McpToolCallError(
+        ErrorData(
+            code=code if isinstance(code, int) else INTERNAL_ERROR,
+            message=str(fields.get("message") or error),
+            data=fields.get("data"),
+        )
+    )
+
+
 #: Не повторяются: вызов мог исполниться на сервере, повтор дублировал бы
 #: эффект. Ошибка тула — ответ сервера; остальные — ответа не было (в том
 #: числе истёкший срок вызова любого транспорта).
@@ -505,6 +521,8 @@ async def acall_mcp_tool(
         logger=logger,
     )
 
+    if isinstance(data, dict) and "error" in data and "result" not in data:
+        raise _rpc_error(data["error"])
     raw = data.get("result", data) if isinstance(data, dict) else data
     raw = await _arewrite_media_blocks(
         raw, target.arguments_obj, target.base_tool_name

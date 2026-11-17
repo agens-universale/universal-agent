@@ -234,6 +234,29 @@ async def test_call_timeout_in_any_group_is_not_repeated(
     assert attempts == ["t"]
 
 
+@pytest.mark.parametrize(
+    "cfg_of",
+    [
+        lambda control: {**stdio_cfg(control), "persistent_session": False},
+        _persistent,
+        lambda control: {**stdio_cfg(control), "transport": "stream_stdio"},
+    ],
+    ids=["stdio", "persistent-stdio", "stream_stdio"],
+)
+async def test_json_rpc_error_answer_is_tool_error(
+    tmp_path, mcp_reaper, mcp_owner, cfg_of
+):
+    """Ответ ``error`` без ``result`` — ошибка тула с данными сервера, а
+    не успешный результат; запрос ушёл один раз."""
+    control = tmp_path / "s.json"
+    set_behavior(control, tools=["echo"])
+
+    with pytest.raises(McpToolCallError, match="unknown tool unlisted"):
+        await _acall_with_retry(cfg_of(control), "unlisted")
+
+    assert len(_requests(control, "tools/call")) == 1
+
+
 async def test_one_shot_stream_stdio_tool_error_is_not_repeated(
     tmp_path, mcp_reaper, mcp_owner
 ):
