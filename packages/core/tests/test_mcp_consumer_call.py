@@ -51,6 +51,7 @@ from gc_testkit.mcp import (
     FakeClock,
     IsolatedBackend,
     alive,
+    closed_port_cfg,
     connections_of,
     events,
     exits,
@@ -125,14 +126,16 @@ async def _view(consumer, settings, **kwargs):
     )
 
 
-def _wrapper(view, name: str, *, timeout: float = 20.0, os_backend=None):
+def _wrapper(
+    view, name: str, *, timeout: float = 20.0, os_backend=None, retry=False
+):
     """Обёртка тула из среза — как её строит сборка контекста."""
     return MCPToolWrapper(
         name,
         view.servers_cfg,
         view.registry,
         timeout,
-        default_use_retry=False,
+        default_use_retry=retry,
         os_backend=os_backend,
         caller=view.caller,
     )
@@ -978,6 +981,80 @@ async def test_legacy_http_401_on_call_is_failure_without_secret(
         assert text == entry.last_failure.reason
         assert entry.last_failure.code == "auth"
         assert _status(consumer).state == STATE_FAILED
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
+async def _refused_with_retry(view, name: str, **arguments) -> str:
+    """Вызов с включённым автоповтором бэкенда; текст ошибки тула."""
+    with pytest.raises(McpToolCallError) as caught:
+        await asyncio.wait_for(
+            _wrapper(view, name, retry=True).acall(**arguments), _CEILING_SEC
+        )
+    return caught.value.error.message
+
+
+async def test_service_call_to_closed_port_fails_at_once(
+    mcp_home, mcp_reaper, mcp_owner
+):
+    """Автоповтор бэкенда на пути сервиса не действует: отказ сразу
+    записан, правило 30 с не пускает следующий вызов."""
+    settings = _settings({"a": closed_port_cfg()})
+    _seed(settings)
+    service = McpService(connect_on_start=False)
+    consumer = await _ready(mcp_reaper, service, settings)
+    view = await _view(consumer, settings)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    text = await _refused_with_retry(view, _ECHO, text="hi")
+
+    assert loop.time() - started < 5
+    entry = _entry(consumer)
+    assert text == entry.last_failure.reason
+    assert not connections_of(consumer).may_connect(entry)
+    again = await _refused_with_retry(view, _ECHO, text="hi")
+    assert again == f"сервер недоступен: {entry.last_failure.reason}"
+
+
+class _Always401(BaseHTTPRequestHandler):
+    """Сервер, отвечающий 401 на всё; считает запросы."""
+
+    requests = 0
+
+    def log_message(self, *args):
+        pass
+
+    def _deny(self):
+        type(self).requests += 1
+        self.send_response(401)
+        self.send_header("content-length", "0")
+        self.end_headers()
+
+    do_POST = do_GET = do_DELETE = _deny
+
+
+async def test_service_call_401_is_sent_once(mcp_home, mcp_reaper, mcp_owner):
+    handler = type("Deny", (_Always401,), {"requests": 0})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/mcp"
+        settings = _settings({"a": {"transport": "stream_http", "url": url}})
+        _seed(settings)
+        service = McpService(connect_on_start=False)
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+
+        text = await _refused_with_retry(view, _ECHO, text="hi")
+
+        assert text == "сервер ответил 401 Unauthorized"
+        assert handler.requests == 1
+        assert _entry(consumer).last_failure.code == "auth"
         await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
     finally:
         server.shutdown()

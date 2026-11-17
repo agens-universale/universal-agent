@@ -71,7 +71,9 @@ class McpCallExecutor:
         Иначе: закрыт или сервис остановлен — «сервис MCP остановлен»;
         сервера с этим отпечатком нет в наборе — «сервер отключён»; вызов
         ждёт своё подключение (или начинает его по правилу 30 с) и идёт
-        по сессии потребителя, под его владельцем и слотами.
+        по сессии потребителя, под его владельцем и слотами. Автоповтора
+        бэкенда на этом пути нет: отказ связи сразу идёт в правило 30 с
+        (шаг 7), а повторы держали бы ход минутами.
         """
         call = partial(
             acall_mcp_tool,
@@ -80,14 +82,14 @@ class McpCallExecutor:
             servers_cfg=servers_cfg,
             tools_registry=tools_registry,
             timeout=timeout,
-            default_use_retry=default_use_retry,
+            default_use_retry=False,
             os_backend=os_backend,
         )
         server_key, key = call_target(
             full_tool_name, servers_cfg, tools_registry
         )
         if server_key is None or key is None:
-            return await call()
+            return await call(default_use_retry=default_use_retry)
         entry = self._call_entry(server_key, key)
         cfg = servers_cfg[server_key]
         await self._aready_for_call(entry, cfg)
