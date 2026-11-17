@@ -277,14 +277,18 @@ class McpConsumer:
         сборке её ждать.
 
         Потребитель «при первом вызове» подключает при сборке сервер без
-        тулов: и неизвестный список, и пустой известный (сервер мог с тех
-        пор получить тулы, а вызова без тулов не будет)."""
-        connected, task = self._connections.attempt_of(entry)
+        тулов: и неизвестный список, и пустой, кроме свежепроверенного
+        (``needs_tools``; сервер мог с тех пор получить тулы, а вызова без
+        тулов не будет)."""
+        connections = self._connections
+        connected, task = connections.attempt_of(entry)
         if connected:
             return None
-        wanted = self._service.connect_on_start or not entry.tools
-        if task is None and wanted and self._connections.may_connect(entry):
-            task = self._connections.start_attempt(entry)
+        wanted = self._service.connect_on_start or connections.needs_tools(
+            entry
+        )
+        if task is None and wanted and connections.may_connect(entry):
+            task = connections.start_attempt(entry)
         if task is None or not self._build_waits(entry):
             return None
         return task
@@ -293,16 +297,16 @@ class McpConsumer:
         """Сборка ждёт: тулов нет и отказа в этом процессе ещё не было;
         при ``wait_all`` — всегда.
 
-        «Тулов нет» у потребителя «при первом вызове» — список неизвестен
-        или пуст: без тулов вызова не будет. У потребителя «на старте» —
-        только неизвестен: пустой каталог старт не задерживает, попытка
-        идёт в фоне."""
+        «Тулов нет» у потребителя «при первом вызове» — списка нет
+        (``needs_tools``): без тулов вызова не будет. У потребителя «на
+        старте» — только неизвестен: пустой каталог старт не задерживает,
+        попытка идёт в фоне."""
         if self._service.wait_all:
             return True
         if self._service.connect_on_start:
             missing = not entry.tools_known
         else:
-            missing = not entry.tools
+            missing = self._connections.needs_tools(entry)
         return missing and entry.last_failure is None
 
     async def _await_build(

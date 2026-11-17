@@ -192,6 +192,18 @@ class McpConnections:
         """Срок свежести списка тулов по настройкам последней сверки."""
         return settings_of(self._settings).mcp.meta.tools_cache_ttl
 
+    def needs_tools(self, entry: ServerEntry) -> bool:
+        """Тулов у записи нет и пустой список не свежий: не проверен
+        подключением не дольше ``tools_ttl()`` назад. Свежий пустой
+        список — сервер честно без тулов, подключать ради него заново
+        незачем; пустой каталог без проверки — подключать."""
+        if entry.tools:
+            return False
+        checked = entry.checked_at
+        if checked is None:
+            return True
+        return self._service._clock() - checked > self.tools_ttl()
+
     def has_session(self, entry: ServerEntry) -> bool:
         with self._lock:
             return session_key_of(entry) in self._sessions
@@ -523,8 +535,8 @@ class McpConnections:
         сервер без своей попытки и без серии повторов получает попытку по
         правилу 30 с — у потребителя «на старте» всегда, у потребителя
         «при первом вызове» — когда тулов сервера в срезе нет: после своей
-        неудачной попытки (у ``failed`` тулов нет) или когда список
-        неизвестен или пуст. Тулов в срезе нет — вызова не будет, поэтому
+        неудачной попытки (у ``failed`` тулов нет) или когда списка нет
+        (``needs_tools``). Тулов в срезе нет — вызова не будет, поэтому
         подключает вход в ход. Попытка начинается до закрепления среза: в
         том же ходе сервер — ``connecting``, вызов ждёт её исхода. Сервер
         с тулами, который потребитель ещё не пытался подключать, ждёт
@@ -540,7 +552,7 @@ class McpConnections:
             wanted = (
                 self._service.connect_on_start
                 or key in self._failures
-                or not entry.tools
+                or self.needs_tools(entry)
             )
             relist = self._new_relist(entry, key) if connected else None
         if relist is not None:

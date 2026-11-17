@@ -380,6 +380,34 @@ async def test_lazy_server_without_tools_held_by_other_connects_on_turn(
     assert _ECHO in (await _view(consumer, settings)).registry
 
 
+async def test_fresh_empty_list_is_not_reconnected(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Сервер честно без тулов: список, проверенный подключением не
+    дольше ``tools_cache_ttl`` назад, следующий потребитель «при первом
+    вызове» не перепроверяет ни сборкой, ни входом в ход; устаревший —
+    перепроверяет."""
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    set_behavior(control, tools=[])
+    settings = _settings({"a": stdio_cfg(control)})
+    service = McpService(connect_on_start=False, clock=clock.now)
+    first = await _ready(mcp_reaper, service, settings, "first")
+    assert len(launches(control)) == 1
+    assert _entry(first).tools == () and _entry(first).checked_at == 0
+
+    clock.advance(60)
+    second = await _ready(mcp_reaper, service, settings, "second")
+    await asyncio.wait_for(second.astart_turn(), _CEILING_SEC)
+    connected, attempt = connections_of(second).attempt_of(_entry(second))
+    assert (connected, attempt) == (False, None)
+    assert len(launches(control)) == 1
+
+    clock.advance(3600)
+    await _ready(mcp_reaper, service, settings, "third")
+    assert len(launches(control)) == 2
+
+
 async def test_stop_cancels_the_wait(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):
