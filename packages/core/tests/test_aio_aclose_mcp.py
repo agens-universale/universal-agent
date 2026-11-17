@@ -16,7 +16,7 @@ async def test_aclose_closes_sessions_owned_by_this_agent(monkeypatch):
 
     seen: dict = {}
 
-    async def _fake_close(owner_reset):
+    async def _fake_close(owner_reset, **_kw):
         seen["owner"] = current_owner()
         reset_owner(owner_reset)
 
