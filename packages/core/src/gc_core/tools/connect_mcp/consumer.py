@@ -274,11 +274,15 @@ class McpConsumer:
 
     def _connect_for_build(self, entry: ServerEntry) -> asyncio.Task | None:
         """Начать подключение по политике хоста; отдать задачу, если
-        сборке её ждать."""
+        сборке её ждать.
+
+        Потребитель «при первом вызове» подключает при сборке сервер без
+        тулов: и неизвестный список, и пустой известный (сервер мог с тех
+        пор получить тулы, а вызова без тулов не будет)."""
         connected, task = self._connections.attempt_of(entry)
         if connected:
             return None
-        wanted = self._service.connect_on_start or not entry.tools_known
+        wanted = self._service.connect_on_start or not entry.tools
         if task is None and wanted and self._connections.may_connect(entry):
             task = self._connections.start_attempt(entry)
         if task is None or not self._build_waits(entry):
@@ -286,11 +290,11 @@ class McpConsumer:
         return task
 
     def _build_waits(self, entry: ServerEntry) -> bool:
-        """Сборка ждёт: тулов нет и отказа в этом процессе ещё не было;
-        при ``wait_all`` — всегда."""
+        """Сборка ждёт: тулов нет (список неизвестен или пуст) и отказа в
+        этом процессе ещё не было; при ``wait_all`` — всегда."""
         if self._service.wait_all:
             return True
-        return not entry.tools_known and entry.last_failure is None
+        return not entry.tools and entry.last_failure is None
 
     async def _await_build(
         self, tasks: set[asyncio.Task], timeout: float

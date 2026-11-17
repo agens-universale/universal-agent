@@ -25,6 +25,7 @@ from gc_core.tools.connect_mcp.consumer_status import (
     STATE_CONNECTING,
     STATE_FAILED,
 )
+from gc_core.tools.connect_mcp.registry import mcp_tool_full_name
 from gc_core.tools.connect_mcp.server_identity import session_key
 from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.connect_mcp.service_records import McpServiceClosed
@@ -321,6 +322,24 @@ async def test_lazy_without_catalog_connects_at_build(
 
     assert _state(consumer, "a") == STATE_CONNECTED
     assert len(launches(control)) == 1
+
+
+async def test_lazy_with_empty_catalog_connects_at_build(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Пустой каталог — не повод не подключаться: сервер мог с тех пор
+    получить тулы. Сборка подключает его и ждёт, как без каталога."""
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", [])
+    consumer = _open(mcp_reaper, McpService(connect_on_start=False))
+
+    await _ensure(consumer, settings)
+    view = await asyncio.wait_for(consumer.aview(settings), _CEILING_SEC)
+
+    assert _state(consumer, "a") == STATE_CONNECTED
+    assert len(launches(control)) == 1
+    assert mcp_tool_full_name("a", "echo") in view.registry
 
 
 async def test_rebuild_does_not_hammer_failed_server(
