@@ -97,6 +97,17 @@ class _HoldSeries:
     until: float = 0.0
     frame_by: float = 0.0
 
+    def end_hold(self, batch, app: App, loop) -> None:
+        """Отпустить удержание серии ``batch``; последнее — следующая
+        серия ждёт кадра (или срока, если сигнал кадра потерялся)."""
+        batch.__exit__(None, None, None)
+        self.count -= 1
+        if not self.count and app.call_after_refresh(self._frame_passed):
+            self.frame_by = loop.time() + _PAINT_HOLD_LIMIT
+
+    def _frame_passed(self) -> None:
+        self.frame_by = 0.0
+
 
 _HOLD_SERIES: WeakKeyDictionary[App, _HoldSeries] = WeakKeyDictionary()
 
@@ -313,24 +324,17 @@ def paint_after_mount(*widgets: Widget) -> asyncio.Task | None:
     limit = series.until - now
     hold = now >= series.frame_by and limit >= _PAINT_HOLD_MIN
     batch = app.batch_update() if hold else None
-
-    def frame_passed() -> None:
-        series.frame_by = 0.0
+    # Удержание ещё не отпущено (отпускается один раз).
+    held = [batch] if batch is not None else []
 
     def unhold() -> None:
-        nonlocal batch
-        if batch is None:
-            return
-        batch.__exit__(None, None, None)
-        batch = None
-        series.count -= 1
-        if not series.count and app.call_after_refresh(frame_passed):
-            series.frame_by = loop.time() + _PAINT_HOLD_LIMIT
+        if held:
+            series.end_hold(held.pop(), app, loop)
 
     async def release() -> None:
         mount = asyncio.ensure_future(mounted(parent, pending))
         try:
-            if batch is not None:
+            if held:
                 await asyncio.wait({mount}, timeout=limit)
                 unhold()
             await asyncio.wait_for(mount, _MOUNT_WAIT_LIMIT)
