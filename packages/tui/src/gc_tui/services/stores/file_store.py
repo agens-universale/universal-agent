@@ -30,6 +30,7 @@ TUI работает с локальным файловым хранилищем
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional, Sequence
 
 from gc_core.message_format.serialization import (
@@ -50,6 +51,7 @@ from gc_core.persistence.turn_outcome import (
 )
 from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Cursor, TailBatch, Threads, run_sync
+from gc_core.threads.file_layout import subagent_trace_path
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
     MODEL_CHOICES,
@@ -86,6 +88,10 @@ class FileTaskStore:
     def __init__(self, threads_dir: str, system: str = "cli") -> None:
         self._threads = Threads(FileThreadStore(threads_dir))
         self._system = system
+        self._dir = threads_dir
+        # Разобранная трасса субагентов последнего прочитанного треда:
+        # (тред, размер и время записи файла) → записи.
+        self._subagents: tuple[tuple, list[dict]] | None = None
 
     def _key(self, task_id: str, system: Optional[str] = None) -> ThreadKey:
         return ThreadKey(system=system or self._system, thread=task_id)
@@ -184,11 +190,21 @@ class FileTaskStore:
     def read_subagent_trace(
         self, task_id: str, system: Optional[str] = None
     ) -> list[dict]:
-        """Трасса субагентов треда — записи в форме develop."""
-        entries = run_sync(
-            self._threads.subagent_events(self._key(task_id, system))
-        )
-        return [{"ts": e.ts, "seq": e.seq, **e.data} for e in entries]
+        """Трасса субагентов треда — записи в форме develop. Файл не
+        менялся с прошлого чтения (тот же размер и время записи) — без
+        чтения: окно ленты спрашивает её на каждый кусок с субагентами."""
+        key = self._key(task_id, system)
+        stamp = (key, _file_stamp(self._subagent_path(key)))
+        cached = self._subagents
+        if cached is not None and cached[0] == stamp and stamp[1]:
+            return list(cached[1])
+        entries = run_sync(self._threads.subagent_events(key))
+        records = [{"ts": e.ts, "seq": e.seq, **e.data} for e in entries]
+        self._subagents = (stamp, records)
+        return list(records)
+
+    def _subagent_path(self, key: ThreadKey) -> str:
+        return subagent_trace_path(self._dir, key.system, key.thread)
 
     # ---- read & tail --------------------------------------------------
 
@@ -643,3 +659,12 @@ def _payload_ids(records: list[dict]) -> frozenset[str]:
 def _max_seq(records: list[dict]) -> int:
     seqs = [r.get("seq") for r in records]
     return max((s for s in seqs if isinstance(s, int)), default=0)
+
+
+def _file_stamp(path: str) -> tuple[int, int] | None:
+    """Размер и время записи файла (нс); файла нет — None."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns

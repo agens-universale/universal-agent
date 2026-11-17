@@ -80,3 +80,30 @@ def test_read_history_single_snapshot(tmp_path, monkeypatch, name, at):
         i for seg in full for i in _ids(seg["messages"])
     ]
     assert not tail.stream_reset
+
+
+def test_subagent_trace_reread_only_when_file_changes(tmp_path, monkeypatch):
+    """Трасса субагентов не перечитывается, пока файл тот же (размер и
+    время записи): окно ленты спрашивает её на каждый кусок."""
+    import os
+
+    from gc_core.threads.file_layout import subagent_trace_path
+
+    store = _store(tmp_path, "subagents")
+    streams: list[str] = []
+    real = FileThreadStore.read_stream
+
+    async def counted(self, key, stream, **kwargs):
+        streams.append(stream)
+        return await real(self, key, stream, **kwargs)
+
+    monkeypatch.setattr(FileThreadStore, "read_stream", counted)
+    first = store.read_subagent_trace(HISTORY_THREAD)
+    assert first
+    assert store.read_subagent_trace(HISTORY_THREAD) == first
+    assert streams == ["subagent_events"]
+    path = subagent_trace_path(str(tmp_path), "cli", HISTORY_THREAD)
+    stat = os.stat(path)
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    assert store.read_subagent_trace(HISTORY_THREAD) == first
+    assert streams == ["subagent_events"] * 2
