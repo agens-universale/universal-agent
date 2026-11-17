@@ -342,6 +342,23 @@ async def test_lazy_with_empty_catalog_connects_at_build(
     assert mcp_tool_full_name("a", "echo") in view.registry
 
 
+async def test_on_start_with_empty_catalog_does_not_wait_at_build(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """У потребителя «на старте» пустой каталог старт не задерживает:
+    попытка идёт в фоне, тулы придут на следующем входе в ход."""
+    control = tmp_path / "a.json"
+    set_behavior(control, start_delay=1.5)
+    settings = _settings({"a": stdio_cfg(control)})
+    seed_catalog(settings, "a", [])
+    consumer = _open(mcp_reaper, McpService(connect_on_start=True))
+
+    await _ensure(consumer, settings)
+
+    assert _state(consumer, "a") == STATE_CONNECTING
+    await wait_for(lambda: _state(consumer, "a") == STATE_CONNECTED)
+
+
 async def test_rebuild_does_not_hammer_failed_server(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):

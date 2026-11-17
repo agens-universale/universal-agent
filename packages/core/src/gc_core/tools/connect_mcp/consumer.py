@@ -290,11 +290,20 @@ class McpConsumer:
         return task
 
     def _build_waits(self, entry: ServerEntry) -> bool:
-        """Сборка ждёт: тулов нет (список неизвестен или пуст) и отказа в
-        этом процессе ещё не было; при ``wait_all`` — всегда."""
+        """Сборка ждёт: тулов нет и отказа в этом процессе ещё не было;
+        при ``wait_all`` — всегда.
+
+        «Тулов нет» у потребителя «при первом вызове» — список неизвестен
+        или пуст: без тулов вызова не будет. У потребителя «на старте» —
+        только неизвестен: пустой каталог старт не задерживает, попытка
+        идёт в фоне."""
         if self._service.wait_all:
             return True
-        return not entry.tools and entry.last_failure is None
+        if self._service.connect_on_start:
+            missing = not entry.tools_known
+        else:
+            missing = not entry.tools
+        return missing and entry.last_failure is None
 
     async def _await_build(
         self, tasks: set[asyncio.Task], timeout: float
