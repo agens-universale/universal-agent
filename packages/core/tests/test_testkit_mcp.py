@@ -32,6 +32,7 @@ from gc_testkit.mcp import (
     events,
     exits,
     free_port,
+    kill_group,
     launches,
     set_behavior,
     stdio_cfg,
@@ -64,8 +65,7 @@ async def _raw(cfg: dict):
         yield proc
     finally:
         if proc.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
+            kill_group(proc.pid)
         await asyncio.wait_for(proc.wait(), _TIMEOUT)
 
 

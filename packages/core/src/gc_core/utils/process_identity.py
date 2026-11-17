@@ -12,7 +12,9 @@ Linux — поле ``starttime`` из ``/proc/<pid>/stat``; macOS — ``lstart``
 
 Опрос, который не удался (``ps`` упал или завис, ``/proc`` не прочитан
 не из-за отсутствия процесса), — ``ProcessQueryFailed``: «неизвестно» не
-путается с «процесса нет», иначе живой процесс сочли бы вышедшим.
+путается с «процесса нет», иначе живой процесс сочли бы вышедшим. Отказ в
+доступе к ``/proc/<pid>`` (``hidepid``) — не сбой: свой процесс читается
+всегда, значит pid занят чужим, и для этого pid нашего процесса нет.
 
 Зомби хранит время старта до того, как родитель его пожмёт, и всё это
 время держит свой pid и номер группы. ``process_start_states`` отдаёт метку
@@ -122,13 +124,14 @@ def boot_id() -> str:
 
 
 def _linux_states(pids: list[int]) -> dict[int, tuple[str, str]]:
-    """Нет файла (или процесс вышел при чтении) — процесса нет; любой
-    другой сбой чтения или разбора — ``ProcessQueryFailed``."""
+    """Нет файла (или процесс вышел при чтении) или процесс чужой (отказ
+    в доступе) — процесса нет; любой другой сбой чтения или разбора —
+    ``ProcessQueryFailed``."""
     states: dict[int, tuple[str, str]] = {}
     for pid in pids:
         try:
             stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-        except (FileNotFoundError, ProcessLookupError):
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
             continue
         except OSError as exc:
             raise ProcessQueryFailed(f"/proc/{pid}/stat: {exc}") from exc

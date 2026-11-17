@@ -281,20 +281,39 @@ def test_failed_ps_is_unknown_not_missing(monkeypatch, error):
         process_start_mark(os.getpid())
 
 
-@_linux_only
-def test_unreadable_proc_is_unknown_not_missing(monkeypatch):
+def _proc_stat_raises(monkeypatch, pid: int, error: OSError) -> None:
+    """Чтение ``/proc/<pid>/stat`` этого pid падает с ``error``."""
     real_read = Path.read_text
 
     def read_text(self, *args, **kwargs):
-        if str(self) == f"/proc/{os.getpid()}/stat":
-            raise PermissionError(13, "нет доступа")
+        if str(self) == f"/proc/{pid}/stat":
+            raise error
         return real_read(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read_text)
+
+
+@_linux_only
+def test_unreadable_proc_is_unknown_not_missing(monkeypatch):
+    _proc_stat_raises(monkeypatch, os.getpid(), OSError(5, "сбой чтения"))
     with pytest.raises(ProcessQueryFailed):
         process_start_states([os.getpid()])
     # Процесса нет — это ответ, а не сбой.
     assert process_start_states([999999999]) == {}
+
+
+_FOREIGN_PID = 999999
+
+
+@_linux_only
+def test_foreign_proc_denied_is_missing(monkeypatch):
+    # hidepid: чужой процесс (pid достался другому пользователю) не
+    # читается. Свой читается всегда — отказ значит «не наш», а не сбой.
+    denied = PermissionError(13, "нет доступа")
+    _proc_stat_raises(monkeypatch, _FOREIGN_PID, denied)
+    own = process_start_mark(os.getpid())
+    states = process_start_states([os.getpid(), _FOREIGN_PID])
+    assert states == {os.getpid(): (own, False)}
 
 
 # --- пускатель и запись ------------------------------------------------------
@@ -464,13 +483,29 @@ def test_host_identity_is_read_once(mcp_home, monkeypatch, tmp_path):
 
     monkeypatch.setattr(process_journal, "process_start_mark", mark)
     monkeypatch.setattr(process_journal, "boot_id", boot)
-    process_journal._host_identity.cache_clear()
-    try:
-        for n in range(3):
-            ProcessJournal(tmp_path / f"j{n}").launch_argv("x", [], "k")
-    finally:
-        process_journal._host_identity.cache_clear()
+    monkeypatch.setattr(process_journal, "_HOST_IDENTITY", {})
+    for n in range(3):
+        ProcessJournal(tmp_path / f"j{n}").launch_argv("x", [], "k")
     assert reads == [f"mark {os.getpid()}", "boot"]
+
+
+def test_failed_host_identity_is_not_remembered(mcp_home, monkeypatch):
+    # Разовый сбой опроса при первом чтении не оставляет хозяина без
+    # метки навсегда: следующий журнал читает метку заново.
+    real_mark = process_journal.process_start_mark
+    failures = {"left": 1}
+
+    def mark(pid: int) -> str | None:
+        if failures["left"]:
+            failures["left"] -= 1
+            raise ProcessQueryFailed("ps завис")
+        return real_mark(pid)
+
+    monkeypatch.setattr(process_journal, "process_start_mark", mark)
+    monkeypatch.setattr(process_journal, "_HOST_IDENTITY", {})
+    pid = os.getpid()
+    assert process_journal._host_identity(pid)[0] is None
+    assert process_journal._host_identity(pid)[0] == real_mark(pid)
 
 
 def test_failed_journal_dir_is_not_retried(mcp_home, tmp_path, caplog):
@@ -620,6 +655,27 @@ async def test_kill_all_skips_foreign_mark_and_foreign_group(
     time.sleep(0.2)
     assert alive(foreign.pid)
     assert alive(grouped.pid)
+
+
+@_linux_only
+async def test_kill_all_kills_own_despite_denied_foreign_pid(
+    mcp_home, mcp_reaper, procs, tmp_path, monkeypatch
+):
+    journal = ProcessJournal()
+    control = tmp_path / "s.json"
+    proc = _spawn(procs, journal, control)
+    await _started(journal, control, proc)
+    _fake_record(
+        _journal_dir(journal),
+        str(_FOREIGN_PID),
+        pid=_FOREIGN_PID,
+        pgid=_FOREIGN_PID,
+        mark="1",
+    )
+    denied = PermissionError(13, "нет доступа")
+    _proc_stat_raises(monkeypatch, _FOREIGN_PID, denied)
+    journal.kill_all(wait_sec=0.3)
+    await wait_for(lambda: not alive(proc.pid))
 
 
 def _forged_records(directory: Path) -> None:

@@ -35,7 +35,6 @@ Linux и macOS — полноценно; на других ОС пускател
 from __future__ import annotations
 
 import contextlib
-import functools
 import json
 import logging
 import os
@@ -246,17 +245,26 @@ def _alnum(text: str) -> str:
     return _NOT_ALNUM.sub("", text) or "0"
 
 
-@functools.cache
+#: Узнанные метка и загрузка хоста по pid (см. ``_host_identity``).
+_HOST_IDENTITY: dict[int, tuple[str | None, str]] = {}
+
+
 def _host_identity(pid: int) -> tuple[str | None, str]:
     """Метка и загрузка процесса хоста ``pid`` — константы процесса,
-    читаются один раз (на macOS это запуск ``ps`` и ``sysctl``). Ключ —
-    pid: у форка хоста своя метка. Метку не узнать — ``None``: хозяин без
-    метки сверяется по живости pid."""
+    узнанные читаются один раз (на macOS это запуск ``ps`` и ``sysctl``).
+    Ключ — pid: у форка хоста своя метка. Метку не узнать — ``None``:
+    хозяин без метки сверяется по живости pid. Неудачный опрос не
+    запоминается: разовый сбой не лишает метки все следующие журналы."""
+    if pid in _HOST_IDENTITY:
+        return _HOST_IDENTITY[pid]
     try:
         mark = process_start_mark(pid)
     except ProcessQueryFailed:
         mark = None
-    return mark, boot_id()
+    identity = (mark, boot_id())
+    if mark is not None and identity[1] != "0":
+        _HOST_IDENTITY[pid] = identity
+    return identity
 
 
 def _create_dir(root: Path) -> Path | None:
