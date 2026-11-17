@@ -287,6 +287,62 @@ async def test_recent_failure_is_tool_error_old_failure_reconnects(
     assert _status(consumer).state == STATE_CONNECTED
 
 
+async def _failed_by_call(reaper, settings, control, clock):
+    """Потребитель «при первом вызове», у которого первый вызов упал на
+    подключении: свой отказ, тулов сервера в срезе нет."""
+    service = McpService(connect_on_start=False, clock=clock.now)
+    consumer = await _ready(reaper, service, settings)
+    set_behavior(control, fail_start=True)
+    await _refused(await _view(consumer, settings), _ECHO, text="hi")
+    await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
+    assert _status(consumer).state == STATE_FAILED
+    assert _ECHO not in (await _view(consumer, settings)).registry
+    set_behavior(control)
+    return consumer
+
+
+async def test_lazy_failed_server_reconnects_on_turn_after_interval(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Через 30 с после своего отказа вход в ход начинает попытку: тулы в
+    срезе того же хода, вызов ждёт попытку и проходит."""
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    consumer = await _failed_by_call(mcp_reaper, settings, control, clock)
+    clock.advance(31)
+
+    await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
+    view = await _view(consumer, settings)
+
+    assert view.status["a"]["status"] in (STATE_CONNECTING, STATE_CONNECTED)
+    assert _ECHO in view.registry
+    out = await _call(view, _ECHO, text="hi")
+    assert out["text"] == "hi"
+    assert _status(consumer).state == STATE_CONNECTED
+
+
+async def test_lazy_failed_server_waits_interval_on_turn(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    clock = FakeClock()
+    control = tmp_path / "a.json"
+    settings = _settings({"a": stdio_cfg(control)})
+    _seed(settings)
+    consumer = await _failed_by_call(mcp_reaper, settings, control, clock)
+    started = len(launches(control))
+    clock.advance(10)
+
+    await asyncio.wait_for(consumer.astart_turn(), _CEILING_SEC)
+    view = await _view(consumer, settings)
+
+    assert view.status["a"]["status"] == STATE_FAILED
+    assert _ECHO not in view.registry
+    assert connections_of(consumer)._connects == {}
+    assert len(launches(control)) == started
+
+
 async def test_stop_cancels_the_wait(
     mcp_home, tmp_path, mcp_reaper, mcp_owner
 ):

@@ -520,9 +520,14 @@ class McpConnections:
 
         Подключённый сетевой сервер, чей список проверен раньше, чем
         ``tools_ttl()`` назад, перечитывает список в фоне. Неподключённый
-        сервер у потребителя «на старте» без своей попытки и без серии
-        повторов получает попытку по правилу 30 с. Закрытый потребитель
-        и остановленный сервис ничего не начинают.
+        сервер без своей попытки и без серии повторов получает попытку по
+        правилу 30 с — у потребителя «на старте» всегда, у потребителя
+        «при первом вызове» только после своей неудачной попытки: у
+        ``failed`` тулов в срезе нет, и вызова, который подключил бы
+        сервер, не будет. Попытка начинается до закрепления среза: в том
+        же ходе сервер — ``connecting``, вызов ждёт её исхода. Сервер,
+        который потребитель ещё не пытался подключать, ждёт вызова.
+        Закрытый потребитель и остановленный сервис ничего не начинают.
         """
         key = session_key_of(entry)
         with self._lock:
@@ -530,10 +535,11 @@ class McpConnections:
                 return
             connected = self._connected(key)
             idle = not self._attempting(key) and key not in self._series
+            wanted = self._service.connect_on_start or key in self._failures
             relist = self._new_relist(entry, key) if connected else None
         if relist is not None:
             relist.add_done_callback(partial(self._on_relist_done, entry))
-        elif connected or not idle or not self._service.connect_on_start:
+        elif connected or not idle or not wanted:
             return
         elif self.may_connect(entry):
             self._attempt(entry)
