@@ -33,30 +33,57 @@ SAVED_PATCH_RESPONSE = """The three edits were applied, but there's a remaining 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("patch_response", "repair_response", "expected_memory", "in_summary"),
+    (
+        "patch_response",
+        "repair_response",
+        "expected_memory",
+        "in_summary",
+        "active_constraint",
+    ),
     [
-        (SAVED_PATCH_RESPONSE, SAVED_PATCH_RESPONSE, "", True),
+        (
+            SAVED_PATCH_RESPONSE,
+            SAVED_PATCH_RESPONSE,
+            "",
+            True,
+            "Keep the results sheet and the exact column order.",
+        ),
         (
             SAVED_PATCH_RESPONSE,
             "<state>Verify the workbook rows.</state>",
             "",
             True,
+            "Keep the results sheet and the exact column order.",
         ),
         (
             "<constraints>Keep the results sheet and the exact column order.</constraints>",
             "",
             "Keep the results sheet and the exact column order.",
             False,
+            "Keep the results sheet and the exact column order.",
+        ),
+        (
+            "<constraints>Never edit files in output/tmp/</constraints>",
+            "",
+            "Never edit files in output/tmp/",
+            True,
+            "Never edit files in output/",
         ),
     ],
     ids=[
         "saved-empty-patch",
         "partial-state-patch",
         "healthy-constraints-patch",
+        "narrower-memory-rule",
     ],
 )
 async def test_compaction_keeps_constraints_in_sent_message(
-    monkeypatch, patch_response, repair_response, expected_memory, in_summary
+    monkeypatch,
+    patch_response,
+    repair_response,
+    expected_memory,
+    in_summary,
+    active_constraint,
 ):
     from gc_core.summarize import (
         compaction,
@@ -86,7 +113,10 @@ async def test_compaction_keeps_constraints_in_sent_message(
     )
 
     async def summary_response(**_kwargs):
-        return SUMMARY
+        return SUMMARY.replace(
+            "Keep the results sheet and the exact column order.",
+            active_constraint,
+        )
 
     async def patch_response_from_llm(**_kwargs):
         return patch_response
@@ -113,7 +143,6 @@ async def test_compaction_keeps_constraints_in_sent_message(
     sent = state.messages[-1]["content"]
     assert '<technical type="dialog_summary">' in sent
     assert (
-        "<active_constraints>Keep the results sheet and the exact column order.</active_constraints>"
-        in sent
+        f"<active_constraints>{active_constraint}</active_constraints>" in sent
     ) is in_summary
     assert state.shared.working_memory["constraints"] == expected_memory

@@ -520,6 +520,16 @@ async def arun_summary_compaction(
     active_constraints = extract_summary_bodies(raw_summary).get(
         "active_constraints", ""
     )
+    try:
+        visible_summary = slice_summary(raw_summary, "short")
+    except ValueError:
+        visible_summary = ""
+    if not has_nonempty_summary_body(visible_summary):
+        error = SummaryRejectedError("compaction produced no usable summary")
+        await aappend_rejected_summary_trace(
+            ctx, trigger_reason=trigger_reason, trace=trace, error=error
+        )
+        raise error
     patched_memory = _patched_snapshot(
         memory_snapshot,
         memory_append_deltas,
@@ -532,7 +542,7 @@ async def arun_summary_compaction(
         patch_executed=patch_executed,
         constraints_transferred=bool(
             active_constraints
-            and active_constraints in patched_memory.constraints
+            and active_constraints == patched_memory.constraints.strip()
         ),
     )
     try:
@@ -545,13 +555,6 @@ async def arun_summary_compaction(
             raw_summary_chars=len(raw_summary),
         )
         agent_summary_text = raw_summary
-    # Reject unusable projected content before changing state or persistence.
-    if not has_nonempty_summary_body(agent_summary_text):
-        error = SummaryRejectedError("compaction produced no usable summary")
-        await aappend_rejected_summary_trace(
-            ctx, trigger_reason=trigger_reason, trace=trace, error=error
-        )
-        raise error
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
     log_summary_raw_text(logger, log_ctx, raw_summary)
 

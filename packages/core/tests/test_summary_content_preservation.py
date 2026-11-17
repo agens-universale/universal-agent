@@ -199,15 +199,26 @@ async def test_failed_summary_preserves_live_and_saved_history(
         assert "confirmed-prior-context" in str(state.messages)
 
 
-async def test_constraints_only_summary_stays_visible_when_memory_patch_is_empty(
+async def test_constraints_only_summary_does_not_replace_visible_history(
     monkeypatch,
 ):
-    """A constraints-only summary is useful when memory receives nothing."""
+    """A constraints-only summary cannot replace other visible history."""
     from gc_core.summarize import compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
     hidden_only = assemble_summary_xml(
         {"active_constraints": "keep hidden fact"}
+    )
+    history = [
+        {"role": "user", "content": "Prepare a rollback checklist."},
+        {
+            "role": "tool",
+            "content": "The verified rollback snapshot is checkpoint-97d.",
+        },
+    ]
+    history.extend(
+        {"role": "user", "content": f"Check item {index}."}
+        for index in range(10)
     )
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -217,7 +228,7 @@ async def test_constraints_only_summary_stays_visible_when_memory_patch_is_empty
         previous_response_id=None,
         user_intent_log=[],
         current_user_intent=[],
-        messages=[{"role": "user", "content": "Visible source fact"}],
+        messages=history.copy(),
     )
 
     async def summarize(**_kwargs):
@@ -233,13 +244,12 @@ async def test_constraints_only_summary_stays_visible_when_memory_patch_is_empty
     monkeypatch.setattr(
         compaction, "asummarize_dialog_via_chat_completions", summarize
     )
-    await arun_summary_compaction(
-        ctx=_ctx(), state=state, trigger_reason="test", is_cli_mode=False
-    )
-    assert (
-        "<active_constraints>keep hidden fact</active_constraints>"
-        in state.messages[-1]["content"]
-    )
+    with pytest.raises(ValueError, match="usable summary"):
+        await arun_summary_compaction(
+            ctx=_ctx(), state=state, trigger_reason="test", is_cli_mode=False
+        )
+    assert state.messages == history
+    assert "checkpoint-97d" in repr(state.messages)
 
 
 @pytest.mark.parametrize("summary_outcome", ["failed", "partial", "success"])
