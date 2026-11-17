@@ -20,6 +20,7 @@ from gc_core.tools.connect_mcp.durable_scope import (
     durable_calls_enabled,
 )
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.transport_policy import (
     resolve_effective_transport,
@@ -481,6 +482,9 @@ async def acall_mcp_tool(
         ),
         retry_log_level=logging.ERROR,
         no_more_retries_log_level=logging.ERROR,
+        describe_error=lambda exc: without_secrets(
+            repr(exc), target.server_cfg
+        ),
     )
     async def _ado_mcp_call() -> Any:
         # Диспетчер один — порт клиента (`McpClientPort`), который develop ввёл

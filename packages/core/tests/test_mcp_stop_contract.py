@@ -326,6 +326,7 @@ async def _call_with_outer_retry(monkeypatch, fail, calls):
     target = SimpleNamespace(
         client=SimpleNamespace(acall_tool=request),
         server_key="test",
+        server_cfg={},
         base_tool_name="action",
         arguments_obj={},
         use_retry=True,

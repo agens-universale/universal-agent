@@ -26,6 +26,7 @@ from gc_core.message_policy.mode_messages import headless_mode_warning_text
 from gc_core.onboarding import explain_broken_config
 from gc_core.plugins.catalog import build_plugin_snapshot
 from gc_core.security.permission_mode import headless_mode_warning
+from gc_core.utils.logging_module import configure_host_logging
 
 from gc_server.agent_roles import acheck_roles, aopen_surface_agents
 from gc_server.app import AddressConflict, ServerRuntime, aserve, build_surface
@@ -84,9 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         say(override_error_text(exc))
         return 2
     log_level = normalize_log_level(cfg.server.log_level)
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    configure_host_logging(
+        getattr(logging, log_level.upper(), logging.INFO),
+        "%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     say(
         "config_server.yml: "

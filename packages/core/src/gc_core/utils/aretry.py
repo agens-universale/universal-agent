@@ -121,6 +121,7 @@ def retry_with_backoff_async(
     no_more_retries_log_level: int = logging.ERROR,
     operation_name: str = "Operation",
     interrupt_on_user_stop: bool = False,
+    describe_error: Optional[Callable[[Exception], str]] = None,
 ) -> Callable[[Callable[..., Awaitable[_T]]], Callable[..., Awaitable[_T]]]:
     """Ретраи с экспоненциальным backoff для корутинных функций.
 
@@ -130,6 +131,9 @@ def retry_with_backoff_async(
     ``interrupt_on_user_stop=True`` прерывает паузу пользовательским стопом
     и не повторяет ``UserStopInterrupt`` из тела вызова. Включать только
     для отменяемой работы, не для записи истории и завершающей уборки.
+
+    ``describe_error`` — описание ошибки в логах повторов (по умолчанию
+    ``repr``): вызывающий маскирует им секреты в тексте ошибки.
     """
 
     policy = _RetryPolicy(
@@ -140,6 +144,7 @@ def retry_with_backoff_async(
         retry_log_level=retry_log_level,
         no_more_retries_log_level=no_more_retries_log_level,
         operation_name=operation_name,
+        describe_error=describe_error,
     )
     return _retry_decorator(
         policy,
