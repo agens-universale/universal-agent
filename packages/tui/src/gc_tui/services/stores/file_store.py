@@ -86,9 +86,12 @@ class FileTaskStore:
     """Треды одного каталога; ``system`` — система тредов TUI по умолчанию."""
 
     def __init__(self, threads_dir: str, system: str = "cli") -> None:
-        self._threads = Threads(FileThreadStore(threads_dir))
+        files = FileThreadStore(threads_dir)
+        self._threads = Threads(files)
         self._system = system
-        self._dir = threads_dir
+        # Каталог тредов, как его читает хранилище (абсолютный): по нему
+        # снимается отпечаток трассы и при другом cwd.
+        self._dir = files.threads_dir
         # Разобранная трасса субагентов последнего прочитанного треда:
         # (тред, размер и время записи файла) → записи.
         self._subagents: tuple[tuple, list[dict]] | None = None
@@ -192,7 +195,8 @@ class FileTaskStore:
     ) -> list[dict]:
         """Трасса субагентов треда — записи в форме develop. Файл не
         менялся с прошлого чтения (тот же размер и время записи) — без
-        чтения: окно ленты спрашивает её на каждый кусок с субагентами."""
+        чтения: окно ленты спрашивает её на каждый кусок с субагентами.
+        Список — новый, а записи в нём общие с кешем: не менять их."""
         key = self._key(task_id, system)
         stamp = (key, _file_stamp(self._subagent_path(key)))
         cached = self._subagents

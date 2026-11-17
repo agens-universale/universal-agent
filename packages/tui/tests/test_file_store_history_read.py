@@ -107,3 +107,27 @@ def test_subagent_trace_reread_only_when_file_changes(tmp_path, monkeypatch):
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
     assert store.read_subagent_trace(HISTORY_THREAD) == first
     assert streams == ["subagent_events"] * 2
+
+
+def test_subagent_trace_cache_with_relative_dir_after_cwd_change(
+    tmp_path, monkeypatch
+):
+    """Отпечаток трассы — по каталогу, как его читает хранилище
+    (абсолютный): относительный каталог и смена cwd кеш не отключают."""
+    threads = tmp_path / "threads"
+    write_history(str(threads), load_history_fixture("subagents"))
+    monkeypatch.chdir(tmp_path)
+    store = FileTaskStore("threads")
+    monkeypatch.chdir(threads)
+    streams: list[str] = []
+    real = FileThreadStore.read_stream
+
+    async def counted(self, key, stream, **kwargs):
+        streams.append(stream)
+        return await real(self, key, stream, **kwargs)
+
+    monkeypatch.setattr(FileThreadStore, "read_stream", counted)
+    first = store.read_subagent_trace(HISTORY_THREAD)
+    assert first
+    assert store.read_subagent_trace(HISTORY_THREAD) == first
+    assert streams == ["subagent_events"]
