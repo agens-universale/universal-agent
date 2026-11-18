@@ -535,7 +535,7 @@ class TraceWindowMixin:
         self._window_grown = 0
         if not self._window_grow_queued:
             self._window_grow_queued = True
-            self.call_after_refresh(self._window_on_grown)
+            self._window_feed().call_after_layout(self._window_on_grown)
 
     def _window_on_grown(self) -> None:
         """Лента выросла у низа: снять старые шаги сверх лимита — только
@@ -650,14 +650,16 @@ class TraceWindowMixin:
         return rest
 
     def _window_kept_steps(self) -> set[int] | None:
-        """Ходы, задевающие видимое с запасами (`policy.keep_rows`).
-        Раскладки не было — None; у низа — только последний шаг, как
-        раньше."""
+        """Шаги, задевающие видимое с запасами (`policy.keep_rows`).
+        Раскладки не было — None. У низа видимое — последний экран
+        ленты: прокрутка к низу после роста может ещё не дойти (открытие
+        рисует живой ход, потом встаёт к низу)."""
         feed = self._window_feed()
+        stuck = self._stick_bottom
         rows = policy.keep_rows(
-            feed.scroll_y,
+            feed.max_scroll_y if stuck else feed.scroll_y,
             feed.container_size.height,
-            stuck=self._stick_bottom,
+            stuck=stuck,
         )
         widgets = feed.placed_between(*rows)
         if widgets is None:

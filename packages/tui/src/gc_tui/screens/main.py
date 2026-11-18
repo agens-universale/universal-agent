@@ -144,7 +144,11 @@ from gc_tui.services.history_model import (
     HistoryModel,
     build_history,
 )
-from gc_tui.services.history_render import ChunkOptions, ChunkRefs
+from gc_tui.services.history_render import (
+    ChunkOptions,
+    ChunkRefs,
+    history_level,
+)
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
 from gc_tui.services.keyboard_layout import swap_layout
@@ -2911,16 +2915,29 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         return super()._window_forget_step(step)
 
     def _step_pinned(self, step: int) -> bool:
-        """Шаг нельзя снимать (§5.3): шаг текущего (последнего) хода, шаг
-        с прижатым хвостом и шаг со строкой, на которую держит ссылку
-        живое состояние или фокус (`_live_widgets`)."""
+        """Шаг нельзя снимать (§5.3, R32): последний шаг модели, шаг с
+        прижатым хвостом, шаг со строкой, на которую держит ссылку живое
+        состояние или фокус (`_live_widgets`: идущий вызов, «!», вопрос,
+        стрим, попытки сдачи), и раскрытое в текущем ходе. Прочие шаги
+        текущего хода снимаются, как шаги старых: гигантский живой ход
+        у низа и при подъёме держится в пределах окна."""
         history = self._feed_history
-        if history.step_turn(step) >= history.turn_count() - 1:
+        if step >= history.step_count() - 1:
             return True
         widgets = self._window_step_widgets(step)
-        return any(pins_to_bottom(w) for w in widgets) or bool(
-            self._step_subtree(step) & self._live_widgets()
-        )
+        if any(pins_to_bottom(w) for w in widgets):
+            return True
+        subtree = self._step_subtree(step)
+        if subtree & self._live_widgets():
+            return True
+        current = history.step_turn(step) == history.turn_count() - 1
+        return current and self._expanded_in(subtree)
+
+    def _expanded_in(self, widgets: set) -> bool:
+        """Среди ``widgets`` — строки раскрытого блока, файла или вывода
+        (живые виды и виды кусков)."""
+        views = (*self._block_views.values(), *self._history_views.values())
+        return any(view.expanded_in(widgets) for view in views)
 
     def _step_subtree(self, step: int) -> set:
         """Все виджеты поддерева ленты шага ``step``."""
@@ -2935,10 +2952,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         виджет в фокусе: их ход снимать нельзя.
 
         Строк родителей бегущих субагентов (`_subagent_parent_rows`) здесь
-        нет: субагенты синхронны, родитель всегда в последнем ходе, а он
-        закреплён (`_step_pinned`). С фоновыми субагентами родитель может
-        остаться в старом ходе — тогда их строки добавить сюда (спека
-        шага 2 окна ленты, §9)."""
+        нет: строка бегущего субагента — идущий вызов (`_active_calls`).
+        С фоновыми субагентами родитель может остаться в старом ходе без
+        идущего вызова — тогда их строки добавить сюда (спека шага 2 окна
+        ленты, §9)."""
         live = {
             self.focused,
             self._fresh_line,
@@ -4694,8 +4711,27 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             return RanResult(output=ev.command)
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
-        """Итог хода — моделям блоков всех уровней (таймеры, стоп)."""
+        """Итог хода — моделям блоков всех уровней (таймеры, стоп) и
+        видам шагов этого хода, вернувшихся куском после снятия (R32)."""
         end_turn(self._block_views, self._call_timers, outcome, settled=False)
+        history = self._feed_history
+        last = history.turn_count() - 1
+        if last < 0:
+            return
+        steps = range(history.turn_step(last), history.step_count())
+        returned = [
+            view
+            for s in steps
+            if (view := self._history_views.get(history_level(s)))
+        ]
+        if returned:
+            end_turn(
+                self._history_views,
+                self._call_timers,
+                outcome,
+                settled=False,
+                levels=returned,
+            )
 
     def on_block_toggle(self, message: BlockToggle) -> None:
         """Раскрыть / свернуть блок; прокрутка — общая для лент (§9.3).

@@ -403,6 +403,155 @@ async def test_open_live_turn_steps_survive_next_turn(tmp_path, monkeypatch):
         assert sorted(seen) == prose
 
 
+def _small_window(monkeypatch) -> int:
+    """Окно в десяток шагов (инвариант лимит ≥ хвост + 2 куска; лимит
+    больше удерживаемого при чтении — видимого с двумя запасами по
+    строке на виджет); возвращает «лимит + кусок»."""
+    monkeypatch.setattr(policy, "TAIL_MIN", 80)
+    monkeypatch.setattr(policy, "CHUNK_MIN", 50)
+    monkeypatch.setattr(policy, "WINDOW_LIMIT", 300)
+    return policy.WINDOW_LIMIT + policy.CHUNK_MIN
+
+
+def _unpinned_widgets(scr) -> int:
+    """Виджетов поддерева ленты в незакреплённых шагах окна."""
+    steps, counts = scr._window_mounted_counts()
+    return sum(
+        c
+        for s, c in zip(steps, counts, strict=True)
+        if not scr._window_pinned(s)
+    )
+
+
+async def _feed_turn(pilot, scr, records, *, bound=None) -> None:
+    """Записи живым путём пачками по десятку; ``bound`` — после каждой
+    пачки у низа незакреплённое в его пределах."""
+    for start in range(0, len(records), 10):
+        feed_live(scr, records[start : start + 10], splits=())
+        await pilot.pause()
+        await _settled(pilot, scr)
+        _window_consistent(scr)
+        if bound is not None:
+            assert scr._stick_bottom
+            assert _unpinned_widgets(scr) <= bound
+
+
+@pytest.mark.asyncio
+async def test_live_giant_turn_at_bottom_stays_bounded(tmp_path, monkeypatch):
+    """Живой гигантский ход у низа: закреплён только его последний шаг —
+    старые шаги снимаются сверху, окно в пределах «лимит + кусок»."""
+    bound = _small_window(monkeypatch)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(
+            pilot, scr, _giant_turn(0, 180, outcome=False), bound=bound
+        )
+        model = scr._window_model()
+        assert model.open_turn() == 0
+        assert scr._window_first > 0
+        pinned = [s for s in scr._window_heads if scr._window_pinned(s)]
+        assert pinned == [model.step_count() - 1]
+
+
+@pytest.mark.asyncio
+async def test_running_call_in_old_live_step_stays_mounted(
+    tmp_path, monkeypatch
+):
+    """Идущий вызов в старом шаге живого хода — живое состояние: его шаг
+    закреплён и остаётся в ленте, пока ход растёт у низа."""
+    _small_window(monkeypatch)
+    records = _giant_turn(0, 120, outcome=False)
+    running = "call_0_4"
+    records = [
+        r for r in records if r["payload"].get("id") != f"fco_{running}"
+    ]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        # Ход идёт: тик не обрывает вызов без исхода.
+        monkeypatch.setattr(scr, "_task_status_badge", lambda: "[running]")
+        await pilot.pause()
+        await _feed_turn(pilot, scr, records)
+        row = scr._active_calls[running]
+        assert row.parent is _trace(scr)
+        model = scr._window_model()
+        step = model.item_step(model.call_item(running))
+        assert step < model.step_count() - 1
+        assert scr._window_pinned(step)
+        assert step in scr._window_heads
+
+
+@pytest.mark.asyncio
+async def test_reading_up_trims_old_steps_of_live_turn(tmp_path, monkeypatch):
+    """Подъём по живому гигантскому ходу: снизу снимаются его старые
+    шаги — разрыв внутри хода, последний шаг на месте."""
+    bound = _small_window(monkeypatch)
+    records = _giant_turn(0, 180, outcome=False)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        fixture = HistoryFixture(
+            records=tuple(records), segments=(tuple(records),), sidecar=()
+        )
+        write_history(str(tmp_path / "t"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        model = scr._window_model()
+        last = model.step_count() - 1
+        # Открытие у низа уже сняло старые шаги живого хода.
+        assert scr._window_first > 0
+        trace = _trace(scr)
+        for _ in range(200):
+            if scr._window_first == 0:
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+            _window_consistent(scr)
+            assert _unpinned_widgets(scr) <= bound
+        assert scr._window_first == 0
+        assert scr._window_gap
+        assert scr._window_gap.stop <= last
+        assert last in scr._window_heads
+
+
+@pytest.mark.asyncio
+async def test_turn_end_reaches_returned_steps_of_live_turn(
+    tmp_path, monkeypatch
+):
+    """Старый шаг живого хода снят у низа и вернулся куском при подъёме;
+    итог хода доходит и до него — время вызова застыло, как у шагов,
+    нарисованных живым путём."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    _small_window(monkeypatch)
+    calls = 180
+    records = _giant_turn(0, calls, outcome=False)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, records)
+        assert scr._window_first > 0
+        trace = _trace(scr)
+        for _ in range(200):
+            if scr._window_first == 0:
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+        assert scr._window_first == 0
+        outcome = _outcome("m_u0000", f"msg_p00_{calls:03d}")
+        outcome["outcome"]["calls"] = {"call_0_0": 7.0}
+        feed_live(scr, [outcome], splits=())
+        await pilot.pause()
+        rows = [r for r in trace.query(ToolCallRow) if r.call_id == "call_0_0"]
+        assert len(rows) == 1
+        assert rows[0]._frozen == 7.0
+
+
 @pytest.mark.asyncio
 async def test_return_to_bottom_does_not_remount_giant_turn(
     tmp_path, monkeypatch
