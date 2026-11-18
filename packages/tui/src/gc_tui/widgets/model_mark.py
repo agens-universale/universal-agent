@@ -101,8 +101,7 @@ class ModelMark(ConsequenceTraceRow):
         self.set_content(self._line(self.size.width))
         if self.is_mounted:
             self.query_one(".trace-prefix", Static).update(self._prefix)
-        self._consequences = self._notes()
-        self._consequence_slot.set_bodies(self._consequences)
+        self._set_consequences(self._notes())
 
     def _sign(self, name_style: str) -> Text:
         # `auto` — сам выбор, а не модель, которую он взял на этот шаг.

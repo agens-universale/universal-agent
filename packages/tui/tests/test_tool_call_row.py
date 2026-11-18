@@ -712,16 +712,17 @@ class _RowHost:
 
 @pytest.mark.asyncio
 async def test_copy_button_hidden_until_edit_counts():
-    """❐ есть только у строки с правкой: появляется вместе со счётчиками."""
+    """❐ есть только у строки с правкой: появляется вместе со счётчиками.
+    До них кнопки нет вовсе — у сотен свёрнутых строк лишнего виджета нет."""
     from textual.widgets import Static
 
     row = _edit_row()
     app = _RowHost.make(row)
     async with app.run_test(size=(80, 5)) as pilot:
-        button = row.query_one(".block-copy", Static)
-        assert not button.display
+        assert not row.query(".block-copy")
         row.set_edit_counts(1, 1, copy_text="diff")
         await pilot.pause()
+        button = row.query_one(".block-copy", Static)
         assert button.display
         assert button.region.right == row.region.right
         assert button.region.y == row.region.y
@@ -730,15 +731,30 @@ async def test_copy_button_hidden_until_edit_counts():
 @pytest.mark.asyncio
 async def test_no_copy_button_without_diff_text():
     """Нечего копировать — нет ❐; счётчики при этом видны."""
-    from textual.widgets import Static
-
     row = _edit_row()
     app = _RowHost.make(row)
     async with app.run_test(size=(80, 5)) as pilot:
         row.set_edit_counts(2, 0, copy_text="")
         await pilot.pause()
-        assert not row.query_one(".block-copy", Static).display
+        assert not row.query(".block-copy")
         assert "(+2 −0)" in row._render_content().plain
+
+
+@pytest.mark.asyncio
+async def test_collapsed_call_row_is_four_widgets():
+    """Свёрнутая строка вызова без правки и следствий — четыре виджета:
+    строка, колонки и два Static (слот `└` и ❐ — по первой нужде)."""
+    from rich.text import Text
+
+    row = _edit_row()
+    app = _RowHost.make(row)
+    async with app.run_test(size=(80, 5)) as pilot:
+        await pilot.pause()
+        assert len(row.walk_children(with_self=True)) == 4
+        row.add_consequence(Text("пометка"))
+        await pilot.pause()
+        assert row.query(".trace-consequence")
+        assert row.has_class("has-consequence")
 
 
 @pytest.mark.asyncio
@@ -765,6 +781,7 @@ async def test_copy_button_excluded_from_selection_and_focus_click():
     """❐ — служебный элемент: вне выделения текста и фокус по клику не
     берёт (экран ленты спрашивает `focus_on_click` у него, а не у строки)."""
     row = _edit_row()
+    row.set_edit_counts(1, 1, copy_text="diff")
     app = _RowHost.make(row)
     async with app.run_test(size=(80, 5)):
         button = row.query_one(".block-copy")

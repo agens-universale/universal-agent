@@ -9,6 +9,11 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 - user reply (UserReplyContainer / band)
 - fenced code-block panel (BlockPanel)
 - tool-вызовов (ToolCallRow — собственный compose, тоже Horizontal-based)
+
+Строка сама раскладывает колонки по горизонтали — без обёртки
+`Horizontal`: в ленте сотни строк, и лишний контейнер на каждую — лишний
+виджет компоновщику. Обёртка нужна только строке со слотом следствий под
+текстом (`ConsequenceTraceRow`).
 """
 
 from __future__ import annotations
@@ -30,16 +35,15 @@ from gc_tui.widgets.click_model import ClickModelMixin, confirm_is_active
 class TraceRow(ClickModelMixin, Widget):
     """Строка трассы: prefix-колонка фиксированной ширины + content-колонка с wrap.
 
-    DOM:
+    DOM (строка сама раскладывает колонки по горизонтали):
         TraceRow.{kind_class}
-            Horizontal
-                Static(prefix, classes="trace-prefix")
-                Static(content, classes="trace-content")
+            Static(prefix, classes="trace-prefix")
+            Static(content, classes="trace-content")
 
     kind_class применяется ТОЛЬКО к самому TraceRow, чтобы CSS-правила
     (margin-top и т.п.) двигали всю строку целиком — prefix и content
     остаются выровненными. Если бы kind_class дублировался на content-Static,
-    margin-top сработал бы дважды (на ряду и на content внутри Horizontal),
+    margin-top сработал бы дважды (на ряду и на content внутри строки),
     и content уезжал бы на строку ниже prefix'а.
 
     Color/text-style из .line-* правил каскадируются на внутренний Static
@@ -55,13 +59,10 @@ class TraceRow(ClickModelMixin, Widget):
 
     DEFAULT_CSS = """
     TraceRow {
+        layout: horizontal;
         height: auto;
         width: 1fr;
         padding: 0;
-    }
-    TraceRow > Horizontal {
-        height: auto;
-        width: 1fr;
     }
     """
     can_focus = True
@@ -116,9 +117,8 @@ class TraceRow(ClickModelMixin, Widget):
         )
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            yield self._make_prefix()
-            yield self._make_content()
+        yield self._make_prefix()
+        yield self._make_content()
 
     def _make_prefix(self) -> Widget:
         """Виджет prefix-колонки (класс `trace-prefix`); подкласс может заменить."""
@@ -291,7 +291,18 @@ class ConsequenceTraceRow(TraceRow):
 
     Следствие — строка внутри виджета события, на +2 от его глифа
     уровня ``consequence_level``; слот — `ConsequenceSlot`, как у строки
-    вызова. Наследники: вопрос и промежуточная реплика субагента."""
+    вызова. Наследники: вопрос и промежуточная реплика субагента.
+
+    Колонки — в `Horizontal`, слот — под ним; слот создаётся с первым
+    следствием: у большинства строк их нет."""
+
+    DEFAULT_CSS = """
+    ConsequenceTraceRow { layout: vertical; }
+    ConsequenceTraceRow > Horizontal {
+        height: auto;
+        width: 1fr;
+    }
+    """
 
     def __init__(
         self,
@@ -300,21 +311,42 @@ class ConsequenceTraceRow(TraceRow):
         consequences: Sequence = (),
         **kwargs,
     ) -> None:
-        from gc_tui.widgets.consequence_line import ConsequenceSlot
-
         super().__init__(**kwargs)
         self._consequences: list = list(consequences)
-        self._consequence_slot = ConsequenceSlot(consequence_level)
-        self._consequence_slot.set_bodies(self._consequences)
+        self._consequence_level = consequence_level
+        self._consequence_slot = None
+        self._composed = False
+        if self._consequences:
+            self._slot().set_bodies(self._consequences)
 
     def compose(self) -> ComposeResult:
-        yield from super().compose()
-        yield self._consequence_slot
+        self._composed = True
+        with Horizontal():
+            yield from super().compose()
+        if self._consequence_slot is not None:
+            yield self._consequence_slot
+
+    def _slot(self):
+        """Слот следствий — по первой нужде; строка уже собрана — он
+        монтируется под колонками."""
+        from gc_tui.widgets.consequence_line import ConsequenceSlot
+
+        if self._consequence_slot is None:
+            self._consequence_slot = ConsequenceSlot(self._consequence_level)
+            if self._composed:
+                self.mount(self._consequence_slot)
+        return self._consequence_slot
 
     def add_consequence(self, body) -> None:
         """Дописать строку `└ body` под текстом события."""
         self._consequences.append(body)
-        self._consequence_slot.set_bodies(self._consequences)
+        self._slot().set_bodies(self._consequences)
+
+    def _set_consequences(self, bodies: Sequence) -> None:
+        """Следствия целиком; пусто и слота нет — слот не нужен."""
+        self._consequences = list(bodies)
+        if self._consequences or self._consequence_slot is not None:
+            self._slot().set_bodies(self._consequences)
 
 
 class QuestionRow(ConsequenceTraceRow):

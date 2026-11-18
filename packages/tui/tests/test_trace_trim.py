@@ -22,10 +22,11 @@ _SIZE = (100, 30)
 
 @pytest.fixture(autouse=True)
 def _small_window(monkeypatch):
-    """Окно в несколько ходов (инвариант лимит ≥ хвост + 2 куска)."""
+    """Окно в несколько ходов (инвариант лимит ≥ хвост + 2 куска); лимит —
+    под вес строки ленты без обёртки `Horizontal`."""
     monkeypatch.setattr(policy, "TAIL_MIN", 30)
     monkeypatch.setattr(policy, "CHUNK_MIN", 24)
-    monkeypatch.setattr(policy, "WINDOW_LIMIT", 80)
+    monkeypatch.setattr(policy, "WINDOW_LIMIT", 60)
 
 
 def _turn(i: int) -> list[dict]:
