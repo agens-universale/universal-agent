@@ -49,6 +49,7 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         "ambiguous_compression",
         "ambiguous_primary",
         "truncated_final_after_draft",
+        "reasoning_boundary_without_final",
     ],
 )
 async def test_failed_summary_preserves_live_and_saved_history(
@@ -61,6 +62,7 @@ async def test_failed_summary_preserves_live_and_saved_history(
         "truncated_compression",
         "ambiguous_compression",
         "truncated_final_after_draft",
+        "reasoning_boundary_without_final",
     }
     thread_id = f"failed-summary-{has_previous_summary}"
     prior = valid_summary_xml_for_tests(seed="confirmed-prior-context")
@@ -94,6 +96,13 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if response_mode == "reasoning_boundary_without_final":
+            if kwargs["request_label"] == "summary_compress":
+                return (
+                    valid_summary_xml_for_tests(seed="previous draft")
+                    + "\n</think>"
+                )
+            return assemble_summary_xml({"task_and_context": "x" * 1200})
         if response_mode == "truncated_final_after_draft":
             if kwargs["request_label"] == "summary_compress":
                 return (
@@ -188,8 +197,14 @@ async def test_failed_summary_preserves_live_and_saved_history(
         )
 
     trace_path = tmp_path / "rejected-summary.jsonl"
+    if response_mode == "reasoning_boundary_without_final":
+        limit = 1000
+    elif compression_failure:
+        limit = 100
+    else:
+        limit = 20000
     ctx = _ctx(
-        100 if compression_failure else 20000,
+        limit,
         batch_chars=1 if response_mode == "late_batch" else 100000,
     )
     ctx.summary_trace_path = str(trace_path)

@@ -199,6 +199,62 @@ async def test_compression_keeps_plain_text_inside_section(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_compression_keeps_outer_summary_around_quoted_example(
+    monkeypatch,
+):
+    draft = valid_summary_xml_for_tests(seed="outer task context")
+    example = valid_summary_xml_for_tests(seed="quoted example")
+    outer = draft.replace(
+        "outer task context", "outer task context\n</think>\n" + example
+    )
+
+    async def response(**_kwargs):
+        return outer
+
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
+    )
+    actual = await acompress_summary_text(
+        ctx=None,
+        state=None,
+        summary_text=assemble_summary_xml({"task_and_context": "x" * 11000}),
+        max_chars=10000,
+        max_tokens=1000,
+    )
+    assert actual == outer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "trailer",
+    [
+        "\nThe log displays `</think>` literally.",
+        "\nThe log displays ``</think>`` literally.",
+        "\nA log excerpt follows:\n```text\n</think>\n```",
+    ],
+)
+async def test_compression_ignores_literal_reasoning_marker_in_postamble(
+    monkeypatch, trailer
+):
+    final = valid_summary_xml_for_tests(seed="confirmed context")
+
+    async def response(**_kwargs):
+        return final + trailer
+
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
+    )
+    actual = await acompress_summary_text(
+        ctx=None,
+        state=None,
+        summary_text=assemble_summary_xml({"task_and_context": "x" * 11000}),
+        max_chars=10000,
+        max_tokens=1000,
+    )
+    assert actual == final
+
+
+@pytest.mark.asyncio
 async def test_unclosed_reasoning_draft_precedes_final_summary(monkeypatch):
     final = valid_summary_xml_for_tests(seed="confirmed context")
 
@@ -233,6 +289,7 @@ async def test_unclosed_reasoning_draft_precedes_final_summary(monkeypatch):
         + "\n<summary><task_and_context>truncated final",
         valid_summary_xml_for_tests(seed="previous draft")
         + "\n</think>\n<summary><task_and_context>truncated final",
+        valid_summary_xml_for_tests(seed="previous draft") + "\n</think>",
     ],
 )
 async def test_compression_rejects_incomplete_or_ambiguous_xml(
