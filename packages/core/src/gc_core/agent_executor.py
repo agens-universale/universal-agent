@@ -228,6 +228,13 @@ async def _aclose_mcp_and_release(
         raise cancelled
 
 
+def _collect_garbage(ctx: Any) -> None:
+    """C2 после уборки хода портом ``mcp_cleanup``. Рантайм может заменить
+    сборку (Temporal: общий worker не останавливается ради одного
+    workflow); локально — ``gc.collect``."""
+    (getattr(ctx, "collect_garbage", None) or gc.collect)()
+
+
 def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
     """Класс и замаскированная причина ошибки для записи итога хода."""
     if exc is None:
@@ -1518,18 +1525,19 @@ class AgentExecutor:
                 m for m in self._pending_messages if _INBOX_MARK not in m
             )
             self._pending_messages = []
+        collect = gc_run_collect_enabled(
+            is_tui=bool(getattr(self._ctx, "is_tui", False))
+        )
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
             if cleanup is None:
-                await _aclose_mcp_and_release(
-                    owner_reset,
-                    collect=gc_run_collect_enabled(
-                        is_tui=bool(getattr(self._ctx, "is_tui", False))
-                    ),
-                )
+                await _aclose_mcp_and_release(owner_reset, collect=collect)
             else:
                 try:
                     await cleanup()
+                    # C2 и после уборки потребителя — по режиму.
+                    if collect:
+                        _collect_garbage(self._ctx)
                 except Exception:
                     # Как локальная уборка: сбой закрытия MCP не отменяет
                     # готовый ответ хода.

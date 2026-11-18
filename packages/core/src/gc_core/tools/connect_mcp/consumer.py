@@ -9,7 +9,6 @@
 """
 
 import asyncio
-import gc
 from typing import TYPE_CHECKING, Any
 
 from gc_core.backends.protocol import base_backend
@@ -357,7 +356,7 @@ class McpConsumer:
         ход подключает их заново по обычным правилам (§5.9). Снятие — не
         отказ: правило 30 с не срабатывает, идущий вызов получает «сессия
         закрыта во время вызова». Идущая попытка подключения не трогается.
-        Затем сборка циклического мусора, как в прежней уборке хода.
+        Сборку мусора после уборки решает исполнитель — по режиму (C2).
         Закрытый потребитель или остановленный сервис — ничего.
         """
         if self._connections.refused():
@@ -369,7 +368,6 @@ class McpConsumer:
                     for entry in self._trace_sessions()
                 )
             )
-        gc.collect()
 
     def _trace_sessions(self) -> list[ServerEntry]:
         """Серверы набора с разрешённым trace и живой постоянной сессией.

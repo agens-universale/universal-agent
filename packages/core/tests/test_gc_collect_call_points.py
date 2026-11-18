@@ -13,6 +13,7 @@ import types
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit.mcp.fixtures import mcp_home, mcp_reaper
 from gc_testkit.settings import fake_ctx, make_settings
 
 # ---------------------------------------------------------------------------
@@ -277,6 +278,41 @@ class TestC2AgentExecutorFinally:
             system="cli",
         )
         assert gc_calls == []
+
+    @pytest.mark.parametrize(("is_tui", "collects"), [(True, 0), (False, 1)])
+    async def test_mcp_consumer_turn_end_follows_mode(
+        self, monkeypatch, tmp_path, mcp_home, mcp_reaper, is_tui, collects
+    ):
+        """С потребителем сервиса MCP (окно TUI открывает его всегда)
+        уборка хода идёт портом ``mcp_cleanup``; C2 и там по режиму."""
+        import gc
+
+        from gc_core.run_context import acreate_run_context
+        from gc_core.tools.connect_mcp.service import McpService
+
+        ae = importlib.import_module("gc_core.agent_executor")
+        gc_calls = []
+        # Сам `gc.collect`: сборка не должна идти ни из какого модуля хода.
+        monkeypatch.setattr(gc, "collect", lambda: gc_calls.append(1))
+
+        async def _arun_agent_stub(*_a, **_kw):
+            return {"finished": True}
+
+        monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
+        service = mcp_reaper.track(McpService(connect_on_start=True))
+        ctx = await acreate_run_context(
+            self._make_cfg(tmp_path),
+            auth_connector=None,
+            mcp_consumer=service.open_consumer("window"),
+            is_tui=is_tui,
+        )
+        await ae.AgentExecutor(ctx).arun(
+            [{"role": "user", "content": "x"}],
+            thread_id="t",
+            start_new_thread=True,
+            system="cli",
+        )
+        assert len(gc_calls) == collects
 
 
 # ---------------------------------------------------------------------------
