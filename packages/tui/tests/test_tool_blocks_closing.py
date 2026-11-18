@@ -21,12 +21,11 @@ from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.paths import TUI_PKG
 from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings, wait_until
-from textual.containers import VerticalScroll
-from textual.widgets import Static
-
 from gc_tui.widgets.tool_blocks_view import BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.turn_line import TurnLine
+from textual.containers import VerticalScroll
+from textual.widgets import Static
 
 TID = "closing0000000000000000000000001"
 
@@ -295,7 +294,7 @@ async def test_plan_panel_closes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plan_panel_above_fresh_line_closes(tmp_path):
-    thread = _Thread(tmp_path)
+    _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         scr = await _open(pilot)
         calls = []
@@ -446,7 +445,9 @@ async def test_expand_at_bottom_stays_bottom(tmp_path):
 
 
 async def _two_blocks(pilot, thread):
-    """Два блока чтений, разделённые ответом; лента у низа."""
+    """Два блока чтений, разделённые ответом; лента у низа. Второй блок
+    длиннее шага хода: граница шага делит его на две группы
+    (`trace_steps`), последняя — `r12…r17`."""
     scr = await _open(pilot)
     await _tail(pilot, thread, *_reads(*range(8)))
     await _tail(pilot, thread, _answer("a1", "Посмотрю ещё."))
@@ -468,9 +469,8 @@ def _header_of(scr, block):
 async def _toggle_frames(pilot, monkeypatch, scr, key, header):
     """Кадры после переключения блока: (scroll_y ленты, ряд заголовка)
     на каждой отрисовке экрана."""
-    from textual.app import App
-
     from gc_tui.messages import BlockToggle
+    from textual.app import App
 
     trace = scr.query_one("#trace", VerticalScroll)
     frames: list[tuple[int, int]] = []
@@ -497,7 +497,8 @@ async def test_toggle_at_bottom_one_movement(tmp_path, monkeypatch, ends):
     async with _app(tmp_path).run_test(size=(100, 20)) as pilot:
         scr = await _two_blocks(pilot, thread)
         trace = scr.query_one("#trace", VerticalScroll)
-        block = _block_of(scr, "r10")
+        block = _block_of(scr, "r17")
+        assert _blocks(scr)[-1] == f"/{block}"
         header = _header_of(scr, block)
         for end in ends:
             frames = await _toggle_frames(
@@ -543,7 +544,9 @@ async def test_collapse_brings_header_into_view(tmp_path):
         scr._stick_bottom = False
         await pilot.pause()
         await _toggle(pilot, scr, "block:0:bottom")
-        (header,) = [r for r in trace.query(ToolCallRow) if r.mode == "header"]
+        # Серия длиннее шага хода — две группы (`trace_steps`); свёрнута
+        # первая.
+        header = _header_of(scr, "block:0")
         top = trace.scroll_offset.y
         assert top <= header.virtual_region.y < top + trace.size.height
 
