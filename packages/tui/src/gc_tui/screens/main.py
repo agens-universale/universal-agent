@@ -791,6 +791,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # Идёт отрисовка элемента модели истории: смонтированное — не
         # эфемерное (`_note_ephemeral`).
         self._drawing_model = 0
+        # Шаг элемента модели, который сейчас рисует живой путь из готовой
+        # модели (`_draw_live_items`); None — живой путь дописывает модель,
+        # его шаг — последний (`_note_turn_head`).
+        self._drawing_step: Optional[int] = None
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
@@ -2830,19 +2834,27 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         живой путь рисует запись за записью."""
         history = self._feed_history
         replies = Counter(p for p in history.reply_points if p >= start)
-        for i in range(start, len(history.items)):
-            item = history.items[i]
-            self._settle_for_replies(replies[i])
-            if item.kind == "model_choice":
-                self._restore_model_mark(item.side)
-            elif item.kind == "outcome":
-                self._show_outcome(parse_turn_outcome(item.side))
-            elif item.kind == "compaction":
-                self._render_event(item.event)
-            else:
-                self._draw_event(item.event, live=False)
+        try:
+            for i in range(start, len(history.items)):
+                self._drawing_step = history.item_step(i)
+                self._draw_live_item(history.items[i], replies[i])
+        finally:
+            self._drawing_step = None
         # Повтор реплики последней записью — тоже начало хода.
         self._settle_for_replies(replies[len(history.items)])
+
+    def _draw_live_item(self, item, replies: int) -> None:
+        """Элемент модели живым путём; ``replies`` — начал хода перед
+        ним."""
+        self._settle_for_replies(replies)
+        if item.kind == "model_choice":
+            self._restore_model_mark(item.side)
+        elif item.kind == "outcome":
+            self._show_outcome(parse_turn_outcome(item.side))
+        elif item.kind == "compaction":
+            self._render_event(item.event)
+        else:
+            self._draw_event(item.event, live=False)
 
     # ---- окно ленты (§5.3) -----------------------------------------------
 
@@ -3930,8 +3942,13 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
 
     def _note_turn_head(self, widget) -> None:
         """Виджет живого пути — в окно своего шага (§5.3: окно режет
-        ленту по шагам ходов; шаг живого пути — последний в модели)."""
-        self._window_appended(self._feed_history.step_count() - 1, widget)
+        ленту по шагам ходов): шаг рисуемого элемента готовой модели
+        (`_draw_live_items`), иначе — последний в модели (живой путь
+        сначала дописывает элемент, потом рисует)."""
+        step = self._drawing_step
+        if step is None:
+            step = self._feed_history.step_count() - 1
+        self._window_appended(step, widget)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение

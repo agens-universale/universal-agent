@@ -10,8 +10,16 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
-from feed_dump import HISTORY_THREAD, HistoryFixture, feed_dump, write_history
+from feed_dump import (
+    HISTORY_THREAD,
+    HistoryFixture,
+    feed_dump,
+    feed_live,
+    write_history,
+)
 from gc_testkit.tui_support import wait_until
 from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.trace_steps import SPLIT_FROM_ITEMS, STEP_MIN_ITEMS
@@ -313,6 +321,86 @@ async def test_reading_up_giant_turns_mounts_bounded_steps(tmp_path):
         assert scr._window_first == 0
         assert chunks
         assert max(chunks) <= policy.CHUNK_MAX
+
+
+def _window_consistent(scr) -> None:
+    """Окно согласовано: у каждого смонтированного шага (от первого до
+    конца модели, кроме разрыва) — своя голова, головы — по порядку
+    шагов в ленте."""
+    model = scr._window_model()
+    gap = scr._window_gap
+    expected = [
+        s for s in range(scr._window_first, model.step_count()) if s not in gap
+    ]
+    heads = scr._window_heads
+    assert sorted(heads) == expected
+    children = list(_trace(scr).children)
+    order = [children.index(heads[s]) for s in expected]
+    assert order == sorted(order)
+
+
+def _prose_seen(scr, turn: int) -> list[int]:
+    """Номера прозы хода ``turn`` в ленте по порядку."""
+    pattern = re.compile(rf"Ход {turn}: смотрю шаг (\d+)\.")
+    return [
+        int(m.group(1))
+        for _kind, text, _classes in feed_dump(_trace(scr))
+        for m in pattern.finditer(text)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_open_live_turn_steps_survive_next_turn(tmp_path, monkeypatch):
+    """Последний ход без итога (агент шёл, TUI убит) открытие рисует живым
+    путём — у каждого его шага своя голова. Реплика: ход перестал быть
+    последним, лента у низа растёт и снимает его шаги сверху — ни один
+    шаг не теряется и не застревает, подъём к началу возвращает их все
+    по порядку."""
+    calls = 60
+    records = [*_giant_turn(0, 3), *_giant_turn(1, calls, outcome=False)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        fixture = HistoryFixture(
+            records=tuple(records), segments=(tuple(records),), sidecar=()
+        )
+        write_history(str(tmp_path / "t"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        model = scr._window_model()
+        assert model.open_turn() == 1
+        assert model.step_count() - model.turn_step(1) >= 2
+        _window_consistent(scr)
+
+        monkeypatch.setattr(policy, "TAIL_MIN", 60)
+        monkeypatch.setattr(policy, "CHUNK_MIN", 40)
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 160)
+        for i in range(2, 5):
+            feed_live(scr, _giant_turn(i, 30), splits=())
+            await pilot.pause()
+            await _settled(pilot, scr)
+            _window_consistent(scr)
+        assert scr._window_first > model.turn_step(2)
+
+        # Подъём к началу: проза хода в ленте всякий раз — подряд идущий
+        # кусок, за подъём встаёт вся.
+        prose = [*range(0, calls, PROSE_EVERY), calls]
+        trace = _trace(scr)
+        seen: set[int] = set()
+        for _ in range(400):
+            if scr._window_first == 0:
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+            _window_consistent(scr)
+            now = _prose_seen(scr, 1)
+            if now:
+                start = prose.index(now[0])
+                assert now == prose[start : start + len(now)]
+            seen.update(now)
+        assert scr._window_first == 0
+        assert sorted(seen) == prose
 
 
 @pytest.mark.asyncio
