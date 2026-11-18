@@ -639,18 +639,170 @@ async def test_wheel_burst_over_overlay_keeps_every_step(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_replies_cache_sees_remove_and_mount_in_one_tick(tmp_path):
+async def test_sticky_sees_remove_and_mount_in_one_tick(tmp_path):
     """Реплику сняли и в том же такте смонтировали другую строку — число
     детей прежнее, но состав реплик другой."""
     _write_task(tmp_path, "o17")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o17")
+        sticky, _ = _overlays(scr)
         first, second = _replies(scr)
-        trace = _trace(scr)
-        assert scr._trace_replies(trace) == [first, second]
+        await _scroll(pilot, scr, second.virtual_region.y + 2)
+        assert sticky.reply is second
         await second.remove()
         _agent(scr, "a3", 3)
-        assert scr._trace_replies(trace) == [first]
+        scr._refresh_trace_overlays()
+        assert sticky.reply is first
+
+
+async def _mixed(pilot, tid, *, calls=True):
+    """Лента: реплики одно- и многострочные вперемешку с завершёнными
+    строками вызовов со следствиями `└` (`calls`) и ответами агента."""
+    from rich.text import Text
+
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    scr = pilot.app.screen
+    scr.attach_active_task(tid)
+    trace = _trace(scr)
+    for k in range(60):
+        scr._mount_user_reply(LONG if k % 4 == 0 else f"реплика {k}")
+        _agent(scr, f"a{k}", 1 + k % 3)
+        if not calls:
+            continue
+        row = ToolCallRow(call_id=f"c{k}", label="Bash", target="ls")
+        trace.mount(row)
+        row.add_consequence(Text(f"следствие {k}"))
+        if k % 3 == 0:
+            row.add_consequence(Text("ещё следствие"))
+        # Завершённый вызов: идущий мигает, а это уже не простой.
+        row.set_result(summary="готово", outcome="error")
+    await pilot.pause(1.0)
+    return scr
+
+
+def _sticky_reference(trace):
+    """Эталон прежнего алгоритма: ближайшая реплика верхнего уровня, чья
+    верхняя строка (`virtual_region.y`) выше края `y`."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    tops = [
+        (child.virtual_region.y, child)
+        for child in trace.children
+        if isinstance(child, UserReplyContainer)
+    ]
+
+    def reference(y):
+        above = [reply for top, reply in tops if top < y]
+        return above[-1] if above else None
+
+    return reference
+
+
+async def _leave_bottom(pilot, scr):
+    trace = _trace(scr)
+    trace.scroll_to(y=trace.max_scroll_y - 30, animate=False, immediate=True)
+    await pilot.pause(0.6)
+    assert scr._stick_bottom is False
+
+
+@pytest.mark.asyncio
+async def test_sticky_reply_matches_virtual_region_on_every_position(
+    tmp_path,
+):
+    """Страж семантики: на каждом положении прокрутки — сразу, на пути
+    наблюдателя, без паузы — та же реплика, что у поиска по
+    `virtual_region.y`."""
+    _write_task(tmp_path, "o30")
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _mixed(pilot, "o30")
+        await _leave_bottom(pilot, scr)
+        trace = _trace(scr)
+        sticky, _ = _overlays(scr)
+        reference = _sticky_reference(trace)
+        # До допуска липкости: у низа якорь снова держит ленту.
+        top = round(trace.max_scroll_y) - scr._STICK_TOL - 1
+        for y in range(top + 1):
+            trace.scroll_to(y=y, animate=False, immediate=True)
+            assert round(trace.scroll_y) == y
+            expected = reference(y)
+            assert (sticky.reply, y) == (expected, y)
+            assert sticky.display is (expected is not None)
+        assert scr._stick_bottom is False
+
+
+@pytest.mark.asyncio
+async def test_sticky_reply_does_not_rearrange_trace(tmp_path, monkeypatch):
+    """Поиск берёт раскладку ленты из кэша: ни одного пересчёта, якорь
+    прежний. Вызов с другим размером пересчитал бы её (контроль)."""
+    import textual.widget
+    from textual.geometry import Size
+
+    _write_task(tmp_path, "o31")
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _mixed(pilot, "o31")
+        await _leave_bottom(pilot, scr)
+        trace = _trace(scr)
+        sticky, _ = _overlays(scr)
+        calls = []
+        original = textual.widget.arrange
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(textual.widget, "arrange", counting)
+        anchor = trace._anchor_y
+        scr._refresh_trace_overlays()
+        assert sticky.reply is not None
+        assert calls == []
+        assert trace._anchor_y == anchor
+        box = trace.scrollable_content_region
+        trace.arrange(Size(box.width - 1, box.height))
+        assert calls != []
+
+
+@pytest.mark.asyncio
+async def test_idle_scroll_no_full_map_rebuild(tmp_path):
+    """Прокрутка вверх в простое при видимых накладках не пересобирает
+    полную карту виджетов экрана. Без строк вызовов: строка, чей глиф
+    ушёл выше края, а `└` видны, при отрисовке читает размер своей
+    невидимой колонки текста — это источник строк вызовов, не накладок."""
+    from arrange_counter import count_arranges
+
+    _write_task(tmp_path, "o32")
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _mixed(pilot, "o32", calls=False)
+        await _leave_bottom(pilot, scr)
+        trace = _trace(scr)
+        sticky, pill = _overlays(scr)
+        with count_arranges() as counts:
+            for _ in range(12):
+                y = trace.scroll_y - 3
+                trace.scroll_to(y=y, animate=False, immediate=True)
+                await pilot.pause(0.15)
+        assert sticky.display is True
+        assert pill.display is True
+        assert counts.full_map == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_chrome_caps_without_overlay_reads_nothing(
+    tmp_path, monkeypatch
+):
+    """Без оверлея и sticky-баннера потолки хрома не нужны — и не
+    замеряются."""
+    _write_task(tmp_path, "o33")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o33")
+        assert scr._open_overlay_widget() is None
+        assert scr._sticky_banner_widget() is None
+        measured = []
+        monkeypatch.setattr(
+            type(scr), "_chrome_height", staticmethod(measured.append)
+        )
+        scr._sync_chrome_caps()
+        assert measured == []
 
 
 class _BusyRunner:

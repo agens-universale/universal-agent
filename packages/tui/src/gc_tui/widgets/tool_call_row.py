@@ -56,6 +56,7 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIFF_ADD_INK as _DIFF_ADD
 from gc_tui.palette import DIFF_DEL_INK as _DIFF_DEL
@@ -95,6 +96,7 @@ from gc_tui.widgets.expandable_text import (
     ExpandableTextBody,
     ExpandableToggle,
 )
+from gc_tui.widgets.missed_frame import miss_frame
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.ran_output import OutputTexts, RanParts, RanPhrase
 from gc_tui.widgets.static_content import update_if_changed
@@ -297,6 +299,8 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._copy_text: str = ""
         self._restore_timer = None  # откат ✓ → ❐ (CopyFeedbackMixin)
         self._pulse_frame: int = 0
+        # Тик пропустил рисование: перерисовываемое было не видно.
+        self._frame_missed = False
         self._pulse_timer = (
             None  # собственный 0.1с-тик мигания ● (_sync_pulse)
         )
@@ -429,7 +433,7 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         монтирования) пересобирается по ширине ленты сейчас — при сборке
         ширины могло ещё не быть, и первый показ нарисовал бы объект
         несокращённым."""
-        if self.size.width == 0:
+        if textual_compat.laid_out_width(self) == 0:
             self._update()
 
     def set_mode(
@@ -533,6 +537,10 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._edit_tail = tail
         self._update()
 
+    @property
+    def _pulse_widget(self) -> Optional[Static]:
+        return self._prefix_static
+
     def _redraw_pulse(self) -> None:
         if self._prefix_static is not None:
             # Меняется только цвет ● (ширина глифа постоянна) — без layout.
@@ -623,10 +631,28 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._update()
 
     def refresh_running_elapsed(self) -> None:
-        """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op."""
+        """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op.
+        Колонка текста не видна — тик пропускает рисование (и чтения
+        ширины в `_update`) и отмечает пропуск (`miss_frame`)."""
         if not self._is_live:
             return
+        if not textual_compat.is_visible(self._content_static):
+            miss_frame(self)
+            return
         self._update()
+
+    def redraw_if_missed(self) -> bool:
+        """Пропустила кадр за экраном и колонка текста теперь видна —
+        текущие кадр мигания и счётчик сразу (П6); `True` — перерисовала.
+        Глиф — до `_update`: его кадр меняется без перекладки."""
+        if not self._frame_missed or not textual_compat.is_visible(
+            self._content_static
+        ):
+            return False
+        self._frame_missed = False
+        self._redraw_pulse()
+        self._update()
+        return True
 
     def pause(self, *, asking: bool = False) -> None:
         """Заморозить elapsed на человеко-ожидании; ``asking`` — ждут
@@ -771,14 +797,13 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _content_width(self) -> int:
         """Ширина content-колонки; ещё не раскладывалась — та, что даст
-        раскладка (`_row_width` без префикса и ❐)."""
+        раскладка (`_row_width` без префикса и ❐). Ширины — по последней
+        раскладке, а не из карты экрана: строка, частично или целиком за
+        экраном, иначе пересобирает её на каждой отрисовке."""
         static = self._content_static
-        if (
-            self._think_body is None
-            and static is not None
-            and (static.size.width > 0)
-        ):
-            return static.size.width
+        laid = 0 if static is None else textual_compat.laid_out_width(static)
+        if self._think_body is None and laid > 0:
+            return laid
         width = self._row_width() - self._render_prefix().cell_len
         if width > 0 and self.has_class("edited"):
             # ❐: `width: auto` и поле справа в одну клетку.
@@ -791,11 +816,12 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         во всю ширину): объект сокращается заранее, и первый показ
         (раскрытие окна) — один кадр, без несокращённого объекта до
         `Resize`."""
-        if self.size.width > 0:
-            return self.size.width
+        width = textual_compat.laid_out_width(self)
+        if width > 0:
+            return width
         parent = self.parent
         if isinstance(parent, Widget):
-            return parent.scrollable_content_region.width
+            return textual_compat.laid_out_scrollable_width(parent)
         return 0
 
     def _tail_room(self, label_cols: int, sep: int = 2) -> Optional[int]:
