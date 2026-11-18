@@ -12,10 +12,15 @@
 (``RuntimeError: cannot set daemon status of active thread``), а не-демон
 поток задержит выход интерпретатора не хуже atexit-join.
 
-Дискавери зовёт БЛОКИРУЮЩИЙ код (requests, subprocess) — отменить его нечем,
+Обмен с долгоживущим stdio — БЛОКИРУЮЩИЙ код (``Popen``, ``readline``), и у
+дискавери, и у подключения потребителя, и у вызова тула; отменить его нечем,
 единственный выход — перестать его ждать. Поэтому здесь поток-демон на вызов,
 ограниченный семафором: брошенный воркер дочитает свой сокет в никуда и умрёт
 вместе с процессом.
+
+Семафор по умолчанию — общий пул процесса; ``use_call_slots`` подменяет его
+своим набором на время блока (у каждого потребителя свои слоты), а
+``run_abandonable_in`` принимает набор явно.
 """
 
 from __future__ import annotations
@@ -24,7 +29,8 @@ import asyncio
 import contextvars
 import logging
 import threading
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from gc_core.mcp_session_owner import copy_context_for_thread
 
@@ -33,6 +39,11 @@ from gc_core.mcp_session_owner import copy_context_for_thread
 _MAX_WORKERS = 8
 
 _slots = threading.BoundedSemaphore(_MAX_WORKERS)
+
+#: Свой набор слотов на время вызова; ``None`` — общий пул процесса.
+_call_slots: contextvars.ContextVar[threading.BoundedSemaphore | None] = (
+    contextvars.ContextVar("gc_call_slots", default=None)
+)
 
 
 logger = logging.getLogger(__name__)
@@ -145,16 +156,40 @@ async def run_abandonable_in(
     return await future
 
 
+@contextmanager
+def use_call_slots(slots: threading.BoundedSemaphore) -> Iterator[None]:
+    """На время блока :func:`run_abandonable` берёт слоты из ``slots``.
+
+    Так зависшие вызовы одного потребителя не занимают слоты другого.
+    """
+    token = _call_slots.set(slots)
+    try:
+        yield
+    finally:
+        _call_slots.reset(token)
+
+
 async def run_abandonable(
     fn: Callable[..., Any], /, *args: Any, **kwargs: Any
 ) -> Any:
-    """Выполнить ``fn`` в потоке-демоне на пуле MCP и дождаться результата.
+    """Выполнить ``fn`` в потоке-демоне и дождаться результата.
+
+    Слоты — из :func:`use_call_slots`, если заданы, иначе общий пул MCP.
 
     Если вызывающего отменили (истёк ``asyncio.timeout``), поток продолжит
     работу в фоне: результат к тому моменту уже никому не нужен, а прервать
     блокирующий сокет всё равно нечем.
     """
-    return await run_abandonable_in(_slots, fn, *args, **kwargs)
+    # Набор читается здесь, в контексте вызывающего, до ухода в поток.
+    slots = _call_slots.get()
+    if slots is None:
+        slots = _slots
+    return await run_abandonable_in(slots, fn, *args, **kwargs)
 
 
-__all__ = ["current_call_abandoned", "run_abandonable", "run_abandonable_in"]
+__all__ = [
+    "current_call_abandoned",
+    "run_abandonable",
+    "run_abandonable_in",
+    "use_call_slots",
+]

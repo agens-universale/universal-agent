@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 #: None — легальное значение, которое может прийти от колбэка.
 _DONE = object()
 
+_DURABLE_TAKES_NO_CONTEXT = (
+    "durable=: контекст собирает рантайм; "
+    "auth_connector, on_stream_delta, plugins и параметры "
+    "контекста здесь не принимаются"
+)
+
 
 def _take_tail(executor: Any) -> list:
     """Хвост хода: отдано исполнителю, а до агента не дошло.
@@ -45,6 +51,45 @@ def _unpack_stores(stores: Stores | None, context_kwargs: dict) -> None:
             raise ValueError(f"stores= и {name}= вместе: выберите одно")
     context_kwargs["thread_store"] = stores.threads
     context_kwargs["agent_store"] = stores.agent
+
+
+def _open_mcp_consumer(
+    mcp_service: Any, durable: Any, context_kwargs: dict
+) -> Any | None:
+    """Потребитель агента у ``mcp_service``; без сервиса — ``None``.
+
+    Сочетания отвергаются до открытия, чтобы отказ не оставлял открытого
+    потребителя: с ``durable=`` контекст собирает рантайм; источник
+    MCP-тулов у сборки один — сервис агента, ``tools_cache=`` или
+    потребитель хоста (``mcp_consumer=``).
+    """
+    if mcp_service is None:
+        return None
+    if durable is not None:
+        raise TypeError(_DURABLE_TAKES_NO_CONTEXT)
+    for name in ("tools_cache", "mcp_consumer"):
+        if context_kwargs.get(name) is not None:
+            raise ValueError(f"mcp_service= и {name}= вместе: выберите одно")
+    return mcp_service.open_consumer("agent")
+
+
+async def _aundo_create(consumer: Any) -> None:
+    """Откат упавшей сборки: свой потребитель агента и заявка на пул.
+
+    Отказ закрытия потребителя только пишется в лог: наружу уходит
+    исходная ошибка сборки (или её отмена), а не сбой отката.
+    """
+    try:
+        if consumer is not None:
+            await consumer.aclose()
+    except Exception as exc:
+        logger.warning(
+            "потребитель MCP не закрыт после отказа сборки: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+    finally:
+        await release_clients()
 
 
 def _with_plugins(
@@ -82,8 +127,13 @@ class AsyncAgent:
         subscribers: set[asyncio.Queue],
         *,
         durable: Any = None,
+        mcp_consumer: Any = None,
     ) -> None:
         self._executor = executor
+        # Потребитель, открытый агентом у ``mcp_service`` (``create``):
+        # его сессии закрывает ``aclose``. Потребитель хоста сюда не
+        # попадает — его закрывает хост.
+        self._mcp_consumer = mcp_consumer
         # Durable-рантайм (``durable=`` в ``create``): ходы исполняет он, а
         # своего исполнителя и пула у агента нет.
         self._durable = durable
@@ -110,6 +160,7 @@ class AsyncAgent:
         durable: Any = None,
         stores: Stores | None = None,
         ask_human_suspends: bool = False,
+        mcp_service: Any = None,
         plugins: Sequence[str | os.PathLike | Plugin] | None = None,
         **context_kwargs: Any,
     ) -> AsyncAgent:
@@ -153,6 +204,18 @@ class AsyncAgent:
         кэш без бэкенда считает такой сервер «своим» и проходит дискавери в
         процессе агента — для stdio это запуск сервера НА ХОСТЕ, мимо
         песочницы. Вызовы тулов при этом уходят правильно: течёт дискавери.
+
+        ``mcp_service`` — сервис MCP хоста (``McpService``) вместо
+        ``tools_cache``: агент открывает у него своего потребителя, сессии
+        MCP живут между ходами и закрываются в ``aclose`` агента или при
+        отказе его собственной сборки. Вместе с ``durable=`` —
+        ``TypeError``, с ``tools_cache=`` или ``mcp_consumer=`` —
+        ``ValueError``. Сервис работает на одном цикле событий: агент на
+        другом — ``RuntimeError``.
+
+        ``mcp_consumer`` (через ``context_kwargs``) — потребитель, которого
+        открыл хост: его сессии закрывает хост, ``aclose`` агента их не
+        трогает.
         """
         from gc_core.config_modules.root import AppConfig
         from gc_core.settings import LoadedSettings
@@ -166,6 +229,13 @@ class AsyncAgent:
                 "gc_core.config.load_settings(path) или "
                 "gc_core.settings.default_settings(**{'agent.model': ...})"
             )
+        if plugins is not None and durable is None:
+            # До открытия своего потребителя MCP: отказ разбора путей не
+            # оставляет открытого потребителя.
+            settings = await asyncio.to_thread(
+                _with_plugins, settings, plugins, context_kwargs
+            )
+        mcp_consumer = _open_mcp_consumer(mcp_service, durable, context_kwargs)
         if durable is not None:
             # Ходы исполняет durable-рантайм (``gc_core.aio.durable``;
             # Temporal — ``gc_core_temporalio.TemporalDurability``): контекст,
@@ -176,16 +246,8 @@ class AsyncAgent:
                 or on_stream_delta
                 or plugins is not None
             ):
-                raise TypeError(
-                    "durable=: контекст собирает рантайм; "
-                    "auth_connector, on_stream_delta, plugins и параметры "
-                    "контекста здесь не принимаются"
-                )
+                raise TypeError(_DURABLE_TAKES_NO_CONTEXT)
             return cls(None, set(), durable=await durable.open(settings))
-        if plugins is not None:
-            settings = await asyncio.to_thread(
-                _with_plugins, settings, plugins, context_kwargs
-            )
         # Набор ЖИВЫХ подписчиков вместо одной очереди на агента.
         #
         # Одна общая очередь давала два бага, оба воспроизводились замером:
@@ -209,6 +271,9 @@ class AsyncAgent:
             if on_stream_delta is not None:
                 on_stream_delta(kind, text)
 
+        if mcp_consumer is not None:
+            context_kwargs["mcp_consumer"] = mcp_consumer
+
         # Права на пул заявляем ДО сборки: она сама ходит в сеть (MCP), и без
         # заявки соседний агент мог бы закрыть пул у неё под руками. Но если
         # сборка упадёт — а падает она в первую очередь на отказе
@@ -223,10 +288,10 @@ class AsyncAgent:
                 **context_kwargs,
             )
         except BaseException:
-            await release_clients()
+            await _aundo_create(mcp_consumer)
             raise
         ctx.ask_human_suspends = ask_human_suspends
-        return cls(AgentExecutor(ctx), subscribers)
+        return cls(AgentExecutor(ctx), subscribers, mcp_consumer=mcp_consumer)
 
     @property
     def closed(self) -> bool:
@@ -252,7 +317,8 @@ class AsyncAgent:
         """Ход агента — и доигрывание хвоста. Возвращает ответ последнего хода.
 
         Хвост — отданное `send` после последнего забора очереди циклом: пока ход
-        сохранял тред и сносил MCP, он ещё шёл, но читать очередь было уже
+        сохранял тред и прибирался (без сервиса MCP — ещё и сносил MCP), он
+        ещё шёл, но читать очередь было уже
         некому. Исполнитель откладывает такое в сторону, и забрать его, кроме
         владельца, некому: следующий `run` отдал бы его позади своего запроса,
         а без следующего оно не дошло бы вовсе. Поэтому, как сервер и TUI,
@@ -447,7 +513,7 @@ class AsyncAgent:
         """Подкинуть сообщение в идущий ход (или в следующий, если ход не идёт).
 
         Опоздавшее к последнему забору очереди — пока ход сохранял тред и
-        сносил MCP — тот же `run` доигрывает отдельным ходом (см. `run`).
+        прибирался — тот же `run` доигрывает отдельным ходом (см. `run`).
 
         Картинки — ключ ``attachments`` (словари ``Attachment.to_dict()`` из
         кармана): ход копирует их в тред, когда агент принимает сообщение.
@@ -480,6 +546,9 @@ class AsyncAgent:
         (`async with` плюс явный `aclose`, повторный выход по ошибке), а
         отпускать пул дважды значит уронить счётчик владельцев ниже нуля и
         закрыть клиенты соседа.
+
+        Потребителя MCP, которого агент открыл у ``mcp_service``, закрывает
+        здесь же — вместе с его сессиями. Потребителя хоста не трогает.
         """
         from gc_core.utils.async_http import release_clients
         from gc_core.utils.logging_module import release_run_logger
@@ -491,7 +560,10 @@ class AsyncAgent:
             await self._durable.aclose()
             return
         try:
-            await self._aclose_owned_mcp_sessions()
+            if self._mcp_consumer is not None:
+                await self._mcp_consumer.aclose()
+            else:
+                await self._aclose_owned_mcp_sessions()
         finally:
             await release_clients()
         # Логгер прогона уникален по имени и остаётся в реестре `logging` до
@@ -510,8 +582,15 @@ class AsyncAgent:
         заденет. Без этого долгоживущий stdio (браузер под
         ``@playwright/mcp``) гасил только ``finally`` прогона: агент без
         прогона оставлял процессы жить до выхода из процесса.
+
+        С портом уборки MCP (потребитель сервиса, спека §5.2) сессии
+        контекста не агента: под владельцем потребителя закрылись бы
+        сессии всех его контекстов. Их закрывает тот, кто открыл
+        потребителя, — как и конец хода (``_ateardown_run``).
         """
         ctx = getattr(self._executor, "_ctx", None)
+        if getattr(ctx, "mcp_cleanup", None) is not None:
+            return
         owner = getattr(ctx, "mcp_session_owner", "") or None
         if not owner:
             return

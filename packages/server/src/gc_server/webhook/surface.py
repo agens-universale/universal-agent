@@ -36,6 +36,7 @@ from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadQuery, ThreadRecord
 from gc_core.threads.rules import lease_expired, list_cursor_of
+from gc_core.tools.connect_mcp.service import McpService
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
@@ -43,6 +44,7 @@ from gc_core.utils.generate_message_id import (
 
 from gc_server.config import RESERVED_SYSTEMS
 from gc_server.surface import (
+    aclose_mcp_service,
     allowed_system,
     http_error,
     install_bearer,
@@ -63,6 +65,8 @@ from gc_server.webhook.registry import ActiveRun, AgentRunRegistry
 from gc_server.webhook.request import ensure_task_id, normalize_system
 
 if TYPE_CHECKING:
+    from gc_core.tools.connect_mcp.consumer import McpConsumer
+
     from gc_server.app import ServerRuntime
 
 logger = logging.getLogger(__name__)
@@ -158,6 +162,10 @@ class WebhookSurface:
         self.section = runtime.config.surface("webhook")
         self.settings = webhook_settings(runtime)
         self.registry = AgentRunRegistry()
+        # Сервис MCP на поверхность, потребитель — на прогон: сессии живут
+        # прогон. Сервер подключается первым вызовом тула, если тулы
+        # известны. Бэкенд рождается в сборке прогона — у сервиса его нет.
+        self._mcp_service = McpService(connect_on_start=False)
         self._pruner: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
         self.callbacks = CallbackSender(self.config.callbacks)
@@ -184,17 +192,20 @@ class WebhookSurface:
         self._pruner = asyncio.create_task(self._aprune_loop())
 
     async def astop(self) -> None:
-        # Снятые прогоны пишут статус cancelled — дождаться их до закрытия
-        # хранилища процессом.
-        tasks = self.registry.cancel_all()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        await self.callbacks.aclose()
-        background = [t for t in (self._pruner, self.recovery_task) if t]
-        self._pruner = self.recovery_task = None
-        for task in background:
-            task.cancel()
-        await asyncio.gather(*background, return_exceptions=True)
+        try:
+            # Снятые прогоны пишут статус cancelled и закрывают своих
+            # потребителей MCP — дождаться их до закрытия хранилища.
+            tasks = self.registry.cancel_all()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await self.callbacks.aclose()
+            background = [t for t in (self._pruner, self.recovery_task) if t]
+            self._pruner = self.recovery_task = None
+            for task in background:
+                task.cancel()
+            await asyncio.gather(*background, return_exceptions=True)
+        finally:
+            await aclose_mcp_service(self.name, self._mcp_service)
 
     async def aprune_once(self, *, older_than: timedelta) -> int:
         """Удалить задачи вебхука (тред со статусом вебхука), не менявшиеся
@@ -559,27 +570,34 @@ class WebhookSurface:
             logger.warning(
                 "agent_overrides: уровни отключены на этот запуск (легаси-форс)"
             )
-        ctx = await acreate_run_context(
-            loaded,
-            auth_connector=build_auth_connector(loaded),
-            force_legacy=force_legacy,
-            **self.runtime.store_kwargs("webhook"),
-        )
-        run_id = f"{instance_id()}:{uuid.uuid4().hex[:12]}"
-        started_at = time.time()
-        # Статус «running» пишет только ход, взявший тред: прогон, чей тред
-        # перехватил другой инстанс, статус не трогает.
-        ctx.on_thread_claimed = functools.partial(
-            self._amark_running, run_id, started_at, callback_url
-        )
-        await self.registry.astart(
-            system=system,
-            task_id=task_id,
-            executor=AgentExecutor(ctx),
-            ctx=ctx,
-            on_finish=self._amark_finished,
-            notes={"run_id": run_id},
-        )
+        consumer = self._mcp_service.open_consumer(self.name)
+        try:
+            ctx = await acreate_run_context(
+                loaded,
+                auth_connector=build_auth_connector(loaded),
+                force_legacy=force_legacy,
+                mcp_consumer=consumer,
+                **self.runtime.store_kwargs("webhook"),
+            )
+            run_id = f"{instance_id()}:{uuid.uuid4().hex[:12]}"
+            started_at = time.time()
+            # Статус «running» пишет только ход, взявший тред: прогон, чей
+            # тред перехватил другой инстанс, статус не трогает.
+            ctx.on_thread_claimed = functools.partial(
+                self._amark_running, run_id, started_at, callback_url
+            )
+            await self.registry.astart(
+                system=system,
+                task_id=task_id,
+                executor=AgentExecutor(ctx),
+                ctx=ctx,
+                on_finish=functools.partial(self._afinish_run, consumer),
+                notes={"run_id": run_id},
+            )
+        except BaseException:
+            # Прогон не начат: его потребителя закрывает открывший.
+            await _aclose_run_consumer(consumer)
+            raise
 
     async def _amark_running(
         self,
@@ -613,6 +631,16 @@ class WebhookSurface:
         fields["inbox_started_upto"] = record.max_seq.get("inbox", 0)
         fields["inbox_first"] = record.state.inbox_seq + 1
         await task_status.aset_status(threads, key, **fields)
+
+    async def _afinish_run(
+        self, consumer: McpConsumer, run: ActiveRun
+    ) -> None:
+        """Конец прогона при любом исходе: итог в статус задачи, затем
+        закрытие потребителя MCP прогона (спека §6)."""
+        try:
+            await self._amark_finished(run)
+        finally:
+            await _aclose_run_consumer(consumer)
 
     async def _amark_finished(self, run: ActiveRun) -> None:
         """Итог прогона — в статус задачи, если статус всё ещё его: тред
@@ -663,6 +691,17 @@ class WebhookSurface:
             self.callbacks.send(
                 url, make_event(status["status"], key, jsonable(status))
             )
+
+
+async def _aclose_run_consumer(consumer: McpConsumer) -> None:
+    """Закрыть потребителя MCP прогона; отказ — в лог: исход прогона он
+    не подменяет, а недозакрытого потребителя закроет остановка сервиса."""
+    try:
+        await consumer.aclose()
+    except Exception:
+        logger.warning(
+            "webhook: закрытие потребителя MCP прогона", exc_info=True
+        )
 
 
 def _turn_done(run: ActiveRun, record: ThreadRecord | None) -> bool:

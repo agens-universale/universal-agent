@@ -43,7 +43,7 @@ class CompletionsFacade:
         settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         section: ChatConfig | None = None,
         threads: Threads | None = None,
@@ -52,7 +52,7 @@ class CompletionsFacade:
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._threads = threads or Threads.from_settings(settings)
         self.auth_token = section.auth_token or ""
@@ -68,15 +68,17 @@ class CompletionsFacade:
         thread_id = validate_thread_id(str(uuid.uuid4()))
         cwd = cwd_for_new(incoming.cwd_sent, self._launch_root)
         agent = await self._agent_for(thread_id, cwd)
+        # До старта хода агентом владеет запрос: отказ закрывает его, иначе
+        # его потребитель MCP остался бы у сервиса поверхности.
         try:
             bind_ask_human(agent)
             await seed_prior(self._threads, thread_id, incoming.prior)
+            return await self._begin(incoming, thread_id, cwd, agent)
         except Exception:
-            logger.exception("completions seed")
+            logger.exception("completions open")
             await _safe_aclose(agent)
             await _forget_quietly(self._threads, thread_id)
             raise
-        return await self._begin(incoming, thread_id, cwd, agent)
 
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         del thread_id
@@ -87,13 +89,11 @@ class CompletionsFacade:
                 instructions_path=completions_special_instructions_path(),
                 variant=COMPLETIONS,
             )
-            backend, cache = agent_io(
-                settings, cwd, self._os_backend, self._tools_cache
-            )
+            backend = agent_io(settings, cwd, self._os_backend)
             return await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=cache,
+                mcp_service=self._mcp_service,
                 os_backend=backend,
             )
 

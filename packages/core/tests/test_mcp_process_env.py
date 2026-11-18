@@ -12,6 +12,7 @@ import pytest
 
 from gc_core.mcp_runtime import env as mcp_env
 from gc_core.mcp_runtime.env import mcp_process_env
+from gc_testkit.mcp.fixtures import mcp_home  # noqa: F401
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="shebang — POSIX")
 pytestmark = pytest.mark.usefixtures("bare_path")
@@ -149,3 +150,24 @@ def test_every_stdio_launcher_uses_it(tmp_path):
         proc.wait(timeout=10)
         proc.stdin.close()
         proc.stdout.close()
+
+
+@posix_only
+def test_launcher_keeps_the_dir_of_the_server_command(tmp_path, mcp_home):
+    """Постоянный stdio у сервиса идёт через пускатель журнала: первым в
+    PATH должен встать каталог команды сервера, а не интерпретатора
+    пускателя."""
+    from gc_core.tools.connect_mcp.service import McpService
+    from gc_core.tools.connect_mcp.transport import _stdio_command
+
+    bin_dir, tool = _agent_node(tmp_path)
+    cfg = {
+        "transport": "stdio",
+        "command": str(tool),
+        "args": [],
+        "persistent_session": True,
+    }
+    launched = McpService(connect_on_start=False).with_launcher("srv", cfg)
+    cmd, _cwd, env = _stdio_command(launched)
+    assert cmd[0] != str(tool)
+    assert env["PATH"].split(os.pathsep)[0] == str(bin_dir)

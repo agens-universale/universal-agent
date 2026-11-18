@@ -73,7 +73,7 @@ from gc_core.processing_responses import (
     arun_agent,
     begin_turn_main_trace,
 )
-from gc_core.run_context import RunContext
+from gc_core.run_context import RunContext, arefresh_context_tools
 from gc_core.run_summary_coordinator import (
     RunSummaryCoordinator,
     areset_run_flags,
@@ -182,6 +182,10 @@ async def _aappend_trace_id_to_meta(
 
 async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     """Уборка после прогона: stdio-сессии, stream-сессии, владение.
+
+    Только для контекста без порта `mcp_cleanup`. С потребителем сервиса MCP
+    порт задан (уборка хода потребителя): сессии остаются у потребителя, а
+    закрываются вместе с ним.
 
     Отмену КОПИМ, а не пробрасываем сразу. Раньше `CancelledError` из первого
     шага уносил управление мимо всего остального: не закрывались
@@ -857,6 +861,30 @@ class AgentExecutor:
             (logger or logging.getLogger(__name__)).warning(
                 "on_thread_claimed hook failed", exc_info=True
             )
+
+    async def _arefresh_mcp_tools(self) -> None:
+        """Вход в ход у источника тулов с «началом хода» (спека §5.6).
+
+        Источник назначает фоновую работу и сообщает, изменился ли срез;
+        изменился — набор тулов контекста пересобирается до хода. Без
+        такого источника ход прежний; отказ не роняет ход: он идёт на
+        прежнем наборе, а закрепление сбрасывается — следующий вход в ход
+        пересоберёт набор снова.
+        """
+        source = getattr(self._ctx, "tools_cache", None)
+        start_turn = getattr(source, "astart_turn", None)
+        if start_turn is None:
+            return
+        try:
+            if await start_turn():
+                await arefresh_context_tools(self._ctx)
+        except Exception:
+            reset_pin = getattr(source, "reset_pin", None)
+            if reset_pin is not None:
+                reset_pin()
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("mcp_tools_refresh_failed", exc_info=True)
 
     async def _amcp_snapshot(
         self, thread_session, thread_id, system_id: str
@@ -1695,6 +1723,7 @@ class AgentExecutor:
         # Снять протухшие runtime-индикаторы одним атомарным store batch,
         # сохраняя прежний путь у пользовательских хранилищ без capability.
         await areset_run_flags(thread_session)
+        await self._arefresh_mcp_tools()
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
         # Начальные значения для координатора; проверка истории перечитывает
@@ -1841,8 +1870,10 @@ class AgentExecutor:
         run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
         state.run_start_usage_meta = run_start_usage.to_meta()
         # Входим во владение MCP-сессиями этого контекста. Всё, что поднимут
-        # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
-        # ровно своё, не тронув сессии параллельных агентов на том же loop.
+        # тулы внутри прогона, ляжет под этот токен — и на выходе без
+        # потребителя мы закроем ровно своё, не тронув сессии параллельных
+        # агентов на том же loop. С потребителем сервиса MCP токен — его, и
+        # уборка хода закрывает только сессии серверов с trace.
         _owner_reset = set_owner(
             getattr(self._ctx, "mcp_session_owner", "") or None
         )

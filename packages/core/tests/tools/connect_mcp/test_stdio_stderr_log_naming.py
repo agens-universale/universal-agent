@@ -118,23 +118,27 @@ def test_without_a_name_the_log_is_named_by_the_command():
 
 
 async def test_stream_stdio_persistent_crash_names_the_real_cause():
-    """Долгоживущая SDK-сессия: та же причина при входе, лог — по имени."""
-    from gc_core.tools.connect_mcp import stream_client
+    """Долгоживущая SDK-сессия: та же причина при входе, лог — по имени.
 
-    cfg = _cfg("stream_stdio", "persist", persistent_session=True)
+    Постоянную сессию открывает подключение потребителя — список тулов с
+    ключом сессии; вызов идёт по той же сессии."""
+    from gc_core.tools.connect_mcp import stream_client
+    from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
+
+    cfg = _cfg(
+        "stream_stdio",
+        "persist",
+        persistent_session=True,
+        **{SESSION_KEY_FIELD: "stream_stdio::test-persist"},
+    )
     # Класс берём из модуля сейчас: плагин набора между тестами
     # перезагружает пакет ``tools``, и класс импорта модуля теста — уже
     # другой объект.
     from gc_core.tools.connect_mcp.transport import McpServerExitedError
 
     with pytest.raises(McpServerExitedError) as info:
-        await stream_client._call_tool_stream_stdio_persistent(
-            server_key="stream_stdio::test-persist",
-            server_cfg=cfg,
-            timeout=10,
-            tool_name="noop",
-            arguments={},
-            server_name="persist_pw",
+        await stream_client.alist_tools_stream_stdio(
+            cfg, timeout=10, server_name="persist_pw"
         )
 
     assert _CRASH_LINE in str(info.value)

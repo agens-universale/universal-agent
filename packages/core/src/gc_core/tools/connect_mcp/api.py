@@ -9,8 +9,20 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from mcp.types import INTERNAL_ERROR, ErrorData
+
 from gc_core.config_modules.env_vars import mcp_media_dir
+from gc_core.tools.connect_mcp.call_errors import (
+    CALL_TIMEOUTS,
+    McpCallOutcomeUnknown,
+    first_leaf,
+)
+from gc_core.tools.connect_mcp.durable_scope import (
+    McpSessionLostError,
+    durable_calls_enabled,
+)
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.transport_policy import (
     resolve_effective_transport,
@@ -391,6 +403,37 @@ def _prepare_mcp_call(
     )
 
 
+def _rpc_error(error: Any) -> McpToolCallError:
+    """Ответ JSON-RPC ``error`` легаси-транспорта — ошибкой тула, как у
+    SDK-транспортов: модель видит отказ сервера, а не пустой успех."""
+    fields = error if isinstance(error, dict) else {}
+    code = fields.get("code")
+    return McpToolCallError(
+        ErrorData(
+            code=code if isinstance(code, int) else INTERNAL_ERROR,
+            message=str(fields.get("message") or error),
+            data=fields.get("data"),
+        )
+    )
+
+
+#: Не повторяются: вызов мог исполниться на сервере, повтор дублировал бы
+#: эффект. Ошибка тула — ответ сервера; остальные — ответа не было (в том
+#: числе истёкший срок вызова любого транспорта).
+_NOT_REPEATED = (
+    McpToolCallError,
+    McpCallOutcomeUnknown,
+    McpSessionLostError,
+    *CALL_TIMEOUTS,
+)
+
+
+def _repeatable(exc: BaseException) -> bool:
+    """Повторять ли вызов: решает первый лист группы исключений — SDK
+    отдаёт исход вызова из своих групп задач."""
+    return not isinstance(first_leaf(exc), _NOT_REPEATED)
+
+
 async def acall_mcp_tool(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
@@ -413,11 +456,13 @@ async def acall_mcp_tool(
     * SDK-транспорты (``stream_sse`` / ``stream_http`` / ``stream_stdio``, и
       сюда же уходит депрекейтнутый ``sse``) исполняются ПРЯМО на loop
       вызывающего — ни одного потока;
-    * легаси (свои ``http`` и ``stdio`` на ``requests`` и ``subprocess``)
-      блокирующие, прервать их нечем — уходят в поток, который можно бросить
-      по дедлайну. Loop при этом свободен: ``requests`` отпускает GIL на
-      сокете (замерено — 21 мс разрыва на двухсекундном вызове против 2016 мс
-      при прямом вызове в корутине).
+    * легаси ``http`` (``httpx.AsyncClient``) и разовый ``stdio``
+      (asyncio-подпроцесс) тоже идут на loop; в поток, который можно бросить
+      по дедлайну, уходит только долгоживущий stdio: обмен с ``Popen``
+      блокирующий, прервать его нечем. Loop при этом свободен: GIL на
+      ожидании трубы отпускается (когда в поток уходил и легаси на
+      ``requests``, замерено — 21 мс разрыва на двухсекундном вызове против
+      2016 мс при прямом вызове в корутине).
     """
     if tools_registry is None:
         # Реестра нет — значит нужна ДИСКАВЕРИ, а это сеть и запуск процессов.
@@ -447,12 +492,15 @@ async def acall_mcp_tool(
 
     @retry_with_backoff_async(
         interrupt_on_user_stop=True,
-        should_retry=lambda exc: not isinstance(exc, McpToolCallError),
+        should_retry=_repeatable,
         operation_name=(
             f"MCP tool call ({target.server_key}:{target.base_tool_name})"
         ),
         retry_log_level=logging.ERROR,
         no_more_retries_log_level=logging.ERROR,
+        describe_error=lambda exc: without_secrets(
+            repr(exc), target.server_cfg
+        ),
     )
     async def _ado_mcp_call() -> Any:
         # Диспетчер один — порт клиента (`McpClientPort`), который develop ввёл
@@ -462,19 +510,19 @@ async def acall_mcp_tool(
         #
         # `acall_tool` порт получил вместе с этим вливанием: у develop он был
         # только синхронным, и звать его отсюда значило морозить loop на всё
-        # время обмена. SDK-транспорты внутри идут нативно, легаси и persistent
+        # время обмена. SDK-транспорты и легаси внутри идут нативно, persistent
         # stdio — через `run_abandonable`, ровно как дискавери.
         return await target.client.acall_tool(
             target.base_tool_name, target.arguments_obj, timeout=timeout
         )
-
-    from gc_core.tools.connect_mcp.durable_scope import durable_calls_enabled
 
     data = await _ado_mcp_call(
         use_retry=target.use_retry and not durable_calls_enabled(),
         logger=logger,
     )
 
+    if isinstance(data, dict) and "error" in data and "result" not in data:
+        raise _rpc_error(data["error"])
     raw = data.get("result", data) if isinstance(data, dict) else data
     raw = await _arewrite_media_blocks(
         raw, target.arguments_obj, target.base_tool_name

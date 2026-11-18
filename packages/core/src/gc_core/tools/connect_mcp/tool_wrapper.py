@@ -32,9 +32,9 @@ class MCPToolWrapper:
         """Быстрый путь для цикла агента: диспетчер зовёт его без потока.
 
         Форма из docs/async.md — тул с парой ``acall``/``__call__``.
-        Для SDK-транспортов вызов идёт прямо на loop вызывающего; легаси
-        (свои http/stdio на requests и subprocess) уходят в поток внутри
-        ``acall_mcp_tool``, потому что прервать их всё равно нечем.
+        Вызов идёт прямо на loop вызывающего; в поток внутри
+        ``acall_mcp_tool`` уходит только долгоживущий stdio (обмен с
+        ``Popen`` блокирующий, прервать его всё равно нечем).
         """
         if self._servers_cfg is None or self._tools_registry is None:
             from gc_core.execution.contracts import ExecutionFailure

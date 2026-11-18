@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import logging
 import threading
 import uuid
 from dataclasses import dataclass
@@ -32,6 +33,17 @@ from gc_core.startup_notices import (
     collect_startup_notices,
 )
 from gc_core.summarize.summary_validation import SummaryRejectedError
+from gc_core.tools.connect_mcp.consumer_status import (
+    STATE_CONNECTED,
+    STATE_FAILED,
+)
+from gc_core.tools.connect_mcp.service import (
+    CLOSE_BUDGET_SEC,
+    CLOSE_GRACE_SEC,
+    KILL_WAIT_SEC,
+    McpService,
+)
+from gc_core.tools.mcp_snapshot import overlay_service_statuses
 from gc_core.tools.registry import all_builtin_tool_names
 from textual.app import App
 from textual.binding import Binding
@@ -39,7 +51,7 @@ from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
-from gc_tui.services.agent_loop import AgentLoop
+from gc_tui.services.agent_loop import AgentLoop, thread_has_running_loop
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.profile_lock import profile_switch_refusal
@@ -165,6 +177,45 @@ def _run_auto_check_safely(
         )
     except Exception:
         pass
+
+
+_log = logging.getLogger(__name__)
+
+#: Статусы потребителя, которые шапка принимает окончательными (§5.7):
+#: `connecting` и `cached` — сервер ещё подключается.
+_FINAL_MCP_STATES = frozenset({STATE_CONNECTED, STATE_FAILED})
+
+
+#: Потолок ожидания закрытия сервиса MCP на выходе (`_close_mcp_service`).
+#: Худший возврат `McpService.aclose()` с бюджетом по умолчанию — бюджет,
+#: отсрочка и добивание по журналу (`CLOSE_BUDGET_SEC` + `CLOSE_GRACE_SEC`
+#: + `KILL_WAIT_SEC`, при текущих значениях 15 с) по часам цикла агента, а
+#: срок `agent_loop.run` идёт от постановки корутины. Запас 3 с — на очередь
+#: занятого цикла: потолок не должен обрывать штатное закрытие (гашение
+#: оборвало бы close-тул сервера). Сработал — процессы гасит
+#: `kill_processes_now`. Худший выход окна с двумя гашениями — ожидание
+#: стопа (`STOP_SETTLE_SEC`), этот потолок, гашение (`KILL_WAIT_SEC`),
+#: остановка цикла агента (`AgentLoop.shutdown`) и снова гашение; при
+#: текущих значениях 2 + 18 + 2 + 5 + 2 = 29 с.
+MCP_CLOSE_TIMEOUT_SEC = (
+    CLOSE_BUDGET_SEC + CLOSE_GRACE_SEC + KILL_WAIT_SEC + 3.0
+)
+
+
+def _report_final_statuses(progress, names, statuses: dict) -> None:
+    """Окончательные статусы потребителя (`_FINAL_MCP_STATES`) серверов
+    ``names`` — в поколение шапки; остальные ждут."""
+    for name in names:
+        status = statuses.get(name)
+        if status is not None and status.state in _FINAL_MCP_STATES:
+            progress.update(
+                name,
+                {
+                    "status": status.state,
+                    "reason": status.reason or None,
+                    "tool_count": len(status.tools),
+                },
+            )
 
 
 def _release_runner(runner) -> None:
@@ -318,6 +369,7 @@ class TuiApp(App):
         settings: Optional[LoadedSettings] = None,
         profile_override: Optional[str] = None,
         model_override: Optional[str] = None,
+        mcp_service: Optional[McpService] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
@@ -405,6 +457,24 @@ class TuiApp(App):
         self._registered_tool_names = (
             None  # имена тулов до stop_tools — валидатор notices
         )
+        #: Сервис MCP окна (спека §5.1): один на приложение. Потребитель
+        #: «окно» открывает первая сборка исполнителя (`_window_consumer`),
+        #: и он живёт всё окно: пересборка раннера серверы не трогает.
+        self._mcp_service = (
+            mcp_service
+            if mcp_service is not None
+            else McpService(connect_on_start=True)
+        )
+        self._mcp_consumer = None
+        #: Снимок окна и статусы сервиса последнего наложения
+        #: (`refresh_mcp_snapshot`): без изменений тик не пересобирает.
+        self._mcp_followed: tuple = (None, None)
+        #: Последний сбой чтения статусов там же (тип, текст): повтор на
+        #: тике в лог не пишется.
+        self._mcp_status_failure: tuple | None = None
+        # Две сборки окна бывают одновременно (прогрев и `/profile`):
+        # потребитель открывается один раз.
+        self._mcp_consumer_lock = threading.Lock()
         self.active_runner = None  # AgentRunner | None
         #: Цикл агента приложения, один на все ходы; поток поднимается при
         #: первой отдаче работы (`AgentLoop.submit` / `call_soon`).
@@ -1745,9 +1815,18 @@ class TuiApp(App):
         runtime-уведомления: и то и другое живёт в модульных реестрах до конца
         процесса и держит приложение целиком, если его не снять.
 
-        Последним — цикл агента (`AgentLoop.shutdown`): отменить задачи,
-        глухие к стопу, закрыть пул httpx, погасить поток. Тоже в потоке пула:
+        Перед остановкой цикла — сервис MCP (`_close_mcp_service`): его
+        сессии живут на цикле агента, закрыть их можно только там и только
+        пока цикл жив.
+
+        Затем цикл агента (`AgentLoop.shutdown`): отменить задачи, глухие к
+        стопу, закрыть пул httpx, погасить поток. Тоже в потоке пула:
         shutdown синхронно ждёт цикл, а поток UI так ждать не должен.
+
+        Последним — аварийное гашение процессов MCP по журналу, безусловно:
+        сборка могла открыть потребителя уже после проверки на выходе, а
+        закрытие сессии, не уложившееся в срок остановки цикла, отменено в
+        его последнем запасе.
         """
         runner = self.active_runner
         stop = getattr(runner, "stop", None)
@@ -1760,10 +1839,44 @@ class TuiApp(App):
         if callable(wait):
             await asyncio.to_thread(wait, STOP_SETTLE_SEC)
         _release_runner(runner)
+        await asyncio.to_thread(self._close_mcp_service)
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()
         atexit.unregister(self._clear_image_pocket)
         await asyncio.to_thread(self.agent_loop.shutdown)
+        await asyncio.to_thread(self._mcp_service.kill_processes_now)
+
+    def _close_mcp_service(self) -> None:
+        """Закрыть сервис MCP окна на цикле агента (спека §5.12, линия 1).
+
+        Рабочий поток пула (из `on_unmount`): синхронное ожидание цикла с
+        потока интерфейса запрещено. Потребитель не открывался — закрывать
+        нечего, поток цикла ради закрытия не поднимается; уже закрытый
+        сервис (повторный выход) не трогается. Потребителя окна отдельно
+        не закрываем: его закрывает сервис. Сбой и срок — в лог и сразу
+        аварийное гашение: к сроку сервис мог ещё не закрыться, а на
+        вечно занятом цикле не закроется вовсе."""
+        if self._mcp_consumer is None:
+            return
+        try:
+            if self._mcp_service.closed:
+                return
+            self.agent_loop.run(
+                self._mcp_service.aclose(), timeout=MCP_CLOSE_TIMEOUT_SEC
+            )
+            return
+        except TimeoutError:
+            _log.warning(
+                "MCP: закрытие сервиса на выходе не уложилось в %s с",
+                MCP_CLOSE_TIMEOUT_SEC,
+            )
+        except Exception as exc:
+            _log.warning(
+                "MCP: сервис не закрыт на выходе: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+        self._mcp_service.kill_processes_now()
 
     def watch_app_focus(self, focused: bool) -> None:
         """Окно терминала потеряло фокус — погасить подсветку картинок в репликах
@@ -1948,10 +2061,11 @@ class TuiApp(App):
     def _build_real_executor(self):
         """Build the real AgentExecutor from config. Called when no factory injected.
 
-        Конец сборки — конец загрузки MCP для шапки, успешный или нет
-        (контракт §6.3): любой сбой сборки, в том числе до старта MCP,
-        отдаёт шапке прогресс с ошибкой, а успех отмечается только у
-        готового executor."""
+        Сбой сборки в любом месте, в том числе до старта MCP, закрывает
+        поколение шапки отказом (контракт §6.3). Удачная сборка — ещё не
+        конец загрузки (спека §5.7): серверы подключаются в фоне, и
+        поколение закрывает `settle_mcp_progress`, когда все они
+        определились."""
         from gc_tui.services.mcp_progress import McpProgress
 
         progress = McpProgress()
@@ -1963,7 +2077,9 @@ class TuiApp(App):
             published = True
 
         try:
-            executor = self._assemble_executor(progress, publish)
+            executor, loaded, mcp_status = self._assemble_executor(
+                progress, publish
+            )
         except BaseException:
             progress.finish(False)
             # Упала до публикации — прогресс ещё не на app; ставим, иначе
@@ -1972,12 +2088,178 @@ class TuiApp(App):
             if not published:
                 self._mcp_progress = progress
             raise
-        progress.finish(True)
+        self._mark_generation_built(progress, loaded, mcp_status)
         return executor
+
+    def _mark_generation_built(self, progress, loaded, mcp_status) -> None:
+        """Удачная сборка — в поколение шапки: серверы, статусы сборки
+        серверов вне набора потребителя (§5.10) и настройки сборки. Сбой
+        этого шага удачную сборку отказом не делает: поколение получает
+        итог «собрано», причина — в лог."""
+        try:
+            own = self._service_statuses()
+            outside = {
+                name: status
+                for name, status in mcp_status.items()
+                if name not in own
+            }
+            progress.mark_built(list(progress.state()[0]), outside, loaded)
+            self.settle_mcp_progress(progress)
+        except Exception as exc:
+            _log.warning(
+                "MCP: шапка не получила статусы сборки: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            progress.finish(True)
+
+    def _window_consumer(self):
+        """Потребитель MCP «окно»: открывается первой сборкой, дальше тот же.
+
+        Зовётся только из рабочего потока сборки (поток без цикла): с цикла
+        Textual открытие привязало бы сервис к циклу интерфейса, и сверки
+        на цикле агента упали бы (контракт `McpService.open_consumer`).
+        С потока, где идёт цикл, — отказ до открытия."""
+        if thread_has_running_loop():
+            raise RuntimeError(
+                "потребитель MCP окна открывается только из рабочего потока "
+                "сборки, не с цикла событий"
+            )
+        with self._mcp_consumer_lock:
+            if self._mcp_consumer is None:
+                self._mcp_consumer = self._mcp_service.open_consumer("window")
+            return self._mcp_consumer
+
+    def _service_statuses(self) -> dict:
+        """Снимок статусов потребителя окна; потокобезопасен (§5.7)."""
+        consumer = self._mcp_consumer
+        if consumer is None:
+            return {}
+        return self._mcp_service.status(consumer)
+
+    def _overlay_service_statuses(self, statuses: dict, settings) -> None:
+        """Наложить статусы сервиса на снимок и статусы окна
+        (`overlay_service_statuses`). Сбой — предупреждение в лог, копии
+        окна остаются прежними: снимок окна не роняет ни сборку, ни тик."""
+        try:
+            snapshot, mcp_status = overlay_service_statuses(
+                self._mcp_snapshot, self._mcp_status, settings, statuses
+            )
+        except Exception as exc:
+            _log.warning(
+                "MCP: статусы сервиса не наложены на снимок окна: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return
+        self._mcp_snapshot, self._mcp_status = snapshot, mcp_status
+
+    def refresh_mcp_snapshot(self) -> None:
+        """Копии окна (`_mcp_snapshot`, `_mcp_status`) — по статусам
+        потребителя окна, и после итога шапки (спека §5.7). Их читают
+        уведомление «MCP не подключились», значок футера, экран `/mcp` и
+        подписи вызовов MCP.
+
+        Поток интерфейса: тик главного экрана и открытие `/mcp`. Только
+        `service.status` и прикрытое наложение по настройкам сборки
+        текущего поколения; без потребителя или удачной сборки — ничего.
+        Снимок и статусы те же, что при прошлом наложении, — ничего: тик
+        идёт раз в 250 мс, а новый объект снимка сбрасывает кэш подписей.
+        Тот же сбой чтения статусов подряд — одно предупреждение.
+        """
+        progress = self._mcp_progress
+        built = progress.built() if progress is not None else None
+        if built is None or self._mcp_consumer is None:
+            return
+        try:
+            statuses = self._service_statuses()
+        except Exception as exc:
+            failure = (type(exc).__name__, str(exc))
+            if failure != self._mcp_status_failure:
+                _log.warning(
+                    "MCP: статусы сервиса не прочитаны: %s: %s", *failure
+                )
+            self._mcp_status_failure = failure
+            return
+        self._mcp_status_failure = None
+        seen = self._mcp_followed
+        if seen[0] is self._mcp_snapshot and seen[1] == statuses:
+            return
+        self._overlay_service_statuses(statuses, built[2])
+        self._mcp_followed = (self._mcp_snapshot, statuses)
+
+    def settle_mcp_progress(self, progress) -> None:
+        """Перенести окончательные статусы потребителя в поколение шапки.
+
+        Зовётся из рабочего потока сборки и с тика шапки; читает только
+        потокобезопасные `McpProgress` и `McpService.status`. Шапке идут
+        `connected` и `failed` (у глазка первый статус окончателен);
+        серверы вне сервиса — со статусом сборки. Поколение закрывается,
+        когда ни один сервер не остался `connecting` или `cached`; тогда
+        же снимок и статусы окна получают окончательные статусы сервиса —
+        тосты итога видят их — по настройкам сборки поколения и только у
+        поколения, которое стоит на приложении.
+
+        Сбой любого шага — предупреждение в лог и итог «собрано»: ни тик
+        интерфейса, ни удачную сборку он не роняет, копии окна прежние."""
+        try:
+            self._settle_generation(progress)
+        except Exception as exc:
+            _log.warning(
+                "MCP: шапка не получила статусы потребителя: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            progress.finish(True)
+
+    def _settle_generation(self, progress) -> None:
+        """Шаг `settle_mcp_progress` без прикрытия."""
+        built = progress.built()
+        if built is None or progress.state()[1] is not None:
+            return
+        names, outside, settings = built
+        statuses = self._service_statuses()
+        for name in names & outside.keys():
+            progress.update(name, outside[name])
+        _report_final_statuses(progress, names - outside.keys(), statuses)
+        if any(
+            statuses[name].state not in _FINAL_MCP_STATES
+            for name in names
+            if name in statuses
+        ):
+            return
+        if self._mcp_progress is progress:
+            self._overlay_service_statuses(statuses, settings)
+        progress.finish(True)
+
+    def _report_settled_servers(self, progress, loaded) -> None:
+        """Серверы, уже определившиеся у потребителя окна с тем же
+        определением, что у сборки ``loaded``, — в поколение до его
+        публикации: пересборка без изменений не показывает загрузку, а
+        изменённый сервер под тем же ключом ждёт своего статуса (спека
+        §5.7). Сбой чтения статусов — предупреждение в лог, сборку он не
+        роняет: поколение ждёт статусов, как на первой сборке."""
+        consumer = self._mcp_consumer
+        try:
+            statuses = (
+                {}
+                if consumer is None
+                else self._mcp_service.matching_status(consumer, loaded)
+            )
+        except Exception as exc:
+            _log.warning(
+                "MCP: статусы сервиса не прочитаны до сборки: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return
+        _report_final_statuses(progress, progress.state()[0], statuses)
 
     def _assemble_executor(self, progress, publish):
         """Сборка executor; прогресс MCP встаёт на app (`publish`) после
-        `begin`, чтобы шапка не приняла пустой список серверов за «MCP нет»."""
+        `begin`, чтобы шапка не приняла пустой список серверов за «MCP нет».
+        Статусы серверов в прогресс пишет не сборка, а `settle_mcp_progress`.
+        Отдаёт исполнитель, настройки сборки и статусы MCP её контекста."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import (
             cli_forces_legacy_model,
@@ -1994,6 +2276,7 @@ class TuiApp(App):
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress.begin(list(effective_mcp_servers(loaded)))
+        self._report_settled_servers(progress, loaded)
         publish()
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 
@@ -2002,6 +2285,8 @@ class TuiApp(App):
             signal=self._post_stream_signal,
             throttle_s=STREAM_REFRESH_MS / 1000,
         )
+        # Один потребитель MCP на окно — в каждую сборку (спека §6).
+        consumer = self._window_consumer()
         # Сборка — на общем цикле агента, как ход и `/compact`: MCP-сессии и
         # клиенты, открытые сборкой, живут на цикле, где их и используют.
         # Фабрика зовётся в рабочем потоке раннера (не UI), поэтому
@@ -2013,7 +2298,7 @@ class TuiApp(App):
             acreate_run_context(
                 loaded,
                 auth_connector=auth,
-                on_progress=progress.update,
+                mcp_consumer=consumer,
                 on_stream_delta=self._stream_pump.on_delta,
                 is_tui=True,
                 choice_provider=choice_provider,
@@ -2040,21 +2325,24 @@ class TuiApp(App):
         ctx.subagent_progress_sink = self._subagent_progress_sink
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
+        # Пишет только сборка, чей прогресс стоит на приложении: обогнанная
+        # сборка, закончившая позже, копии новой не перетирает.
         from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 
-        self._mcp_snapshot = build_mcp_tools_snapshot(
-            loaded, ctx.tools_data, ctx.mcp_status
-        )
-        self._mcp_status = ctx.mcp_status
-        self._registered_tool_names = getattr(
-            ctx, "registered_tool_names", None
-        )
+        if self._mcp_progress is progress:
+            self._mcp_snapshot = build_mcp_tools_snapshot(
+                loaded, ctx.tools_data, ctx.mcp_status
+            )
+            self._mcp_status = ctx.mcp_status
+            self._registered_tool_names = getattr(
+                ctx, "registered_tool_names", None
+            )
         # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
         runner = self.active_runner
         if runner is not None and hasattr(runner, "make_tui_confirm"):
             ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         register_runtime_notices_listener(self._on_runtime_notice)
-        return AgentExecutor(ctx)
+        return AgentExecutor(ctx), loaded, ctx.mcp_status
 
     def _post_stream_signal(self) -> None:
         """Сигнал стрима с цикла агента: неблокирующе, сообщением в очередь

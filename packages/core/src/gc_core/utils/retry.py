@@ -25,6 +25,14 @@ class _RetryPolicy:
     retry_log_level: int
     no_more_retries_log_level: int
     operation_name: str
+    #: Описание ошибки для лога; ``None`` — ``repr``. Вызывающий, у кого в
+    #: тексте ошибки бывают секреты (адрес со строкой запроса), их маскирует.
+    describe_error: Optional[Callable[[Exception], str]] = None
+
+    def describe(self, exc: Exception) -> str:
+        if self.describe_error is None:
+            return repr(exc)
+        return self.describe_error(exc)
 
     def retriable(self, attempt: int, exc: Exception) -> bool:
         if attempt >= self.max_attempts:
@@ -36,12 +44,12 @@ class _RetryPolicy:
     ) -> None:
         logger.log(
             self.no_more_retries_log_level,
-            "%s failed (attempt %s/%s, no more retries). url=%s error=%r",
+            "%s failed (attempt %s/%s, no more retries). url=%s error=%s",
             self.operation_name,
             attempt,
             self.max_attempts,
             url,
-            exc,
+            self.describe(exc),
         )
 
     def log_retrying(
@@ -49,13 +57,13 @@ class _RetryPolicy:
     ) -> None:
         logger.log(
             self.retry_log_level,
-            "%s failed (attempt %s/%s). Retrying in %.1f sec url=%s error=%r",
+            "%s failed (attempt %s/%s). Retrying in %.1f sec url=%s error=%s",
             self.operation_name,
             attempt,
             self.max_attempts,
             delay,
             url,
-            exc,
+            self.describe(exc),
         )
 
 

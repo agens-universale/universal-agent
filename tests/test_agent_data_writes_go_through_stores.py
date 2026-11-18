@@ -49,6 +49,11 @@ _EDITS = (
     "журнал и снимки правок workspace — до перевода журнала на append_side"
 )
 _MCP_RUNTIME = "MCP runtime: установка и состояние серверов"
+_MCP_PROCESSES = (
+    "журнал процессов MCP — учёт процессов хоста (pid, группа, метка) для "
+    "аварийного гашения и уборки сирот, не данные агента; файл запуска "
+    "пишет сам пускатель"
+)
 _VOICE = "голосовой рантайм: свои аренды и состояние"
 _UPDATER = "апдейтер"
 _TESTKIT_REASON = "тестовый инструментарий, в продукт не входит"
@@ -98,6 +103,11 @@ ALLOWED: dict[str, str] = {
     # MCP.
     _CORE + "mcp_runtime/state.py": _MCP_RUNTIME,
     _CORE + "tools/connect_mcp/api.py": "медиа MCP вне треда",
+    _CORE + "tools/connect_mcp/catalog.py": (
+        "каталог тулов MCP — кеш сырых списков тулов серверов"
+    ),
+    _CORE + "tools/connect_mcp/process_journal.py": _MCP_PROCESSES,
+    _CORE + "tools/connect_mcp/spawn_launcher.py": _MCP_PROCESSES,
     _CORE + "tools/connect_mcp/stderr_capture.py": (
         "pipe и ограниченный stderr-лог MCP — диагностика, не данные агента"
     ),
@@ -140,6 +150,9 @@ ALLOWED: dict[str, str] = {
     _TESTKIT + "develop_files.py": _TESTKIT_REASON,
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,
+    _TESTKIT + "mcp/__init__.py": "файл поведения тестового сервера",
+    _TESTKIT + "mcp/stdio_server.py": "журнал тестового сервера",
+    _TESTKIT + "mcp/stream_server.py": "журнал тестового сервера",
     _TESTKIT + "plugin_store.py": _TESTKIT_REASON,
     _TESTKIT + "tui_fixtures/stub_executor.py": _TESTKIT_REASON,
 }

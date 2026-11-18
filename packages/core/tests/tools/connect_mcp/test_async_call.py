@@ -12,6 +12,7 @@ import threading
 import pytest
 from gc_core.tools.connect_mcp import api, client_port, stream_client
 from gc_core.tools.connect_mcp.agent_tools import MCPToolWrapper
+from gc_core.tools.connect_mcp.durable_scope import durable_mcp_calls
 
 _REGISTRY = {
     "mcp_srv_echo": {
@@ -213,8 +214,6 @@ async def test_dispatcher_refuses_a_tool_without_acall():
 async def test_durable_scope_disables_outer_retry_even_when_config_enabled(
     monkeypatch,
 ):
-    from gc_core.tools.connect_mcp.durable_scope import durable_mcp_calls
-
     calls = []
 
     async def fail(**_kwargs):

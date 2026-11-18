@@ -152,7 +152,7 @@ class AcpFacade:
         writer: Any,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         session_index: SessionIndex | None = None,
     ) -> None:
@@ -160,7 +160,9 @@ class AcpFacade:
         self._writer = writer
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        # Сервис MCP процесса: агент сессии открывает у него своего
+        # потребителя, ``shutdown`` закрывает его после агентов.
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._index = session_index or SessionIndex.from_settings(settings)
         self._sessions: dict[str, LiveSession] = {}
@@ -169,6 +171,11 @@ class AcpFacade:
         self._create_lock = asyncio.Lock()
         self._pending = PendingOutbound()
         self._loop: asyncio.AbstractEventLoop | None = None
+
+    @property
+    def mcp_service(self) -> Any:
+        """Сервис MCP процесса; ``None`` — фасад без сервиса."""
+        return self._mcp_service
 
     async def handle_line(self, line: str) -> None:
         self._loop = asyncio.get_running_loop()
@@ -212,19 +219,34 @@ class AcpFacade:
             return CONFIRM_TIMED_OUT
 
     async def shutdown(self) -> None:
-        """Отменить живые ходы и закрыть простаивающих агентов.
+        """Отменить ходы, закрыть сервис MCP, затем простаивающих агентов.
 
         Идущий ход не ждём: stop() кооперативный, команда может занять
-        весь таймаут, а stdin после выхода уже закрыт.
+        весь таймаут, а stdin после выхода уже закрыт. Сервис — до агентов:
+        он закрывает потребителей всех агентов разом, в общий бюджет, а
+        закрытие агентов по одному шло бы без бюджета и складывалось бы по
+        агентам. Потребитель агента к его закрытию уже закрыт — оно быстрое.
+        Агента с идущим ходом не закрываем: его потребителя закрыл сервис.
         """
+        try:
+            idle = self._stop_turns()
+        finally:
+            await _safe_aclose(self._mcp_service)
+        for agent in idle:
+            await _safe_aclose(agent)
+
+    def _stop_turns(self) -> list[Any]:
+        """Снять ожидания и идущие ходы; агенты простаивающих сессий."""
         self._pending.cancel_all(cancelled_reply())
         leftover = list(self._sessions.values())
         self._sessions.clear()
+        idle = []
         for live in leftover:
             if _prompt_running(live):
                 _mark_cancel(live)
-                continue
-            await _safe_aclose(live.agent)
+            else:
+                idle.append(live.agent)
+        return idle
 
     async def _dispatch(self, incoming: Incoming) -> None:
         if incoming.method in _SILENT:
@@ -588,7 +610,7 @@ class AcpFacade:
             agent = await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=self._tools_cache,
+                mcp_service=self._mcp_service,
                 os_backend=self._session_backend(live),
                 choice_provider=choice_provider,
             )

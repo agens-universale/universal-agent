@@ -78,16 +78,33 @@ class McpPeephole:
         outcome: bool | None,
     ) -> bool:
         """Принять снимок; True — изменилось то, что видно на экране.
-        Число серверов задаёт поколение: список фиксируется до публикации."""
+        Число серверов задаёт поколение: список фиксируется до публикации.
+
+        Поколение, все серверы которого отчитались к первому снимку, пока
+        виден итог прошлого, загрузку не показывает: сразу итог
+        (пересборка без изменений, спека §5.7). Конец сборки ждётся, как
+        у поколения без серверов."""
         before = self._view()
         if source is not self._source:
+            keep_result = self._source is not None and (
+                self._phase == "settled"
+            )
             self._source = source
             self._generation += 1
             self._reset(len(servers))
+            if keep_result and None not in servers.values():
+                self._settle_reported(servers)
         if self._phase != "failed":
             self._enqueue_reported(servers)
             self._apply_outcome(servers, outcome)
         return self._view() != before
+
+    def _settle_reported(self, servers: Mapping[str, Mapping]) -> None:
+        self._queued.update(servers)
+        self._connected = sum(
+            status.get("status") == "connected" for status in servers.values()
+        )
+        self._phase = "settled"
 
     def _view(self) -> tuple:
         return (

@@ -58,7 +58,7 @@ class ResponsesFacade:
         settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         index: ResponseIndex | None = None,
         section: ChatConfig | None = None,
@@ -67,7 +67,7 @@ class ResponsesFacade:
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._index = index or ResponseIndex.for_threads_dir(
             resolve_threads_dir(settings)
@@ -131,7 +131,8 @@ class ResponsesFacade:
     def turn_busy(self, thread_id: str) -> bool:
         return thread_id in self._busy
 
-    async def shutdown(self) -> None:
+    async def stop_turns(self) -> None:
+        """Снять идущие ходы и дождаться их конца; повтор безвреден."""
         await self.recovery.stop()
         runs = list(self._live.values())
         for run in runs:
@@ -146,6 +147,9 @@ class ResponsesFacade:
                     logger.exception(
                         "responses shutdown finalization %s", run.response_id
                     )
+
+    async def shutdown(self) -> None:
+        await self.stop_turns()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
@@ -222,13 +226,11 @@ class ResponsesFacade:
                 cwd=cwd,
                 instructions_path=responses_special_instructions_path(),
             )
-            backend, cache = agent_io(
-                settings, cwd, self._os_backend, self._tools_cache
-            )
+            backend = agent_io(settings, cwd, self._os_backend)
             agent = await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=cache,
+                mcp_service=self._mcp_service,
                 os_backend=backend,
             )
             try:
