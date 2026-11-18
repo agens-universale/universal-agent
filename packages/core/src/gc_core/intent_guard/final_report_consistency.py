@@ -18,6 +18,7 @@ from gc_core.intent_guard.trace_digest import (
 )
 from gc_core.intent_guard.validation_result import (
     ValidationResult,
+    conflicting_validator_verdicts,
     fail_open_validation_result,
     parse_validator_response,
     salvage_validator_axes,
@@ -200,6 +201,18 @@ def _resolve_after_unparseable_replies(
     logger: Any,
 ) -> ValidationResult:
     """Retry уже сделан; пробуем salvage осей, иначе fail-open accept."""
+    conflict = conflicting_validator_verdicts(
+        raw_retry
+    ) or conflicting_validator_verdicts(raw)
+    if conflict is not None:
+        if logger is not None:
+            logger.warning(
+                "finish_gate conflicting complete verdicts remain after retry; "
+                "using conservative axes trace_ok=%s report_ok=%s",
+                conflict.trace_ok,
+                conflict.report_ok,
+            )
+        return conflict
     salvaged = salvage_validator_axes(raw_retry) or salvage_validator_axes(raw)
     if salvaged is None:
         return fail_open_validation_result()

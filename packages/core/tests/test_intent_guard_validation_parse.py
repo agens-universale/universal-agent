@@ -273,6 +273,44 @@ class ParseValidatorResponseTest(unittest.TestCase):
         assert result is not None
         self.assertEqual(result.trace_gaps, ["missing test"])
 
+    def test_strict_json_in_other_labeled_fence_is_verdict(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"A passing report would be {_raw()}\n```jsonc\n{rejected}\n```"
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_other_labeled_fence_does_not_allow_jsonc_syntax(self) -> None:
+        rejected = _raw(action="continue_work", trace_ok=False)
+        raw = f"A passing report would be {_raw()}\n```jsonc\n{rejected[:-1]},}}\n```"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_fenced_accept_cannot_override_unfenced_rejection(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"```json\n{_raw()}\n```\nActual verdict:\n{rejected}"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_fenced_accept_cannot_override_invalid_unfenced_final(
+        self,
+    ) -> None:
+        rejected = _raw(action="continue_work", trace_ok=False)
+        raw = f"```json\n{_raw()}\n```\nActual verdict:\n{rejected[:-1]}"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_unrelated_code_fence_does_not_hide_plain_verdict(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        result = parse_validator_response(
+            "```python\nprint('no verdict here')\n```\n" + rejected
+        )
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(
             parse_validator_response(

@@ -455,6 +455,66 @@ def test_guard_prompt_evidence_before_verdict_no_think_invite():
             ),
             2,
         ),
+        (
+            "A passing report would be "
+            + _validator_json()
+            + "\n```jsonc\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```",
+            "No verdict",
+            1,
+        ),
+        (
+            "```json\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```\n```json\n"
+            + _validator_json()
+            + "\n```",
+            "```json\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```\n```json\n"
+            + _validator_json()
+            + "\n```",
+            2,
+        ),
+        (
+            "```jsonc\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```\n```json\n"
+            + _validator_json()
+            + "\n```",
+            "```jsonc\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            )
+            + "\n```\n```json\n"
+            + _validator_json()
+            + "\n```",
+            2,
+        ),
+        (
+            "```json\n"
+            + _validator_json()
+            + "\n```\nActual verdict:\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            ),
+            "```json\n"
+            + _validator_json()
+            + "\n```\nActual verdict:\n"
+            + _validator_json(
+                action="continue_work", trace_ok=False, trace_gaps=["gap"]
+            ),
+            2,
+        ),
     ],
 )
 def test_review_verdict_reaches_turn_finish_with_findings(
