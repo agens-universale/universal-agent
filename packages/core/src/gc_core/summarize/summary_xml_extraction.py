@@ -13,6 +13,7 @@ _TOKEN = re.compile(
     rf"<!\[CDATA\[.*?\]\]>|</think>|</?summary>|</?(?:{_SECTIONS})>",
     re.DOTALL,
 )
+_ROOT_FIRST_SECTION = re.compile(rf"\s*<(?:{_SECTIONS})>")
 _SUMMARY_OPEN = "<summary>"
 _SUMMARY_CLOSE = "</summary>"
 _THINK_CLOSE = "</think>"
@@ -25,16 +26,30 @@ def _outside_cdata(source: str):
             yield match
 
 
+def _candidate_tokens(source: str):
+    for match in _outside_cdata(source):
+        if match.group() == _SUMMARY_OPEN and not _ROOT_FIRST_SECTION.match(
+            source, match.end()
+        ):
+            continue
+        yield match
+
+
+def _remaining_section(token: str, active_section: str) -> str | None:
+    return None if token == f"</{active_section}>" else active_section
+
+
 def _outer_tokens(source: str) -> list[re.Match[str]]:
     """Ignore section text and CDATA while locating the summary envelope."""
     tokens: list[re.Match[str]] = []
     in_summary = False
     active_section: str | None = None
-    for match in _outside_cdata(source):
+    for match in _candidate_tokens(source):
         token = match.group()
         if active_section is not None:
-            if token == f"</{active_section}>":
-                active_section = None
+            active_section = _remaining_section(token, active_section)
+            continue
+        if token == _SUMMARY_CLOSE and not in_summary:
             continue
         if in_summary and token not in _OUTER_TOKENS:
             if not token.startswith("</"):

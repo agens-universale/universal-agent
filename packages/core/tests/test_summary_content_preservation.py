@@ -48,6 +48,7 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         "truncated_compression",
         "ambiguous_compression",
         "ambiguous_primary",
+        "truncated_final_after_draft",
     ],
 )
 async def test_failed_summary_preserves_live_and_saved_history(
@@ -59,6 +60,7 @@ async def test_failed_summary_preserves_live_and_saved_history(
         "incomplete_compression",
         "truncated_compression",
         "ambiguous_compression",
+        "truncated_final_after_draft",
     }
     thread_id = f"failed-summary-{has_previous_summary}"
     prior = valid_summary_xml_for_tests(seed="confirmed-prior-context")
@@ -92,6 +94,13 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if response_mode == "truncated_final_after_draft":
+            if kwargs["request_label"] == "summary_compress":
+                return (
+                    valid_summary_xml_for_tests(seed="previous draft")
+                    + "\n</think>\n<summary><task_and_context>truncated final"
+                )
+            return valid_summary_xml_for_tests(seed="valid-before-compression")
         if response_mode == "ambiguous_primary":
             if kwargs["request_label"].startswith("summary_batch"):
                 return (
