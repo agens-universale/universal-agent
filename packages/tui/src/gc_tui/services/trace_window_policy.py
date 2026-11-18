@@ -19,9 +19,10 @@ WINDOW_LIMIT = 1000
 TAIL_MIN = 200
 #: Кусок истории, домонтируемый к краю, — не меньше стольких виджетов.
 CHUNK_MIN = 90
-#: Кусок не больше стольких виджетов: столько монтаж успевает за кадр
-#: подгрузки (~150 мс на стенде §12). Держит его размер шага
-#: (`trace_steps.STEP_MIN_ITEMS`), а не политика: шаг идёт целиком.
+#: Кусок не больше стольких виджетов по оценке: столько монтаж успевает
+#: за кадр подгрузки (~150 мс на стенде §12). Кусок набирает
+#: ``CHUNK_MIN``, но не сверх ``CHUNK_MAX`` (один шаг берётся всегда), а
+#: шаг не больше ``CHUNK_MAX`` по оценке (`trace_steps.STEP_MAX_ITEMS`).
 CHUNK_MAX = 200
 #: Запас до края смонтированного, в экранах: меньше — следующий кусок.
 PREFETCH_SCREENS = 2
@@ -31,10 +32,15 @@ PREFETCH_SCREENS = 2
 ITEM_WIDGETS = 9
 
 
-def _start_back(end: int, widget_counts: Sequence[int], budget: int) -> int:
-    """Начало целых шагов перед ``end``, набравших ``budget`` виджетов."""
+def _start_back(
+    end: int, widget_counts: Sequence[int], budget: int, cap: float
+) -> int:
+    """Начало целых шагов перед ``end``, набравших ``budget`` виджетов,
+    но не сверх ``cap`` (один шаг — всегда)."""
     start, total = end, 0
     while start > 0 and total < budget:
+        if total and total + widget_counts[start - 1] > cap:
+            break
         start -= 1
         total += widget_counts[start]
     return start
@@ -43,12 +49,15 @@ def _start_back(end: int, widget_counts: Sequence[int], budget: int) -> int:
 def tail_steps(widget_counts: Sequence[int], budget: int) -> range:
     """Последние шаги, набравшие ``budget`` виджетов (или все)."""
     end = len(widget_counts)
-    return range(_start_back(end, widget_counts, budget), end)
+    return range(_start_back(end, widget_counts, budget, float("inf")), end)
 
 
-def prev_chunk(first: int, widget_counts: Sequence[int], chunk: int) -> range:
-    """Шаги перед ``first``, набравшие ``chunk`` виджетов (или все)."""
-    return range(_start_back(first, widget_counts, chunk), first)
+def prev_chunk(
+    first: int, widget_counts: Sequence[int], chunk: int, cap: int
+) -> range:
+    """Шаги перед ``first``, набравшие ``chunk`` виджетов (или все), не
+    сверх ``cap`` (один шаг — всегда)."""
+    return range(_start_back(first, widget_counts, chunk, cap), first)
 
 
 def trim_to(mounted: int, limit: int, chunk: int) -> int | None:
@@ -61,12 +70,14 @@ def trim_to(mounted: int, limit: int, chunk: int) -> int | None:
 
 
 def next_chunk(
-    start: int, stop: int, widget_counts: Sequence[int], chunk: int
+    start: int, stop: int, widget_counts: Sequence[int], chunk: int, cap: int
 ) -> range:
-    """Шаги с ``start``, набравшие ``chunk`` виджетов, — не дальше
-    ``stop`` (конец разрыва)."""
+    """Шаги с ``start``, набравшие ``chunk`` виджетов, не сверх ``cap``
+    (один шаг — всегда), — не дальше ``stop`` (конец разрыва)."""
     end, total = start, 0
     while end < stop and total < chunk:
+        if total and total + widget_counts[end] > cap:
+            break
         total += widget_counts[end]
         end += 1
     return range(start, end)

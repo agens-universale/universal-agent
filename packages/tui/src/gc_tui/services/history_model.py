@@ -183,6 +183,15 @@ class HistoryModel:
             return len(self.step_starts)
         return bisect_left(self.step_starts, self.turn_starts[turn])
 
+    def starts_step(self, no: int) -> bool:
+        """Событие с номером ``no`` — первый элемент своего шага: живой
+        путь закрывает на нём группу вызовов (`trace_steps`)."""
+        i = self._item_of_no.get(no)
+        if i is None:
+            return False
+        at = bisect_left(self.step_starts, i)
+        return at < len(self.step_starts) and self.step_starts[at] == i
+
     def item_step(self, i: int) -> int:
         """Шаг элемента ``i``."""
         return bisect_right(self.step_starts, i) - 1

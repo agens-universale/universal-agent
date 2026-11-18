@@ -3260,6 +3260,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._mount_turn_line(outcome)
 
     def _draw_event(self, ev, *, live: bool) -> None:
+        view = self._block_views.get("")
+        if view is not None and self._feed_history.starts_step(ev.no):
+            # Граница шага закрывает группу вызовов, как отрисовщик
+            # кусков рисует шаг своим видом блоков (`trace_steps`).
+            view.event_closing()
         self._render_event(ev, live=live)
         # Spec 2026-05-26 + 2026-05-28: запоминаем kind последнего события.
         # Для submit_solution финального ответа — sticky sentinel

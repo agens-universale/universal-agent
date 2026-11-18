@@ -277,7 +277,10 @@ class TraceWindowMixin:
     def _window_prepend(self, *, focus: bool) -> bool:
         model = self._window_model()
         steps = policy.prev_chunk(
-            self._window_first, self._window_estimates(model), policy.CHUNK_MIN
+            self._window_first,
+            self._window_estimates(model),
+            policy.CHUNK_MIN,
+            policy.CHUNK_MAX,
         )
         if not steps:
             return False
@@ -294,6 +297,7 @@ class TraceWindowMixin:
             gap.stop,
             self._window_estimates(self._window_model()),
             policy.CHUNK_MIN,
+            policy.CHUNK_MAX,
         )
         if not steps:
             return False

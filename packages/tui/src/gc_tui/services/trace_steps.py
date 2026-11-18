@@ -17,7 +17,19 @@
   (ход короче и так не больше куска окна — он один шаг, как раньше), в
   шаге набралось не меньше ``STEP_MIN_ITEMS`` элементов, а сдачи
   ``submit_solution`` в ходе ещё не было (попытки сдачи сворачивают одна
-  другую — они остаются в одном шаге).
+  другую — они остаются в одном шаге);
+- обязательно — на любом событии, кроме исхода вызова, когда в шаге
+  набралось ``STEP_MAX_ITEMS`` элементов и ни один вызов шага не ждёт
+  исхода (строка вызова и её исход — в одном шаге). Серия вызовов без
+  прозы так делится на шаги не больше куска окна. Группа вызовов на такой
+  границе закрывается на обоих путях: отрисовщик рисует шаг своим видом
+  блоков, живой путь закрывает группу на первом элементе шага
+  (`HistoryModel.starts_step`) — длинная серия однородных вызовов
+  показывается несколькими группами, одинаково при открытии и вживую.
+
+Непокрыто: после первой сдачи границ нет, и вызов, оставшийся без исхода
+посреди хода, держит обязательную границу до исхода — такой остаток хода
+одним шагом.
 
 Исход вызова может прийти в следующем шаге (параллельные вызовы, исход
 после сжатия). Его виджеты встают якорем к строке вызова, а не в конец
@@ -35,20 +47,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.answer_flow import AnswerFlow
 
 if TYPE_CHECKING:
     from gc_tui.models import TraceEvent
     from gc_tui.services.history_model import HistoryItem
 
-#: Элементов модели в шаге не меньше стольких: раньше граница не ставится.
-#: С оценкой ``ITEM_WIDGETS`` виджетов на элемент шаг не меньше куска
-#: окна (``CHUNK_MIN``).
+#: Элементов модели в шаге не больше стольких (до ближайшей
+#: обязательной границы): по оценке ``ITEM_WIDGETS`` шаг не больше куска
+#: окна ``CHUNK_MAX``.
+STEP_MAX_ITEMS = policy.CHUNK_MAX // policy.ITEM_WIDGETS
+#: Мягкая граница (проза и прочие строки не из вызовов) — не раньше
+#: стольких элементов в шаге: с оценкой ``ITEM_WIDGETS`` шаг не меньше
+#: куска окна (``CHUNK_MIN``).
 STEP_MIN_ITEMS = 10
-#: Ход делится, только когда он длиннее стольких элементов: по оценке
-#: ``ITEM_WIDGETS`` это ``CHUNK_MAX`` виджетов — ход короче и так встаёт
-#: одним куском, и окно для него остаётся окном по ходам.
-SPLIT_FROM_ITEMS = 24
+#: Ход делится мягкими границами, только когда он длиннее стольких
+#: элементов: ход не длиннее шага — один шаг, окно для него остаётся
+#: окном по ходам.
+SPLIT_FROM_ITEMS = STEP_MAX_ITEMS
 
 #: Вызов сдачи хода: его попытки сворачивают одна другую.
 _FINISH_TOOL = "submit_solution"
@@ -92,6 +109,8 @@ class StepSplitter:
     # Элементов в шаге и в ходе до дописываемого.
     _size: int
     _turn_size: int
+    # Вызовы хода без исхода.
+    _awaiting: set[str]
 
     def __init__(self) -> None:
         self.turn_started()
@@ -102,21 +121,38 @@ class StepSplitter:
         self._finished = False
         self._size = 0
         self._turn_size = 0
+        self._awaiting = set()
 
     def feed(self, item: HistoryItem, withdrawn: set[str]) -> bool:
         """Элемент ``item`` дописан в ход; True — он начинает новый шаг."""
         ev = item.event
-        starts = item.kind == "event" and shown(ev, withdrawn)
-        if starts:
+        starts = False
+        if item.kind == "event" and shown(ev, withdrawn):
             assert ev is not None
+            # Обязательная граница — пока событие и исход за ним (у
+            # вызова) ещё помещаются в шаг.
+            forced = (
+                not self._finished
+                and ev.kind not in RESULT_KINDS
+                and self._size + 1 >= STEP_MAX_ITEMS
+                and not self._awaiting
+            )
             free = (
                 not self._finished
                 and self._size >= STEP_MIN_ITEMS
                 and self._turn_size >= SPLIT_FROM_ITEMS
             )
-            starts = replay_answer(self._flow, ev) and free
-            if ev.kind == "agent" and ev.tool_name == _FINISH_TOOL:
-                self._finished = True
+            starts = (replay_answer(self._flow, ev) and free) or forced
+            self._note(ev)
         self._turn_size += 1
         self._size = 1 if starts else self._size + 1
         return starts
+
+    def _note(self, ev: TraceEvent) -> None:
+        """Вызовы без исхода и сдача хода."""
+        if ev.kind == "call" and ev.call_id:
+            self._awaiting.add(ev.call_id)
+        elif ev.kind in RESULT_KINDS and ev.call_id:
+            self._awaiting.discard(ev.call_id)
+        elif ev.kind == "agent" and ev.tool_name == _FINISH_TOOL:
+            self._finished = True

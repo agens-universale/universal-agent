@@ -1,5 +1,6 @@
-"""Политика окна ленты: какие ходы смонтированы (спека шага 2 окна, §5.3,
-§6). Единица — виджет поддерева ленты, ход — минимальная единица окна."""
+"""Политика окна ленты: какие шаги ходов смонтированы (спека шага 2
+окна, §5.3, §6). Единица — виджет поддерева ленты, шаг хода —
+минимальная единица окна."""
 
 from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.trace_window_policy import (
@@ -25,10 +26,26 @@ def test_tail_covers_budget():
 
 def test_prev_chunk_whole_turns():
     counts = [10, 20, 30, 40, 50]
-    assert prev_chunk(4, counts, 45) == range(2, 4)
-    assert prev_chunk(4, counts, 40) == range(3, 4)
-    assert prev_chunk(2, counts, 1000) == range(2)
-    assert prev_chunk(0, counts, 10) == range(0)
+    assert prev_chunk(4, counts, 45, 1000) == range(2, 4)
+    assert prev_chunk(4, counts, 40, 1000) == range(3, 4)
+    assert prev_chunk(2, counts, 1000, 1000) == range(2)
+    assert prev_chunk(0, counts, 10, 1000) == range(0)
+
+
+def test_chunk_not_over_max_unless_one_step():
+    """Кусок набирает ``chunk``, но не сверх ``cap``; один шаг — всегда,
+    даже больше ``cap``."""
+    counts = [100, 80, 30, 70]
+    assert prev_chunk(4, counts, 90, 150) == range(2, 4)
+    assert prev_chunk(4, counts, 200, 150) == range(2, 4)
+    assert prev_chunk(1, counts, 90, 50) == range(1)
+    assert next_chunk(0, 4, counts, 90, 150) == range(1)
+    assert next_chunk(1, 4, counts, 200, 150) == range(1, 3)
+    assert next_chunk(0, 4, counts, 90, 50) == range(1)
+
+
+def test_chunk_max_holds_chunk_min_and_a_step():
+    assert policy.CHUNK_MAX >= policy.CHUNK_MIN
 
 
 def test_trim_hysteresis():
@@ -39,10 +56,10 @@ def test_trim_hysteresis():
 
 def test_next_chunk_whole_turns_up_to_gap_end():
     counts = [10, 20, 30, 40, 50]
-    assert next_chunk(1, 5, counts, 45) == range(1, 3)
-    assert next_chunk(1, 5, counts, 20) == range(1, 2)
-    assert next_chunk(1, 3, counts, 1000) == range(1, 3)
-    assert next_chunk(3, 3, counts, 10) == range(3, 3)
+    assert next_chunk(1, 5, counts, 45, 1000) == range(1, 3)
+    assert next_chunk(1, 5, counts, 20, 1000) == range(1, 2)
+    assert next_chunk(1, 3, counts, 1000, 1000) == range(1, 3)
+    assert next_chunk(3, 3, counts, 10, 1000) == range(3, 3)
 
 
 def test_edge_drops_whole_turns_from_edge():
@@ -74,7 +91,7 @@ def test_invariant_limit():
 
 def test_giant_turn_is_one_unit():
     assert tail_steps([10, 5000], 600) == range(1, 2)
-    assert prev_chunk(2, [10, 5000], 300) == range(1, 2)
+    assert prev_chunk(2, [10, 5000], 300, 600) == range(1, 2)
     assert edge_drops([5000, 10], 4000) == 1
 
 

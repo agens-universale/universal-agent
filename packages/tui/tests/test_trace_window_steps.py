@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -18,11 +19,17 @@ from feed_dump import (
     HistoryFixture,
     feed_dump,
     feed_live,
+    without_ephemeral,
     write_history,
 )
-from gc_testkit.tui_support import wait_until
+from gc_testkit.tui_support import pinned_snapshot_clock, wait_until
 from gc_tui.services import trace_window_policy as policy
-from gc_tui.services.trace_steps import SPLIT_FROM_ITEMS, STEP_MIN_ITEMS
+from gc_tui.services.trace_steps import (
+    SPLIT_FROM_ITEMS,
+    STEP_MAX_ITEMS,
+    STEP_MIN_ITEMS,
+)
+from test_feed_parity_baseline import _settled_dump
 from test_trace_ephemera import _app
 from test_trace_window_far_edge import _call, _message
 from textual import events
@@ -92,6 +99,47 @@ def _giant_turn(i: int, calls: int, *, outcome: bool = True) -> list[dict]:
     return records
 
 
+def _find(i: int, k: int) -> list[dict]:
+    """Поиск по файлам — вызов группы `Explored`."""
+    cid = f"find_{i}_{k}"
+    args = {"path": "/p", "pattern": f"f{k}"}
+    output = {"tool": "fs_find_in_files", "ok": True, **args, "matches": []}
+    return [
+        _message(
+            {
+                "arguments": json.dumps(args),
+                "call_id": cid,
+                "name": "fs_find_in_files",
+                "type": "function_call",
+                "id": f"fc_{cid}",
+                "status": "completed",
+            }
+        ),
+        _message(
+            {
+                "id": f"fco_{cid}",
+                "type": "function_call_output",
+                "call_id": cid,
+                "output": json.dumps(output),
+            }
+        ),
+    ]
+
+
+def _calls_turn(i: int, calls: int) -> list[dict]:
+    """Ход без прозы: реплика, ``calls`` вызовов подряд (поиски одной
+    группой, команды — каждая своим блоком, вперемежку сериями) и
+    ответ с итогом."""
+    user = f"m_u{i:04d}"
+    records = [
+        _message({"role": "user", "id": user, "content": f"запрос {i}"})
+    ]
+    for k in range(calls):
+        records += _find(i, k) if k % 40 < 30 else _call(i, k)
+    answer = _prose(i, calls)
+    return [*records, answer, _outcome(user, answer["payload"]["id"])]
+
+
 def _session() -> list[dict]:
     """Два гигантских хода и живой (без итога) короткий — пользователь
     стоит у живого хода."""
@@ -136,6 +184,23 @@ def test_giant_turn_splits_into_steps_at_tool_boundaries():
         assert turn == model.step_turn(s - 1)
         assert len(model.step_range(s - 1)) >= STEP_MIN_ITEMS
         assert span.start - model.turn_starts[turn] >= SPLIT_FROM_ITEMS
+
+
+def test_calls_without_prose_split_at_call_boundaries():
+    """Сотня вызовов подряд без прозы — шаги не больше ``STEP_MAX_ITEMS``
+    (по оценке — не больше куска окна), строка вызова и её исход — в
+    одном шаге."""
+    calls = 120
+    model = _model(_calls_turn(0, calls))
+    assert model.step_count() > 1
+    for s in range(model.step_count()):
+        span = model.step_range(s)
+        assert len(span) <= STEP_MAX_ITEMS
+        assert len(span) * policy.ITEM_WIDGETS <= policy.CHUNK_MAX
+    for k in range(calls):
+        cid = f"find_0_{k}" if k % 40 < 30 else f"call_0_{k}"
+        result = model.first_result(cid)
+        assert model.item_step(result) == model.item_step(model.call_item(cid))
 
 
 def test_steps_follow_live_appends():
@@ -240,6 +305,32 @@ async def test_steps_rendered_one_by_one_match_whole_turn():
             await pilot.pause()
             top = refs.step_heads.get(s, top)
         assert feed_dump(feed) == whole
+
+
+@pytest.mark.asyncio
+async def test_calls_without_prose_open_matches_live(tmp_path, monkeypatch):
+    """Шаги серии вызовов без прозы режут группу поисков: кусками при
+    открытии и живым путём лента одна и та же — группа закрывается на
+    границе шага на обоих путях."""
+    monkeypatch.setattr(policy, "TAIL_MIN", 10**6)
+    monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
+    records = [*_calls_turn(0, 120), *_giant_turn(1, 3)]
+    assert _model(records).step_count() > 3
+    fixture = HistoryFixture(
+        records=tuple(records), segments=(tuple(records),), sidecar=()
+    )
+    with pinned_snapshot_clock(monkeypatch):
+        async with _app(tmp_path / "open").run_test(size=_SIZE) as pilot:
+            write_history(str(tmp_path / "open"), fixture)
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+            opened = await _settled_dump(pilot)
+        async with _app(tmp_path / "live").run_test(size=_SIZE) as pilot:
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD)
+            feed_live(scr, records, splits=())
+            live = await _settled_dump(pilot)
+    assert without_ephemeral(live) == opened
 
 
 # ---- окно: подъём от живого хода -------------------------------------------
