@@ -31,8 +31,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from itertools import takewhile
 from typing import TYPE_CHECKING, Literal
+from weakref import WeakKeyDictionary
 
 from gc_tui import textual_compat
 from gc_tui.services import trace_window_policy as policy
@@ -60,6 +62,31 @@ Side = Literal["top", "bottom", "end"]
 Edge = Literal["top", "bottom"]
 
 
+def step_heads(
+    children: Iterable[Widget], step_of: Mapping[Widget, int]
+) -> dict[int, Widget]:
+    """Голова каждого шага — первый по ленте его виджет (метка шага
+    ``step_of``), который не снимается: снятый мимо окна виджет передаёт
+    роль следующему виджету шага, вставленный перед строкой шага
+    (заголовок группы) сам становится головой. Метка не старше уже
+    встреченной головы головы не даёт: такой виджет (прижатый хвост,
+    помеченный до того, как над ним встали шаги новее) по ленте лежит в
+    шаге перед ним."""
+    heads: dict[int, Widget] = {}
+    last = -1
+    for widget in children:
+        step = step_of.get(widget)
+        if (
+            step is None
+            or step <= last
+            or textual_compat.is_being_removed(widget)
+        ):
+            continue
+        heads[step] = widget
+        last = step
+    return heads
+
+
 class TraceWindowMixin:
     """Окно ленты: хвост, домонтирование и снятие с краёв, разрыв."""
 
@@ -81,36 +108,25 @@ class TraceWindowMixin:
     _window_grown = 0
     # Сверка с лимитом после роста уже ждёт раскладки.
     _window_grow_queued = False
+    # Шаг последнего виджета, дописанного живым путём.
+    _window_grow_step = -1
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # Первый в ленте виджет каждого смонтированного шага; читается
-        # только через `_window_heads`.
-        self._window_head_of: dict[int, Widget] = {}
+        # Шаг каждого смонтированного виджета ленты (кусок и живой путь);
+        # снятый виджет уходит сам.
+        self._window_step_of: WeakKeyDictionary[Widget, int] = (
+            WeakKeyDictionary()
+        )
 
     @property
     def _window_heads(self) -> dict[int, Widget]:
-        """Первый в ленте виджет каждого смонтированного шага. Голову мог
-        снять не окно (откат реплики) — шаг без неё уходит из окна здесь,
-        одной точкой для всех путей снятия: иначе кусок встаёт перед
-        снятым виджетом, а соседний шаг тянет ленту до конца.
-
-        Контракт: голова снимается только вместе со всем своим шагом.
-        Снятие мимо окна снимает шаг целиком (откат — реплику хода без
-        вывода, это весь ход) или идёт через окно (`_window_forget_step`);
-        оставшиеся виджеты шага без головы отошли бы к предыдущему шагу, а
-        у верха окна — ни к какому, и их бы больше не сняли."""
-        feed = self._window_feed()
-        heads = self._window_head_of
-        gone = [
-            step
-            for step, widget in heads.items()
-            if widget.parent is not feed
-            or textual_compat.is_being_removed(widget)
-        ]
-        for step in gone:
-            del heads[step]
-        return heads
+        """Голова каждого смонтированного шага — первый по ленте его
+        виджет (`step_heads`), одно правило для кусков и живого пути.
+        Снятое мимо окна (свёртка попыток сдачи, откат реплики) голову не
+        уносит: она переходит к следующему виджету шага, а шаг без
+        виджетов уходит из окна."""
+        return step_heads(self._window_feed().children, self._window_step_of)
 
     # ---- что даёт экран --------------------------------------------------
 
@@ -174,7 +190,8 @@ class TraceWindowMixin:
         self._window_stuck = True
         self._window_trim_due = False
         self._window_grown = 0
-        self._window_head_of = {}
+        self._window_grow_step = -1
+        self._window_step_of = WeakKeyDictionary()
         self._window_first = 0
         self._window_gap = range(0)
         self._window_feed().hold_first_visible(None)
@@ -191,7 +208,7 @@ class TraceWindowMixin:
             ephemera=self._window_ephemera(),
             nested=self._window_nested(),
         )
-        self._window_head_of.update(refs.step_heads)
+        self._window_step_of.update(refs.step_of)
         return refs
 
     @staticmethod
@@ -525,14 +542,15 @@ class TraceWindowMixin:
     # ---- снятие ----------------------------------------------------------
 
     def _window_appended(self, step: int, widget: Widget) -> None:
-        """Живой путь дописал ``widget`` шага ``step``. Сверка с лимитом — не на каждый виджет (это пересчёт
-        окна): с началом шага и после роста на кусок по оценке, после
+        """Живой путь смонтировал ``widget`` шага ``step``: метка шага.
+        Сверка с лимитом — не на каждый виджет (это пересчёт окна): с
+        началом шага и после роста на кусок по оценке, после
         раскладки."""
         if step < 0:
             return
-        new_step = step not in self._window_heads
-        if new_step:
-            self._window_head_of[step] = widget
+        self._window_step_of[widget] = step
+        new_step = step > self._window_grow_step
+        self._window_grow_step = max(step, self._window_grow_step)
         self._window_grown += policy.ITEM_WIDGETS
         if not new_step and self._window_grown < policy.CHUNK_MIN:
             return
@@ -540,6 +558,17 @@ class TraceWindowMixin:
         if not self._window_grow_queued:
             self._window_grow_queued = True
             self._window_feed().call_after_layout(self._window_on_grown)
+
+    def _window_step_at(self, widget: Widget) -> int | None:
+        """Шаг, в котором ``widget`` лежит по ленте (от головы шага до
+        следующей); выше первой головы или не в ленте — None."""
+        step_at = {w: t for t, w in self._window_heads.items()}
+        step = None
+        for child in self._window_feed().children:
+            step = step_at.get(child, step)
+            if child is widget:
+                return step
+        return None
 
     def _window_on_grown(self) -> None:
         """Лента выросла у низа: снять старые шаги сверх лимита — только
@@ -715,7 +744,6 @@ class TraceWindowMixin:
         if not self._window_removable(step):
             return False
         widgets = self._window_step_widgets(step)
-        self._window_head_of.pop(step, None)
         self._window_drop(step)
         self._window_feed().remove_children(widgets)
         return True

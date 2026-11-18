@@ -25,6 +25,7 @@ from feed_dump import (
 from gc_testkit.tui_support import pinned_snapshot_clock, wait_until
 from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.trace_steps import (
+    RESULT_KINDS,
     SPLIT_FROM_ITEMS,
     STEP_MAX_ITEMS,
     STEP_MIN_ITEMS,
@@ -269,6 +270,7 @@ async def test_steps_rendered_one_by_one_match_whole_turn():
     """Шаги куском сверху по одному (как подъём) и весь ход разом —
     одинаковая лента: исход из следующего шага — под своей строкой,
     дедуп прозы — по проигранному началу хода."""
+    from gc_tui.screens.trace_window import step_heads
     from gc_tui.services.history_render import (
         ChunkOptions,
         FeedHost,
@@ -303,7 +305,7 @@ async def test_steps_rendered_one_by_one_match_whole_turn():
                 options=ChunkOptions(),
             )
             await pilot.pause()
-            top = refs.step_heads.get(s, top)
+            top = step_heads(feed.children, refs.step_of).get(s, top)
         assert feed_dump(feed) == whole
 
 
@@ -422,7 +424,10 @@ async def test_reading_up_giant_turns_mounts_bounded_steps(tmp_path):
 def _window_consistent(scr) -> None:
     """Окно согласовано: у каждого смонтированного шага (от первого до
     конца модели, кроме разрыва) — своя голова, головы — по порядку
-    шагов в ленте."""
+    шагов в ленте, и голова — первый по ленте виджет своего шага: каждое
+    событие модели лежит в ленте между головой своего шага и следующей
+    (исход — в шаге своего вызова), заголовок группы — в шаге своих
+    строк."""
     model = scr._window_model()
     gap = scr._window_gap
     expected = [
@@ -433,6 +438,43 @@ def _window_consistent(scr) -> None:
     children = list(_trace(scr).children)
     order = [children.index(heads[s]) for s in expected]
     assert order == sorted(order)
+    _events_in_their_steps(scr, children)
+
+
+def _event_step(model, i: int) -> int:
+    """Шаг, в котором отрисовщик рисует элемент ``i``: исход — в шаге
+    своего вызова."""
+    ev = model.items[i].event
+    call = model.call_item(ev.call_id) if ev.kind in RESULT_KINDS else None
+    return model.item_step(i if call is None else call)
+
+
+def _events_in_their_steps(scr, children: list) -> None:
+    """Виджеты событий — в шаге своего события по модели, заголовок группы
+    — в шаге первой строки за ним."""
+    from gc_tui.textual_compat import is_being_removed
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    model = scr._window_model()
+    item_of = {
+        it.event.no: i
+        for i, it in enumerate(model.items)
+        if it.kind == "event" and it.event is not None
+    }
+    step_at = {w: s for s, w in scr._window_heads.items()}
+    step = header = None
+    for widget in children:
+        step = step_at.get(widget, step)
+        if is_being_removed(widget):
+            continue
+        i = item_of.get(getattr(widget, "_event_no", 0) or 0)
+        if i is not None:
+            owner = _event_step(model, i)
+            assert step == owner
+            assert header in (None, owner)
+            header = None
+        if isinstance(widget, ToolCallRow) and widget._mode == "header":
+            header = step
 
 
 def _prose_seen(scr, turn: int) -> list[int]:
@@ -519,17 +561,34 @@ def _unpinned_widgets(scr) -> int:
     )
 
 
-async def _feed_turn(pilot, scr, records, *, bound=None) -> None:
+async def _feed_turn(
+    pilot, scr, records, *, bound=None, whole_calls=False
+) -> None:
     """Записи живым путём пачками по десятку; ``bound`` — после каждой
-    пачки у низа незакреплённое в его пределах."""
-    for start in range(0, len(records), 10):
-        feed_live(scr, records[start : start + 10], splits=())
+    пачки у низа незакреплённое в его пределах; ``whole_calls`` — пачка
+    не кончается между вызовом и его исходом (иначе тик между пачками
+    обрывает вызов «прервано», а открытие рисует его законченным)."""
+    for batch in _batches(records, 10, whole_calls=whole_calls):
+        feed_live(scr, batch, splits=())
         await pilot.pause()
         await _settled(pilot, scr)
         _window_consistent(scr)
         if bound is not None:
             assert scr._stick_bottom
             assert _unpinned_widgets(scr) <= bound
+
+
+def _batches(records, size: int, *, whole_calls: bool) -> list[list[dict]]:
+    """Записи пачками по ``size``; ``whole_calls`` — исход вызова в пачке
+    своего вызова."""
+    out: list[list[dict]] = []
+    for rec in records:
+        output = rec.get("payload", {}).get("type") == "function_call_output"
+        if out and (len(out[-1]) < size or (whole_calls and output)):
+            out[-1].append(rec)
+        else:
+            out.append([rec])
+    return out
 
 
 @pytest.mark.asyncio
@@ -826,3 +885,157 @@ async def test_return_to_bottom_does_not_remount_giant_turn(
         assert not policy.underfilled(
             trace.max_scroll_y, trace.container_size.height
         )
+
+
+# ---- головы шагов живого пути — по ленте -----------------------------------
+
+
+def _finish(i: int, n: int, *, ok: bool) -> list[dict]:
+    """Попытка сдачи хода ``i`` номер ``n``: вызов `turn_finish` с call_id
+    и его исход (принята или отклонена судьёй финала)."""
+    cid = f"fin_{i}_{n}"
+    args = {
+        "solution_type": "full_solution",
+        "task": f"ход {i}",
+        "handoff": "{}",
+        "task_report": f"Отчёт {i} попытка {n}.",
+    }
+    output = {
+        "tool": "turn_finish",
+        "ok": ok,
+        "status": "submitted" if ok else "rejected_by_finish_gate",
+    }
+    return [
+        _message(
+            {
+                "arguments": json.dumps(args, ensure_ascii=False),
+                "call_id": cid,
+                "name": "turn_finish",
+                "type": "function_call",
+                "id": f"fc_{cid}",
+                "status": "completed",
+            }
+        ),
+        _message(
+            {
+                "id": f"fco_{cid}",
+                "type": "function_call_output",
+                "call_id": cid,
+                "output": json.dumps(output),
+            }
+        ),
+    ]
+
+
+def _refused_finish_turn(i: int, after: int) -> list[dict]:
+    """Ход: первая сдача — первое, что рисует шаг (шаг начат на 22-м
+    элементе прозой, которую гасит дедуп ответа: она повторяет прошлую),
+    судья её отклоняет, потом ``after`` вызовов и вторая, принятая
+    сдача."""
+    user = f"m_u{i:04d}"
+    records = [
+        _message({"role": "user", "id": user, "content": f"запрос {i}"}),
+        _prose(i, 0),
+    ]
+    for k in range(9):
+        records += _call(i, k)
+    again = _prose(i, 1)
+    again["payload"] = {**again["payload"], "id": f"msg_again_{i}"}
+    records += [_prose(i, 1), again, *_finish(i, 1, ok=False)]
+    for k in range(10, 10 + after):
+        records += _call(i, k)
+    records += _finish(i, 2, ok=True)
+    return [*records, _outcome(user, f"fco_fin_{i}_2")]
+
+
+async def _opened_dump(tmp_path, records, monkeypatch) -> list:
+    """Лента открытия сессии целиком (хвост — вся история)."""
+    with monkeypatch.context() as m:
+        m.setattr(policy, "TAIL_MIN", 10**6)
+        m.setattr(policy, "WINDOW_LIMIT", 10**7)
+        async with _app(tmp_path).run_test(size=_SIZE) as pilot:
+            write_history(
+                str(tmp_path),
+                HistoryFixture(
+                    records=tuple(records),
+                    segments=(tuple(records),),
+                    sidecar=(),
+                ),
+            )
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+            return await _settled_dump(pilot)
+
+
+async def _climb_whole(pilot, scr, monkeypatch) -> list:
+    """Подъём к началу без снятия (лимит снят): вся история в ленте —
+    её дамп без эфемерного."""
+    monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
+    trace = _trace(scr)
+    for _ in range(400):
+        if scr._window_first == 0:
+            break
+        trace.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        await _settled(pilot, scr)
+        _window_consistent(scr)
+    assert scr._window_first == 0
+    return without_ephemeral(await _settled_dump(pilot))
+
+
+@pytest.mark.asyncio
+async def test_refused_finish_head_keeps_turn_answer(tmp_path, monkeypatch):
+    """Первая сдача хода — первый нарисованный виджет шага, и судья её
+    отклонил: свёртка попыток снимает её виджеты мимо окна. Голова шага
+    переходит к следующему его виджету — вызовы после отказа и принятый
+    отчёт остаются в своём шаге: снятие сверху следующими ходами и
+    подъём не теряют ответ хода."""
+    records = _refused_finish_turn(0, 30)
+    model = _model(records)
+    item = {
+        it.event.message_id: i
+        for i, it in enumerate(model.items)
+        if it.event is not None
+    }
+    again, first = item["msg_again_0"], item["fc_fin_0_1"]
+    assert model.starts_step(model.items[again].event.no)
+    assert model.item_step(first) == model.item_step(again)
+    later = [*_giant_turn(1, 30), *_giant_turn(2, 30)]
+    with pinned_snapshot_clock(monkeypatch):
+        opened = await _opened_dump(
+            tmp_path / "open", [*records, *later], monkeypatch
+        )
+        _small_window(monkeypatch)
+        async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD)
+            await pilot.pause()
+            await _feed_turn(pilot, scr, records, whole_calls=True)
+            await _feed_turn(pilot, scr, later, whole_calls=True)
+            assert scr._window_first > 0
+            live = await _climb_whole(pilot, scr, monkeypatch)
+    answers = [t for _k, t, _c in live if "Отчёт 0 попытка 2." in t]
+    assert len(answers) == 1
+    assert live == opened
+
+
+@pytest.mark.asyncio
+async def test_live_calls_without_prose_header_stays_with_group(
+    tmp_path, monkeypatch
+):
+    """Серия поисков без прозы вживую: шаг начат вызовом, заголовок
+    `Explored` встаёт перед ним — он голова шага, а не хвост прошлого.
+    Снятие сверху у низа уносит заголовок только со своей группой,
+    подъём возвращает его один раз — лента как при открытии."""
+    records = [*_calls_turn(0, 60), *_calls_turn(1, 60)]
+    with pinned_snapshot_clock(monkeypatch):
+        opened = await _opened_dump(tmp_path / "open", records, monkeypatch)
+        _small_window(monkeypatch)
+        async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD)
+            await pilot.pause()
+            await _feed_turn(pilot, scr, records, whole_calls=True)
+            assert scr._window_first > 0
+            live = await _climb_whole(pilot, scr, monkeypatch)
+    assert live == opened

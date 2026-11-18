@@ -167,15 +167,15 @@ class ChunkOptions:
 @dataclass
 class ChunkRefs:
     """Что кусок отдаёт экрану. ``widgets`` — прямые дети ленты, которые
-    смонтировал кусок; ``step_heads`` — первый в ленте виджет каждого шага
-    куска (шаг без виджетов — без записи; вложенное лежит внутри шага):
-    по ним окно режет ленту на шаги; ``block_views`` — виды блоков шагов
+    смонтировал кусок; ``step_of`` — шаг каждого из них (вложенное без
+    метки — лежит внутри шага): по меткам окно находит головы шагов
+    (`trace_window.step_heads`); ``block_views`` — виды блоков шагов
     куска (по одному на шаг с вызовами, уровень в пространстве
     ``HISTORY_LEVEL_PREFIX``) — только для маршрута раскрытия, не в живой
     реестр видов; ``thoughts`` — строки мыслей из памяти эфемерного."""
 
     widgets: list[Widget] = field(default_factory=list)
-    step_heads: dict[int, Widget] = field(default_factory=dict)
+    step_of: dict[Widget, int] = field(default_factory=dict)
     fresh_turn_line: Widget | None = None
     call_rows: dict[str, Widget] = field(default_factory=dict)
     question_rows: dict[str, Widget] = field(default_factory=dict)
@@ -512,7 +512,7 @@ class _Chunk:
             drop_mark_before(below)
         refs = self.refs
         refs.widgets = [w for w in self._mounted if not is_being_removed(w)]
-        refs.step_heads = self._step_heads()
+        refs.step_of = self._step_of
         return refs
 
     def _restore_view(
@@ -535,19 +535,6 @@ class _Chunk:
                 widget.restore_view(flag)
         for view in views:
             view.restore_view(ephemera.view)
-
-    def _step_heads(self) -> dict[int, Widget]:
-        """Первый в ленте виджет каждого шага: заголовок блока встаёт
-        перед строкой своего шага, поэтому порядок — по ленте, а не по
-        монтажу."""
-        heads: dict[int, Widget] = {}
-        step_of = self._step_of
-        for widget in self._host.feed.children:
-            step = step_of.get(widget)
-            if step is None or step in heads or is_being_removed(widget):
-                continue
-            heads[step] = widget
-        return heads
 
     # ---- записи сбоку ----------------------------------------------------
 

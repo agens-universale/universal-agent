@@ -477,6 +477,7 @@ async def test_opened_turns_restore_compaction_body_shown(tmp_path):
 async def test_restored_group_phrase_belongs_to_its_turn():
     """Раскрытие из снимка вида монтирует фразы группы в своём ходе:
     голова следующего хода куска — его первый виджет."""
+    from gc_tui.screens.trace_window import step_heads
     from gc_tui.services.history_model import HistoryInputs, build_history
     from gc_tui.services.history_render import (
         ChunkOptions,
@@ -503,7 +504,8 @@ async def test_restored_group_phrase_belongs_to_its_turn():
         )
         await pilot.pause()
         texts = [t for _c, t, _ in feed_dump(_feed(pilot.app))]
-        head = refs.step_heads[1]
+        heads = step_heads(_feed(pilot.app).children, refs.step_of)
+        head = heads[1]
         assert isinstance(head, UserReplyContainer)
         assert head.plain_text == "turn 2 calls=1 light"
     assert "    − свернуть группу" in texts

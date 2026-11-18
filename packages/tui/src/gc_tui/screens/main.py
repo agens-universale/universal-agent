@@ -800,7 +800,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._drawing_model = 0
         # Шаг элемента модели, который сейчас рисует живой путь из готовой
         # модели (`_draw_live_items`); None — живой путь дописывает модель,
-        # его шаг — последний (`_note_turn_head`).
+        # его шаг — последний (`_note_step`).
         self._drawing_step: Optional[int] = None
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
@@ -3915,21 +3915,30 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             else self._pinned_tail(trace, sent=sent)
         )
         if queue:
-            self._feed_mount(trace, widget, before=queue[0])
+            self._feed_mount(trace, widget, at_end=True, before=queue[0])
         else:
             self._feed_mount(trace, widget)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
 
     def _feed_mount(
-        self, trace, widget, *, at: Optional[int] = None, **where
+        self,
+        trace,
+        widget,
+        *,
+        at: Optional[int] = None,
+        at_end: bool = False,
+        **where,
     ) -> None:
         """Добавить виджет в ленту (``where`` — `before` / `after`) с
         отметкой в счётчике добавлений; ``at`` — место эфемерного в
-        модели, если он встаёт не в конец (`_note_ephemeral`)."""
+        модели, если он встаёт не в конец (`_note_ephemeral`);
+        ``at_end`` — якорь ``where`` лишь прижатый хвост, по смыслу виджет
+        встаёт в конец ленты."""
         self._feed_appended += 1
         trace.mount(widget, **where)
-        self._note_turn_head(widget)
+        anchor = None if at_end else where.get("before") or where.get("after")
+        self._note_step(widget, anchor)
         self._note_ephemeral(widget, at)
 
     def _note_ephemeral(self, widget, at: Optional[int] = None) -> None:
@@ -3964,12 +3973,17 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         finally:
             self._drawing_model -= 1
 
-    def _note_turn_head(self, widget) -> None:
-        """Виджет живого пути — в окно своего шага (§5.3: окно режет
-        ленту по шагам ходов): шаг рисуемого элемента готовой модели
-        (`_draw_live_items`), иначе — последний в модели (живой путь
-        сначала дописывает элемент, потом рисует)."""
-        step = self._drawing_step
+    def _note_step(self, widget, anchor=None) -> None:
+        """Виджет живого пути — меткой в окно своего шага (§5.3: окно
+        режет ленту по шагам ходов, голова шага — первый по ленте его
+        виджет): встал рядом со своим виджетом ``anchor`` — шаг якоря по
+        ленте (заголовок группы, исход вызова прошлого шага, вложенное);
+        иначе шаг рисуемого элемента готовой модели (`_draw_live_items`);
+        иначе — последний в модели (живой путь сначала дописывает элемент,
+        потом рисует)."""
+        step = None if anchor is None else self._window_step_at(anchor)
+        if step is None:
+            step = self._drawing_step
         if step is None:
             step = self._feed_history.step_count() - 1
         self._window_appended(step, widget)
@@ -4395,7 +4409,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                     self._top_blocks().queued_admitted()
                     widget.set_event_no(ev.no)
                     # Реплика встала раньше, чем ядро открыло её ход.
-                    self._note_turn_head(widget)
+                    self._note_step(widget)
                     # Картинки из треда — копии, закоммиченные ядром; у pending-реплики
                     # пути кармана процесса, который чистится на выходе (дизайн картинок §3).
                     if ev.attachments:
