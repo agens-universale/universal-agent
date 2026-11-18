@@ -56,12 +56,25 @@ def _texts(feed) -> list[str]:
     return [text for _cls, text, _classes in feed_dump(feed)]
 
 
+async def _stable_dump(pilot) -> list:
+    """Дамп ленты, когда он перестал меняться: строки под ширину ленты
+    (черта смены модели) собираются по событию смены размера, а оно
+    приходит не за один такт."""
+    dump = feed_dump(_feed(pilot.app))
+    for _ in range(40):
+        await pilot.pause(0.02)
+        again = feed_dump(_feed(pilot.app))
+        if again == dump:
+            return dump
+        dump = again
+    raise AssertionError("лента не успокоилась")
+
+
 async def _render(model, **options):
     """Все ходы модели в пустую ленту: (дамп, ссылки куска)."""
     async with _Feed().run_test(size=_SIZE) as pilot:
         refs = render_model(_feed(pilot.app), model, **options)
-        await pilot.pause()
-        return feed_dump(_feed(pilot.app)), refs
+        return await _stable_dump(pilot), refs
 
 
 @pytest.mark.asyncio
@@ -227,8 +240,7 @@ async def test_model_marks_collapse_across_chunk_boundary():
         render_turns(
             host, model, range(1), before=lower.widgets[0], options=opts
         )
-        await pilot.pause()
-        assert feed_dump(_feed(pilot.app)) == whole
+        assert await _stable_dump(pilot) == whole
         (mark,) = _feed(pilot.app).query(ModelMark)
         assert mark.before == "fast-model"
 
