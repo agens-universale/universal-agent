@@ -575,9 +575,9 @@ class TraceWindowMixin:
                 order,
             )
         )
-        dropped = removable[
-            : policy.edge_drops([c for _t, c in removable], excess)
-        ]
+        dropped = self._window_keep_filled(
+            removable[: policy.edge_drops([c for _t, c in removable], excess)]
+        )
         if not dropped:
             return
         if edge == "top" and not self._stick_bottom:
@@ -586,6 +586,46 @@ class TraceWindowMixin:
             if not self._window_forget_step(step):
                 break
         self.call_after_refresh(self._window_fill)
+
+    def _window_keep_filled(
+        self, dropped: list[tuple[int, int]]
+    ) -> list[tuple[int, int]]:
+        """Снимаемые шаги (от края внутрь) без тех, после снятия которых
+        лента станет ниже запаса ``PREFETCH_SCREENS``: иначе догрузка
+        (`_window_fill`) тут же домонтирует их обратно — у низа это цикл
+        «снять ↔ домонтировать» на каждый приход к низу. Высота шага — по
+        последней раскладке; раскладки не было — как раньше (у низа без
+        неё снимается всё, кроме последнего шага)."""
+        feed = self._window_feed()
+        if feed.placed_between(0, 1) is None:
+            return dropped
+        height = feed.container_size.height
+        rows = [self._window_step_rows(step) for step, _count in dropped]
+        left = feed.virtual_size.height - sum(rows)
+        while dropped and policy.underfilled(left - height, height):
+            dropped = dropped[:-1]
+            left += rows.pop()
+        return dropped
+
+    def _window_step_rows(self, step: int) -> int:
+        """Строк ленты под шагом ``step`` по последней раскладке: от верха
+        первого его показанного виджета до верха следующего показанного
+        за ним (или конца ленты); показанных нет — ноль."""
+        feed = self._window_feed()
+        widgets = self._window_step_widgets(step)
+        tops = [feed.placed_top(w) for w in widgets]
+        shown = [t for t in tops if t is not None]
+        if not shown:
+            return 0
+        children = list(feed.children)
+        bottom: int | None = None
+        for widget in children[children.index(widgets[-1]) + 1 :]:
+            bottom = feed.placed_top(widget)
+            if bottom is not None:
+                break
+        if bottom is None:
+            bottom = feed.virtual_size.height
+        return max(0, bottom - min(shown))
 
     def _window_edge_order(
         self, edge: Edge, mounted: list[tuple[int, int]]

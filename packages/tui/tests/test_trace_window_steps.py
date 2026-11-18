@@ -313,3 +313,69 @@ async def test_reading_up_giant_turns_mounts_bounded_steps(tmp_path):
         assert scr._window_first == 0
         assert chunks
         assert max(chunks) <= policy.CHUNK_MAX
+
+
+@pytest.mark.asyncio
+async def test_return_to_bottom_does_not_remount_giant_turn(
+    tmp_path, monkeypatch
+):
+    """Гигантский ход над коротким живым: приход к низу ужимает окно
+    сверху, но не ниже запаса ленты — иначе догрузка тут же домонтирует
+    снятое обратно (цикл «снять ↔ домонтировать» на каждый приход)."""
+    records = [*_giant_turn(0, CALLS), *_giant_turn(1, 3, outcome=False)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        fixture = HistoryFixture(
+            records=tuple(records), segments=(tuple(records),), sidecar=()
+        )
+        write_history(str(tmp_path / "t"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        trace = _trace(scr)
+        # Подняться на несколько экранов: сверху домонтированы шаги.
+        for _ in range(60):
+            trace.post_message(
+                events.MouseScrollUp(trace, 5, 5, 0, 0, 0, False, False, False)
+            )
+            await pilot.pause()
+            await _settled(pilot, scr)
+        assert scr._stick_bottom is False
+        # Лимит меньше смонтированного: у низа снимать есть что.
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 40)
+        forgotten, mounted = [], []
+        forget, prepend = scr._window_forget_step, scr._window_prepend
+
+        def counted_forget(step):
+            done = forget(step)
+            if done:
+                forgotten.append(step)
+            return done
+
+        def counted_prepend(**kw):
+            done = prepend(**kw)
+            if done:
+                mounted.append(scr._window_first)
+            return done
+
+        monkeypatch.setattr(scr, "_window_forget_step", counted_forget)
+        monkeypatch.setattr(scr, "_window_prepend", counted_prepend)
+        for _ in range(400):
+            if scr._stick_bottom:
+                break
+            trace.post_message(
+                events.MouseScrollDown(
+                    trace, 5, 5, 0, 0, 0, False, False, False
+                )
+            )
+            await pilot.pause()
+            await _settled(pilot, scr)
+        assert scr._stick_bottom is True
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        # Ужато, но не перемонтировано, и лента не ниже запаса.
+        assert forgotten
+        assert mounted == []
+        assert not policy.underfilled(
+            trace.max_scroll_y, trace.container_size.height
+        )
