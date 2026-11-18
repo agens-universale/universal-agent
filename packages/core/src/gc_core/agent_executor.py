@@ -67,6 +67,7 @@ from gc_core.plan_store import (
     normalize_plan_block,
     now_stamp,
 )
+from gc_core.plugins.commands import user_intent_text
 from gc_core.processing_responses import (
     _acall_blocking_hook,
     arun_agent,
@@ -99,6 +100,7 @@ from gc_core.thread_store import (
 )
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.session_writer import LEASE_TTL
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
     _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
@@ -854,7 +856,7 @@ class AgentExecutor:
         self, thread_session, thread_id, system_id: str
     ) -> None:
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
-        if thread_id is None or not settings_of(self._ctx).mcp.servers:
+        if thread_id is None or not effective_mcp_servers(self._ctx):
             return
         try:
             from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
@@ -1204,14 +1206,13 @@ class AgentExecutor:
         shared.plan_removed_notice = False
         return [PLAN_REMOVED_MESSAGE]
 
-    @staticmethod
-    def _seed_current_user_intent(state, new_user_messages) -> None:
+    def _seed_current_user_intent(self, state, new_user_messages) -> None:
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
         # user_intent_log — только после flush при accept turn_finish.
         for new_user_message in new_user_messages:
             state.finish_gate_rejection_count = 0
-            text = extract_real_user_message_text(new_user_message)
+            text = user_intent_text(self._ctx, state, new_user_message)
             if text:
                 state.current_user_intent = append_user_ask_deduped(
                     state.current_user_intent,
@@ -1240,6 +1241,7 @@ class AgentExecutor:
                 state.current_user_intent,
                 step_messages_for_user_scope,
                 user_turn_seq=state.user_turn_seq,
+                text_of=lambda m: user_intent_text(self._ctx, state, m),
             )
             await _apersist_state(
                 thread_session,
@@ -1309,6 +1311,7 @@ class AgentExecutor:
                     state.current_user_intent,
                     step_messages,
                     user_turn_seq=state.user_turn_seq,
+                    text_of=lambda m: user_intent_text(self._ctx, state, m),
                 )
 
             return messages, _persist_runtime_batch, None

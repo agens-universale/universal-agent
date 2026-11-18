@@ -330,6 +330,11 @@ class AgentRunner:
         if executor is not None and hasattr(executor, "arm_plan_rework"):
             executor.arm_plan_rework(thread_id)
 
+    def plan_decisions(self) -> tuple:
+        """Решения по плану, ещё не отданные прогону: (принят, доработать).
+        Пересобранный раннер получает их от прежнего (``TuiApp.get_runner``)."""
+        return self._plan_accepted, self._plan_rework
+
     def warm(self) -> None:
         """Собрать executor в фоне (off-UI), без запуска run. Идемпотентно.
 
@@ -664,6 +669,9 @@ class AgentRunner:
                 if self._stop_requested:
                     ending = "stopped"
                     return
+                # Прогон гасит решения по плану у исполнителя
+                # (`_apply_plan_changes`) — у раннера они тоже отданы.
+                self._plan_accepted = self._plan_rework = None
                 _run_agent(
                     executor,
                     batch,

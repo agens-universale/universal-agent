@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from gc_core.settings import settings_of
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 
 
 def build_mcp_tools_snapshot(
@@ -14,7 +14,7 @@ def build_mcp_tools_snapshot(
 
     tool: {name, description, tool, title}.
     """
-    servers = settings_of(settings).mcp.servers
+    servers = effective_mcp_servers(settings)
     status_map = mcp_status or {}
     snapshot: Dict[str, Dict[str, Any]] = {}
     for server_name, scfg in servers.items():

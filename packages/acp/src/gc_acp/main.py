@@ -32,6 +32,7 @@ from gc_core.constants.tool_names import (
     INTERMEDIATE_REPLY_TOOL_NAME,
 )
 from gc_core.onboarding import explain_broken_config
+from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.settings import LoadedSettings
 from gc_core.stores import files_only_rejection
 from gc_core.tools.connect_mcp.registry import ToolsCache
@@ -83,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
             {"logging.console_trace": False}, layer="runtime"
         )
     )
+    # Снимок набора плагинов — после всех правок (иначе
+    # `--plugins.use_installed false` не подействует) и до цикла: клон
+    # git-источников — синхронный git.
+    loaded = with_plugin_snapshot(loaded)
     protocol_out = _claim_protocol_stdout()
     try:
         asyncio.run(serve(loaded, protocol_out))

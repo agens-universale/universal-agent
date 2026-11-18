@@ -24,6 +24,7 @@ from gc_core.constants.tool_names import (
 from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
+from gc_core.plugins.snapshot import PluginSnapshot
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv, is_explicit
 from gc_core.trace_id import normalize_trace_id
@@ -404,13 +405,28 @@ def _with_durable_logging(settings, profile):
     )
 
 
+def warn_profile_plugins(name, settings):
+    """Плагины в durable-режиме не поддерживаются: заданные в профиле —
+    строка в лог (снимок под воркером пуст по построению)."""
+    if settings.plugins.paths or settings.plugins.sources:
+        logger.warning(
+            "Профиль %s: plugins под воркером Temporal не "
+            "поддерживаются, плагины профиля не подключаются",
+            name,
+        )
+
+
 def _worker_runtime(profile, workspace, *, human_input):
     """Рантайм профиля под воркером: каталог старта — workspace; без
     человека (``human_input: false``) канал объявляет «человека нет», и
     вопрос подтверждения — «спросить некого», а не обрыв ожидания."""
+    # Снимок плагинов приложения на воркер не переносится: плагины в
+    # durable-режиме не поддерживаются, набор пуст по построению.
     runtime = replace(
         profile.runtime or RuntimeEnv(),
         launch_root=str(workspace.resolve()),
+        plugins=PluginSnapshot(),
+        untrusted_plugin_entries=frozenset(),
     )
     if human_input:
         return runtime
@@ -502,6 +518,7 @@ class ContextProvider:
             # сбой задачи вместо ошибки старта).
             snapshot = public_config_snapshot(loaded)
             settings_from_snapshot(snapshot.settings, snapshot.runtime)
+            warn_profile_plugins(name, settings)
             kind = settings.os_backend.kind
             if kind in _UNTESTED_BACKENDS:
                 logger.warning(

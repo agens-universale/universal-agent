@@ -346,6 +346,11 @@ class TuiApp(App):
         # Поколение состояния: растёт на каждой перечитке. Читатель, собравший
         # кэш по снимку ДО неё, не затирает им уже применённый новый.
         self._config_generation = 0
+        # Диагностика снимков плагинов, уже показанная в этом процессе: после
+        # смены набора посреди сессии новое уведомление — раз за процесс (§7.1).
+        self._plugin_notices_seen: set[str] = set(
+            settings.runtime.plugins.notices
+        )
         # Кеш имён встроенных тулов для уведомлений: (settings, names) по
         # identity объекта настроек — сборка реестра дорогая, а бейдж
         # опрашивается каждый тик.
@@ -400,6 +405,8 @@ class TuiApp(App):
             None  # имена тулов до stop_tools — валидатор notices
         )
         self.active_runner = None  # AgentRunner | None
+        #: Решения по плану снятого раннера для следующего (`_retire_runner`).
+        self._carried_plan: tuple = (None, None)
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
         # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска, сохранённый
         # в сессии). None — выбора не было, действует конфиг. Единственный
@@ -1201,11 +1208,16 @@ class TuiApp(App):
         """Флаги запуска поверх свежей загрузки: слой CLI и путь `--model`,
         решённый на старте (без повторного решения по новому реестру)."""
         from gc_core.config import apply_cli_overrides
+        from gc_core.plugins.catalog import with_plugin_snapshot
 
         loaded = apply_cli_overrides(loaded)
         if self._model_flag:
             loaded = loaded.with_overrides(self._model_flag, layer="cli")
-        return self._with_tui_runtime(loaded)
+        # Цикл Textual уже идёт: без клонов, недостающий источник — в
+        # диагностику до перезапуска (§8.3).
+        return with_plugin_snapshot(
+            self._with_tui_runtime(loaded), clone=False
+        )
 
     def _maybe_notice_profile_activation(self, name: str, meta, cfg) -> None:
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с
@@ -1692,6 +1704,19 @@ class TuiApp(App):
         if runner is not None and runner.is_running():
             self._runner_stale = True
             return
+        self._retire_runner(runner)
+
+    def drop_carried_plan_decisions(self) -> None:
+        """Раннер снят стопом или сменой сессии: решения по плану прежнего
+        раннера в следующий не едут."""
+        self._carried_plan = (None, None)
+
+    def _retire_runner(self, runner) -> None:
+        """Снять простаивающий раннер под пересборку. Решения по плану, ещё
+        не отданные прогону, принадлежат окну, а не раннеру: следующий
+        раннер их получит (`get_runner`)."""
+        if runner is not None:
+            self._carried_plan = runner.plan_decisions()
         _release_runner(runner)
         self.active_runner = None
         self._runner_stale = False
@@ -1799,14 +1824,13 @@ class TuiApp(App):
         сборка заморозила бы event-loop Textual. Передаём фабрику; AgentRunner
         построит executor в своём worker-потоке при первом start().
         """
+        self.refresh_plugin_set()
         if (
             self.active_runner is not None
             and self._runner_stale
             and not self.active_runner.is_running()
         ):
-            _release_runner(self.active_runner)
-            self.active_runner = None
-            self._runner_stale = False
+            self._retire_runner(self.active_runner)
             # Снятие выбора, отложенное перечиткой конфига посреди хода.
             self.sanitize_session_model()
         if self.active_runner is not None:
@@ -1841,7 +1865,75 @@ class TuiApp(App):
         # принадлежит окну, а не раннеру, и едет в каждый новый.
         if self._permission_mode is not None:
             self.active_runner.set_permission_mode(self._permission_mode)
+        # Так же решения по плану прежнего раннера: кнопка баннера нажата, а
+        # Enter — уже после пересборки.
+        accepted, rework = self._carried_plan
+        self._carried_plan = (None, None)
+        if accepted is not None:
+            self.active_runner.accept_plan(*accepted)
+        if rework is not None:
+            self.active_runner.arm_plan_rework(rework)
         return self.active_runner
+
+    def refresh_plugin_set(self) -> bool:
+        """Сверка набора плагинов с диском (§8.3): граница хода, отправка
+        ввода, открытие палитры и ``/plugins``. Набор сменился — новый
+        снимок в базу окна и в пере-мерж сессионного профиля, раннер
+        пересобирается, палитра забывает скиллы. Живой ход не трогаем:
+        в рамках раннера набор не меняется частично. Без смены — только
+        отпечаток. True — набор сменился."""
+        from gc_tui.services.plugin_set import plugin_set_changed
+
+        runner = self.active_runner
+        if runner is not None and runner.is_running():
+            return False
+        snap = self._config_snapshot()
+        cached = snap.profile_cache
+        targets = (snap.settings,) + ((cached[1],) if cached else ())
+        if not any(plugin_set_changed(t) for t in targets):
+            return False
+        self._push_plugin_notices(self._commit_plugin_refresh(snap))
+        self.invalidate_runner()
+        main = self._main_screen()
+        if main is not None:
+            main.drop_skills_cache()
+        return True
+
+    def _commit_plugin_refresh(self, snap: _ConfigSnapshot) -> tuple:
+        """Новый снимок в базу и в кеш сессионного профиля одним
+        присваиванием под замком; возвращает обновлённые настройки."""
+        from gc_tui.services.plugin_set import refresh_plugins
+
+        base = refresh_plugins(snap.settings)
+        cache = snap.profile_cache
+        if cache is not None:
+            loaded = cache[1]
+            loaded = (
+                base if loaded is snap.settings else refresh_plugins(loaded)
+            )
+            cache = (cache[0], loaded)
+        with self._config_lock:
+            self._config_generation += 1
+            self._settings = base
+            self._session_profile_cache = cache
+            self._effective_cache = None
+        return (base,) + ((cache[1],) if cache else ())
+
+    def _push_plugin_notices(self, refreshed: tuple) -> None:
+        """Диагностика нового снимка, которой нет среди стартовых и которую
+        ещё не показывали, — уведомлением рантайма, раз за процесс."""
+        for loaded in refreshed:
+            runtime = loaded.runtime
+            for message in runtime.plugins.notices:
+                if (
+                    message in runtime.notices
+                    or message in self._plugin_notices_seen
+                ):
+                    continue
+                self._plugin_notices_seen.add(message)
+                push_runtime_notice(
+                    Notice("warning", "plugin_snapshot", message)
+                )
 
     def _build_real_executor(self):
         """Build the real AgentExecutor from config. Called when no factory injected.
@@ -1882,7 +1974,7 @@ class TuiApp(App):
         )
         from gc_core.config_modules.auth import build_auth_connector
         from gc_core.run_context import acreate_run_context
-        from gc_core.settings import settings_of
+        from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 
         from gc_tui.toggles import tui_agent_settings
 
@@ -1891,7 +1983,7 @@ class TuiApp(App):
         loaded = tui_agent_settings(self.effective_settings())
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
-        progress.begin(list(settings_of(loaded).mcp.servers))
+        progress.begin(list(effective_mcp_servers(loaded)))
         publish()
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 

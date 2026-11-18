@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from typing import Any, NamedTuple
@@ -37,6 +38,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
+from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.settings import is_explicit
 from gc_core.stores import Stores, run_store_kwargs
@@ -630,7 +632,7 @@ async def _run_init_agents_md() -> int:
     """
     # Тот же режим запуска, что у основного входа: правило одно для всех
     # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
-    loaded, settings_exit = _load_cli_settings(
+    loaded, settings_exit = await _aload_settings_with_plugins(
         arg_parser.run_args.config,
         getattr(arg_parser.run_args, "profile", None),
     )
@@ -793,6 +795,19 @@ def _unconfigured_setup_exit(
     if format_text is not None:
         return 1
     return 0
+
+
+async def _aload_settings_with_plugins(config_arg, profile_arg):
+    """Настройки запуска со снимком набора плагинов в рантайме (§8.3).
+
+    Снимок — после всех CLI-override: иначе ``--plugins.use_installed
+    false`` его не выключит. Клон git-источников — синхронный git, поэтому
+    в потоке: цикл уже запущен (``asyncio.run(arun_cli())``).
+    """
+    loaded, settings_exit = _load_cli_settings(config_arg, profile_arg)
+    if settings_exit is not None:
+        return None, settings_exit
+    return await asyncio.to_thread(with_plugin_snapshot, loaded), None
 
 
 def _load_cli_settings(config_arg, profile_arg):
@@ -1009,7 +1024,9 @@ async def arun_cli() -> int:
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
-    loaded, settings_exit = _load_cli_settings(config_arg, profile_arg)
+    loaded, settings_exit = await _aload_settings_with_plugins(
+        config_arg, profile_arg
+    )
     if settings_exit is not None:
         return settings_exit
     # Хранилище в базе (storage: config.yml) — одно на запуск: открыть до
@@ -1216,8 +1233,6 @@ def main() -> int:
     Пара ``main``/``amain`` читалась счётчиком как случайная — точка входа
     консольной команды обязана быть синхронной, и прогон у неё ровно один.
     """
-    import asyncio
-
     # `gc-cli config …` — без агента, MCP и сети (gc_core.config_command);
     # парсер агента её пропускает (arg_parser.CONFIG_COMMAND).
     if sys.argv[1:2] == ["config"]:

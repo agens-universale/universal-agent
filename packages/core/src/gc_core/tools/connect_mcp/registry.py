@@ -5,6 +5,7 @@ import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+from gc_core.constants.tool_names import shorten_tool_name
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.transport import McpServerExitedError
 
@@ -46,6 +47,12 @@ def _tool_title(tool: Dict[str, Any]) -> str | None:
     return next((c for c in candidates if isinstance(c, str) and c), None)
 
 
+def mcp_tool_full_name(server_name: str, base_name: str) -> str:
+    """Имя тула для модели ``mcp_<сервер>_<тул>``; длиннее предела — укорочено
+    с хешем полного имени. Вызов идёт по метаданным записи, а не по имени."""
+    return shorten_tool_name(f"mcp_{server_name}_{base_name}")
+
+
 def _normalize_tool(
     server_name: str,
     tool: Dict[str, Any],
@@ -69,7 +76,7 @@ def _normalize_tool(
     if not base_name:
         return None
 
-    combined_name = f"mcp_{server_name}_{base_name}"
+    combined_name = mcp_tool_full_name(server_name, base_name)
 
     base_description = tool.get("description") or ""
     extra_desc = f"\n\nFrom server: {server_display_name}"
@@ -372,7 +379,7 @@ async def _abuild_tools_registry(
             base = tool.get("name")
             if not base:
                 continue
-            all_tools[f"mcp_{name}_{base}"] = _registry_entry(
+            all_tools[mcp_tool_full_name(name, base)] = _registry_entry(
                 name, server_cfg=cfg, tool=tool
             )
     return all_tools, status_map

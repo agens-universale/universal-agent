@@ -3,14 +3,23 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from pathlib import Path
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+)
 
 import yaml
 
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
-from gc_core.settings import settings_of
+from gc_core.settings import runtime_of, settings_of
 
 SKILL_MD = "SKILL.md"
 
@@ -246,16 +255,30 @@ def _skill_listed(
     pack: Optional[str],
     include_all: bool,
     bootstrap_ids: Dict[str, str],
+    plugin_packs: frozenset = frozenset(),
 ) -> bool:
     """Фильтр list_skills: pack → только его internal; include_all → все; иначе flat + bootstraps."""
     if pack is not None:
         return skill.pack_id == pack
-    if include_all:
+    if include_all or skill.pack_id in plugin_packs:
         return True
     # default: flat + bootstraps; internal — показываем только если это bootstrap
     return (
         skill.pack_id is None or bootstrap_ids.get(skill.pack_id) == skill.id
     )
+
+
+def _inside(path: Path, root: Path) -> bool:
+    """Путь после раскрытия ссылок остаётся внутри ``root``."""
+    return path.resolve().is_relative_to(root.resolve())
+
+
+class PluginSkillRoot(Protocol):
+    """Каталог skills плагина (``SkillRoot`` из снимка), читается по полям."""
+
+    plugin: str
+    path: str
+    contain: Optional[str]
 
 
 class SkillsRegistry:
@@ -271,9 +294,13 @@ class SkillsRegistry:
         system_root: Optional[str] = None,
         user_root: Optional[str] = None,
         project_root: Optional[str] = None,
+        plugin_roots: Sequence[PluginSkillRoot] = (),
         disable_skills: Optional[List[str]] = None,
     ) -> None:
         self._backend = backend or LocalFsBackend()
+        # Каталоги skills/ включённых плагинов: слой между system и user.
+        # Skills плагина получают id ``<плагин>:<skill>``.
+        self._plugin_roots: List[PluginSkillRoot] = list(plugin_roots)
         # Legacy: если передан skills_root и никаких новых — режим single-source.
         # В этом режиме все скиллы помечаются как source="user".
         if (
@@ -354,17 +381,74 @@ class SkillsRegistry:
         self._packs_by_id.clear()
         # Идём СНИЗУ ВВЕРХ: system → user → project.
         # Верхний слой перетирает нижний по skill_id (silent override).
+        # Плагины идут между system и user, помечены как system (только чтение).
         for source, root in (
             ("system", self._system_root),
             ("user", self._user_root),
             ("project", self._project_root),
         ):
+            if source == "user":
+                await self._load_plugin_skills()
             if not root or not await self._backend.is_dir(root):
                 continue
             for entry, is_dir in await self._backend.listdir(root):
                 if is_dir:
                     await self._load_root_entry(root, entry, source)
                 # else: пусто, скип  # noqa: ERA001  # описание формата, не выключенный код
+
+    def _plugin_names(self) -> List[str]:
+        return list(dict.fromkeys(r.plugin for r in self._plugin_roots))
+
+    def _register_plugin_pack(self, plugin_name: str) -> None:
+        self._packs_by_id[plugin_name] = {
+            "id": plugin_name,
+            "name": plugin_name,
+            "description": "",
+            "version": None,
+            "source_url": None,
+            "bootstrap_skill": None,
+            "source": "system",
+            "plugin": True,
+        }
+
+    async def _load_plugin_skill_dirs(
+        self, plugin_name: str, root: Optional[str], contain: Optional[str]
+    ) -> None:
+        if not root or not await self._backend.is_dir(root):
+            return
+        for entry, is_dir in await self._backend.listdir(root):
+            # listdir не считает ссылку каталогом; скилл по ссылке берётся,
+            # а выход за корень Agent Plugins отсекает проверка ниже.
+            path = self._backend.join(root, entry)
+            if not is_dir and not await self._backend.is_dir(path):
+                continue
+            if contain and not _inside(Path(root) / entry, Path(contain)):
+                logger.warning(
+                    "plugin %s: skill %s resolves outside the plugin, skipped",
+                    plugin_name,
+                    entry,
+                )
+                continue
+            skill = await self._load_skill_dir(
+                path,
+                dir_name=entry,
+                source="system",
+                pack_id=plugin_name,
+            )
+            if skill is not None and skill.id not in self._disabled:
+                self._skills_by_id[skill.id] = skill
+
+    async def _load_plugin_skills(self) -> None:
+        """Skills плагинов как пакет ``<плагин>``: все видны в списке."""
+        roots: dict[str, list[tuple[str, Optional[str]]]] = {}
+        for item in self._plugin_roots:
+            roots.setdefault(item.plugin, []).append((item.path, item.contain))
+        for plugin_name in self._plugin_names():
+            if plugin_name in self._disabled:
+                continue
+            self._register_plugin_pack(plugin_name)
+            for root, contain in roots.get(plugin_name, ()):
+                await self._load_plugin_skill_dirs(plugin_name, root, contain)
 
     async def _load_skill_dir(
         self,
@@ -551,6 +635,7 @@ class SkillsRegistry:
                 pack=pack,
                 include_all=include_all,
                 bootstrap_ids=bootstrap_ids,
+                plugin_packs=frozenset(self._plugin_names()),
             ):
                 continue
             result.append(self._skill_entry(skill, bootstrap_ids, pack_sizes))
@@ -844,6 +929,7 @@ def get_skills_registry(
         disable_skills=disable_skills,
         backend=backend,
         project_root=project_root,
+        plugin_roots=runtime_of(settings).plugins.skill_roots,
     )
 
 

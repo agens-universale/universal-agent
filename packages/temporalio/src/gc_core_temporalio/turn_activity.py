@@ -15,11 +15,13 @@ from typing import Any
 
 from gc_core.aio import AsyncAgent
 from gc_core.config_modules.root import AppConfig
+from gc_core.plugins.snapshot import PluginSnapshot
 from gc_core.settings import LoadedSettings, settings_of
 from gc_core.trace_id import normalize_trace_id
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from gc_core_temporalio.provider import warn_profile_plugins
 from gc_core_temporalio.turn_activity_contracts import (
     AgentActivityRequest,
     AgentActivityResult,
@@ -68,6 +70,8 @@ class AgentActivity:
         self.heartbeat_interval = heartbeat_interval
         self.log_handlers = tuple(log_handlers)
         self.workspace = Path.cwd().resolve()
+        for name, source in self.agents.items():
+            warn_profile_plugins(name, settings_of(source))
 
     def _settings(self, request):
         try:
@@ -88,10 +92,14 @@ class AgentActivity:
             if isinstance(source, LoadedSettings)
             else LoadedSettings(settings=settings_of(source))
         )
+        # Плагины в durable-режиме не поддерживаются: снимок пуст и у
+        # готовых настроек приложения, как у профиля воркера.
         return loaded.with_runtime(
             launch_root=str(self.workspace),
             human_channel=False,
             trace_id=trace,
+            plugins=PluginSnapshot(),
+            untrusted_plugin_entries=frozenset(),
         )
 
     async def _heartbeat(self):

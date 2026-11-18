@@ -595,6 +595,43 @@ async def test_worker_without_human_declares_the_channel(
         await provider.aclose()
 
 
+async def test_worker_settings_have_empty_snapshot(
+    tmp_path, monkeypatch, caplog
+):
+    """Плагинов под воркером нет по построению: снимок приложения в рантайме
+    профиля не доезжает (иначе субагенты и skills брались бы с диска хоста
+    воркера); заданные в профиле плагины — строка в лог."""
+    from gc_core.plugins.snapshot import PluginSnapshot
+    from gc_core.settings import RuntimeEnv, runtime_of
+
+    monkeypatch.chdir(tmp_path)
+    app_runtime = RuntimeEnv(
+        plugins=PluginSnapshot(trusted=frozenset({"x"}), notices=("n",)),
+        untrusted_plugin_entries=frozenset({"/p"}),
+    )
+    worker_profile = AgentProfile(
+        workspace=str(tmp_path),
+        core=AppConfig.model_validate(
+            {
+                "agent": {"use_local_subagents": False},
+                "plugins": {"paths": [str(tmp_path / "plug")]},
+            }
+        ),
+        runtime=app_runtime,
+    )
+    caplog.set_level("WARNING", logger="gc_core_temporalio.provider")
+    provider, _store = make_provider(tmp_path, {"test": worker_profile})
+    try:
+        worker_loaded = provider._profiles["test"][1]
+        assert runtime_of(worker_loaded).plugins == PluginSnapshot()
+        assert runtime_of(worker_loaded).untrusted_plugin_entries == (
+            frozenset()
+        )
+        assert "plugins" in caplog.text
+    finally:
+        await provider.aclose()
+
+
 async def test_call_trace_id_reaches_context_and_mcp(tmp_path, monkeypatch):
     """trace_id вызова — в рантайме контекста хода и в заголовках MCP."""
     from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config

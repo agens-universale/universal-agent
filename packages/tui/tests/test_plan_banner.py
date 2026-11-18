@@ -502,3 +502,80 @@ async def test_plan_options_height_stays_on_selection():
         # Перенос есть (вариантов с подсказкой — 6 строк), и он влезает.
         assert longest > len(PLAN_OPTIONS) + 2
         assert heights.pop() >= longest
+
+
+class _PlanExecutor:
+    """Исполнитель-заглушка: помнит решения по плану; прогон их гасит,
+    как `AgentExecutor._apply_plan_changes`."""
+
+    def __init__(self) -> None:
+        self.transition = None
+        self.rework = None
+        self.runs = 0
+
+    def accept_plan(self, mode, thread_id):
+        self.transition = (mode, thread_id)
+
+    def arm_plan_rework(self, thread_id):
+        self.rework = thread_id
+
+    def add_message(self, message):
+        pass
+
+    async def arun(self, messages, **kwargs):
+        self.runs += 1
+        self.transition = self.rework = None
+
+
+def _factory_app(tmp_path):
+    app = _app(tmp_path)
+    app._executor_factory = _PlanExecutor
+    return app
+
+
+async def test_plan_decisions_survive_runner_recreation(tmp_path):
+    """Между кнопкой баннера и Enter раннер пересобран (набор плагинов,
+    тоггл палитры, перечитка конфига): решения едут в новый, как режим
+    разрешений, и доходят до нового исполнителя."""
+    app = _factory_app(tmp_path)
+    old = app.get_runner()
+    old._ensure_executor()
+    old.accept_plan("edit", "t1")
+    old.arm_plan_rework("t1")
+
+    app.invalidate_runner()
+    fresh = app.get_runner()
+
+    assert fresh is not old
+    executor = fresh._ensure_executor()
+    assert executor.transition == ("edit", "t1")
+    assert executor.rework == "t1"
+
+
+async def test_plan_decisions_taken_by_a_run_are_not_carried(tmp_path):
+    app = _factory_app(tmp_path)
+    old = app.get_runner()
+    old.arm_plan_rework("t1")
+    assert old.start(query="что доработать", thread_id="t1")
+    old.wait(5)
+    assert old._executor.runs == 1
+
+    app.invalidate_runner()
+    executor = app.get_runner()._ensure_executor()
+
+    assert executor.rework is None
+
+
+async def test_new_session_drops_carried_plan_decisions(tmp_path):
+    """Решение, перенесённое с пересобранного раннера, живёт, пока окно не
+    сняло раннер само (новая сессия, стоп): тогда оно не едет дальше, как и
+    без пересборки."""
+    async with _factory_app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        app.get_runner().arm_plan_rework("t1")
+        app.invalidate_runner()
+
+        app.screen.request_thread_switch(None)
+        await pilot.pause()
+
+        assert app.get_runner()._ensure_executor().rework is None

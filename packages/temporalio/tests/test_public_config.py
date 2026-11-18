@@ -23,8 +23,8 @@ from gc_core_temporalio.public_config import (
     PublicConfigError,
     is_private_path,
     public_config_snapshot,
-    settings_fingerprint,
     settings_exclude_spec,
+    settings_fingerprint,
 )
 
 #: Каждое закрытое поле задано значением с меткой SECRET — метка не должна
@@ -189,6 +189,7 @@ def test_snapshot_contains_no_worker_only_or_secret_field():
         "finish_gate_smart",
         "subagent_tools_allow",
         "subagent_tools_stop",
+        "subagent_mcp_allow",
         "os_backend",
         "run_mode",
         "human_channel",
@@ -529,3 +530,25 @@ def test_channel_declarations_reach_the_workflow():
     )
     assert rebuilt.runtime.human_channel is False
     assert rebuilt.runtime.external_user_words is True
+
+
+def test_runtime_fields_classified_for_durable():
+    """Снимок плагинов и недоверенные записи — только воркеру: в историю
+    workflow они не идут, а снимок настроек не падает на новых полях."""
+    from gc_core.plugins.snapshot import PluginSnapshot
+    from gc_core_temporalio.public_config import public_runtime
+
+    runtime = RuntimeEnv(
+        plugins=PluginSnapshot(trusted=frozenset({"x"})),
+        untrusted_plugin_entries=frozenset({"/p"}),
+    )
+
+    public = public_runtime(runtime)
+
+    assert "plugins" not in public
+    assert "untrusted_plugin_entries" not in public
+    snapshot = public_config_snapshot(
+        LoadedSettings(settings=AppConfig(), runtime=runtime)
+    )
+    restored = settings_from_snapshot(snapshot.settings, snapshot.runtime)
+    assert restored.runtime.plugins == PluginSnapshot()

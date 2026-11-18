@@ -18,6 +18,7 @@ from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp.api import (
     acall_mcp_tool,  # transport injection compatibility
 )
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.trace_id import trace_header_name, trace_id_from_config
@@ -493,7 +494,7 @@ def mcp_cache_config(settings: Any) -> Dict[str, Any]:
     app = settings_of(settings)
     servers_cfg: Dict[str, Any] = {
         name: plain_dump(server, by_alias=True)
-        for name, server in app.mcp.servers.items()
+        for name, server in effective_mcp_servers(settings).items()
     }
     return {
         "mcp-servers": _servers_cfg_with_trace(servers_cfg, settings),

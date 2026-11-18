@@ -212,10 +212,6 @@ class ThreadSession:
         self._proj_tags = tuple(tags or ())
         self._proj_strip_think = bool(strip_think)
         self.runtime_messages: List[Dict[str, Any]] = []
-        # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
-        self.known_keys_snapshot_before_last_batch: Optional[
-            frozenset[str]
-        ] = None
         # persist: turn — шаги хода копятся здесь до точки сброса.
         self._defer_persist = False
         self._deferred_messages: List[Dict[str, Any]] = []
@@ -425,8 +421,7 @@ class ThreadSession:
     ) -> None:
         """История и состояние шага — одной записью. Сессия меняется только
         после записи: упавшая запись не оставляет её впереди хранилища."""
-        known_before = set(self.known_message_keys)
-        fresh, seen = [], set(known_before)
+        fresh, seen = [], set(self.known_message_keys)
         for message in step_messages:
             key = make_message_key(message)
             if key not in seen:
@@ -456,7 +451,6 @@ class ThreadSession:
             set_runtime=runtime,
             set_extra=extra_for_write(self.extra),
         )
-        self.known_keys_snapshot_before_last_batch = frozenset(known_before)
         self.history_messages.extend(fresh)
         self.known_message_keys.update(seen)
         self.persisted_messages_count += len(fresh)

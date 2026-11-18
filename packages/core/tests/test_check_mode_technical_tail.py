@@ -315,3 +315,17 @@ def test_run_agent_sends_loop_notice_tail_as_function_call_output(monkeypatch):
     body = json.loads(seen_batches[0][-1]["output"])
     assert "Loop detector:" in body["technical_system_messages"][0]
     assert body["ok"] is True
+
+
+def test_last_real_user_text_skips_technical_tail():
+    from gc_core.message_policy.user_message_policy import (
+        last_real_user_text,
+        wrap_technical_user_content,
+    )
+
+    tail = {"role": "user", "content": wrap_technical_user_content("x")}
+    query = {"role": "user", "content": "/p:c a"}
+    answer = {"role": "assistant", "content": "earlier"}
+    assert last_real_user_text([query, tail]) == "/p:c a"
+    assert last_real_user_text([query, answer, tail]) == ""
+    assert last_real_user_text([]) == ""

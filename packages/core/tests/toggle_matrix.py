@@ -733,6 +733,12 @@ NOT_IN_MATRIX = {
     "storage.threads": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
     "storage.agent": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
     "storage.ensure_schema": "накат схемы при открытии в gc-stores; покрытие в stores/tests/test_open_configured",
+    # --- плагины (песочница): по умолчанию пустой список, путь исполнения ядра
+    # не меняется; поведение покрыто packages/core/tests/plugins/test_plugins.py.
+    "plugins.paths": "песочница плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.sources": "git-источники плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.use_installed": "выбор источника плагинов (установленные или нет), не путь исполнения ядра; покрытие в plugins/test_plugins.py",
+    "plugins.hook_timeout_sec": "таймаут внешних хуков плагинов, не путь исполнения ядра; покрытие в plugins/test_plugins.py",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
@@ -790,7 +796,6 @@ NOT_IN_MATRIX = {
     # Порог напоминания чек-листа. Числился непрочитанным и потому не сверялся
     # с матрицей; эталон develop случаев с ним не содержит. Сам рычаг покрыт
     # test_todo_config.py и test_todo_reminder.py.
-    "todo.reminder_steps": "эталон develop его не содержит, покрытие в test_todo_config и test_todo_reminder",
     # --- приехало с develop при вливании 09.09.2026 (PR #97, #99, #100) -------
     #
     # Оба ключа меняют ФОРМУ вывода, а не путь исполнения: preview-края режут
@@ -920,10 +925,6 @@ NOT_IN_MATRIX = {
     "acp.todo_reminder_steps": "только ACP",
     "acp.confirm_timeout_sec": "только ACP: ожидание session/request_permission",
     "tui.finish_gate_mode": "только TUI",
-    "todo.reminder_steps": (
-        "напоминание чеклиста; матрица гоняет CLI и этот лист не "
-        "переключает. Канал Responses пишет его в runtime"
-    ),
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",
     "tui.bang_shell.max_output_bytes": "только TUI",
