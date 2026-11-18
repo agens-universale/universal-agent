@@ -28,6 +28,7 @@ from gc_core.tools.connect_mcp.consumer_call import (
     lost_session,
     passes_through,
     refusal_text,
+    resend_if_unsent,
     stop_requested,
     timeout_error,
     tool_error,
@@ -72,8 +73,9 @@ class McpCallExecutor:
         сервера с этим отпечатком нет в наборе — «сервер отключён»; вызов
         ждёт своё подключение (или начинает его по правилу 30 с) и идёт
         по сессии потребителя, под его владельцем и слотами. Автоповтора
-        бэкенда на этом пути нет: отказ связи сразу идёт в правило 30 с
-        (шаг 7), а повторы держали бы ход минутами.
+        бэкенда с паузами на этом пути нет — он держал бы ход минутами:
+        запрос, который не ушёл, повторяется один раз сразу, иначе отказ
+        связи идёт в правило 30 с (шаг 7).
         """
         call = partial(
             acall_mcp_tool,
@@ -163,7 +165,9 @@ class McpCallExecutor:
         нет: закрытие, начатое позже, задачу уже увидит."""
         connections = self._connections
         with use_owner(connections.owner), use_call_slots(connections.slots):
-            task = asyncio.get_running_loop().create_task(call())
+            task = asyncio.get_running_loop().create_task(
+                resend_if_unsent(call)
+            )
         generation = connections.begin_call(task, entry)
         task.add_done_callback(self._forget_call)
         try:

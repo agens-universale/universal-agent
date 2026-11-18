@@ -13,6 +13,7 @@
 """
 
 import asyncio
+from typing import Any, Awaitable, Callable
 
 import anyio
 import httpx
@@ -25,6 +26,7 @@ from gc_core.tools.connect_mcp.call_errors import (
     CALL_TIMEOUTS,
     McpCallOutcomeUnknown,
     McpCallTimedOut,
+    request_not_sent,
 )
 from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.service_records import Failure
@@ -100,6 +102,18 @@ def refusal_text(own: Failure | None, shared: Failure | None) -> str:
         return UNAVAILABLE_TEXT
     latest = max(failures, key=lambda failure: failure.at)
     return f"{UNAVAILABLE_TEXT}: {latest.reason}"
+
+
+async def resend_if_unsent(call: Callable[[], Awaitable[Any]]) -> Any:
+    """Вызов с одним повтором сразу, без паузы, если запрос не ушёл
+    серверу (не удалось соединиться): разовый сбой связи у живого сервера
+    не становится отказом. Всё остальное и неудачный повтор — как есть."""
+    try:
+        return await call()
+    except Exception as exc:
+        if not request_not_sent(exc):
+            raise
+    return await call()
 
 
 def is_timeout(leaf: BaseException) -> bool:

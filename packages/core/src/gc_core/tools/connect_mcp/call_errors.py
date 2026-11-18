@@ -5,7 +5,7 @@
 
 Здесь же — общая для сервиса и исполнителя вызова таблица «истёк срок
 вызова» и разворот группы исключений до листа: одна классификация на
-подключение и вызов.
+подключение и вызов, и правило «запрос не ушёл».
 """
 
 import httpx
@@ -41,6 +41,12 @@ CALL_TIMEOUTS = (
 )
 
 
+#: Запрос не ушёл серверу: в соединении отказано, вызова сервер не видел.
+#: Отказ, срок ответа и обрыв после отправки сюда не входят. Срок
+#: соединения тоже: повтор удвоил бы ожидание хоста, который не отвечает.
+REQUEST_NOT_SENT = (httpx.ConnectError,)
+
+
 def first_leaf(exc: BaseException) -> BaseException:
     """Первый лист группы исключений; не группа — само исключение."""
     while isinstance(exc, BaseExceptionGroup):
@@ -48,10 +54,17 @@ def first_leaf(exc: BaseException) -> BaseException:
     return exc
 
 
+def request_not_sent(exc: BaseException) -> bool:
+    """Запрос точно не дошёл до сервера (по первому листу группы)."""
+    return isinstance(first_leaf(exc), REQUEST_NOT_SENT)
+
+
 __all__ = [
     "CALL_TIMEOUTS",
+    "REQUEST_NOT_SENT",
     "McpCallOutcomeUnknown",
     "McpCallTimedOut",
     "McpServerGone",
     "first_leaf",
+    "request_not_sent",
 ]

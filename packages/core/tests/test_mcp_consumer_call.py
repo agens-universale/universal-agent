@@ -1022,48 +1022,103 @@ async def _refused_with_retry(view, name: str, **arguments) -> str:
     return caught.value.error.message
 
 
-async def test_service_call_to_closed_port_fails_at_once(
-    mcp_home, mcp_reaper, mcp_owner
+def _count_calls(monkeypatch, fail_first=None) -> list[int]:
+    """Каждая попытка вызова транспорта на пути сервиса; ``fail_first`` —
+    исключение вместо первой попытки."""
+    attempts: list[int] = []
+    real = executor_module.acall_mcp_tool
+
+    async def counting(**kwargs):
+        attempts.append(len(attempts) + 1)
+        if fail_first is not None and len(attempts) == 1:
+            raise fail_first
+        return await real(**kwargs)
+
+    monkeypatch.setattr(executor_module, "acall_mcp_tool", counting)
+    return attempts
+
+
+async def test_service_call_resends_once_when_connect_failed(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner, monkeypatch
 ):
-    """Автоповтор бэкенда на пути сервиса не действует: отказ сразу
-    записан, правило 30 с не пускает следующий вызов."""
+    """Разовый отказ соединения у живого сервера: запрос не ушёл, один
+    быстрый повтор успешен — отказ не записан, правило 30 с не включилось."""
+    refused = ExceptionGroup("g", [httpx.ConnectError("refused")])
+    async with stream_server(tmp_path, "stream_http") as (network, control):
+        settings = _settings({"a": network})
+        service = McpService(connect_on_start=True)
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+        attempts = _count_calls(monkeypatch, fail_first=refused)
+
+        out = await _call(view, _ACTION)
+
+        assert "count" in out
+        assert attempts == [1, 2]
+        entry = _entry(consumer)
+        assert entry.last_failure is None
+        assert connections_of(consumer).may_connect(entry)
+        assert _calls_sent(control) == 1
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
+
+
+async def test_service_call_to_closed_port_resends_once_then_fails(
+    mcp_home, mcp_reaper, mcp_owner, monkeypatch
+):
+    """Закрытый порт: две попытки подряд без паузы (автоповтор бэкенда на
+    пути сервиса не действует), затем отказ записан и правило 30 с не
+    пускает следующий вызов."""
     settings = _settings({"a": closed_port_cfg()})
     _seed(settings)
     service = McpService(connect_on_start=False)
     consumer = await _ready(mcp_reaper, service, settings)
     view = await _view(consumer, settings)
+    attempts = _count_calls(monkeypatch)
     loop = asyncio.get_running_loop()
     started = loop.time()
 
     text = await _refused_with_retry(view, _ECHO, text="hi")
 
     assert loop.time() - started < 5
+    assert attempts == [1, 2]
     entry = _entry(consumer)
     assert text == entry.last_failure.reason
     assert not connections_of(consumer).may_connect(entry)
     again = await _refused_with_retry(view, _ECHO, text="hi")
     assert again == f"сервер недоступен: {entry.last_failure.reason}"
+    assert attempts == [1, 2]
 
 
-class _Always401(BaseHTTPRequestHandler):
-    """Сервер, отвечающий 401 на всё; считает запросы."""
+class _AlwaysDeny(BaseHTTPRequestHandler):
+    """Сервер, отвечающий статусом ``status`` на всё; считает запросы."""
 
     requests = 0
+    status = 401
 
     def log_message(self, *args):
         pass
 
     def _deny(self):
         type(self).requests += 1
-        self.send_response(401)
+        self.send_response(self.status)
         self.send_header("content-length", "0")
         self.end_headers()
 
     do_POST = do_GET = do_DELETE = _deny
 
 
-async def test_service_call_401_is_sent_once(mcp_home, mcp_reaper, mcp_owner):
-    handler = type("Deny", (_Always401,), {"requests": 0})
+@pytest.mark.parametrize(
+    ("status", "text", "code"),
+    [
+        (401, "сервер ответил 401 Unauthorized", "auth"),
+        (502, "сервер ответил 502 Bad Gateway", "other"),
+    ],
+)
+async def test_service_call_denied_is_sent_once(
+    mcp_home, mcp_reaper, mcp_owner, status, text, code
+):
+    """Ответ сервера статусом — запрос дошёл: повтора нет."""
+    handler = type("Deny", (_AlwaysDeny,), {"requests": 0, "status": status})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1075,16 +1130,40 @@ async def test_service_call_401_is_sent_once(mcp_home, mcp_reaper, mcp_owner):
         consumer = await _ready(mcp_reaper, service, settings)
         view = await _view(consumer, settings)
 
-        text = await _refused_with_retry(view, _ECHO, text="hi")
+        refused = await _refused_with_retry(view, _ECHO, text="hi")
 
-        assert text == "сервер ответил 401 Unauthorized"
+        assert refused == text
         assert handler.requests == 1
-        assert _entry(consumer).last_failure.code == "auth"
+        assert _entry(consumer).last_failure.code == code
         await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
     finally:
         server.shutdown()
         server.server_close()
         thread.join(5)
+
+
+async def test_service_call_read_timeout_runs_tool_once(
+    mcp_home, tmp_path, mcp_reaper, mcp_owner
+):
+    """Сервер отвечает одним JSON и не успевает: ``ReadTimeout`` — исход
+    неизвестен, повтора нет, тул исполнен один раз."""
+    async with stream_server(tmp_path, "stream_http", json_response=True) as (
+        network,
+        control,
+    ):
+        settings = _settings({"a": network})
+        service = McpService(connect_on_start=True)
+        consumer = await _ready(mcp_reaper, service, settings)
+        view = await _view(consumer, settings)
+
+        with pytest.raises(McpToolCallError) as caught:
+            await asyncio.wait_for(
+                _wrapper(view, _ACTION, timeout=1).acall(delay=30), 8
+            )
+
+        assert caught.value.error.message == "сервер не ответил за 1 с"
+        assert _calls_sent(control) == 1
+        await asyncio.wait_for(consumer.aclose(), _CEILING_SEC)
 
 
 async def test_stream_stdio_death_mid_call_is_own_failure(
@@ -1340,7 +1419,7 @@ async def test_legacy_http_success_after_sibling_failure_confirms(
 
     async def late_success_then_refused(**kwargs):
         calls.append(kwargs["full_tool_name"])
-        if len(calls) == 2:
+        if len(calls) in (2, 3):  # вызов соседа и его быстрый повтор
             raise httpx.ConnectError("refused")
         result = await real(**kwargs)
         if len(calls) == 1:
