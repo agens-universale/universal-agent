@@ -319,9 +319,20 @@ _RESERVED_REGISTER_TAG = re.compile(
     rf"<(/?)({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>"
 )
 _MARKDOWN_CODE_SPAN = re.compile(r"(`+)(.*?)\1", re.DOTALL)
-_WHOLE_PATCH_FENCE = re.compile(r"\A```[^\n]*\n(.*?)\n```\Z", re.DOTALL)
+_REGISTER_BOUNDARY_IN_SPAN = re.compile(
+    rf"</(?:{'|'.join(REGISTER_ORDER)})>.*?<(?:{'|'.join(REGISTER_ORDER)})>",
+    re.DOTALL,
+)
+_SINGLE_PATCH_FENCE = re.compile(
+    r"^```[^\n]*\n(.*?)\n```[ \t]*(?=\n|\Z)", re.DOTALL | re.MULTILINE
+)
+_EXAMPLE_CUE = re.compile(r"\b(?:example|for instance|e\.g\.|пример)\b", re.I)
+_OUTSIDE_TAG_LIKE = re.compile(r"</?[A-Za-z]")
 _REGISTER_END_TAG = re.compile(
     rf"</({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>\Z"
+)
+_BROKEN_REGISTER_TAIL = re.compile(
+    rf"</?(?:{'|'.join(re.escape(name) for name in REGISTER_ORDER)})\s*\Z"
 )
 _REGISTER_WRAPPER_END = re.compile(
     r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
@@ -348,6 +359,39 @@ def _next_unquoted_tag(
     )
 
 
+def _next_structural_tag(
+    text: str, start: int, spans: list[tuple[int, int]]
+) -> re.Match[str] | None:
+    for tag in _REGISTER_TAG_TOKEN.finditer(text, start):
+        if _is_markdown_literal(tag.start(), spans):
+            continue
+        line_start = text.rfind("\n", start, tag.start()) + 1
+        if text[max(start, line_start) : tag.start()].strip():
+            continue
+        return tag
+    return None
+
+
+def _register_opening(text: str, cursor: int) -> re.Match[str] | None:
+    opening = _REGISTER_TAG_TOKEN.match(text, cursor)
+    if (
+        opening is None
+        or opening.group(1)
+        or opening.group(2) not in _REGISTER_NAMES
+    ):
+        return None
+    return opening
+
+
+def _matching_register_close(
+    text: str, start: int, name: str, spans: list[tuple[int, int]]
+) -> re.Match[str] | None:
+    closing = _next_unquoted_tag(_RESERVED_REGISTER_TAG, text, start, spans)
+    if closing is None or closing.group(1) != "/" or closing.group(2) != name:
+        return None
+    return closing
+
+
 def _parse_register_block(
     text: str, start: int, spans: list[tuple[int, int]]
 ) -> dict[str, str] | None:
@@ -355,29 +399,21 @@ def _parse_register_block(
     bodies: dict[str, str] = {}
     cursor = start
     while cursor < len(text):
-        opening = _REGISTER_TAG_TOKEN.match(text, cursor)
-        if (
-            opening is None
-            or opening.group(1)
-            or opening.group(2) not in _REGISTER_NAMES
-        ):
+        opening = _register_opening(text, cursor)
+        if opening is None:
             return None
         name = opening.group(2)
-        closing = _next_unquoted_tag(
-            _RESERVED_REGISTER_TAG, text, opening.end(), spans
-        )
-        if (
-            closing is None
-            or closing.group(1) != "/"
-            or closing.group(2) != name
-        ):
+        closing = _matching_register_close(text, opening.end(), name, spans)
+        if closing is None:
             return None
         bodies[name] = text[opening.end() : closing.start()].strip()
         cursor = closing.end()
         if _REGISTER_WRAPPER_END.fullmatch(text[cursor:].strip()):
             return bodies
-        next_tag = _next_unquoted_tag(_REGISTER_TAG_TOKEN, text, cursor, spans)
+        next_tag = _next_structural_tag(text, cursor, spans)
         if next_tag is None:
+            if _BROKEN_REGISTER_TAIL.search(text[cursor:]):
+                return None
             return bodies
         if next_tag.group(1) or next_tag.group(2) not in _REGISTER_NAMES:
             return None
@@ -385,37 +421,45 @@ def _parse_register_block(
     return None
 
 
-def _has_unclosed_register_prefix(
-    text: str, stop: int, spans: list[tuple[int, int]]
-) -> bool:
-    stack: list[str] = []
-    for tag in _REGISTER_TAG_TOKEN.finditer(text, 0, stop):
-        if _is_markdown_literal(tag.start(), spans):
-            continue
-        name = tag.group(2)
-        if name not in _REGISTER_NAMES:
-            continue
-        if tag.group(1):
-            if not stack or stack.pop() != name:
-                return True
-        else:
-            stack.append(name)
-    return bool(stack)
-
-
 def _extract_balanced_registers(s: str) -> dict[str, str]:
-    spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]
+    spans = [
+        match.span()
+        for match in _MARKDOWN_CODE_SPAN.finditer(s)
+        if len(match.group(1)) >= 3
+        or _REGISTER_BOUNDARY_IN_SPAN.search(match.group()) is None
+    ]
     for token in _REGISTER_TAG_TOKEN.finditer(s):
         if _is_markdown_literal(token.start(), spans):
             continue
         if token.group(1) or token.group(2) not in _REGISTER_NAMES:
             continue
-        if _has_unclosed_register_prefix(s, token.start(), spans):
-            continue
-        bodies = _parse_register_block(s, token.start(), spans)
-        if bodies is not None:
-            return bodies
+        return _parse_register_block(s, token.start(), spans) or {}
     return {}
+
+
+def _extract_register_candidate(s: str) -> dict[str, str]:
+    fenced = _SINGLE_PATCH_FENCE.search(s)
+    if fenced is None:
+        return _extract_balanced_registers(s)
+    if s.count("```") != 2:
+        return {}
+    outside = f"{s[: fenced.start()]}\n{s[fenced.end() :]}"
+    if _OUTSIDE_TAG_LIKE.search(outside):
+        enclosing = _extract_balanced_registers(s)
+        return (
+            enclosing
+            if any("```" in body for body in enclosing.values())
+            else {}
+        )
+    if _EXAMPLE_CUE.search(outside):
+        return {}
+    inner = fenced.group(1).strip()
+    if (
+        _RESERVED_REGISTER_TAG.match(inner) is None
+        or _REGISTER_END_TAG.search(inner) is None
+    ):
+        return {}
+    return _extract_balanced_registers(inner)
 
 
 def extract_register_bodies(text: str) -> dict[str, str]:
@@ -423,17 +467,11 @@ def extract_register_bodies(text: str) -> dict[str, str]:
     s = (text or "").strip()
     if not s:
         return {}
-    fenced = _WHOLE_PATCH_FENCE.fullmatch(s)
-    if fenced is not None:
-        s = fenced.group(1).strip()
-        if (
-            _RESERVED_REGISTER_TAG.match(s) is None
-            or _REGISTER_END_TAG.search(s) is None
-        ):
-            return {}
-    full = _extract_balanced_registers(s)
+    full = _extract_register_candidate(s)
+    if any("</think>" in body for body in full.values()):
+        return full
     for boundary in re.finditer(r"</think>", s):
-        after_think = _extract_balanced_registers(s[boundary.end() :].strip())
+        after_think = _extract_register_candidate(s[boundary.end() :].strip())
         if after_think:
             return after_think
     return full

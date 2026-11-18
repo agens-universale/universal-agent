@@ -134,6 +134,122 @@ def test_fenced_example_in_explanation_is_not_applied():
     assert deltas.is_empty()
 
 
+def test_final_fenced_register_block_after_intro_is_applied():
+    raw = (
+        "Here is the updated memory:\n```xml\n"
+        "<goal>new goal</goal><knowledge>new fact</knowledge>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "knowledge"})
+    assert deltas.goal == "new goal"
+    assert deltas.knowledge == "new fact"
+
+
+def test_single_fenced_register_block_with_text_on_both_sides_is_applied():
+    raw = (
+        "Here is the updated memory:\n```xml\n"
+        "<goal>new goal</goal><knowledge>new fact</knowledge>\n```\n"
+        "The registers above are ready."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "knowledge"})
+    assert deltas.goal == "new goal"
+    assert deltas.knowledge == "new fact"
+
+
+def test_fenced_example_inside_register_body_stays_literal():
+    value = "Run:\n```xml\n<state>example</state>\n```\nKeep this text."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_text_mentions_between_and_after_registers_keep_entire_patch():
+    raw = (
+        "<goal>G</goal><constraints>C</constraints>\n"
+        "Note: prints <stdout> only.\n"
+        "<state>S</state><knowledge>K</knowledge>\n"
+        "I updated <knowledge> with verified facts."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.to_dict() == {
+        "goal": "G",
+        "constraints": "C",
+        "state": "S",
+        "knowledge": "K",
+    }
+
+
+def test_backticks_do_not_span_across_register_boundaries():
+    raw = (
+        "<goal>Run `make.</goal>"
+        "<constraints>Keep the existing `schema`.</constraints>"
+        "<state>Next step</state><knowledge>Verified fact</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.goal == "Run `make."
+    assert deltas.constraints == "Keep the existing `schema`."
+
+
+def test_damaged_structural_tail_does_not_apply_partial_patch():
+    prefix = (
+        "<goal>new goal</goal><constraints>new rule</constraints>"
+        "<state>new step</state><knowledge>new fact</knowledge>"
+    )
+
+    for tail in ("\n<knowledge>unfinished", "\n<knowledge"):
+        deltas, present = parse_memory_deltas(prefix + tail)
+
+        assert present == frozenset()
+        assert deltas.is_empty()
+
+
+def test_unknown_structural_tag_between_registers_does_not_apply_tail():
+    raw = (
+        "<goal>G</goal><constraints>C</constraints>\n"
+        "<stdout>unexpected</stdout>\n"
+        "<state>S</state><knowledge>K</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_terminal_fenced_example_is_not_a_memory_patch():
+    raw = "For example:\n```xml\n<knowledge>illustration</knowledge>\n```"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_multiple_fenced_register_blocks_are_ambiguous():
+    raw = (
+        "```xml\n<knowledge>draft</knowledge>\n```\n"
+        "```xml\n<knowledge>final</knowledge>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
 def test_register_body_keeps_literal_think_closing_tag():
     value = "Generic <Result> comes from transport; keep </think> literal."
 
