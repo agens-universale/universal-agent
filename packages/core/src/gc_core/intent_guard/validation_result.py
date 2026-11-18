@@ -42,9 +42,13 @@ _FENCE_OPEN_RE = re.compile(
     r"^[ \t]*```[\w-]*[ \t]*\r?\n", re.IGNORECASE | re.MULTILINE
 )
 _VERDICT_KEY_RE = re.compile(
-    r'"(?:action|trace_ok|report_ok|is_question|trace_gaps|report_mismatches)"\s*:'
+    r"[\"'](?:trace_ok|report_ok|is_question|trace_gaps|report_mismatches)[\"']\s*:"
+    r"|[\"']action[\"']\s*:\s*[\"']"
+    r"(?:accept|fix_report_and_continue|fix_report|continue_work)[\"']",
+    re.IGNORECASE,
 )
 _JSON_FENCE_LABELS = frozenset({"json", "jsonc", "json5", "js"})
+_INLINE_CODE_RE = re.compile(r"(?<!\\)`[^`\n]+`")
 
 
 @dataclass
@@ -245,7 +249,14 @@ def _object_ranges(text: str) -> list[tuple[int, int]]:
 
 def _reasoning_boundary(raw: str) -> int:
     """Find a standalone closing tag, excluding quoted JSON literals."""
-    boundaries = [match.end() for match in _THINK_CLOSE_RE.finditer(raw)]
+    fenced_ranges = [match.span() for match in _FENCE_RE.finditer(raw)]
+    boundaries = [
+        match.end()
+        for match in _THINK_CLOSE_RE.finditer(raw)
+        if not any(
+            start <= match.start() < end for start, end in fenced_ranges
+        )
+    ]
     return boundaries[-1] if boundaries else 0
 
 
@@ -264,7 +275,7 @@ def _fenced_verdict_bodies(text: str) -> tuple[bool, list[str]]:
         for m in fences
         if m.group("lang").lower() in _JSON_FENCE_LABELS
         or not m.group("lang")
-        or _VERDICT_KEY_RE.search(m.group("body"))
+        or _parse_json_verdict(m.group("body")) is not None
     ]
     unclosed = _FENCE_OPEN_RE.search(_FENCE_RE.sub("", text))
     return bool(bodies or unclosed), bodies
@@ -277,14 +288,41 @@ def _parse_fenced_verdict(text: str) -> tuple[bool, ValidationResult | None]:
     return True, _parse_json_verdict(bodies[0])
 
 
+def _mask_inline_code(text: str) -> str:
+    """Hide Markdown code outside strict JSON objects, preserving offsets."""
+    decoder = json.JSONDecoder()
+    json_ranges: list[tuple[int, int]] = []
+    position = 0
+    while (start := text.find("{", position)) != -1:
+        try:
+            parsed, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            position = start + 1
+            continue
+        if isinstance(parsed, dict):
+            json_ranges.append((start, end))
+        position = end
+
+    def replace(match: re.Match[str]) -> str:
+        if any(
+            start < match.start() and match.end() < end
+            for start, end in json_ranges
+        ):
+            return match.group()
+        return " " * len(match.group())
+
+    return _INLINE_CODE_RE.sub(replace, text)
+
+
 def _unfenced_candidate_bodies(text: str) -> tuple[list[str], bool]:
-    ranges = _object_ranges(text)
+    visible = _mask_inline_code(text)
+    ranges = _object_ranges(visible)
     candidates = [
         text[start:end]
         for start, end in ranges
-        if _VERDICT_KEY_RE.search(text[start:end])
+        if _VERDICT_KEY_RE.search(visible[start:end])
     ]
-    incomplete = "{" in text[ranges[-1][1] if ranges else 0 :]
+    incomplete = "{" in visible[ranges[-1][1] if ranges else 0 :]
     return candidates, incomplete
 
 
@@ -320,19 +358,19 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
 
 
 def conflicting_validator_verdicts(raw: str) -> ValidationResult | None:
-    """Keep a repeated conflict from being accepted by axis-only salvage."""
+    """Keep unresolved candidate conflicts from being accepted by salvage."""
     source = (raw or "")[_reasoning_boundary(raw or "") :]
     cleaned = project_text_for_model(source, strip_think=True)
     has_fence, bodies = _fenced_verdict_bodies(cleaned)
     outside = _FENCE_RE.sub("", cleaned)
     others, _ = _unfenced_candidate_bodies(outside)
     bodies = bodies + others if has_fence else others
-    verdicts = [
-        verdict for body in bodies if (verdict := _parse_json_verdict(body))
-    ]
+    parsed = [(body, _parse_json_verdict(body)) for body in bodies]
+    verdicts = [verdict for _, verdict in parsed if verdict is not None]
     axes = {(verdict.trace_ok, verdict.report_ok) for verdict in verdicts}
     if len(axes) < 2:
-        return None
+        malformed = [body for body, verdict in parsed if verdict is None]
+        return _malformed_conflict_result(verdicts, malformed)
     trace_ok = all(verdict.trace_ok for verdict in verdicts)
     report_ok = all(verdict.report_ok for verdict in verdicts)
     trace_gaps = list(
@@ -361,6 +399,42 @@ def conflicting_validator_verdicts(raw: str) -> ValidationResult | None:
         coverage_score=min(verdict.coverage_score for verdict in verdicts),
         feedback_for_agent="",
         is_question=all(verdict.is_question for verdict in verdicts),
+    )
+
+
+def _malformed_conflict_result(
+    verdicts: list[ValidationResult], malformed: list[str]
+) -> ValidationResult | None:
+    if not malformed:
+        return None
+    rejected = next((verdict for verdict in verdicts if not verdict.ok), None)
+    if rejected is not None:
+        return rejected
+    if not verdicts:
+        return None
+    trace_rejected = any(
+        _last_bool_match(_TRACE_OK_RE, body) is False for body in malformed
+    )
+    report_rejected = any(
+        _last_bool_match(_REPORT_OK_RE, body) is False for body in malformed
+    )
+    if not (trace_rejected or report_rejected):
+        return None
+    trace_ok = not trace_rejected
+    report_ok = not report_rejected
+    return ValidationResult(
+        ok=False,
+        action=expected_action_for_axes(
+            trace_ok=trace_ok, report_ok=report_ok
+        ),
+        trace_ok=trace_ok,
+        report_ok=report_ok,
+        trace_gaps=[],
+        report_mismatches=[],
+        missing_requirements=[],
+        conflicts=[],
+        coverage_score=0.0,
+        feedback_for_agent="Conflicting validator output remained unparseable after retry.",
     )
 
 

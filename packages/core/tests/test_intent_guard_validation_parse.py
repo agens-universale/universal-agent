@@ -201,6 +201,14 @@ class ParseValidatorResponseTest(unittest.TestCase):
             result.trace_gaps, ["Check literal </think> in feedback."]
         )
 
+    def test_inline_code_inside_json_string_is_preserved(self) -> None:
+        detail = "Check `make` output and the literal `{` in stderr."
+        result = parse_validator_response(
+            _raw(action="continue_work", trace_ok=False, trace_gaps=[detail])
+        )
+        assert result is not None
+        self.assertEqual(result.trace_gaps, [detail])
+
     def test_reasoning_boundary_precedes_literal_tag_in_verdict(self) -> None:
         raw = '{"action": "accept", "trace_ok": true}\n</think>\n' + _raw(
             action="continue_work",
