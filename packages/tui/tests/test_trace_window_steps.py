@@ -726,6 +726,38 @@ async def test_ephemeral_row_returns_with_its_step(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_climb_over_giant_last_turn_stays_bounded(tmp_path, monkeypatch):
+    """Последний ход сессии — законченный гигантский (стенд, снимок G):
+    подъём к началу держит всё смонтированное, вместе с закреплённым, в
+    пределах «лимит + кусок» и последнего шага — ход не закреплён
+    целиком."""
+    bound = _small_window(monkeypatch)
+    records = [*_giant_turn(0, 3), *_giant_turn(1, 180)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        fixture = HistoryFixture(
+            records=tuple(records), segments=(tuple(records),), sidecar=()
+        )
+        write_history(str(tmp_path / "t"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        model = scr._window_model()
+        last = model.step_count() - 1
+        trace = _trace(scr)
+        for _ in range(200):
+            if scr._window_first == 0:
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+            steps, counts = scr._window_mounted_counts()
+            pinned = dict(zip(steps, counts, strict=True)).get(last, 0)
+            assert sum(counts) <= bound + pinned
+        assert scr._window_first == 0
+
+
+@pytest.mark.asyncio
 async def test_return_to_bottom_does_not_remount_giant_turn(
     tmp_path, monkeypatch
 ):
