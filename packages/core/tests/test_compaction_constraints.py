@@ -20,8 +20,7 @@ SUMMARY = assemble_summary_xml(
     }
 )
 
-# The post-think part of the saved Polar 50k jpg-ocr-stat-4 response at step 0056.
-# Its task path is anonymized; the malformed tool-call structure is preserved.
+# An anonymized memory-patch response with no register tags.
 SAVED_PATCH_RESPONSE = """The three edits were applied, but there's a remaining bug: `extract_total` references `_bucket()` which doesn't exist yet — it will NameError on re-run. Let me inspect the current function and fix it properly.
 
 <function_call>

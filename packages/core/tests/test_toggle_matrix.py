@@ -119,7 +119,8 @@ def _normalize(obj):
 def reference() -> dict:
     data = json.loads(REFERENCE.read_text(encoding="utf-8"))
     rows = {row["id"]: row for row in data}
-    # Captured on develop 9af72d28b with the same valid summary stimulus.
+    # The compaction rows include constraints retained after an incomplete
+    # memory patch. Other cases still compare against the develop baseline.
     # Invalid-summary preservation is covered by test_summary_content_preservation.
     valid_summary_rows = json.loads(
         VALID_SUMMARY_REFERENCE.read_text(encoding="utf-8")
