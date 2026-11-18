@@ -2923,29 +2923,19 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         return super()._window_forget_step(step)
 
     def _step_pinned(self, step: int) -> bool:
-        """Шаг нельзя снимать (§5.3, R32): последний шаг модели, шаг с
-        прижатым хвостом, шаг со строкой, на которую держит ссылку живое
+        """Шаг нельзя снимать (§5.3, R32, R41): последний шаг модели, шаг
+        с прижатым хвостом, шаг со строкой, на которую держит ссылку живое
         состояние или фокус (`_live_widgets`: идущий вызов, «!», вопрос,
-        стрим, попытки сдачи), и раскрытое в текущем ходе. Прочие шаги
-        текущего хода снимаются, как шаги старых: гигантский живой ход
-        у низа и при подъёме держится в пределах окна."""
-        history = self._feed_history
-        if step >= history.step_count() - 1:
+        стрим, попытки сдачи). Прочие шаги текущего хода снимаются, как
+        шаги старых: гигантский живой ход у низа и при подъёме держится в
+        пределах окна; раскрытое возвращается со снятым шагом снимком
+        вида."""
+        if step >= self._feed_history.step_count() - 1:
             return True
         widgets = self._window_step_widgets(step)
         if any(pins_to_bottom(w) for w in widgets):
             return True
-        subtree = self._step_subtree(step)
-        if subtree & self._live_widgets():
-            return True
-        current = history.step_turn(step) == history.turn_count() - 1
-        return current and self._expanded_in(subtree)
-
-    def _expanded_in(self, widgets: set) -> bool:
-        """Среди ``widgets`` — строки раскрытого блока, файла или вывода
-        (живые виды и виды кусков)."""
-        views = (*self._block_views.values(), *self._history_views.values())
-        return any(view.expanded_in(widgets) for view in views)
+        return bool(self._step_subtree(step) & self._live_widgets())
 
     def _step_subtree(self, step: int) -> set:
         """Все виджеты поддерева ленты шага ``step``."""

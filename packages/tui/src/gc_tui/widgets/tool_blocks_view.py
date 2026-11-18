@@ -391,12 +391,6 @@ class ToolBlocksView:
         """Окно субагента — ключом его уровня (call_id родителя)."""
         return f"window:{self.level}" if key == "window" else key
 
-    def expanded_in(self, widgets: set) -> bool:
-        """Среди ``widgets`` — строки блока, раскрытого человеком (блок,
-        файл, вывод `Ran`, окно субагента)."""
-        calls = {k for k, w in self._widgets.items() if w in widgets}
-        return bool(calls) and any(self.model.view_state(calls).values())
-
     def forget(self, widgets: set) -> None:
         """Снятые с ленты ``widgets`` уровень больше не держит; модель
         блоков (текст, без виджетов) остаётся."""

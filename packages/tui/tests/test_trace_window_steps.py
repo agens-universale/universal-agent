@@ -1064,3 +1064,38 @@ async def test_live_calls_without_prose_header_stays_with_group(
             assert scr._window_first > 0
             live = await _climb_whole(pilot, scr, monkeypatch)
     assert live == opened
+
+
+@pytest.mark.asyncio
+async def test_expanded_step_of_live_turn_is_not_pinned(tmp_path):
+    """Раскрытое в старом шаге текущего хода шаг не закрепляет (R41):
+    снятый шаг возвращается куском раскрытым — снимок вида его хранит."""
+    user = "m_u0000"
+    records = [_message({"role": "user", "id": user, "content": "запрос"})]
+    for k in range(30):
+        records += _find(0, k)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, records, whole_calls=True)
+        model = scr._window_model()
+        assert model.open_turn() == 0
+        assert model.step_count() > 1
+        view = scr._block_views[""]
+        view.toggle(view.model.block_of("find_0_0"))
+        await pilot.pause()
+        texts = [t for _k, t, _c in feed_dump(_trace(scr))]
+        assert "    − свернуть группу" in texts
+        assert not scr._step_pinned(0)
+        assert scr.forget_step(0)
+        await pilot.pause()
+        assert "    − свернуть группу" not in [
+            t for _k, t, _c in feed_dump(_trace(scr))
+        ]
+        refs = scr._window_render(range(1), before=scr._window_top())
+        scr._window_first = 0
+        scr._window_adopt_chunk(refs)
+        await pilot.pause()
+        texts = [t for _k, t, _c in feed_dump(_trace(scr))]
+        assert texts.count("    − свернуть группу") == 1
