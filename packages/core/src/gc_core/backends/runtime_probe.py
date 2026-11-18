@@ -129,9 +129,10 @@ async def aensure_runtime(run: ProbeRun) -> None:
 class RuntimeProbeCache:
     """Успешная проба жива ``ttl_sec`` секунд. Отказ проверяется снова сразу.
 
-    Лока нет: бэкенд переживает несколько ``asyncio.run`` (TUI — по одному на
-    ход), а ``asyncio.Lock`` привязывается к loop первого захвата и на следующем
-    ходе падает. Двойной echo безвреден — лишний round-trip, не рассогласование.
+    Лока нет: бэкенд может пережить несколько ``asyncio.run`` (встраивающий
+    ведёт ходы отдельными ``asyncio.run``), а ``asyncio.Lock`` привязывается
+    к loop первого захвата и на следующем падает. Двойной echo безвреден —
+    лишний round-trip, не рассогласование.
     """
 
     def __init__(self, ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC) -> None:

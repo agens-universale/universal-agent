@@ -39,6 +39,7 @@ from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
+from gc_tui.services.agent_loop import AgentLoop
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.profile_lock import profile_switch_refusal
@@ -405,6 +406,9 @@ class TuiApp(App):
             None  # имена тулов до stop_tools — валидатор notices
         )
         self.active_runner = None  # AgentRunner | None
+        #: Цикл агента приложения, один на все ходы; поток поднимается при
+        #: первой отдаче работы (`AgentLoop.submit` / `call_soon`).
+        self.agent_loop = AgentLoop()
         #: Решения по плану снятого раннера для следующего (`_retire_runner`).
         self._carried_plan: tuple = (None, None)
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
@@ -1740,6 +1744,10 @@ class TuiApp(App):
         Затем логгер прогона (см. `AgentRunner.release`) и подписка на
         runtime-уведомления: и то и другое живёт в модульных реестрах до конца
         процесса и держит приложение целиком, если его не снять.
+
+        Последним — цикл агента (`AgentLoop.shutdown`): отменить задачи,
+        глухие к стопу, закрыть пул httpx, погасить поток. Тоже в потоке пула:
+        shutdown синхронно ждёт цикл, а поток UI так ждать не должен.
         """
         runner = self.active_runner
         stop = getattr(runner, "stop", None)
@@ -1755,6 +1763,7 @@ class TuiApp(App):
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()
         atexit.unregister(self._clear_image_pocket)
+        await asyncio.to_thread(self.agent_loop.shutdown)
 
     def watch_app_focus(self, focused: bool) -> None:
         """Окно терминала потеряло фокус — погасить подсветку картинок в репликах
@@ -1858,6 +1867,7 @@ class TuiApp(App):
             executor_factory=factory,
             on_error=_on_runner_error,
             on_complete=_on_runner_complete,
+            loop=self.agent_loop,
         )
         runner_ref.append(self.active_runner)
         self._runner_stale = False
@@ -1992,48 +2002,30 @@ class TuiApp(App):
             signal=self._post_stream_signal,
             throttle_s=STREAM_REFRESH_MS / 1000,
         )
-        # Своя `asyncio.run` на сборку — как и у хода ниже. Раньше здесь
-        # стояла ВТОРАЯ нативная сборка контекста (синхронная `create_run_context`),
-        # и docs объясняли её привязкой MCP-сессий к loop'у. Обоснование было
-        # неверным: синхронная сборка уводила дискавери в `run_coro_blocking`,
-        # то есть на такой же одноразовый loop, умиравший до первого хода.
-        # Настоящая причина была проще — эта функция синхронная и своего loop
-        # не имеет; фабрика зовётся в рабочем потоке раннера, где живого loop
-        # ещё нет, поэтому `asyncio.run` здесь законен.
-        #
-        # Отложенное решение (не в этой ветке): один долгоживущий loop в
-        # рабочем потоке на всё приложение. Он же убрал бы TLS-рукопожатие,
-        # которое TUI платит на каждое сообщение, закрывая пул после хода.
-        import asyncio
-
-        async def _abuild_ctx():
-            # Пул httpx ЭТОГО loop закрываем здесь же: `asyncio.run` ниже убьёт
-            # loop, а реестр клиентов ключуется по нему. Ход и `/compact` так и
-            # делают, а сборка — нет: клиент легаси http/sse MCP оставался в
-            # реестре с открытыми сокетами, и так на каждой пересборке (смена
-            # конфига сессии, `/profile`).
-            from gc_core.utils.async_http import aclose_clients
-
-            try:
-                return await acreate_run_context(
-                    loaded,
-                    auth_connector=auth,
-                    on_progress=progress.update,
-                    on_stream_delta=self._stream_pump.on_delta,
-                    is_tui=True,
-                    choice_provider=choice_provider,
-                    circuit_breaker=self._circuit_breaker,
-                    # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
-                    # поверх непустого реестра — тот же детект, что уже
-                    # используют CLI/server (config.cli_forces_legacy_model); без
-                    # него ран резолвил бы через реестр, расходясь с честным
-                    # хинтом /level (display_router).
-                    force_legacy=cli_forces_legacy_model(loaded),
-                )
-            finally:
-                await aclose_clients()
-
-        ctx = asyncio.run(_abuild_ctx())
+        # Сборка — на общем цикле агента, как ход и `/compact`: MCP-сессии и
+        # клиенты, открытые сборкой, живут на цикле, где их и используют.
+        # Фабрика зовётся в рабочем потоке раннера (не UI), поэтому
+        # синхронное ожидание `run` здесь законно. Пул httpx не закрываем:
+        # цикл переживает пересборку (`/profile`, смена конфига сессии), и на
+        # нём могут идти запросы живых субагентов — пул закрывает
+        # `AgentLoop.shutdown` на выходе.
+        ctx = self.agent_loop.run(
+            acreate_run_context(
+                loaded,
+                auth_connector=auth,
+                on_progress=progress.update,
+                on_stream_delta=self._stream_pump.on_delta,
+                is_tui=True,
+                choice_provider=choice_provider,
+                circuit_breaker=self._circuit_breaker,
+                # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
+                # поверх непустого реестра — тот же детект, что уже
+                # используют CLI/server (config.cli_forces_legacy_model); без
+                # него ран резолвил бы через реестр, расходясь с честным
+                # хинтом /level (display_router).
+                force_legacy=cli_forces_legacy_model(loaded),
+            )
+        )
         # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
         # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
@@ -2065,9 +2057,9 @@ class TuiApp(App):
         return AgentExecutor(ctx)
 
     def _post_stream_signal(self) -> None:
-        """Сигнал стрима с потока агента: неблокирующе, сообщением в очередь
+        """Сигнал стрима с цикла агента: неблокирующе, сообщением в очередь
         UI (`call_later` → `post_message` → `call_soon_threadsafe`). Мост
-        `call_from_thread` держал бы поток агента — и приём ответа модели, —
+        `call_from_thread` держал бы общий цикл агента — и ходы, и детей, —
         пока UI не отрисует кадр. Ошибку позднего сигнала гасит `StreamPump`.
         """
         self.call_later(self._stream_signal)
@@ -2443,9 +2435,9 @@ class TuiApp(App):
             fn()
 
     def _on_runtime_notice(self) -> None:
-        """Callback с любого потока (поток агента, воркер, UI): обновить
+        """Callback с любого потока (цикл агента, воркер, UI): обновить
         счётчики уведомлений. Неблокирующе (`call_later`): мост
-        `call_from_thread` держал бы поток агента до отрисовки, а с потока UI
+        `call_from_thread` держал бы цикл агента до отрисовки, а с потока UI
         бросал — и счётчики не обновлялись."""
         try:
             self.call_later(self.refresh_notices_indicators)
