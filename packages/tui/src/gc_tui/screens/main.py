@@ -2778,7 +2778,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._nested_source = self._history_nested(task_id)
         open_turn = history.open_turn()
         stop = history.turn_count() if open_turn is None else open_turn
-        refs = self._window_mount_tail(stop)
+        refs = self._window_mount_tail(history.turn_step(stop))
         self._adopt_history_refs(refs)
         self._seed_fresh_line(refs.fresh_turn_line)
         live_from = self._live_items_start(stop)
@@ -2863,11 +2863,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     def _window_ephemera(self) -> Ephemera:
         return self._ephemera
 
-    def _window_forget_turn(self, turn: int) -> bool:
-        return self.forget_turn(turn)
+    def _window_forget_step(self, step: int) -> bool:
+        return self.forget_step(step)
 
-    def _window_pinned(self, turn: int) -> bool:
-        return self._turn_pinned(turn)
+    def _window_pinned(self, step: int) -> bool:
+        return self._step_pinned(step)
 
     def _window_focus_home(self) -> None:
         self.set_focus(
@@ -2875,35 +2875,36 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             scroll_visible=False,
         )
 
-    def forget_turn(self, turn: int) -> bool:
-        """«Забыть ход» (§5.3, §5.11): ход ``turn`` на конце прочитанного
-        диапазона снимается с ленты одной операцией — эфемерное и снимок
-        вида уходят в память, ни один реестр экрана не держит снятый
-        виджет; события остаются в модели. Не снимаются (False): ход не на
-        конце и живой (`_turn_pinned`)."""
-        if not self._window_removable(turn) or self._turn_pinned(turn):
+    def forget_step(self, step: int) -> bool:
+        """«Забыть шаг» (§5.3, §5.11): шаг хода ``step`` на конце
+        прочитанного диапазона снимается с ленты одной операцией —
+        эфемерное и снимок вида уходят в память, ни один реестр экрана не
+        держит снятый виджет; события остаются в модели. Не снимаются
+        (False): шаг не на конце и живой (`_step_pinned`)."""
+        if not self._window_removable(step) or self._step_pinned(step):
             return False
-        gone = self._turn_subtree(turn)
-        self._remember_turn(turn, gone)
+        gone = self._step_subtree(step)
+        self._remember_step(step, gone)
         self._forget_widgets(gone)
-        return super()._window_forget_turn(turn)
+        return super()._window_forget_step(step)
 
-    def _turn_pinned(self, turn: int) -> bool:
-        """Ход нельзя снимать (§5.3): текущий (последний) ход, ход с
-        прижатым хвостом и ход со строкой, на которую держит ссылку живое
-        состояние или фокус (`_live_widgets`)."""
-        if turn >= self._feed_history.turn_count() - 1:
+    def _step_pinned(self, step: int) -> bool:
+        """Шаг нельзя снимать (§5.3): шаг текущего (последнего) хода, шаг
+        с прижатым хвостом и шаг со строкой, на которую держит ссылку
+        живое состояние или фокус (`_live_widgets`)."""
+        history = self._feed_history
+        if history.step_turn(step) >= history.turn_count() - 1:
             return True
-        widgets = self._window_turn_widgets(turn)
+        widgets = self._window_step_widgets(step)
         return any(pins_to_bottom(w) for w in widgets) or bool(
-            self._turn_subtree(turn) & self._live_widgets()
+            self._step_subtree(step) & self._live_widgets()
         )
 
-    def _turn_subtree(self, turn: int) -> set:
-        """Все виджеты поддерева ленты хода ``turn``."""
+    def _step_subtree(self, step: int) -> set:
+        """Все виджеты поддерева ленты шага ``step``."""
         return {
             w
-            for top in self._window_turn_widgets(turn)
+            for top in self._window_step_widgets(step)
             for w in top.walk_children(with_self=True)
         }
 
@@ -2913,7 +2914,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
 
         Строк родителей бегущих субагентов (`_subagent_parent_rows`) здесь
         нет: субагенты синхронны, родитель всегда в последнем ходе, а он
-        закреплён (`_turn_pinned`). С фоновыми субагентами родитель может
+        закреплён (`_step_pinned`). С фоновыми субагентами родитель может
         остаться в старом ходе — тогда их строки добавить сюда (спека
         шага 2 окна ленты, §9)."""
         live = {
@@ -2931,10 +2932,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         live.discard(None)
         return live
 
-    def _remember_turn(self, turn: int, gone: set) -> None:
-        """Эфемерное и снимок вида снимаемого хода — в память (§5.4)."""
+    def _remember_step(self, step: int, gone: set) -> None:
+        """Эфемерное и снимок вида снимаемого шага — в память (§5.4)."""
         ephemera = self._ephemera
-        at = self._feed_history.turn_starts[turn]
+        at = self._feed_history.step_starts[step]
         for widget in gone:
             view_key = getattr(widget, "view_key", None)
             key = view_key() if view_key else ""
@@ -3918,9 +3919,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._drawing_model -= 1
 
     def _note_turn_head(self, widget) -> None:
-        """Виджет живого пути — в окно своего хода (§5.3: окно режет
-        ленту по ходам; ход живого пути — последний в модели)."""
-        self._window_appended(self._feed_history.turn_count() - 1, widget)
+        """Виджет живого пути — в окно своего шага (§5.3: окно режет
+        ленту по шагам ходов; шаг живого пути — последний в модели)."""
+        self._window_appended(self._feed_history.step_count() - 1, widget)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение

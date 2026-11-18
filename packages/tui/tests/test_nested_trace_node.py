@@ -99,7 +99,8 @@ async def _dump_rendered_with_node(name: str, tmp_path) -> list:
     """Тред фикстуры записан целиком; все ходы — отрисовщиком кусков с
     узлом, трасса субагентов читается из хранилища по требованию."""
     from gc_tui.services.history_model import build_history
-    from gc_tui.services.history_render import FeedHost, render_turns
+    from gc_tui.services.history_render import FeedHost
+    from trace_readonly import render_turns
     from gc_tui.services.trace_retention import (
         subagent_parent_ids_from_events,
     )

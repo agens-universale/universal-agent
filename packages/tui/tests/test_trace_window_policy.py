@@ -9,18 +9,18 @@ from gc_tui.services.trace_window_policy import (
     next_chunk,
     prev_chunk,
     short_gap,
-    tail_turns,
+    tail_steps,
     trim_to,
     underfilled,
 )
 
 
 def test_tail_covers_budget():
-    assert tail_turns([50, 40, 30, 20], 45) == range(2, 4)
-    assert tail_turns([50, 40, 30, 20], 50) == range(2, 4)
-    assert tail_turns([50, 40, 30, 20], 51) == range(1, 4)
-    assert tail_turns([50, 40, 30, 20], 1000) == range(4)
-    assert tail_turns([], 100) == range(0)
+    assert tail_steps([50, 40, 30, 20], 45) == range(2, 4)
+    assert tail_steps([50, 40, 30, 20], 50) == range(2, 4)
+    assert tail_steps([50, 40, 30, 20], 51) == range(1, 4)
+    assert tail_steps([50, 40, 30, 20], 1000) == range(4)
+    assert tail_steps([], 100) == range(0)
 
 
 def test_prev_chunk_whole_turns():
@@ -73,7 +73,7 @@ def test_invariant_limit():
 
 
 def test_giant_turn_is_one_unit():
-    assert tail_turns([10, 5000], 600) == range(1, 2)
+    assert tail_steps([10, 5000], 600) == range(1, 2)
     assert prev_chunk(2, [10, 5000], 300) == range(1, 2)
     assert edge_drops([5000, 10], 4000) == 1
 

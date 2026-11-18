@@ -162,7 +162,7 @@ async def test_open_tall_tail_mounts_no_chunk(tmp_path):
         await pilot.pause(0.3)
         pilot.app.pop_screen()
         await pilot.pause()
-        tail = policy.tail_turns(
+        tail = policy.tail_steps(
             scr._window_estimates(scr._window_model()), policy.TAIL_MIN
         )
         await _filled(pilot, scr)
@@ -359,13 +359,13 @@ async def test_rebuild_midrun_unfinished_turn_live(tmp_path, monkeypatch):
         pilot.app.active_runner = _FakeRunner()
         scr._prepare_for_new_run()
         drawn: list[range] = []
-        render = trace_window.render_turns
+        render = trace_window.render_steps
 
         def spy(host, model, turns, **kw):
             drawn.append(turns)
             return render(host, model, turns, **kw)
 
-        monkeypatch.setattr(trace_window, "render_turns", spy)
+        monkeypatch.setattr(trace_window, "render_steps", spy)
         scr._rebuild_from_store()
         await pilot.pause()
 
@@ -393,7 +393,7 @@ async def test_open_after_turn_end_compaction_all_from_chunks(
 
     write_history(str(tmp_path), load_history_fixture("compaction"))
     drawn: list[range] = []
-    render = trace_window.render_turns
+    render = trace_window.render_steps
 
     def spy(host, model, turns, **kw):
         drawn.append(turns)
@@ -405,10 +405,10 @@ async def test_open_after_turn_end_compaction_all_from_chunks(
             assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
             await pilot.pause()
             drawn.clear()
-            monkeypatch.setattr(trace_window, "render_turns", spy)
+            monkeypatch.setattr(trace_window, "render_steps", spy)
             scr._rebuild_from_store()
         else:
-            monkeypatch.setattr(trace_window, "render_turns", spy)
+            monkeypatch.setattr(trace_window, "render_steps", spy)
             assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
         await pilot.pause()
         assert scr._feed_history.open_turn() is None

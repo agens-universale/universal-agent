@@ -47,13 +47,13 @@ async def test_rebuild_mounts_tail(tmp_path, monkeypatch):
             thread.messages(_reply(f"u{i}", f"запрос {i}"), _answer(f"a{i}"))
             thread.record(i % 10, f"u{i}")
         drawn: list[range] = []
-        render = trace_window.render_turns
+        render = trace_window.render_steps
 
         def spy(host, model, turns, **kw):
             drawn.append(turns)
             return render(host, model, turns, **kw)
 
-        monkeypatch.setattr(trace_window, "render_turns", spy)
+        monkeypatch.setattr(trace_window, "render_steps", spy)
         scr._rebuild_from_store()
         await _filled(pilot, scr)
 

@@ -38,10 +38,10 @@ def _held(scr) -> list:
     return held
 
 
-def _turn_subtree(scr, turn: int) -> set:
+def _step_subtree(scr, turn: int) -> set:
     return {
         w
-        for top in scr._window_turn_widgets(turn)
+        for top in scr._window_step_widgets(turn)
         for w in top.walk_children(with_self=True)
     }
 
@@ -51,9 +51,9 @@ async def test_registries_empty_after_forget_live_turn(tmp_path):
     """Ход живого пути (вложенный трейс, мысли, «!», вопрос, вызовы)."""
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await live_session(pilot)
-        gone = _turn_subtree(scr, 0)
+        gone = _step_subtree(scr, 0)
         assert gone & set(_held(scr))
-        assert scr.forget_turn(0)
+        assert scr.forget_step(0)
         await pilot.pause()
         assert not gone & set(_held(scr))
         assert all(not w.is_attached for w in gone)
@@ -71,8 +71,8 @@ async def test_registries_empty_after_forget_history_turns(tmp_path):
         last = scr._feed_history.turn_count() - 1
         gone: set = set()
         for turn in range(scr._window_first, last):
-            gone |= _turn_subtree(scr, turn)
-            assert scr.forget_turn(turn)
+            gone |= _step_subtree(scr, turn)
+            assert scr.forget_step(turn)
         await pilot.pause()
         assert gone
         assert not gone & set(_held(scr))
@@ -86,15 +86,15 @@ async def test_live_turns_never_forgotten(tmp_path):
         scr = await live_session(pilot)
         last = scr._feed_history.turn_count() - 1
         assert last == 1
-        assert not scr.forget_turn(last)
-        focused = scr._window_turn_widgets(0)[0]
+        assert not scr.forget_step(last)
+        focused = scr._window_step_widgets(0)[0]
         focused.can_focus = True
         focused.focus()
         await pilot.pause()
-        assert not scr.forget_turn(0)
+        assert not scr.forget_step(0)
         scr.set_focus(None)
         row = next(iter(scr._subagent_parent_rows.values()))
         scr._active_calls[row.call_id] = row
-        assert not scr.forget_turn(0)
+        assert not scr.forget_step(0)
         del scr._active_calls[row.call_id]
-        assert scr.forget_turn(0)
+        assert scr.forget_step(0)

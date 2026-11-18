@@ -1,24 +1,30 @@
-"""Окно ленты — какие ходы смонтированы (спека шага 2 окна ленты, §3.1,
-§5.3, §5.11). Общее экранов ленты: превью и экран сессии.
+"""Окно ленты — какие шаги ходов смонтированы (спека шага 2 окна ленты,
+§3.1, §5.3, §5.11). Общее экранов ленты: превью и экран сессии.
+
+Единица окна — шаг хода (`HistoryModel.step_starts`, `trace_steps`):
+гигантский ход агента (сотня вызовов тулов) домонтируется и снимается по
+шагам, а не целиком; у короткого хода шаг один. Индексы окна ниже —
+номера шагов модели.
 
 Смонтированы прочитанный диапазон ``[first, gap)`` и закреплённый низ
-``[tail, N)`` (живой ход и примыкающие закреплённые; в превью — пусто);
-разрыв ``_window_gap = [gap, tail)`` открыт, когда диапазоны не сходятся.
+``[tail, N)`` (шаги живого хода и примыкающие закреплённые; в превью —
+пусто); разрыв ``_window_gap = [gap, tail)`` открыт, когда диапазоны не
+сходятся.
 Открытие монтирует хвост (`_window_mount_tail`). Пока лента отлистана
 пользователем, к краю, до которого меньше запаса, домонтируется кусок —
 сверху или перед разрывом — под удержанием отрисовки, а `AnchoredScroll`
 держит читаемую строку на месте внутри раскладки. Встал кусок — снимается
-противоположный край: целые ходы дальше двух запасов от видимого, до
-закреплённого хода. ↑ / ↓ в режиме событий на краю домонтируют и переводят
+противоположный край: целые шаги дальше двух запасов от видимого, до
+закреплённого шага. ↑ / ↓ в режиме событий на краю домонтируют и переводят
 фокус (`_window_edge_up`, `_window_edge_down`). Пока разрыв открыт, лента
 не «у низа»; переход к низу (`_window_on_bottom`) или читаемая строка,
 ушедшая в закреплённый низ, закрывают разрыв (`_window_close_gap`). У низа
-лента, растущая живым путём, снимает старые ходы (`_window_appended`).
+лента, растущая живым путём, снимает старые шаги (`_window_appended`).
 Числа и решения — `services.trace_window_policy`.
 
 Экран ставит миксин перед `TraceFollowMixin` и даёт ленту
 (`_window_feed`) и модель истории (`_window_model`); параметры отрисовки,
-вложенный трейс, приём кусков, закреплённые ходы и уход фокуса — по
+вложенный трейс, приём кусков, закреплённые шаги и уход фокуса — по
 желанию. Смена сессии — новый хвост: поколение окна (`_window_gen`)
 растёт, результат куска прежнего поколения выбрасывается.
 """
@@ -33,7 +39,7 @@ from gc_tui.services import trace_window_policy as policy
 from gc_tui.services.history_render import (
     ChunkOptions,
     FeedHost,
-    render_turns,
+    render_steps,
 )
 
 if TYPE_CHECKING:
@@ -50,7 +56,7 @@ if TYPE_CHECKING:
 #: Край окна, у которого встал кусок: сверху, перед разрывом или хвост
 #: при закрытии разрыва.
 Side = Literal["top", "bottom", "end"]
-#: Край, с которого снимаются ходы.
+#: Край, с которого снимаются шаги.
 Edge = Literal["top", "bottom"]
 
 
@@ -59,10 +65,10 @@ class TraceWindowMixin:
 
     # Поколение окна: растёт с каждым новым хвостом (смена сессии).
     _window_gen = 0
-    # Первый смонтированный ход; ходы от него до конца модели, кроме
+    # Первый смонтированный шаг; шаги от него до конца модели, кроме
     # разрыва, — в ленте.
     _window_first = 0
-    # Разрыв: несмонтированные ходы между прочитанным и закреплённым низом;
+    # Разрыв: несмонтированные шаги между прочитанным и закреплённым низом;
     # пустой — разрыва нет.
     _window_gap = range(0)
     # Кусок встаёт (смонтирован, ещё не собран).
@@ -78,32 +84,32 @@ class TraceWindowMixin:
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # Первый в ленте виджет каждого смонтированного хода; читается
+        # Первый в ленте виджет каждого смонтированного шага; читается
         # только через `_window_heads`.
         self._window_head_of: dict[int, Widget] = {}
 
     @property
     def _window_heads(self) -> dict[int, Widget]:
-        """Первый в ленте виджет каждого смонтированного хода. Голову мог
-        снять не окно (откат реплики) — ход без неё уходит из окна здесь,
+        """Первый в ленте виджет каждого смонтированного шага. Голову мог
+        снять не окно (откат реплики) — шаг без неё уходит из окна здесь,
         одной точкой для всех путей снятия: иначе кусок встаёт перед
-        снятым виджетом, а соседний ход тянет ленту до конца.
+        снятым виджетом, а соседний шаг тянет ленту до конца.
 
-        Контракт: голова снимается только вместе со всем своим ходом.
-        Снятие мимо окна снимает ход целиком (откат — реплику хода без
-        вывода) или идёт через окно (`_window_forget_turn`); оставшиеся
-        виджеты хода без головы отошли бы к предыдущему ходу, а у верха
-        окна — ни к какому, и их бы больше не сняли."""
+        Контракт: голова снимается только вместе со всем своим шагом.
+        Снятие мимо окна снимает шаг целиком (откат — реплику хода без
+        вывода, это весь ход) или идёт через окно (`_window_forget_step`);
+        оставшиеся виджеты шага без головы отошли бы к предыдущему шагу, а
+        у верха окна — ни к какому, и их бы больше не сняли."""
         feed = self._window_feed()
         heads = self._window_head_of
         gone = [
-            turn
-            for turn, widget in heads.items()
+            step
+            for step, widget in heads.items()
             if widget.parent is not feed
             or textual_compat.is_being_removed(widget)
         ]
-        for turn in gone:
-            del heads[turn]
+        for step in gone:
+            del heads[step]
         return heads
 
     # ---- что даёт экран --------------------------------------------------
@@ -126,14 +132,14 @@ class TraceWindowMixin:
         return None
 
     def _window_ephemera(self) -> Ephemera | None:
-        """Память эфемерного экрана: снятые ходы возвращаются с ней."""
+        """Память эфемерного экрана: снятые шаги возвращаются с ней."""
         return None
 
     def _window_adopt_chunk(self, refs: ChunkRefs) -> None:
         """Кусок смонтирован: принять его ссылки (виды блоков)."""
 
-    def _window_pinned(self, turn: int) -> bool:
-        """Ход снимать нельзя (§5.3): снятие с края на нём
+    def _window_pinned(self, step: int) -> bool:
+        """Шаг снимать нельзя (§5.3): снятие с края на нём
         останавливается."""
         return False
 
@@ -144,16 +150,16 @@ class TraceWindowMixin:
     # ---- хвост и куски ---------------------------------------------------
 
     def _window_mount_tail(self, stop: int | None = None) -> ChunkRefs:
-        """Новое окно: последние ходы на ``TAIL_MIN`` виджетов в конец
+        """Новое окно: последние шаги на ``TAIL_MIN`` виджетов в конец
         ленты. Прежнее поколение окна больше не действует. ``stop`` —
-        ходы от него рисует сам экран (незаконченный ход — живым путём);
+        шаги от него рисует сам экран (незаконченный ход — живым путём);
         None — хвост до конца модели."""
         self._window_reset()
         model = self._window_model()
         estimates = self._window_estimates(model)[:stop]
-        turns = policy.tail_turns(estimates, policy.TAIL_MIN)
-        self._window_first = turns.start
-        refs = self._window_render(turns, before=None)
+        steps = policy.tail_steps(estimates, policy.TAIL_MIN)
+        self._window_first = steps.start
+        refs = self._window_render(steps, before=None)
         # Догрузка решает по высоте разложенного хвоста.
         self._window_feed().call_after_layout(self._window_fill)
         return refs
@@ -174,24 +180,24 @@ class TraceWindowMixin:
         self._window_feed().hold_first_visible(None)
 
     def _window_render(
-        self, turns: range, *, before: Widget | None
+        self, steps: range, *, before: Widget | None
     ) -> ChunkRefs:
-        refs = render_turns(
+        refs = render_steps(
             self._window_host(),
             self._window_model(),
-            turns,
+            steps,
             before=before,
             options=self._window_options(),
             ephemera=self._window_ephemera(),
             nested=self._window_nested(),
         )
-        self._window_head_of.update(refs.turn_heads)
+        self._window_head_of.update(refs.step_heads)
         return refs
 
     @staticmethod
     def _window_estimates(model: HistoryModel) -> list[int]:
-        """Оценка виджетов каждого хода модели — до монтажа."""
-        starts = model.turn_starts
+        """Оценка виджетов каждого шага модели — до монтажа."""
+        starts = model.step_starts
         ends = [*starts[1:], len(model.items)][: len(starts)]
         return [
             (end - start) * policy.ITEM_WIDGETS
@@ -270,39 +276,39 @@ class TraceWindowMixin:
 
     def _window_prepend(self, *, focus: bool) -> bool:
         model = self._window_model()
-        turns = policy.prev_chunk(
+        steps = policy.prev_chunk(
             self._window_first, self._window_estimates(model), policy.CHUNK_MIN
         )
-        if not turns:
+        if not steps:
             return False
-        refs = self._window_insert(turns, before=self._window_top())
-        self._window_first = turns.start
+        refs = self._window_insert(steps, before=self._window_top())
+        self._window_first = steps.start
         self._window_settle_later(refs, "top", focus)
         return True
 
     def _window_append(self, *, focus: bool) -> bool:
         """Кусок перед разрывом (§5.11) — зеркально `_window_prepend`."""
         gap = self._window_gap
-        turns = policy.next_chunk(
+        steps = policy.next_chunk(
             gap.start,
             gap.stop,
             self._window_estimates(self._window_model()),
             policy.CHUNK_MIN,
         )
-        if not turns:
+        if not steps:
             return False
-        refs = self._window_insert(turns, before=self._window_gap_head())
-        self._window_set_gap(turns.stop, gap.stop)
+        refs = self._window_insert(steps, before=self._window_gap_head())
+        self._window_set_gap(steps.stop, gap.stop)
         self._window_settle_later(refs, "bottom", focus)
         return True
 
     def _window_insert(
-        self, turns: range, *, before: Widget | None
+        self, steps: range, *, before: Widget | None
     ) -> ChunkRefs:
-        """Ходы ``turns`` — перед ``before``; якорь держит читаемую
+        """Шаги ``steps`` — перед ``before``; якорь держит читаемую
         строку."""
         self._window_feed().hold_first_visible(self._window_reading_row())
-        refs = self._window_render(turns, before=before)
+        refs = self._window_render(steps, before=before)
         self._window_adopt_chunk(refs)
         return refs
 
@@ -312,7 +318,7 @@ class TraceWindowMixin:
         """Кусок встаёт под удержанием отрисовки до монтажа; потом —
         `_window_settle` очередью ленты: после того, как лента разобрала
         сообщения монтажа куска. Иначе подъём кусок за куском обгоняет её
-        очередь, а ждущие в ней сообщения держат снятые ходы."""
+        очередь, а ждущие в ней сообщения держат снятые шаги."""
         self._window_busy = True
         gen = self._window_gen
         task = textual_compat.paint_after_mount(*refs.widgets)
@@ -443,7 +449,7 @@ class TraceWindowMixin:
     def _window_on_bottom(self) -> None:
         """Переход к низу — одна точка всех путей (отправка, команда,
         плашка, клавиша): разрыв открыт — фокус со старой строки домой и
-        разрыв закрывается; нет — ужатие сверху до лимита целыми ходами с
+        разрыв закрывается; нет — ужатие сверху до лимита целыми шагами с
         запасом против петли с домонтированием. Пока идёт выделение —
         нет; пока встаёт кусок — когда встанет (если лента всё ещё у
         низа)."""
@@ -472,22 +478,22 @@ class TraceWindowMixin:
         gap = self._window_gap
         stop = gap.stop if gap else self._window_first
         # Хвост, как при открытии, — с закреплённым низом в бюджете.
-        tail = policy.tail_turns(estimates, policy.TAIL_MIN)
+        tail = policy.tail_steps(estimates, policy.TAIL_MIN)
         low = gap.start if gap else 0
         if policy.short_gap(sum(estimates[low:stop])):
             tail = range(low, stop)
-        turns = range(max(tail.start, low), stop)
+        steps = range(max(tail.start, low), stop)
         # Как при открытии: хвост ниже запаса ленты — догрузка после
         # раскладки.
         self._window_feed().call_after_layout(self._window_fill)
-        if not turns:
+        if not steps:
             return
         before = self._window_gap_head() if gap else self._window_top()
-        refs = self._window_insert(turns, before=before)
+        refs = self._window_insert(steps, before=before)
         if gap:
-            self._window_set_gap(gap.start, turns.start)
+            self._window_set_gap(gap.start, steps.start)
         else:
-            self._window_first = turns.start
+            self._window_first = steps.start
         self._window_settle_later(refs, "end", False)
 
     def _window_forget_read_range(self) -> None:
@@ -495,8 +501,8 @@ class TraceWindowMixin:
         for edge in ("top", "bottom"):
             while self._window_gap:
                 gap = self._window_gap
-                turn = self._window_first if edge == "top" else gap.start - 1
-                if not self._window_forget_turn(turn):
+                step = self._window_first if edge == "top" else gap.start - 1
+                if not self._window_forget_step(step):
                     break
 
     def _window_in_read_range(self, widget: Widget | None) -> bool:
@@ -514,18 +520,18 @@ class TraceWindowMixin:
 
     # ---- снятие ----------------------------------------------------------
 
-    def _window_appended(self, turn: int, widget: Widget) -> None:
-        """Живой путь дописал ``widget`` хода ``turn`` (последнего в
+    def _window_appended(self, step: int, widget: Widget) -> None:
+        """Живой путь дописал ``widget`` шага ``step`` (последнего в
         модели). Сверка с лимитом — не на каждый виджет (это пересчёт
-        окна): с началом хода и после роста на кусок по оценке, после
+        окна): с началом шага и после роста на кусок по оценке, после
         раскладки."""
-        if turn < 0:
+        if step < 0:
             return
-        new_turn = turn not in self._window_heads
-        if new_turn:
-            self._window_head_of[turn] = widget
+        new_step = step not in self._window_heads
+        if new_step:
+            self._window_head_of[step] = widget
         self._window_grown += policy.ITEM_WIDGETS
-        if not new_turn and self._window_grown < policy.CHUNK_MIN:
+        if not new_step and self._window_grown < policy.CHUNK_MIN:
             return
         self._window_grown = 0
         if not self._window_grow_queued:
@@ -533,7 +539,7 @@ class TraceWindowMixin:
             self.call_after_refresh(self._window_on_grown)
 
     def _window_on_grown(self) -> None:
-        """Лента выросла у низа: снять старые ходы сверх лимита — только
+        """Лента выросла у низа: снять старые шаги сверх лимита — только
         пока она прилипла к низу, без выделения и пока кусок не встаёт.
         Рост живого хода при чтении снятия не запускает (§5.11): его
         проверит следующий кусок или переход в конец."""
@@ -542,9 +548,9 @@ class TraceWindowMixin:
             self._window_trim("top")
 
     def _window_trim(self, edge: Edge) -> None:
-        """Ужать окно до лимита целыми ходами с края ``edge`` (``top`` /
+        """Ужать окно до лимита целыми шагами с края ``edge`` (``top`` /
         ``bottom``), если оно больше «лимит + кусок» (запас против петли с
-        домонтированием). Закреплённое считается в лимите; снимаются ходы
+        домонтированием). Закреплённое считается в лимите; снимаются шаги
         от края до удерживаемых (видимое с запасами) или закреплённого."""
         if self._ui_frozen_for_select() or (
             # Низ снимается только при чтении: у низа там живой ход.
@@ -553,16 +559,16 @@ class TraceWindowMixin:
             return
         if self._window_busy:
             return
-        turns, counts = self._window_mounted_counts()
+        steps, counts = self._window_mounted_counts()
         excess = policy.trim_to(
             sum(counts), policy.WINDOW_LIMIT, policy.CHUNK_MIN
         )
         if excess is None:
             return
-        kept = self._window_kept_turns()
+        kept = self._window_kept_steps()
         if kept is None:
             return
-        order = self._window_edge_order(edge, list(zip(turns, counts)))
+        order = self._window_edge_order(edge, list(zip(steps, counts)))
         removable = list(
             takewhile(
                 lambda m: m[0] not in kept and not self._window_pinned(m[0]),
@@ -576,18 +582,18 @@ class TraceWindowMixin:
             return
         if edge == "top" and not self._stick_bottom:
             self._window_feed().hold_first_visible(self._window_reading_row())
-        for turn, _count in dropped:
-            if not self._window_forget_turn(turn):
+        for step, _count in dropped:
+            if not self._window_forget_step(step):
                 break
         self.call_after_refresh(self._window_fill)
 
     def _window_edge_order(
         self, edge: Edge, mounted: list[tuple[int, int]]
     ) -> list[tuple[int, int]]:
-        """Смонтированные ходы от края ``edge`` внутрь прочитанного
-        диапазона. Снизу: при разрыве — сначала незакреплённые ходы в
+        """Смонтированные шаги от края ``edge`` внутрь прочитанного
+        диапазона. Снизу: при разрыве — сначала незакреплённые шаги в
         начале закреплённого низа (переставшие быть живыми), потом низ
-        прочитанного; без разрыва — мимо закреплённых ходов у низа."""
+        прочитанного; без разрыва — мимо закреплённых шагов у низа."""
         gap = self._window_gap
         read = [m for m in mounted if not gap or m[0] < gap.start]
         if edge == "top":
@@ -604,9 +610,9 @@ class TraceWindowMixin:
             rest.pop(0)
         return rest
 
-    def _window_kept_turns(self) -> set[int] | None:
+    def _window_kept_steps(self) -> set[int] | None:
         """Ходы, задевающие видимое с запасами (`policy.keep_rows`).
-        Раскладки не было — None; у низа — только последний ход, как
+        Раскладки не было — None; у низа — только последний шаг, как
         раньше."""
         feed = self._window_feed()
         rows = policy.keep_rows(
@@ -619,80 +625,80 @@ class TraceWindowMixin:
             if not self._stick_bottom:
                 return None
             widgets = set()
-        turn_at = {w: t for t, w in self._window_heads.items()}
+        step_at = {w: t for t, w in self._window_heads.items()}
         kept: set[int] = set()
-        turn = None
+        step = None
         for widget in feed.children:
-            turn = turn_at.get(widget, turn)
-            if turn is not None and widget in widgets:
-                kept.add(turn)
+            step = step_at.get(widget, step)
+            if step is not None and widget in widgets:
+                kept.add(step)
         if not kept and self._window_heads:
-            # Удерживаемых нет — последний ход остаётся, даже гигантский.
+            # Удерживаемых нет — последний шаг остаётся, даже гигантский.
             kept.add(max(self._window_heads))
         return kept
 
     def _window_mounted_counts(self) -> tuple[list[int], list[int]]:
-        """Смонтированные ходы с виджетами и число виджетов поддерева
-        ленты каждого: ход — от своего первого виджета до первого
+        """Смонтированные шаги с виджетами и число виджетов поддерева
+        ленты каждого: шаг — от своего первого виджета до первого
         следующего."""
-        turn_at = {w: t for t, w in self._window_heads.items()}
-        turns: list[int] = []
+        step_at = {w: t for t, w in self._window_heads.items()}
+        steps: list[int] = []
         counts: list[int] = []
         for widget in self._window_feed().children:
-            turn = turn_at.get(widget)
-            if turn is not None:
-                turns.append(turn)
+            step = step_at.get(widget)
+            if step is not None:
+                steps.append(step)
                 counts.append(0)
             if counts:
                 counts[-1] += len(widget.walk_children(with_self=True))
-        return turns, counts
+        return steps, counts
 
-    def _window_removable(self, turn: int) -> bool:
-        """Ход на конце прочитанного диапазона: верхний или нижний перед
+    def _window_removable(self, step: int) -> bool:
+        """Шаг на конце прочитанного диапазона: верхний или нижний перед
         разрывом, либо первый за разрывом; без разрыва — любой
         смонтированный (снятие откроет разрыв на нём)."""
         gap = self._window_gap
-        if turn == self._window_first:
+        if step == self._window_first:
             return True
         if gap:
-            return turn in (gap.start - 1, gap.stop)
-        return turn in self._window_heads
+            return step in (gap.start - 1, gap.stop)
+        return step in self._window_heads
 
-    def _window_forget_turn(self, turn: int) -> bool:
-        """Снять ход на конце прочитанного диапазона целиком; не на конце
+    def _window_forget_step(self, step: int) -> bool:
+        """Снять шаг на конце прочитанного диапазона целиком; не на конце
         — False."""
-        if not self._window_removable(turn):
+        if not self._window_removable(step):
             return False
-        widgets = self._window_turn_widgets(turn)
-        self._window_head_of.pop(turn, None)
-        self._window_drop(turn)
+        widgets = self._window_step_widgets(step)
+        self._window_head_of.pop(step, None)
+        self._window_drop(step)
         self._window_feed().remove_children(widgets)
         return True
 
-    def _window_drop(self, turn: int) -> None:
-        """Границы окна без снятого хода ``turn``. Прочитанный диапазон
+    def _window_drop(self, step: int) -> None:
+        """Границы окна без снятого шага ``step``. Прочитанный диапазон
         снят целиком — окно сходится к закреплённому низу."""
         gap = self._window_gap
-        if turn == self._window_first:
-            self._window_first = turn + 1
+        if step == self._window_first:
+            self._window_first = step + 1
             if gap and self._window_first == gap.start:
                 self._window_first, self._window_gap = gap.stop, range(0)
         elif not gap:
-            self._window_gap = range(turn, turn + 1)
-        elif turn == gap.start - 1:
-            self._window_gap = range(turn, gap.stop)
+            self._window_gap = range(step, step + 1)
+        elif step == gap.start - 1:
+            self._window_gap = range(step, gap.stop)
         else:
-            self._window_gap = range(gap.start, turn + 1)
+            self._window_gap = range(gap.start, step + 1)
 
-    def _window_turn_widgets(self, turn: int) -> list[Widget]:
-        """Виджеты ленты хода ``turn``: от его первого виджета до первого
-        виджета следующего смонтированного хода. Ход без виджетов —
+    def _window_step_widgets(self, step: int) -> list[Widget]:
+        """Виджеты ленты шага ``step``: от его первого виджета до первого
+        виджета следующего смонтированного шага. Шаг без виджетов —
         пусто."""
         heads = self._window_heads
-        start = heads.get(turn)
+        start = heads.get(step)
         if start is None:
             return []
-        later = [t for t in heads if t > turn]
+        later = [t for t in heads if t > step]
         stop = heads[min(later)] if later else None
         widgets: list[Widget] = []
         for widget in self._window_feed().children:

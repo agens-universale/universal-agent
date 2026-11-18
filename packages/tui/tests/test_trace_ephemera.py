@@ -1,7 +1,7 @@
 """Память эфемерного и снятый ход (спека шага 2 окна ленты, §3.1, §3.5,
 §5.4, §8 «Снять и вернуть», «Эфемерное»).
 
-Ход, нарисованный живым путём, снимается с ленты (`forget_turn`) и
+Ход, нарисованный живым путём, снимается с ленты (`forget_step`) и
 возвращается отрисовщиком кусков (`render_turns`) таким, каким был снят:
 мысли, «!», вывод команд, пометки, вложенный трейс, раскрытое — на
 месте. После смены сессии, пересборки и ухода хода за окно удержания —
@@ -197,7 +197,7 @@ async def test_trim_restore_roundtrip(tmp_path, monkeypatch):
             line = next(i for i, t in enumerate(texts) if "Ошибка" in t)
             assert "предложенный план" not in texts[line + 1]
 
-            assert scr.forget_turn(0)
+            assert scr.forget_step(0)
             await pilot.pause()
             assert not any(
                 "echo hi" in t for _c, t, _ in feed_dump(_trace(scr))
@@ -215,7 +215,7 @@ async def test_trim_twice_restores_again(tmp_path, monkeypatch):
             _expand_views(scr)
             before = await _settled_dump(pilot)
             for _ in range(2):
-                assert scr.forget_turn(0)
+                assert scr.forget_step(0)
                 await pilot.pause()
                 restore(scr, 0)
                 assert await _settled_dump(pilot) == before
@@ -238,7 +238,7 @@ async def test_ephemera_before_first_reply_restored(tmp_path, monkeypatch):
             feed_live(scr, records, splits=(), sidecar=_sidecar())
             before = await _settled_dump(pilot)
             assert "echo early" in before[0][1]
-            assert scr.forget_turn(0)
+            assert scr.forget_step(0)
             await pilot.pause()
             after = feed_dump(_trace(scr))
             assert "echo early" in after[0][1]
@@ -256,7 +256,7 @@ async def test_thoughts_follow_current_flag(tmp_path):
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await live_session(pilot)
         scr._sync_thoughts_flag()
-        assert scr.forget_turn(0)
+        assert scr.forget_step(0)
         monkeypatch_flag(scr, False)
         await pilot.pause()
         restore(scr, 0)
@@ -291,7 +291,7 @@ async def test_withdrawn_not_resurrected_after_trim(tmp_path):
         await pilot.pause()
         row.remove()
         await pilot.pause()
-        assert scr.forget_turn(0)
+        assert scr.forget_step(0)
         await pilot.pause()
         restore(scr, 0)
         await pilot.pause()
@@ -312,7 +312,7 @@ async def test_bang_clear_after_trim(tmp_path):
             prefix="[!] ", content="$ late", kind_class="line-bang"
         )
         scr._close_bang_block()
-        assert scr.forget_turn(0)
+        assert scr.forget_step(0)
         await pilot.pause()
         scr._clear_bang_blocks(1)
         await pilot.pause()
@@ -321,7 +321,7 @@ async def test_bang_clear_after_trim(tmp_path):
         texts = [t for _c, t, _ in feed_dump(_trace(scr))]
         assert any("echo hi" in t for t in texts)
         assert not any("$ late" in t for t in texts)
-        assert scr.forget_turn(0)
+        assert scr.forget_step(0)
         await pilot.pause()
         scr._clear_bang_blocks(1)
         await pilot.pause()
@@ -333,7 +333,7 @@ async def test_bang_clear_after_trim(tmp_path):
 
 
 async def _forgotten_and_back(pilot, scr) -> list:
-    assert scr.forget_turn(0)
+    assert scr.forget_step(0)
     await pilot.pause()
     restore(scr, 0)
     return await _settled_dump(pilot)
@@ -373,7 +373,7 @@ async def test_old_turns_drop_ephemera_on_retention(tmp_path, monkeypatch):
             history.start_segment()
             history.start_segment()
             scr._ephemera.drop_before(history.retention_start())
-            assert scr.forget_turn(0)
+            assert scr.forget_step(0)
             await pilot.pause()
             restore(scr, 0)
             restored = await _settled_dump(pilot)
@@ -398,7 +398,7 @@ async def test_diff_body_restored_when_age_rule_would_compact(monkeypatch):
     """Дифф, показанный телом, возвращается телом, даже если по возрасту
     хода он был бы компактным: в памяти — только отметка."""
     from gc_tui.services import block_edits
-    from gc_tui.services.history_render import render_turns
+    from trace_readonly import render_turns
     from gc_tui.services.tool_blocks import BlockEdit
     from gc_tui.widgets.tool_blocks_view import diff_view_key
     from test_history_render import _Feed, _feed, _model
@@ -457,7 +457,7 @@ async def test_opened_turns_restore_compaction_body_shown(tmp_path):
         last = scr._feed_history.turn_count() - 1
         first = scr._window_first
         for turn in range(first, last):
-            assert scr.forget_turn(turn)
+            assert scr.forget_step(turn)
         # Сразу назад: иначе окно само догрузит недостающее сверху.
         for turn in reversed(range(first, last)):
             restore(scr, turn)
@@ -472,8 +472,8 @@ async def test_restored_group_phrase_belongs_to_its_turn():
     from gc_tui.services.history_render import (
         ChunkOptions,
         FeedHost,
-        render_turns,
     )
+    from trace_readonly import render_turns
     from gc_tui.widgets.user_reply import UserReplyContainer
     from test_history_render import _Feed, _feed
 
@@ -494,7 +494,7 @@ async def test_restored_group_phrase_belongs_to_its_turn():
         )
         await pilot.pause()
         texts = [t for _c, t, _ in feed_dump(_feed(pilot.app))]
-        head = refs.turn_heads[1]
+        head = refs.step_heads[1]
         assert isinstance(head, UserReplyContainer)
         assert head.plain_text == "turn 2 calls=1 light"
     assert "    − свернуть группу" in texts

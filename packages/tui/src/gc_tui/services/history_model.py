@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Literal
@@ -41,6 +41,7 @@ from gc_tui.services.trace_retention import (
     message_ids_in_retention_window,
     retention_window_start_index,
 )
+from gc_tui.services.trace_steps import RESULT_KINDS, StepSplitter
 
 ItemKind = Literal["event", "outcome", "model_choice", "compaction"]
 
@@ -77,10 +78,12 @@ class HistoryItem:
 class HistoryModel:
     """История ленты открытого треда.
 
-    ``turn_starts`` и ``segment_starts`` — индексы ``items``. Ход
-    начинается настоящей репликой пользователя (ответ на вопрос агента и
-    техническая запись хода не открывают); записи до первой реплики
-    входят в первый ход (его начало — 0).
+    ``turn_starts``, ``step_starts`` и ``segment_starts`` — индексы
+    ``items``. Ход начинается настоящей репликой пользователя (ответ на
+    вопрос агента и техническая запись хода не открывают); записи до
+    первой реплики входят в первый ход (его начало — 0). Шаг — кусок хода
+    по границам вызовов тулов (`trace_steps`), единица окна ленты; начало
+    хода — всегда начало шага.
 
     После построения модель принадлежит экрану и меняется только на
     главном потоке: элементы дописываются через ``append_event`` /
@@ -91,6 +94,7 @@ class HistoryModel:
     context: RenderContext = field(default_factory=RenderContext)
     items: list[HistoryItem] = field(default_factory=list)
     turn_starts: list[int] = field(default_factory=list)
+    step_starts: list[int] = field(default_factory=list)
     # Позиции (индекс следующего элемента ``items``) каждой настоящей
     # реплики в порядке файла, и повтора preserved-копии тоже: за ними
     # строка итога оседает (важна позиция в файле, а не повтор).
@@ -113,6 +117,19 @@ class HistoryModel:
     )
     # call_id вопросов агента (`ask_human`).
     _question_ids: set[str] = field(default_factory=set, repr=False)
+    # call_id → индекс события вызова и первого показанного исхода после
+    # него (исход может лечь в следующий шаг, `trace_steps`).
+    _call_items: dict[str, int] = field(default_factory=dict, repr=False)
+    _first_results: dict[str, int] = field(default_factory=dict, repr=False)
+    # Границы шагов дописываемого хода.
+    _steps: StepSplitter = field(
+        default_factory=StepSplitter, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        # Модель, собранная готовыми ходами, — шаг на ход.
+        if self.turn_starts and not self.step_starts:
+            self.step_starts = list(self.turn_starts)
 
     def event_by_no(self, no: int) -> TraceEvent | None:
         i = self._item_of_no.get(no)
@@ -144,6 +161,40 @@ class HistoryModel:
 
     def turn_count(self) -> int:
         return len(self.turn_starts)
+
+    # ---- шаги (единица окна ленты) ---------------------------------------
+
+    def step_count(self) -> int:
+        return len(self.step_starts)
+
+    def step_range(self, s: int) -> range:
+        """Индексы ``items`` шага ``s``."""
+        starts = self.step_starts
+        stop = starts[s + 1] if s + 1 < len(starts) else len(self.items)
+        return range(starts[s], stop)
+
+    def step_turn(self, s: int) -> int:
+        """Ход шага ``s``."""
+        return bisect_right(self.turn_starts, self.step_starts[s]) - 1
+
+    def turn_step(self, turn: int) -> int:
+        """Первый шаг хода ``turn``; ``turn`` за последним — число шагов."""
+        if turn >= len(self.turn_starts):
+            return len(self.step_starts)
+        return bisect_left(self.step_starts, self.turn_starts[turn])
+
+    def item_step(self, i: int) -> int:
+        """Шаг элемента ``i``."""
+        return bisect_right(self.step_starts, i) - 1
+
+    def call_item(self, call_id: str | None) -> int | None:
+        """Индекс события вызова ``call_id``."""
+        return self._call_items.get(call_id) if call_id else None
+
+    def first_result(self, call_id: str | None) -> int | None:
+        """Индекс первого показанного исхода вызова ``call_id`` после
+        него (исход, ошибка, техническая ошибка с его call_id)."""
+        return self._first_results.get(call_id) if call_id else None
 
     def last_reply(self, *, with_images: bool = False) -> TraceEvent | None:
         """Последняя реплика пользователя в ленте (снятые откатом не в
@@ -200,7 +251,8 @@ class HistoryModel:
     def append_event(self, ev: TraceEvent, kind: ItemKind = "event") -> None:
         """Событие с окончательным номером — в конец ленты."""
         self._item_of_no[ev.no] = len(self.items)
-        self.items.append(HistoryItem(kind, event=ev))
+        self._note_call(ev)
+        self._append(HistoryItem(kind, event=ev))
         self.next_no = ev.no + 1
         if ev.tool_name == "ask_human" and ev.kind == "system" and ev.call_id:
             self.unanswered.add(ev.call_id)
@@ -215,12 +267,40 @@ class HistoryModel:
 
     def append_side(self, rec: dict, kind: ItemKind) -> None:
         """Запись сбоку (итог хода, смена модели) — в конец ленты."""
-        self.items.append(HistoryItem(kind, side=rec))
+        self._append(HistoryItem(kind, side=rec))
         if kind == "outcome":
             self.last_turn_outcome = parse_turn_outcome(rec)
             self.outcome_superseded = False
         elif kind == "model_choice":
             self.last_model_choice = rec
+
+    def _note_call(self, ev: TraceEvent) -> None:
+        """Вызов и первый показанный исход после него — по call_id."""
+        cid = ev.call_id
+        if not cid or ev.hidden:
+            return
+        if ev.kind == "call":
+            self._call_items.setdefault(cid, len(self.items))
+        elif ev.kind in RESULT_KINDS and cid in self._call_items:
+            self._first_results.setdefault(cid, len(self.items))
+
+    def _append(self, item: HistoryItem) -> None:
+        """Элемент — в конец ленты и в шаги: начало хода — новый шаг, внутри
+        хода границу решает `StepSplitter`. Пока ходов нет, нет и шагов;
+        первый шаг, как и первый ход, начинается с 0."""
+        at = len(self.items)
+        self.items.append(item)
+        if not self.turn_starts:
+            return
+        if not self.step_starts:
+            self.step_starts.append(0)
+        if self.turn_starts[-1] == at:
+            self._steps.turn_started()
+            if self.step_starts[-1] != at:
+                self.step_starts.append(at)
+            self._steps.feed(item, self.withdrawn)
+        elif self._steps.feed(item, self.withdrawn):
+            self.step_starts.append(at)
 
     def carry_response_tail(self, payloads: list, *, live: bool) -> list:
         """Хвост ответа после порции ``payloads``. Живой опрос несёт хвост

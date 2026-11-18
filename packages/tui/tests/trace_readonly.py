@@ -1,7 +1,7 @@
 """Отрисовка истории без экрана — наблюдатель для тестов.
 
 Прод рисует историю превью и сессии отрисовщиком кусков
-(`history_render.render_turns`) по модели истории; тестам рендера хватает
+(`history_render.render_steps`) по модели истории; тестам рендера хватает
 модели из сегментов (или из готовых событий) и всех её ходов разом."""
 
 from __future__ import annotations
@@ -28,13 +28,17 @@ def render_segments_history(
     return render_model(mount_target, model, **options)
 
 
+def render_turns(host, model, turns: range, **kwargs):
+    """Ходы ``turns`` модели целиком — все их шаги (`render_steps`)."""
+    from gc_tui.services.history_render import render_steps
+
+    steps = range(model.turn_step(turns.start), model.turn_step(turns.stop))
+    return render_steps(host, model, steps, **kwargs)
+
+
 def render_model(mount_target, model, **options):
     """Все ходы модели — в ``mount_target``."""
-    from gc_tui.services.history_render import (
-        ChunkOptions,
-        FeedHost,
-        render_turns,
-    )
+    from gc_tui.services.history_render import ChunkOptions, FeedHost
 
     return render_turns(
         FeedHost(mount_target),

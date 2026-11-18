@@ -211,8 +211,8 @@ async def test_model_marks_collapse_across_chunk_boundary():
     from gc_tui.services.history_render import (
         ChunkOptions,
         FeedHost,
-        render_turns,
     )
+    from trace_readonly import render_turns
     from gc_tui.widgets.model_mark import ModelMark
 
     model = _marks_model()
@@ -327,8 +327,8 @@ async def test_render_turns_does_not_touch_live_state(tmp_path):
     from gc_tui.services.history_render import (
         ChunkOptions,
         FeedHost,
-        render_turns,
     )
+    from trace_readonly import render_turns
 
     model = model_of(
         _ev(1, "user", "сделай"),
@@ -437,8 +437,8 @@ async def test_chunk_mounts_feed_in_one_call():
     from gc_tui.services.history_render import (
         ChunkOptions,
         FeedHost,
-        render_turns,
     )
+    from trace_readonly import render_turns
 
     batches: list[int] = []
 

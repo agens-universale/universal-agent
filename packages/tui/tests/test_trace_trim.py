@@ -102,7 +102,7 @@ def _mounted(scr, *, current: bool = True) -> int:
     return sum(
         len(top.walk_children(with_self=True))
         for turn in turns
-        for top in scr._window_turn_widgets(turn)
+        for top in scr._window_step_widgets(turn)
     )
 
 
@@ -175,7 +175,7 @@ async def test_trim_hysteresis_no_loop(tmp_path, monkeypatch):
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await _session(pilot)
         calls = {"prepend": 0, "forget": 0}
-        prepend, forget = scr._window_prepend, scr.forget_turn
+        prepend, forget = scr._window_prepend, scr.forget_step
 
         def counted_prepend(*, focus: bool) -> bool:
             calls["prepend"] += 1
@@ -186,7 +186,7 @@ async def test_trim_hysteresis_no_loop(tmp_path, monkeypatch):
             return forget(turn)
 
         monkeypatch.setattr(scr, "_window_prepend", counted_prepend)
-        monkeypatch.setattr(scr, "forget_turn", counted_forget)
+        monkeypatch.setattr(scr, "forget_step", counted_forget)
         for i in range(1, 60):
             await _feed(pilot, scr, i - 1, i)
             if calls["forget"]:
@@ -295,23 +295,23 @@ async def test_never_trims_current_focused_queue_live_refs(tmp_path):
         await _user_scroll_up(pilot, scr)
         await _feed(pilot, scr, 4, 30)
         first = scr._window_first
-        row = scr._window_turn_widgets(first)[-1]
+        row = scr._window_step_widgets(first)[-1]
         # Ссылки живого состояния ставятся вручную, без бегущей задачи:
         # тик опроса финализировал бы «идущий вызов» как осиротевший.
         # На время пинов тик стоит — проверяется снятие, а не тик.
         scr._poll_tick = lambda: None
         for name, pin, unpin in _pins(scr, row):
             pin()
-            assert scr._turn_pinned(first), name
+            assert scr._step_pinned(first), name
             scr._window_on_bottom()
             await pilot.pause()
             assert scr._window_first == first, name
             assert row.is_attached, name
             unpin()
-            assert not scr._turn_pinned(first), name
+            assert not scr._step_pinned(first), name
         del scr._poll_tick
         last = scr._feed_history.turn_count() - 1
-        assert scr._turn_pinned(last)
+        assert scr._step_pinned(last)
         # Реплика в очереди прижата к низу — в текущем ходе, не снимается.
         queued = scr._mount_user_reply(
             "в очередь", state="queued", client_id="q1"
@@ -342,12 +342,12 @@ async def test_admitted_pending_reply_heads_its_turn(tmp_path):
             "запрос 4", state="pending", client_id="c1"
         )
         await pilot.pause()
-        assert reply in scr._window_turn_widgets(3)
+        assert reply in scr._window_step_widgets(3)
         await _feed(pilot, scr, 4, 5)
         assert "c1" not in scr._pending_user_widgets
         assert scr._window_heads[4] is reply
-        assert reply not in scr._window_turn_widgets(3)
-        assert scr._window_turn_widgets(4)[0] is reply
+        assert reply not in scr._window_step_widgets(3)
+        assert scr._window_step_widgets(4)[0] is reply
 
 
 @pytest.mark.asyncio
@@ -367,8 +367,8 @@ async def test_turn_head_removed_outside_window_leaves_it(tmp_path):
         assert 4 not in scr._window_heads
         await _feed(pilot, scr, 5, 6)
         later = scr._window_heads[5]
-        assert later not in scr._window_turn_widgets(3)
-        assert scr._window_turn_widgets(5)[0] is later
+        assert later not in scr._window_step_widgets(3)
+        assert scr._window_step_widgets(5)[0] is later
 
 
 @pytest.mark.asyncio
@@ -383,7 +383,7 @@ async def test_turn_head_removed_at_open_gap_does_not_break_append(tmp_path):
         feed_live(scr, _turn(5)[:2], splits=())
         feed_live(scr, _turn(6)[:1], splits=())
         await pilot.pause()
-        assert scr._window_forget_turn(5)
+        assert scr._window_forget_step(5)
         await pilot.pause()
         assert (scr._window_gap, scr._window_gap_head()) == (
             range(5, 6),
@@ -394,7 +394,7 @@ async def test_turn_head_removed_at_open_gap_does_not_break_append(tmp_path):
         reply.remove()
         await pilot.pause()
         assert scr._window_gap_head() is None
-        last = scr._window_turn_widgets(4)[-1]
+        last = scr._window_step_widgets(4)[-1]
         assert scr._window_past_gap(last) is False
         assert scr._window_append(focus=False)
         await wait_until(pilot, lambda: not scr._window_busy, "встал")

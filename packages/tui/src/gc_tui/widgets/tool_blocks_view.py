@@ -622,10 +622,13 @@ class BlockViews(dict[str, ToolBlocksView]):
         super().clear()
         self._stopped.clear()
 
-    def note_turn(self, *, stopped: bool) -> None:
-        """Запись итога хода — до `turn_ended` уровней."""
+    def note_turn(
+        self, *, stopped: bool, views: Iterable[ToolBlocksView] | None = None
+    ) -> None:
+        """Запись итога хода — до `turn_ended` уровней (``views`` — только
+        эти, по умолчанию все)."""
         if stopped:
-            for view in self.values():
+            for view in self.values() if views is None else views:
                 self._stopped.update(view.model.turn_calls())
 
     def settle_levels(self) -> None:
@@ -655,9 +658,15 @@ class BlockViews(dict[str, ToolBlocksView]):
 
 
 def end_turn(
-    views: BlockViews, timers: CallTimers, outcome: Any, *, settled: bool
+    views: BlockViews,
+    timers: CallTimers,
+    outcome: Any,
+    *,
+    settled: bool,
+    levels: Optional[Sequence[ToolBlocksView]] = None,
 ) -> None:
-    """Запись итога хода — моделям всех уровней: время вызовов хода
+    """Запись итога хода — моделям всех уровней (``levels`` — только
+    этим: уровням шагов хода в куске истории): время вызовов хода
     (`outcome.calls`) — застывшим таймерам; остановка пользователем
     ставит `○` блокам этого хода. Одно правило для живой ленты и превью;
     ``settled`` — у превью: поток хода давно вышел (`turn_ended`)."""
@@ -666,8 +675,9 @@ def end_turn(
     calls = outcome.calls or {}
     timers.update(calls)
     stopped = kind_of(outcome)[0] == "cancelled"
-    views.note_turn(stopped=stopped)
-    for view in list(views.values()):
+    chosen = list(views.values()) if levels is None else list(levels)
+    views.note_turn(stopped=stopped, views=chosen)
+    for view in chosen:
         view.timers_updated(calls)
         view.turn_ended(stopped=stopped, settled=settled)
 
@@ -697,7 +707,7 @@ def nested_tail(
 class PreviewBlocks:
     """Блоки превью `/sessions` (спека P4 §9.7, §9.10а): исполнители
     уровней, реестр застывших таймеров и журнал правок треда (только
-    чтение) — общие для отрисовщика кусков истории (`render_turns`; виды
+    чтение) — общие для отрисовщика кусков истории (`render_steps`; виды
     ходов — его `ChunkRefs.block_views`) и узла вложенного трейса
     (`nested_trace`)."""
 

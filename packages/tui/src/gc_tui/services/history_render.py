@@ -1,5 +1,12 @@
-"""Отрисовщик кусков истории: ходы модели истории целиком — в ленту (спека
+"""Отрисовщик кусков истории: шаги ходов модели истории — в ленту (спека
 шага 2 окна ленты, §5.2).
+
+Кусок — подряд идущие шаги (`HistoryModel.step_starts`); ход, нарисованный
+по шагам, выглядит так же, как целиком: граница шага стоит там, где
+группа вызовов и так закрыта (`trace_steps`), у каждого шага свой вид
+блоков, а состояние хода, которое шаг получает от предыдущих (дедуп
+ответа), отрисовщик проигрывает по модели, если кусок начинается внутри
+хода. Итог хода и обрыв вызовов без исхода — всем шагам хода в куске.
 
 Без побочных эффектов на экран: состояние куска (вид блоков хода, дедуп
 ответа, свёртка попыток, вызовы без исхода) живёт в самом проходе, а
@@ -44,6 +51,7 @@ from gc_tui.services.trace_render import (
     result_with_edits,
     tool_caption,
 )
+from gc_tui.services.trace_steps import RESULT_KINDS, replay_answer, shown
 from gc_tui.services.turn_outcome import outcome_error
 from gc_tui.textual_compat import is_being_removed
 from gc_tui.widgets.model_mark import (
@@ -157,15 +165,15 @@ class ChunkOptions:
 @dataclass
 class ChunkRefs:
     """Что кусок отдаёт экрану. ``widgets`` — прямые дети ленты, которые
-    смонтировал кусок; ``turn_heads`` — первый в ленте виджет каждого хода
-    куска (ход без виджетов — без записи; вложенное лежит внутри хода):
-    по ним окно режет ленту на ходы; ``block_views`` — виды блоков ходов
-    куска (по одному на ход, уровень в пространстве
+    смонтировал кусок; ``step_heads`` — первый в ленте виджет каждого шага
+    куска (шаг без виджетов — без записи; вложенное лежит внутри шага):
+    по ним окно режет ленту на шаги; ``block_views`` — виды блоков шагов
+    куска (по одному на шаг с вызовами, уровень в пространстве
     ``HISTORY_LEVEL_PREFIX``) — только для маршрута раскрытия, не в живой
     реестр видов; ``thoughts`` — строки мыслей из памяти эфемерного."""
 
     widgets: list[Widget] = field(default_factory=list)
-    turn_heads: dict[int, Widget] = field(default_factory=dict)
+    step_heads: dict[int, Widget] = field(default_factory=dict)
     fresh_turn_line: Widget | None = None
     call_rows: dict[str, Widget] = field(default_factory=dict)
     question_rows: dict[str, Widget] = field(default_factory=dict)
@@ -175,31 +183,32 @@ class ChunkRefs:
     thoughts: list[Widget] = field(default_factory=list)
 
 
-def render_turns(
+def render_steps(
     host: HistoryHost,
     model: HistoryModel,
-    turns: range,
+    steps: range,
     *,
     before: Widget | None,
     options: ChunkOptions,
     ephemera: Ephemera | None = None,
     nested: NestedSource | None = None,
 ) -> ChunkRefs:
-    """Ходы ``turns`` модели целиком — в ленту перед ``before`` (None — в
-    конец). Черта смены модели на стыке с куском ниже схлопывается с ним
-    так же, как подряд. ``nested`` — вложенный трейс под вызовами куска;
-    ``ephemera`` — снятое эфемерное и снимок вида ходов куска (§5.4)."""
+    """Шаги ``steps`` модели — в ленту перед ``before`` (None — в конец).
+    Черта смены модели на стыке с куском ниже схлопывается с ним так же,
+    как подряд. ``nested`` — вложенный трейс под вызовами куска;
+    ``ephemera`` — снятое эфемерное и снимок вида шагов куска (§5.4)."""
     chunk = _Chunk(host, model, before, options, ephemera)
-    for i in turns:
-        chunk.turn(i)
+    for s in steps:
+        chunk.step(s)
+    chunk.end_turn_part()
     if nested is not None:
         chunk.nest(nested)
     return chunk.finish()
 
 
-def history_level(turn: int) -> str:
-    """Уровень блоков хода ``turn`` куска."""
-    return f"{HISTORY_LEVEL_PREFIX}{turn}"
+def history_level(step: int) -> str:
+    """Уровень блоков шага ``step`` куска."""
+    return f"{HISTORY_LEVEL_PREFIX}{step}"
 
 
 class _Chunk:
@@ -230,9 +239,15 @@ class _Chunk:
         self._mounted: list[Widget] = []
         # Виджеты позиции куска, ещё не отданные ленте (`flush`).
         self._pending: list[Widget] = []
-        self._turn_of: dict[Widget, int] = {}
+        self._step_of: dict[Widget, int] = {}
         self._view: ToolBlocksView | None = None
+        self._step: int | None = None
         self._turn: int | None = None
+        # Нарисованная часть хода ``_turn``: первый её виджет в
+        # ``_mounted``, виды блоков её шагов и последний её элемент модели.
+        self._turn_from = 0
+        self._turn_views: list[ToolBlocksView] = []
+        self._turn_stop = 0
         self._flow = AnswerFlow()
         self._attempts: list[list[Widget]] = []
         # Вызовы без исхода: строка и вид её хода.
@@ -256,8 +271,8 @@ class _Chunk:
             self.flush()
             self._host.mount(widget, before=before, after=after)
         self._mounted.append(widget)
-        if self._turn is not None:
-            self._turn_of[widget] = self._turn
+        if self._step is not None:
+            self._step_of[widget] = self._step
         view = self._view
         if view is not None and not view.issued(widget):
             view.event_closing()
@@ -272,9 +287,11 @@ class _Chunk:
         for widget in widgets:
             self.mount(widget)
 
-    def _turn_view(self) -> ToolBlocksView:
-        """Вид блоков хода: один на ход, создаётся первым вызовом хода."""
-        level = history_level(self._turn or 0)
+    def _step_view(self) -> ToolBlocksView:
+        """Вид блоков шага: один на шаг, создаётся первым вызовом шага.
+        Группа вызовов не переходит через границу шага (`trace_steps`),
+        поэтому вид на шаг рисует то же, что вид на весь ход."""
+        level = history_level(self._step or 0)
         view = self.refs.block_views.get(level)
         if view is None:
             opts = self._opts
@@ -283,34 +300,129 @@ class _Chunk:
                 _FlushingHost(self), model, level=level, depth=0
             )
             self.refs.block_views[level] = view
+            self._turn_views.append(view)
             self._view = view
         return view
 
     # ---- проход ----------------------------------------------------------
 
-    def turn(self, i: int) -> None:
-        self._turn = i
-        self._flow = AnswerFlow()
-        self._attempts = []
-        self._ended = i + 1 < self._model.turn_count()
-        start = self._model.turn_starts[i]
-        first = len(self._mounted)
-        rows = (
-            self._ephemera.for_turn(self._model, i) if self._ephemera else []
-        )
-        for k, item in enumerate(self._model.turn_items(i), start):
-            self._item(k, item)
+    def step(self, s: int) -> None:
+        model = self._model
+        turn = model.step_turn(s)
+        span = model.step_range(s)
+        if turn != self._turn:
+            self.end_turn_part()
+            self._begin_turn(turn, span.start)
+        self._step = s
+        rows = self._ephemera.for_step(model, s) if self._ephemera else []
+        for k in span:
+            if not self._settled_early(k):
+                self._item(k, model.items[k])
             rows = self._mount_ephemeral(rows, k + 1)
         self._mount_ephemeral(rows, None)
+        self._settle_calls(s, span.stop)
+        self._turn_stop = span.stop
+
+    def _turn_end(self) -> int:
+        """Конец хода ``_turn`` в ``items``."""
+        model = self._model
+        turn = (self._turn or 0) + 1
+        if turn < model.turn_count():
+            return model.turn_starts[turn]
+        return len(model.items)
+
+    def _settle_calls(self, s: int, start: int) -> None:
+        """Исходы вызовов шага ``s``, пришедшие в следующих шагах хода
+        (с ``start``), — сейчас: их виджеты встают якорем к строке вызова,
+        и шаг выглядит так же, как в ходе целиком (`trace_steps`)."""
+        model = self._model
+        stop = self._turn_end()
+        for call_id in list(self._open):
+            at = model.first_result(call_id)
+            call = model.call_item(call_id)
+            if at is None or call is None or not start <= at < stop:
+                continue
+            if model.item_step(call) == s:
+                self._event(model.items[at].event)
+
+    def _settled_early(self, k: int) -> bool:
+        """Элемент ``k`` — исход вызова из прошлого шага того же хода: он
+        уже применён в конце шага вызова (`_settle_calls`)."""
+        model = self._model
+        ev = model.items[k].event
+        if ev is None or ev.kind not in RESULT_KINDS:
+            return False
+        if model.first_result(ev.call_id) != k:
+            return False
+        call = model.call_item(ev.call_id)
+        if call is None:
+            return False
+        step = model.item_step(k)
+        return model.item_step(call) != step and model.step_turn(
+            model.item_step(call)
+        ) == model.step_turn(step)
+
+    def _begin_turn(self, turn: int, start: int) -> None:
+        """Часть хода ``turn`` с элемента ``start``: кусок, начатый внутри
+        хода, проигрывает дедуп ответа по элементам хода до ``start`` —
+        шаг рисует прозу так же, как при отрисовке хода целиком."""
+        model = self._model
+        self._turn = turn
+        self._flow = AnswerFlow()
+        self._attempts = []
+        self._ended = turn + 1 < model.turn_count()
+        self._turn_from = len(self._mounted)
+        self._turn_views = []
+        for item in model.items[model.turn_starts[turn] : start]:
+            if item.kind == "event" and shown(item.event, model.withdrawn):
+                replay_answer(self._flow, item.event)
+
+    def end_turn_part(self) -> None:
+        """Нарисованная часть хода кончилась. Итог хода за ней (в шагах
+        вне куска) — видам блоков её шагов, как если бы ход шёл до него;
+        ход кончился — вызовы без исхода оборвались; потом снимок вида."""
+        if self._turn is None:
+            return
+        for outcome in self._outcomes_after(self._turn_stop):
+            self._end_turn_blocks(outcome)
         if self._ended:
             self._interrupt_open()
         if self._ephemera is not None:
             # Снимок вида — пока ход свой: смонтированное раскрытием (фразы
             # группы) — виджеты этого хода, а не последнего в куске.
-            view = self.refs.block_views.get(history_level(i))
             self._restore_view(
-                self._ephemera, self._mounted[first:], [view] if view else []
+                self._ephemera,
+                self._mounted[self._turn_from :],
+                self._turn_views,
             )
+        self._turn = self._step = None
+
+    def _outcomes_after(self, start: int) -> list:
+        """Записи итога хода ``_turn`` с элемента ``start`` — те, что
+        нарисовали бы строку итога."""
+        model = self._model
+        out = []
+        for item in model.items[start : self._turn_end()]:
+            if item.kind != "outcome":
+                continue
+            outcome = parse_turn_outcome(item.side)
+            if (
+                outcome is not None
+                and outcome.opened_by not in model.withdrawn
+            ):
+                out.append(outcome)
+        return out
+
+    def _end_turn_blocks(self, outcome) -> None:
+        """Итог хода — видам блоков его шагов в куске."""
+        end_turn(
+            self.refs.block_views,
+            self._opts.timers,
+            outcome,
+            settled=True,
+            levels=self._turn_views,
+        )
+        self._ended = True
 
     def _mount_ephemeral(self, rows: list, at: int | None) -> list:
         """Снятое эфемерное за элементом ``at - 1`` (None — всё
@@ -344,7 +456,7 @@ class _Chunk:
         """Вложенное для вызовов куска — под их строками."""
         self.flush()
         calls = self.refs.call_rows
-        self._turn = None
+        self._turn = self._step = None
         self._nested_from = len(self._mounted)
         self._mounted += nested.mount(
             self._host,
@@ -369,7 +481,7 @@ class _Chunk:
             drop_mark_before(below)
         refs = self.refs
         refs.widgets = [w for w in self._mounted if not is_being_removed(w)]
-        refs.turn_heads = self._turn_heads()
+        refs.step_heads = self._step_heads()
         return refs
 
     def _restore_view(
@@ -393,17 +505,17 @@ class _Chunk:
         for view in views:
             view.restore_view(ephemera.view)
 
-    def _turn_heads(self) -> dict[int, Widget]:
-        """Первый в ленте виджет каждого хода: заголовок блока встаёт
-        перед строкой своего хода, поэтому порядок — по ленте, а не по
+    def _step_heads(self) -> dict[int, Widget]:
+        """Первый в ленте виджет каждого шага: заголовок блока встаёт
+        перед строкой своего шага, поэтому порядок — по ленте, а не по
         монтажу."""
         heads: dict[int, Widget] = {}
-        turn_of = self._turn_of
+        step_of = self._step_of
         for widget in self._host.feed.children:
-            turn = turn_of.get(widget)
-            if turn is None or turn in heads or is_being_removed(widget):
+            step = step_of.get(widget)
+            if step is None or step in heads or is_being_removed(widget):
                 continue
-            heads[turn] = widget
+            heads[step] = widget
         return heads
 
     # ---- записи сбоку ----------------------------------------------------
@@ -423,10 +535,7 @@ class _Chunk:
         outcome = parse_turn_outcome(rec)
         if outcome is None or outcome.opened_by in self._model.withdrawn:
             return
-        end_turn(
-            self.refs.block_views, self._opts.timers, outcome, settled=True
-        )
-        self._ended = True
+        self._end_turn_blocks(outcome)
         line = build_turn_line(outcome)
         line.freshen(None, outcome_error(outcome))
         if index == self._fresh_at:
@@ -550,7 +659,7 @@ class _Chunk:
             agent=ev.agent,
             think_text=ev.think_text,
         )
-        view = self._turn_view()
+        view = self._step_view()
         self.refs.call_rows[row.call_id] = row
         self._open[row.call_id] = (row, view)
         category, _ = tool_caption(wire_name, opts.mcp_tools, opts.mcp_servers)

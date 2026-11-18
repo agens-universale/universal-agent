@@ -149,7 +149,7 @@ async def test_wheel_up_after_open_fill_reaches_history(tmp_path, monkeypatch):
         await pilot.app.push_screen(screen)
         await _filled(pilot, screen)
         trace = _trace(screen)
-        tail = policy.tail_turns(
+        tail = policy.tail_steps(
             screen._window_estimates(screen._model), policy.TAIL_MIN
         )
         assert screen._window_first < tail.start
@@ -184,7 +184,7 @@ async def test_underfilled_tail_loads_history_without_input(tmp_path):
     низа, пока ленте не хватит запаса."""
     async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
         screen = await _preview(pilot)
-        tail = policy.tail_turns(
+        tail = policy.tail_steps(
             screen._window_estimates(screen._model), policy.TAIL_MIN
         )
         await _filled(pilot, screen)

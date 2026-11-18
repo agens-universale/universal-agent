@@ -411,7 +411,7 @@ async def test_bottom_trimmed_turn_returns_with_ephemera(
             before = await _settled_dump(pilot)
             assert scr._window_first == 0
             # Ход с мыслью, «!» и раскрытыми блоками — снизу окна.
-            assert scr.forget_turn(1)
+            assert scr.forget_step(1)
             await pilot.pause()
             assert scr._window_gap == range(1, 2)
             assert not any(
@@ -507,7 +507,7 @@ async def test_wheel_reversals_do_not_pulse(tmp_path, monkeypatch, edge):
             await pilot.pause()
             await _settled(pilot, scr)
         forgotten: list[int] = []
-        forget = scr.forget_turn
+        forget = scr.forget_step
 
         def counted(turn: int) -> bool:
             done = forget(turn)
@@ -515,7 +515,7 @@ async def test_wheel_reversals_do_not_pulse(tmp_path, monkeypatch, edge):
                 forgotten.append(turn)
             return done
 
-        monkeypatch.setattr(scr, "forget_turn", counted)
+        monkeypatch.setattr(scr, "forget_step", counted)
         mounted: list[int] = []
         render = scr._window_render
 
@@ -543,7 +543,7 @@ def _turns_on_screen(scr) -> set[int]:
     return {
         turn
         for turn in scr._window_heads
-        if any(view.overlaps(w.region) for w in scr._window_turn_widgets(turn))
+        if any(view.overlaps(w.region) for w in scr._window_step_widgets(turn))
     }
 
 
@@ -586,9 +586,9 @@ async def test_pinned_turn_in_read_range_stops_trim(
         gap = scr._window_gap
         pinned = gap.start - 2
         assert pinned > scr._window_first
-        assert pinned not in scr._window_kept_turns()
+        assert pinned not in scr._window_kept_steps()
         if how == "focus":
-            row = scr._window_turn_widgets(pinned)[0]
+            row = scr._window_step_widgets(pinned)[0]
             row.can_focus = True
             scr.set_focus(row, scroll_visible=False)
             await pilot.pause()
@@ -869,7 +869,7 @@ async def test_continuous_climb_frees_trimmed_turns(tmp_path, monkeypatch):
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await _open_session(pilot, tmp_path / "t")
         trace = _trace(scr)
-        settle, forget = scr._window_settle, scr._window_forget_turn
+        settle, forget = scr._window_settle, scr._window_forget_step
         trimmed: weakref.WeakSet = weakref.WeakSet()
 
         def settle_then_next(*args) -> None:
@@ -879,12 +879,12 @@ async def test_continuous_climb_frees_trimmed_turns(tmp_path, monkeypatch):
                 scr._window_prepend(focus=False)
 
         def forget_noted(turn: int) -> bool:
-            for widget in scr._window_turn_widgets(turn):
+            for widget in scr._window_step_widgets(turn):
                 trimmed.update(widget.walk_children(with_self=True))
             return forget(turn)
 
         monkeypatch.setattr(scr, "_window_settle", settle_then_next)
-        monkeypatch.setattr(scr, "_window_forget_turn", forget_noted)
+        monkeypatch.setattr(scr, "_window_forget_step", forget_noted)
         trace.scroll_to(y=0, animate=False)
         for _ in range(3000):
             await asyncio.sleep(0.02)
@@ -921,11 +921,11 @@ def _pin_turns(scr, monkeypatch, how: str) -> list[int]:
     heads = [scr._window_heads[t] for t in banged]
     monkeypatch.setattr(scr._ephemera, "bang_open_widgets", lambda: heads)
     if how.startswith("focus"):
-        row = scr._window_turn_widgets(low)[0]
+        row = scr._window_step_widgets(low)[0]
         row.can_focus = True
         scr.set_focus(row, scroll_visible=False)
     for turn in turns:
-        assert scr._turn_pinned(turn)
+        assert scr._step_pinned(turn)
     return banged
 
 

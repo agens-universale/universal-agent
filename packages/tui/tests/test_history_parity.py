@@ -41,7 +41,8 @@ async def dump_after_render(name: str, tmp_path, *, one_by_one: bool):
     """Тред фикстуры записан целиком; модель из него — в ленту экрана
     отрисовщиком кусков (экран тред не открывает)."""
     from gc_tui.services.history_model import build_history
-    from gc_tui.services.history_render import FeedHost, render_turns
+    from gc_tui.services.history_render import FeedHost
+    from trace_readonly import render_turns
     from gc_tui.services.stores.file_store import FileTaskStore
 
     threads = tmp_path / "chunks"

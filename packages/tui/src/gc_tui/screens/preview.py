@@ -187,26 +187,26 @@ class PreviewScreen(
         """Виды блоков куска сверху — в маршрут раскрытия превью."""
         self._blocks.views.update(refs.block_views)
 
-    def _window_pinned(self, turn: int) -> bool:
-        """Ход со строкой в фокусе не снимается (§5.3)."""
+    def _window_pinned(self, step: int) -> bool:
+        """Шаг со строкой в фокусе не снимается (§5.3)."""
         focused = self.focused
         return focused is not None and bool(
             set(focused.ancestors_with_self)
-            & set(self._window_turn_widgets(turn))
+            & set(self._window_step_widgets(step))
         )
 
-    def _window_forget_turn(self, turn: int) -> bool:
-        """Снятый ход уходит и из маршрута раскрытия: уровень хода и
+    def _window_forget_step(self, step: int) -> bool:
+        """Снятый шаг уходит и из маршрута раскрытия: уровень шага и
         уровни субагентов (ключ — call_id строки `Agent`)."""
         from gc_tui.services.history_render import history_level
 
-        removed = self._window_turn_widgets(turn)
-        if self._window_pinned(turn):
+        removed = self._window_step_widgets(step)
+        if self._window_pinned(step):
             return False
-        if not super()._window_forget_turn(turn):
+        if not super()._window_forget_step(step):
             return False
         views = self._blocks.views
-        views.pop(history_level(turn), None)
+        views.pop(history_level(step), None)
         for widget in removed:
             views.pop(getattr(widget, "call_id", None), None)
         return True
