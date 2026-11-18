@@ -16,7 +16,11 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.persistence.model_choice_record import parse_model_choice
 
 from gc_tui.services.answer_flow import AnswerFlow
-from gc_tui.services.trace_mapper import collect_render_context, map_message
+from gc_tui.services.trace_mapper import (
+    collect_render_context,
+    is_finish,
+    map_message,
+)
 from gc_tui.services.trace_render import finish_close_of
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
@@ -305,7 +309,7 @@ def _first_by_id(payloads: list[dict]) -> list[dict]:
 
 def _take_agent(flow, ev, answers: list[str], attempt: Optional[int]):
     """Учесть agent-событие; вернуть индекс отчёта текущей попытки."""
-    if ev.tool_name == "submit_solution":
+    if is_finish(ev):
         close = flow.finish(finish_close_of(ev), tracked=bool(ev.call_id))
         text = (close.body or close.note).strip()
         if flow.report_of_intermediate:

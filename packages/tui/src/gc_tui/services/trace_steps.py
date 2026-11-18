@@ -51,7 +51,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gc_tui.services import trace_window_policy as policy
-from gc_tui.services.trace_mapper import FINISH_ID
+from gc_tui.services.trace_mapper import is_finish
 
 if TYPE_CHECKING:
     from gc_tui.models import TraceEvent
@@ -83,11 +83,6 @@ def shown(ev: TraceEvent | None, withdrawn: set[str]) -> bool:
         and not ev.hidden
         and (ev.message_id is None or ev.message_id not in withdrawn)
     )
-
-
-def is_finish(ev: TraceEvent) -> bool:
-    """Событие — сдача хода (``turn_finish``)."""
-    return ev.kind == "agent" and ev.tool_name == FINISH_ID
 
 
 def _closes_group(ev: TraceEvent) -> bool:

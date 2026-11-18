@@ -227,6 +227,7 @@ from gc_tui.services.trace_mapper import (
     RenderContext,
     coerce_args,
     collect_render_context,
+    is_finish,
     with_closing_replies,
 )
 from gc_tui.services.trace_render import (
@@ -243,7 +244,6 @@ from gc_tui.services.trace_retention import (
     parent_outside_retention,
     subagent_parent_ids_from_events,
 )
-from gc_tui.services.trace_steps import is_finish
 from gc_tui.services.turn_outcome import (
     kind_of,
     meta_status_of,
@@ -3074,15 +3074,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if not events:
             return
         last = events[-1]
-        finalized = (
-            last.kind == "agent" and last.tool_name == "submit_solution"
-        )
-        self._last_event_kind = "_finalized" if finalized else last.kind
-        submits = [
-            ev
-            for ev in events
-            if ev.kind == "agent" and ev.tool_name == "submit_solution"
-        ]
+        self._last_event_kind = "_finalized" if is_finish(last) else last.kind
+        submits = [ev for ev in events if is_finish(ev)]
         # Первый финализатор сеет имя; дальше имя меняет только ход с
         # работой — тогда каждый перезаписывает, итог — последнего.
         if submits:
@@ -3274,7 +3267,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # "_finalized" вместо "agent": блокирует повторный mount в
         # _poll_active, пока не придёт новое значимое событие (gate-reject
         # [policy], новый submit_solution и т.п.).
-        if ev.kind == "agent" and ev.tool_name == "submit_solution":
+        if is_finish(ev):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind

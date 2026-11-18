@@ -71,3 +71,27 @@ def test_find_in_files_summary_keeps_the_pattern():
         ts="t",
     )
     assert "def abuild_tools_data" in ev.summary
+
+
+def test_finish_is_recognized_by_one_predicate():
+    """«Это сдача хода» — одно правило (`trace_mapper.is_finish`,
+    `FINISH_ID`): сравнение с литералом канонического id сдачи — только у
+    владельцев имени (`tool_identity`, маппер), не копиями по экранам и
+    сервисам. Старое имя `submit_solution` id не меняет — старые треды
+    узнаются тем же правилом."""
+    import re
+
+    from gc_testkit.paths import package_dir
+    from gc_tui.services.trace_mapper import FINISH_ID
+
+    assert tool_id("submit_solution") == FINISH_ID
+    owners = {"tool_identity.py", "trace_mapper.py"}
+    compare = re.compile(r"""[=!]=\s*["']submit_solution["']""")
+    copies = [
+        f"{path.name}:{n}"
+        for path in package_dir("gc_tui").rglob("*.py")
+        if path.name not in owners
+        for n, line in enumerate(path.read_text().splitlines(), 1)
+        if compare.search(line)
+    ]
+    assert copies == []

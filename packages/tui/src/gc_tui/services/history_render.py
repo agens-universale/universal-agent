@@ -33,7 +33,7 @@ from gc_tui.services.answer_flow import AgentVerdict, AnswerFlow
 from gc_tui.services.think_text import think_rejected
 from gc_tui.services.tool_blocks import CallTimers, ToolBlocks
 from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS, anchor_key
-from gc_tui.services.trace_mapper import PROPOSE_PLAN_ID
+from gc_tui.services.trace_mapper import PROPOSE_PLAN_ID, is_finish
 from gc_tui.services.trace_render import (
     QUESTION_UNANSWERED,
     TAG_RE,
@@ -52,7 +52,7 @@ from gc_tui.services.trace_render import (
     result_with_edits,
     tool_caption,
 )
-from gc_tui.services.trace_steps import RESULT_KINDS, is_finish, shown
+from gc_tui.services.trace_steps import RESULT_KINDS, shown
 from gc_tui.services.turn_outcome import outcome_error
 from gc_tui.textual_compat import is_being_removed
 from gc_tui.widgets.model_mark import (
