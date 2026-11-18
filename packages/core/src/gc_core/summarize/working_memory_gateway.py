@@ -318,7 +318,8 @@ _REGISTER_NAMES = frozenset(REGISTER_ORDER)
 _RESERVED_REGISTER_TAG = re.compile(
     rf"<(/?)({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>"
 )
-_MARKDOWN_CODE_SPAN = re.compile(r"(`+)(.*?)\1", re.DOTALL)
+_MARKDOWN_CODE_SPAN = re.compile(r"(?<!\\)(?:\\\\)*(`+)(.*?)\1", re.DOTALL)
+_INLINE_CODE_CAPTION = re.compile(r"\A(`+)[^`\n]+\1\s*:?[ \t]*\Z")
 _REGISTER_BOUNDARY_IN_SPAN = re.compile(
     rf"</(?:{'|'.join(REGISTER_ORDER)})>.*?<(?:{'|'.join(REGISTER_ORDER)})>",
     re.DOTALL,
@@ -366,7 +367,11 @@ def _next_structural_tag(
         if _is_markdown_literal(tag.start(), spans):
             continue
         line_start = text.rfind("\n", start, tag.start()) + 1
-        if text[max(start, line_start) : tag.start()].strip():
+        before = text[max(start, line_start) : tag.start()].strip()
+        if before and (
+            _INLINE_CODE_CAPTION.fullmatch(before) is None
+            or _EXAMPLE_CUE.search(before)
+        ):
             continue
         return tag
     return None

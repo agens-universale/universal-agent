@@ -189,6 +189,66 @@ def test_text_mentions_between_and_after_registers_keep_entire_patch():
     }
 
 
+def test_inline_code_caption_before_register_does_not_drop_update():
+    raw = (
+        "<goal>new goal</goal>"
+        "<knowledge>Keep `</think>` literal and `run` in notes.</knowledge>\n"
+        "`state notes` <state>new state</state>"
+    )
+    old = WorkingMemorySnapshot(state="old state")
+
+    deltas, present = parse_memory_deltas(raw)
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert present == frozenset({"goal", "knowledge", "state"})
+    assert updated.state == "new state"
+    assert updated.knowledge == "Keep `</think>` literal and `run` in notes."
+
+
+def test_escaped_backtick_does_not_hide_later_code_span():
+    raw = (
+        "<knowledge>Keep \\` literally in the source.</knowledge>"
+        "<state>Use `<goal>` as a label.</state>"
+    )
+    old = WorkingMemorySnapshot(knowledge="old fact", state="old state")
+
+    deltas, present = parse_memory_deltas(raw)
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert updated.knowledge == "Keep \\` literally in the source."
+    assert updated.state == "Use `<goal>` as a label."
+
+
+def test_even_backslashes_leave_backtick_as_code_delimiter():
+    value = r"Keep \\`<state>` as a literal label."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_backslash_before_closing_backtick_keeps_literal_tag_in_code():
+    value = "Keep `<goal> ends with \\` literally."
+    raw = f"<knowledge>{value}</knowledge><state>new state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert deltas.knowledge == value
+    assert deltas.state == "new state"
+
+
+def test_inline_code_example_caption_does_not_replace_register():
+    raw = "<state>real state</state>\n`Example`: <state>example state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"state"})
+    assert deltas.state == "real state"
+
+
 def test_backticks_do_not_span_across_register_boundaries():
     raw = (
         "<goal>Run `make.</goal>"
