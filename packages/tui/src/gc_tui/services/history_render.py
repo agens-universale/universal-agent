@@ -6,11 +6,12 @@
 граница шага закрывает группу вызовов, и живой путь закрывает её там же
 (`trace_steps`), а состояние хода, которое шаг получает от предыдущих
 (дедуп ответа), отрисовщик проигрывает по модели тем же правилом
-(`replay_answer`), если кусок начинается внутри хода. Итог хода и обрыв
-вызовов без исхода — всем шагам хода в куске.
+(`replay_answer`), если кусок начинается внутри хода; попытки сдачи,
+которые свернутся, модель помечает заранее — шаг их не рисует. Итог хода
+и обрыв вызовов без исхода — всем шагам хода в куске.
 
 Без побочных эффектов на экран: состояние куска (вид блоков хода, дедуп
-ответа, свёртка попыток, вызовы без исхода) живёт в самом проходе, а
+ответа, вызовы без исхода) живёт в самом проходе, а
 ссылки, которые нужны живому состоянию экрана, возвращаются в
 ``ChunkRefs``. Им же рисует превью `/sessions`: история в превью и в
 сессии — один код.
@@ -29,7 +30,12 @@ from gc_core.config_modules.agent_edits import (
 from gc_core.persistence.model_choice_record import parse_model_choice
 from gc_core.persistence.turn_outcome import parse_turn_outcome
 
-from gc_tui.services.answer_flow import AgentVerdict, AnswerFlow
+from gc_tui.services.answer_flow import (
+    AnswerFlow,
+    answer_verdict,
+    finish_close,
+    replay_answer,
+)
 from gc_tui.services.think_text import think_rejected
 from gc_tui.services.tool_blocks import CallTimers, ToolBlocks
 from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS, anchor_key
@@ -47,7 +53,6 @@ from gc_tui.services.trace_render import (
     build_orphan_result_row,
     build_standalone_row,
     build_turn_line,
-    finish_close_of,
     note_question,
     result_with_edits,
     tool_caption,
@@ -70,7 +75,6 @@ from gc_tui.widgets.tool_blocks_view import (
 
 if TYPE_CHECKING:
     from gc_core.constants.tool_display import McpToolInfo
-    from gc_core.tools.turn.turn_close import TurnClose
     from textual.widget import Widget
 
     from gc_tui.models import TraceEvent
@@ -208,35 +212,6 @@ def render_steps(
     return chunk.finish()
 
 
-def answer_verdict(flow: AnswerFlow, ev: TraceEvent) -> AgentVerdict:
-    """Проза агента ``ev`` — в дедуп ответа хода: показывать ли её и
-    уходит ли прошлая попытка сдачи. Одно правило отрисовщика кусков и
-    живого пути."""
-    return flow.agent(
-        (ev.summary or "").strip(),
-        intermediate=ev.tool_name == "intermediate_reply",
-    )
-
-
-def finish_close(flow: AnswerFlow, ev: TraceEvent) -> TurnClose:
-    """Сдача хода ``ev`` — в дедуп ответа хода: отчёт без повтора прозы;
-    попытка с call_id заменяет прошлую. Одно правило отрисовщика кусков и
-    живого пути."""
-    return flow.finish(finish_close_of(ev), tracked=bool(ev.call_id))
-
-
-def replay_answer(flow: AnswerFlow, ev: TraceEvent) -> None:
-    """Событие ``ev`` — в дедуп ответа хода так же, как его подаёт
-    отрисовка: реплика начинает ход, сдача и проза — по своим правилам.
-    Кусок, начатый внутри хода, проигрывает так элементы хода до себя."""
-    if ev.kind == "user":
-        flow.new_turn()
-    elif is_finish(ev):
-        finish_close(flow, ev)
-    elif ev.kind == "agent":
-        answer_verdict(flow, ev)
-
-
 def history_level(step: int) -> str:
     """Уровень блоков шага ``step`` куска."""
     return f"{HISTORY_LEVEL_PREFIX}{step}"
@@ -280,7 +255,6 @@ class _Chunk:
         self._turn_views: list[ToolBlocksView] = []
         self._turn_stop = 0
         self._flow = AnswerFlow()
-        self._attempts: list[list[Widget]] = []
         # Вызовы без исхода: строка и вид её хода.
         self._open: dict[str, tuple[ToolCallRow, ToolBlocksView]] = {}
         self._finish_ids: set[str] = set()
@@ -400,7 +374,6 @@ class _Chunk:
         model = self._model
         self._turn = turn
         self._flow = AnswerFlow()
-        self._attempts = []
         self._ended = turn + 1 < model.turn_count()
         self._turn_from = len(self._mounted)
         self._turn_views = []
@@ -576,7 +549,6 @@ class _Chunk:
         from gc_tui.widgets.user_reply import UserReplyContainer
 
         replay_answer(self._flow, ev)
-        self._attempts = []
         self.mount(
             UserReplyContainer(
                 ev.summary,
@@ -590,11 +562,8 @@ class _Chunk:
         if is_finish(ev):
             self._finish(ev)
             return
-        verdict = answer_verdict(self._flow, ev)
-        if not verdict.show:
+        if not answer_verdict(self._flow, ev).show:
             return
-        if verdict.drop_attempt:
-            self._drop_attempts()
         if ev.tool_name == "intermediate_reply":
             self._mount_all(
                 build_intermediate_widgets(ev.summary, event_no=ev.no)
@@ -616,23 +585,16 @@ class _Chunk:
         self.mount(panel)
 
     def _finish(self, ev: TraceEvent) -> None:
-        """Конец хода turn_finish: отчёт без повтора прозы; новая попытка
-        убирает прошлые (отклонённые)."""
+        """Конец хода turn_finish: отчёт без повтора прозы. Попытку,
+        которую свернёт следующая попытка или проза, повторившая отчёт,
+        модель пометила (`HistoryModel.collapsed_attempts`, R42) — она не
+        рисуется, в каком бы шаге ни лежала свёртка."""
         close = finish_close(self._flow, ev)
-        widgets = build_finish_widgets(close, event_no=ev.no)
-        self._mount_all(widgets)
-        if not ev.call_id:
+        if ev.call_id:
+            self._finish_ids.add(ev.call_id)
+        if ev.no in self._model.collapsed_attempts:
             return
-        self._finish_ids.add(ev.call_id)
-        self._drop_attempts()
-        self._attempts.append(widgets)
-
-    def _drop_attempts(self) -> None:
-        self.flush()
-        for widgets in self._attempts:
-            for widget in widgets:
-                widget.remove()
-        self._attempts = []
+        self._mount_all(build_finish_widgets(close, event_no=ev.no))
 
     def _question(self, ev: TraceEvent) -> None:
         """Вопрос агента — видимая строка истории без баннера; «без

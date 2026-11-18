@@ -1099,3 +1099,122 @@ async def test_expanded_step_of_live_turn_is_not_pinned(tmp_path):
         await pilot.pause()
         texts = [t for _k, t, _c in feed_dump(_trace(scr))]
         assert texts.count("    − свернуть группу") == 1
+
+
+# ---- R42: шаги и после отклонённой сдачи -----------------------------------
+
+
+def _finish_nos(model) -> set[int]:
+    """Номера событий сдачи хода в модели."""
+    from gc_tui.services.trace_mapper import is_finish
+
+    return {
+        it.event.no
+        for it in model.items
+        if it.event is not None and is_finish(it.event)
+    }
+
+
+def _drawn_finish_nos(scr, model) -> set[int]:
+    """Номера событий сдачи, чьи виджеты стоят в ленте."""
+    from gc_tui.textual_compat import is_being_removed
+
+    finishes = _finish_nos(model)
+    return {
+        w._event_no
+        for w in _trace(scr).children
+        if getattr(w, "_event_no", 0) in finishes and not is_being_removed(w)
+    }
+
+
+def _attempts_session() -> list[dict]:
+    """Попытки сдачи всех видов: отклонённая и следующая попытка;
+    отклонённая и проза, повторившая её отчёт; одна принятая."""
+    user = "m_u0002"
+    echo = _prose(2, 0)
+    echo["payload"]["content"][0]["text"] = "Отчёт 2 попытка 1."
+    return [
+        *_refused_finish_turn(0, 3),
+        *_refused_finish_turn(1, 0),
+        _message({"role": "user", "id": user, "content": "запрос 2"}),
+        *_call(2, 0),
+        *_finish(2, 1, ok=False),
+        echo,
+        _outcome(user, echo["payload"]["id"]),
+    ]
+
+
+def test_refused_finish_then_long_work_splits_into_bounded_steps():
+    """Отклонённая сдача и сотня вызовов после неё — шаги не больше
+    ``STEP_MAX_ITEMS`` (R42); модель помечает попытку, которую свернёт
+    следующая."""
+    model = _model(_refused_finish_turn(0, 110))
+    for s in range(model.step_count()):
+        assert len(model.step_range(s)) <= STEP_MAX_ITEMS
+    first = next(
+        it.event.no
+        for it in model.items
+        if it.event is not None and it.event.call_id == "fin_0_1"
+    )
+    assert model.collapsed_attempts == {first}
+
+
+@pytest.mark.asyncio
+async def test_finish_attempt_marks_match_both_renderers(tmp_path):
+    """Страж паритета: попытки, которые модель пометила свёрнутыми, —
+    ровно те, что живой путь снял, а отрисовщик кусков не нарисовал;
+    остальные сдачи стоят в ленте на обоих путях."""
+    records = _attempts_session()
+    model = _model(records)
+    assert model.collapsed_attempts
+    expected = _finish_nos(model) - model.collapsed_attempts
+    fixture = HistoryFixture(
+        records=tuple(records), segments=(tuple(records),), sidecar=()
+    )
+    async with _app(tmp_path / "open").run_test(size=_SIZE) as pilot:
+        write_history(str(tmp_path / "open"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        opened = scr._window_model()
+        assert opened.collapsed_attempts == model.collapsed_attempts
+        assert _drawn_finish_nos(scr, opened) == expected
+    async with _app(tmp_path / "live").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, records, whole_calls=True)
+        live = scr._window_model()
+        assert live.collapsed_attempts == model.collapsed_attempts
+        assert _drawn_finish_nos(scr, live) == expected
+
+
+@pytest.mark.asyncio
+async def test_refused_finish_long_work_trim_and_remount(
+    tmp_path, monkeypatch
+):
+    """Отклонённая сдача, сотня вызовов, принятая сдача — шагами (R42).
+    Следующие ходы снимают их сверху, подъём возвращает: ни потерь, ни
+    повторов — лента как при открытии."""
+    records = _refused_finish_turn(0, 110)
+    model = _model(records)
+    assert model.step_count() > 5
+    later = [*_giant_turn(1, 30), *_giant_turn(2, 30)]
+    with pinned_snapshot_clock(monkeypatch):
+        opened = await _opened_dump(
+            tmp_path / "open", [*records, *later], monkeypatch
+        )
+        _small_window(monkeypatch)
+        async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD)
+            await pilot.pause()
+            await _feed_turn(pilot, scr, records, whole_calls=True)
+            await _feed_turn(pilot, scr, later, whole_calls=True)
+            # Сняты шаг отклонённой попытки и шаги работы после неё.
+            assert scr._window_first > 5
+            live = await _climb_whole(pilot, scr, monkeypatch)
+    assert sum("Отчёт 0 попытка 2." in t for _k, t, _c in live) == 1
+    assert not any("Отчёт 0 попытка 1." in t for _k, t, _c in live)
+    assert live == opened

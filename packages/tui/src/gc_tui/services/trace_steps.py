@@ -34,10 +34,12 @@
   ширина пачки элементов (R43). Гигантского шага так нет, но
   ``CHUNK_MAX`` для шага с широкой пачкой — не жёсткая граница.
 
-После сдачи хода (``turn_finish``) границ нет: попытки сдачи сворачивают
-одна другую, отрисовщик держит их в одном шаге. Непокрыто (§5.3): остаток
-хода после первой сдачи и вызов, оставшийся без исхода посреди хода
-(обязательная граница ждёт его исхода), — такой остаток одним шагом.
+Границы стоят и после сдачи хода (``turn_finish``, R42): попытку, которую
+свернёт следующая попытка или проза, повторившая её отчёт, модель
+помечает заранее (`HistoryModel.collapsed_attempts`), и отрисовщик
+кусков её не рисует, в каком бы шаге ни лежала свёртка. Непокрыто
+(§5.3): вызов, оставшийся без исхода посреди хода (обязательная граница
+ждёт его исхода), — остаток хода за ним одним шагом.
 
 Исход вызова, пришедший после мягкой границы (параллельные вызовы, исход
 после сжатия), отрисовщик применяет в конце шага вызова
@@ -95,7 +97,6 @@ def _closes_group(ev: TraceEvent) -> bool:
 class StepSplitter:
     """Границы шагов по мере дописывания элементов модели."""
 
-    _finished: bool
     # Элементов в шаге и в ходе до дописываемого.
     _size: int
     _turn_size: int
@@ -107,7 +108,6 @@ class StepSplitter:
 
     def turn_started(self) -> None:
         """Новый ход — новый шаг с чистым состоянием."""
-        self._finished = False
         self._size = 0
         self._turn_size = 0
         self._awaiting = set()
@@ -126,7 +126,7 @@ class StepSplitter:
 
     def _boundary(self, ev: TraceEvent) -> bool:
         """Событие ``ev`` начинает шаг (правила — в докстроке модуля)."""
-        if self._finished or ev.kind in RESULT_KINDS or is_finish(ev):
+        if ev.kind in RESULT_KINDS or is_finish(ev):
             return False
         if self._size + 1 >= STEP_MAX_ITEMS and not self._awaiting:
             return True
@@ -137,10 +137,8 @@ class StepSplitter:
         )
 
     def _note(self, ev: TraceEvent) -> None:
-        """Вызовы без исхода и сдача хода."""
+        """Вызовы без исхода."""
         if ev.kind == "call" and ev.call_id:
             self._awaiting.add(ev.call_id)
         elif ev.kind in RESULT_KINDS and ev.call_id:
             self._awaiting.discard(ev.call_id)
-        elif is_finish(ev):
-            self._finished = True

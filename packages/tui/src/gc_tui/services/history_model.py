@@ -28,6 +28,7 @@ from gc_core.persistence.turn_outcome import (
 )
 
 from gc_tui.models import TraceEvent
+from gc_tui.services.answer_flow import AnswerFlow, replay_answer
 from gc_tui.services.trace_mapper import (
     RenderContext,
     collect_render_context,
@@ -41,7 +42,7 @@ from gc_tui.services.trace_retention import (
     message_ids_in_retention_window,
     retention_window_start_index,
 )
-from gc_tui.services.trace_steps import RESULT_KINDS, StepSplitter
+from gc_tui.services.trace_steps import RESULT_KINDS, StepSplitter, shown
 
 ItemKind = Literal["event", "outcome", "model_choice", "compaction"]
 
@@ -121,9 +122,18 @@ class HistoryModel:
     # него (исход может лечь в следующий шаг, `trace_steps`).
     _call_items: dict[str, int] = field(default_factory=dict, repr=False)
     _first_results: dict[str, int] = field(default_factory=dict, repr=False)
+    # Номера событий попыток сдачи хода, которые свернула следующая
+    # попытка или проза, повторившая отчёт (R42): отрисовщик кусков их не
+    # рисует, живой путь снимает, когда свёртка приходит. Правило — дедуп
+    # ответа (`answer_flow.replay_answer`), как у отрисовки.
+    collapsed_attempts: set[int] = field(default_factory=set)
     # Границы шагов дописываемого хода.
     _steps: StepSplitter = field(
         default_factory=StepSplitter, repr=False, compare=False
+    )
+    # Дедуп ответа по дописанным событиям — для свёртки попыток.
+    _answers: AnswerFlow = field(
+        default_factory=AnswerFlow, repr=False, compare=False
     )
 
     def __post_init__(self) -> None:
@@ -262,6 +272,9 @@ class HistoryModel:
         self._item_of_no[ev.no] = len(self.items)
         self._note_call(ev)
         self._append(HistoryItem(kind, event=ev))
+        if kind == "event" and shown(ev, self.withdrawn):
+            replay_answer(self._answers, ev)
+            self.collapsed_attempts.update(self._answers.collapsed)
         self.next_no = ev.no + 1
         if ev.tool_name == "ask_human" and ev.kind == "system" and ev.call_id:
             self.unanswered.add(ev.call_id)

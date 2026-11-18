@@ -106,7 +106,11 @@ from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
 from gc_tui.screens.trace_window import TraceWindowMixin
 from gc_tui.services import image_hints, image_paste, model_sign, os_ops
-from gc_tui.services.answer_flow import AnswerFlow
+from gc_tui.services.answer_flow import (
+    AnswerFlow,
+    answer_verdict,
+    finish_close,
+)
 from gc_tui.services.block_edits import (
     RanResult,
     call_edit,
@@ -148,8 +152,6 @@ from gc_tui.services.history_model import (
 from gc_tui.services.history_render import (
     ChunkOptions,
     ChunkRefs,
-    answer_verdict,
-    finish_close,
     history_level,
 )
 from gc_tui.services.image_chips import strip_image_chips
