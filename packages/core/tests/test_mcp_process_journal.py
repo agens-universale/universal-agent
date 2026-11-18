@@ -933,7 +933,14 @@ async def test_sweep_orphans(mcp_home, mcp_reaper, procs, tmp_path):
         _rewrite(dirs[name] / "owner.json", **dead_owner)
     _rewrite(dirs["c"] / "owner.json", boot_id="other-boot")
     _rewrite(_record_of(je, pe.pid).path, mark="bogus")
-    _rewrite(dirs["f"] / "owner.json", node="other-node", **dead_owner)
+    # Другой узел — и другая загрузка: на macOS совпавшая загрузка значит
+    # тот же хост после смены имени.
+    _rewrite(
+        dirs["f"] / "owner.json",
+        node="other-node",
+        boot_id="other-boot",
+        **dead_owner,
+    )
 
     assert sweep_orphans(wait_sec=2) == 1
 
