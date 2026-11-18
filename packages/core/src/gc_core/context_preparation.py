@@ -74,6 +74,12 @@ class PreparedRunContext:
         )
 
 
+def _runtime_value(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    return tuple(tuple(v) if isinstance(v, list) else v for v in value)
+
+
 def settings_from_snapshot(settings: Any, runtime: Any) -> Any:
     """``LoadedSettings`` из подготовленных значений ``PreparedRunContext``.
 
@@ -94,12 +100,10 @@ def settings_from_snapshot(settings: Any, runtime: Any) -> Any:
         apply_compat(raw)
         settings = AppConfig.model_validate(raw)
     if isinstance(runtime, Mapping):
-        # Списков в ``RuntimeEnv`` нет: список снимка — это кортеж рантайма.
+        # Списков в ``RuntimeEnv`` нет: список снимка — это кортеж рантайма
+        # (и пары внутри него — кортежи).
         runtime = RuntimeEnv(
-            **{
-                key: tuple(value) if isinstance(value, list) else value
-                for key, value in runtime.items()
-            }
+            **{key: _runtime_value(value) for key, value in runtime.items()}
         )
     return LoadedSettings(settings=settings, runtime=runtime or RuntimeEnv())
 

@@ -79,7 +79,12 @@ _DOMAIN_ERRORS = {
 }
 _DOMAIN_ERRORS.update(
     {
+        # Вызов MCP ушёл серверу без ответа: исход неизвестен, повторять
+        # нельзя; текст исключения («сервер не ответил за N с», «сервер
+        # завершился, не ответив») переносится как есть.
         "McpSessionLostError": ToolOutcomeUnknown,
+        "McpServerGone": ToolOutcomeUnknown,
+        "McpCallTimedOut": ToolOutcomeUnknown,
         "UnicodeDecodeError": ValueError,
         "JSONDecodeError": ValueError,
     }

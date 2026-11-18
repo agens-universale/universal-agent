@@ -3,7 +3,12 @@ from __future__ import annotations
 import logging
 import os
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
@@ -46,6 +51,7 @@ from gc_core.config_modules.model_registry import (
 )
 from gc_core.config_modules.os_backend import OsBackendConfig
 from gc_core.config_modules.paths import PathsConfig
+from gc_core.config_modules.plugins import PluginsConfig
 from gc_core.config_modules.pricing import PricingConfig
 from gc_core.config_modules.project_memory import (
     ProjectMemoryConfig,
@@ -115,6 +121,10 @@ class AppConfig(BaseModel):
         json_schema_extra=gc_meta(expert=True),
     )
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
+    plugins: PluginsConfig = Field(
+        default_factory=PluginsConfig,
+        json_schema_extra=gc_meta(expert=True),
+    )
     working_memory: WorkingMemoryConfig = Field(
         default_factory=WorkingMemoryConfig,
         json_schema_extra=gc_meta(expert=True),
@@ -254,6 +264,14 @@ def _to_abs(config_dir: str, path_value: str | None) -> str | None:
     if os.path.isabs(path_value):
         return path_value
     return os.path.abspath(os.path.join(config_dir, path_value))
+
+
+def plugin_entry_path(config_dir: str, value: str) -> str:
+    """Запись ``plugins.paths`` как её видит загрузчик: ``~`` раскрыт,
+    относительный путь — от каталога базового конфига. Одно правило для
+    резолва и для сравнения записей при классификации доверия."""
+    expanded = os.path.expanduser(str(value).strip())
+    return _to_abs(config_dir, expanded) or expanded
 
 
 def _normalize_summary_limits(cfg: AppConfig) -> AppConfig:
@@ -402,6 +420,9 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     write_guard = cfg.security.write_guard
     write_guard.extra_paths = [
         to_abs(path) or path for path in write_guard.extra_paths
+    ]
+    cfg.plugins.paths = [
+        plugin_entry_path(config_dir, path) for path in cfg.plugins.paths
     ]
     return cfg.result()
 

@@ -24,7 +24,9 @@ from gc_core.config_modules.cli_args import (
 from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.message_policy.mode_messages import headless_mode_warning_text
 from gc_core.onboarding import explain_broken_config
+from gc_core.plugins.catalog import build_plugin_snapshot
 from gc_core.security.permission_mode import headless_mode_warning
+from gc_core.utils.logging_module import configure_host_logging
 
 from gc_server.agent_roles import acheck_roles, aopen_surface_agents
 from gc_server.app import AddressConflict, ServerRuntime, aserve, build_surface
@@ -33,6 +35,7 @@ from gc_server.config import (
     ServerConfig,
     ServerConfigError,
     load_server_config,
+    surface_settings,
 )
 from gc_server.stores import aopen_process_stores
 from gc_server.surface import say
@@ -82,15 +85,29 @@ def main(argv: list[str] | None = None) -> int:
         say(override_error_text(exc))
         return 2
     log_level = normalize_log_level(cfg.server.log_level)
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    configure_host_logging(
+        getattr(logging, log_level.upper(), logging.INFO),
+        "%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     say(
         "config_server.yml: "
         + (cfg.config_path or "не найден, взяты умолчания")
     )
+    prewarm_plugin_sources(loaded, cfg, names)
     return asyncio.run(_amain(loaded, cfg, names, log_level))
+
+
+def prewarm_plugin_sources(loaded, cfg: ServerConfig, names) -> None:
+    """Клоны git-источников плагинов каждой поверхности — до цикла событий:
+    цикл общий, синхронный git внутри него встал бы на все запросы (§8.2).
+    Снимки поверхностей потом собираются без сети."""
+    for name in names:
+        try:
+            settings = surface_settings(loaded, cfg, name)
+        except ServerConfigError:
+            continue  # отказ объяснит сборка самой поверхности
+        for notice in build_plugin_snapshot(settings, clone=True).notices:
+            say(f"{name}: {notice}")
 
 
 async def _amain(loaded, cfg: ServerConfig, names, log_level: str) -> int:

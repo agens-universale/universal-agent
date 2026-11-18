@@ -275,6 +275,7 @@ def build_default_registry() -> CommandRegistry:
             hotkey="Ctrl+C",
         ),
         Command("mcp", ("мсп",), "", "MCP-серверы и их тулы"),
+        Command("plugins", ("плагины",), "", "Установленные плагины"),
         Command(
             "buffer",
             ("буфер",),

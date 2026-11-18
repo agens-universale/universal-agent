@@ -493,7 +493,8 @@ class RunSummaryCoordinator:
         current_messages: list[dict] | None,
         mode: str | None,
     ) -> list[dict]:
-        """Реплики и картинки текущего шага. Пусто, если батча нет или он не хвост истории.
+        """Реплики, картинки и сообщения к запросу текущего шага. Пусто, если
+        батча нет или он не хвост истории.
 
         Ответ инструмента сюда не входит: после сводки вызов уже внутри неё,
         и ответ без вызова бэкенд отверг бы.
@@ -510,7 +511,6 @@ class RunSummaryCoordinator:
             current_messages=batch,
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
 
     async def _areattach_preserved_batch(
@@ -565,12 +565,6 @@ class RunSummaryCoordinator:
             tags=self._projection_tags(),
             strip_think=True,
         )
-
-    def _keys_persisted_before_last_batch(self) -> frozenset[str] | None:
-        snap = getattr(
-            self._thread_session, "known_keys_snapshot_before_last_batch", None
-        )
-        return snap if isinstance(snap, frozenset) else None
 
     def _restore_after_failed_compaction(
         self, msgs: Any, state_tail: list

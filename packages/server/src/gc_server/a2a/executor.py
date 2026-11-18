@@ -260,7 +260,7 @@ class GcAgentExecutor(AgentExecutor):
         threads: Threads,
         launch_root: str | None = None,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
     ) -> None:
         self._settings = settings
@@ -269,7 +269,7 @@ class GcAgentExecutor(AgentExecutor):
         self._tasks = ThreadTaskStore(threads)
         self._launch_root = launch_root
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._turns: dict[str, Turn] = {}
         #: Реестр владельца: задачи «в работе» этого процесса и его пульс —
@@ -350,15 +350,23 @@ class GcAgentExecutor(AgentExecutor):
             except Exception:
                 logger.warning("a2a: уборка после отмены", exc_info=True)
 
-    async def shutdown(self) -> None:
-        # Остановка сервера — прерывание: задачи остаются как есть, их
-        # подберёт восстановление другого инстанса. Ждущие очереди диалог
-        # больше не занимают.
+    async def stop_turns(self) -> None:
+        """Снять идущие ходы; повтор безвреден.
+
+        Остановка сервера — прерывание: задачи остаются как есть, их
+        подберёт восстановление другого инстанса. Ждущие очереди диалог
+        больше не занимают.
+        """
+        if self._stopping:
+            return
         self._stopping = True
         self._waiting.clear()
         for turn in list(self._turns.values()):
             turn.interrupted = True
             await turn.cancel()
+
+    async def shutdown(self) -> None:
+        await self.stop_turns()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
@@ -880,7 +888,7 @@ class GcAgentExecutor(AgentExecutor):
                     self._settings, cwd=str(cwd or self._root())
                 ),
                 auth_connector=self._auth,
-                tools_cache=self._tools_cache,
+                mcp_service=self._mcp_service,
                 os_backend=self._os_backend,
             )
             self._agents[context_id] = agent

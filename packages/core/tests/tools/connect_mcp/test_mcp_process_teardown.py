@@ -35,6 +35,7 @@ import time
 import pytest
 from gc_core.mcp_session_owner import use_owner
 from gc_core.tools.connect_mcp import persistent_stdio as ps
+from gc_core.tools.connect_mcp.call_errors import McpServerGone
 from gc_testkit.paths import package_src_dirs
 
 pytestmark = pytest.mark.skipif(
@@ -298,7 +299,8 @@ def test_a_crashed_server_is_replaced_without_leaving_its_group(
         reaper.append(first)
         child = _wait_rows(tmp_path, 1)[0]["child"]
 
-        session.call("tools/call", {"name": "crash", "arguments": {}}, 5.0)
+        with pytest.raises(McpServerGone):
+            session.call("tools/call", {"name": "crash", "arguments": {}}, 5.0)
         first.wait(timeout=5)  # сервер упал между вызовами
         assert _group_alive(first.pid), (
             "проверка пустая: потомок упал вместе с сервером"

@@ -159,6 +159,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     build_invalid_tool_call_feedback_message,
     extract_real_user_message_text,
+    last_real_user_text,
     wrap_technical_user_content,
 )
 from gc_core.message_policy.user_stop import (
@@ -170,6 +171,12 @@ from gc_core.model_router import (
     breaker_reason,
     failure_text,
 )
+from gc_core.plugins.commands import (
+    command_messages,
+    listed_skill_ids,
+    user_intent_text,
+)
+from gc_core.plugins.hooks import acontext_hook_messages
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -185,7 +192,7 @@ from gc_core.security.permission_mode import (
     resolve_mode,
     tools_for_mode,
 )
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, runtime_of, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.summarize.summary_validation import SummaryRejectedError
@@ -3226,6 +3233,9 @@ class _AgentLoop:
 
         self.tool_error_cnt = 0
         self.context_overflow_retries = 0
+        # Повтор запроса после переполнения: хуки запроса и команда плагина
+        # уже в messages, второй раз не запускаются.
+        self._repeat_request = False
         self.run_logger = getattr(ctx, "logger", None) or _fallback_logger
         agent_cfg = settings_of(ctx).agent
         self.stop_on_no_tool_response = agent_cfg.stop_on_no_tool_response
@@ -3357,9 +3367,11 @@ class _AgentLoop:
             return _Outcome(result=early)
         # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
         # ретраев исключение уходит наверх как есть.
+        repeat, self._repeat_request = self._repeat_request, False
+        prepared = None
         try:
             prepared = await self._aprepare_main_request(
-                messages, mode, backend_mode
+                messages, mode, backend_mode, repeat=repeat
             )
             if prepared is None:
                 return _Outcome(result=None)
@@ -3388,6 +3400,7 @@ class _AgentLoop:
             ):
                 raise
             # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
+            self._repeat_request = repeat or prepared is not None
             return self._overflow_resume(messages, mode)
         outcome.mode = mode
         self._nudges.notices_sent = False
@@ -3411,12 +3424,16 @@ class _AgentLoop:
         return outcome
 
     async def _aprepare_main_request(
-        self, messages, mode, backend_mode: str
+        self, messages, mode, backend_mode: str, *, repeat: bool = False
     ) -> Optional[List[Dict]]:
-        """Перед запросом к модели: судья/сжатие, затем один flush буфера."""
+        """Перед запросом к модели: судья/сжатие, затем один flush буфера,
+        затем хуки и команда плагинов. None — стоп до запроса. ``repeat`` —
+        повтор того же запроса после переполнения контекста: хуки запроса и
+        команда плагина уже в ``messages``."""
         if not _mode_requires_backend_call(mode):
             return messages
-        if backend_mode == "chat_completions":
+        chat = backend_mode == "chat_completions"
+        if chat:
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
                 await self._apublish_held_on_stop(messages)
@@ -3426,7 +3443,11 @@ class _AgentLoop:
             if self._stopped_before_call():
                 await self._apublish_held_on_stop(messages)
                 return None
-        return await self._aflush_nudges(messages, backend_mode)
+        request = messages
+        messages = await self._aflush_nudges(messages, backend_mode)
+        return await self._aapply_plugin_messages(
+            messages, request, mode, chat=chat, repeat=repeat
+        )
 
     async def _apublish_held_on_stop(self, messages: List[Dict]) -> None:
         """Стоп после prepare: обычная запись вывода отбрасывается, закрытие — нет."""
@@ -3517,6 +3538,9 @@ class _AgentLoop:
         pending = await self.get_pending_messages()
         if not pending:
             return messages
+        # Реплика из очереди — новый запрос, не повтор после переполнения:
+        # хуки запроса и команда плагина для неё запускаются.
+        self._repeat_request = False
         if first_poll or _is_tool_outputs_with_technical_tail(messages):
             return [*messages, *pending]
         return pending
@@ -3814,6 +3838,7 @@ class _AgentLoop:
             state.current_user_intent,
             self._nudges.followers,
             user_turn_seq=state.user_turn_seq,
+            text_of=lambda m: user_intent_text(self.ctx, state, m),
         )
         self._nudges.carrier = None
         self._nudges.followers = []
@@ -3886,6 +3911,79 @@ class _AgentLoop:
         state.messages += notices
         await _maybe_persist(self.persist_messages_callback, notices, state)
         return [*messages, *notices]
+
+    async def _aapply_plugin_messages(
+        self, messages, request, mode, *, chat: bool, repeat: bool
+    ) -> Optional[List[Dict]]:
+        """Контекстные хуки и команда плагинов — в любом api_mode, после
+        flush: отложенный вывод инструмента уже записан, сообщения плагинов
+        встают за ним и в истории, и на диске. UserPromptSubmit и подстановка
+        команды смотрят на запрос человека в ``request`` (до служебных
+        добавок flush). SessionStart — перед каждым запросом: после сжатия
+        посреди хода он срабатывает снова."""
+        if mode == "user_ask" and not repeat:
+            messages = await self._aapply_context_hooks(
+                messages, request, user_prompt=True
+            )
+            messages = await self._aapply_plugin_command(messages, request)
+        messages = await self._aapply_context_hooks(
+            messages, messages, user_prompt=False
+        )
+        if chat and self._stopped_before_call():
+            return None
+        return messages
+
+    async def _aapply_context_hooks(
+        self, messages, seen, *, user_prompt: bool
+    ) -> List[Dict]:
+        """Контекстные хуки плагинов: UserPromptSubmit на запросе в ``seen``
+        (``user_prompt``) или SessionStart перед запросом к модели."""
+        return await self._aadd_plugin_messages(
+            messages,
+            acontext_hook_messages(
+                self.state, self.ctx, seen, user_prompt=user_prompt
+            ),
+        )
+
+    async def _aapply_plugin_command(self, messages, request) -> List[Dict]:
+        """Команда плагина: раскрытый текст к запросу ``/плагин:команда``
+        (реплика человека в хвосте ``request``)."""
+
+        async def _pending() -> List[Dict]:
+            skills = getattr(self.state, "skills_list", None) or []
+            return command_messages(
+                runtime_of(self.ctx).plugins,
+                listed_skill_ids(skills),
+                last_real_user_text(request),
+            )
+
+        return await self._aadd_plugin_messages(messages, _pending())
+
+    async def _aadd_plugin_messages(self, messages, pending) -> List[Dict]:
+        state = self.state
+        try:
+            plugin_messages = await pending
+            if not plugin_messages:
+                return messages
+            messages = list(messages) + plugin_messages
+            to_append = filter_messages_not_in_state(
+                list(getattr(state, "messages", []) or []),
+                list(plugin_messages),
+            )
+            if to_append:
+                state.messages += to_append
+            await _maybe_persist(
+                self.persist_messages_callback, plugin_messages, state
+            )
+        except ExecutionFailure:
+            raise
+        except Exception as plugin_exc:
+            self.run_logger.warning(
+                "Plugin messages warning: %s",
+                plugin_exc,
+                exc_info=True,
+            )
+        return messages
 
     # ------------------------------------------------------------ dispatch
     async def _adispatch(self, mode, messages, backend_mode: str) -> _Outcome:

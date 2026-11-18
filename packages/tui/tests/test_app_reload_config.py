@@ -1,7 +1,7 @@
 """reload_config: перечитка конфига + сброс кэшированного runner (спека B, B3)."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 pytest.importorskip("textual")
 
@@ -14,6 +14,9 @@ class _FakeRunner:
 
     def is_running(self):
         return self._running
+
+    def plan_decisions(self):
+        return None, None
 
 
 def _mk_app(tmp_path):
@@ -99,11 +102,11 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
       - периметр path_policy съезжал со снапшота на живой os.getcwd(), хотя агент мог
         сделать cd внутри сессии.
     """
+    from dataclasses import replace
+
     from gc_core import config as cfg_mod
     from gc_core import thread_store as ts_mod
     from gc_core.config_modules.profiles import ProfileMeta
-    from dataclasses import replace
-
     from gc_testkit.settings import make_settings
     from gc_tui.app import TuiApp
     from gc_tui.runtime_config import apply_tui_runtime
@@ -318,7 +321,7 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
 
     seen_cfg = {}
 
-    async def _fake_acreate_run_context(loaded, **kw):
+    async def _fake_acreate_run_context(loaded, **_kw):
         seen_cfg["backend.completions_url"] = _url(loaded)
         return _Ctx()
 

@@ -22,7 +22,7 @@ from gc_core.backends.factory import resolve_os_backend
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.constants.tool_names import INTERMEDIATE_REPLY_TOOL_NAME
 from gc_core.settings import LoadedSettings
-from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_core.tools.connect_mcp.service import McpService
 
 from gc_server.chat.surface import backend_rejection, stop_channel_tools
 from gc_server.config import (
@@ -30,7 +30,7 @@ from gc_server.config import (
     ServerConfigError,
     reject_moved_section,
 )
-from gc_server.surface import install_bearer
+from gc_server.surface import aclose_mcp_service, install_bearer
 
 if TYPE_CHECKING:
     from gc_server.app import ServerRuntime
@@ -129,13 +129,17 @@ class A2aSurface:
         self._push_client = push_client
         self._push_url_validator = push_url_validator
         self._own_push_client = False
-        self.executor = self._executor()
+        backend = resolve_os_backend(self.settings)
+        # Сервер подключается первым вызовом тула, если тулы известны.
+        self._mcp_service = McpService(
+            os_backend=backend, connect_on_start=False
+        )
+        self.executor = self._executor(backend)
         self._recovery: asyncio.Task | None = None
 
-    def _executor(self):
+    def _executor(self, backend: Any):
         from gc_server.a2a.executor import GcAgentExecutor
 
-        backend = resolve_os_backend(self.settings)
         return GcAgentExecutor(
             settings=self.settings,
             agent_factory=self.runtime.agent_factory(
@@ -144,7 +148,7 @@ class A2aSurface:
             threads=self.runtime.threads("a2a"),
             launch_root=self.section.launch_root,
             auth_connector=build_auth_connector(self.settings),
-            tools_cache=ToolsCache(os_backend=backend),
+            mcp_service=self._mcp_service,
             os_backend=backend,
         )
 
@@ -253,6 +257,11 @@ class A2aSurface:
         recovery, self._recovery = self._recovery, None
         if recovery is not None:
             recovery.cancel()
+        # Порядок — у ``aclose_mcp_service``: ходы, сервис, агенты.
+        try:
+            await self.executor.stop_turns()
+        finally:
+            await aclose_mcp_service(self.name, self._mcp_service)
         await self.executor.shutdown()
         if self._own_push_client and self._push_client is not None:
             await self._push_client.aclose()

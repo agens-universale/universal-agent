@@ -18,6 +18,7 @@ from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp.api import (
     acall_mcp_tool,  # transport injection compatibility
 )
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.trace_id import trace_header_name, trace_id_from_config
@@ -493,7 +494,7 @@ def mcp_cache_config(settings: Any) -> Dict[str, Any]:
     app = settings_of(settings)
     servers_cfg: Dict[str, Any] = {
         name: plain_dump(server, by_alias=True)
-        for name, server in app.mcp.servers.items()
+        for name, server in effective_mcp_servers(settings).items()
     }
     return {
         "mcp-servers": _servers_cfg_with_trace(servers_cfg, settings),
@@ -517,7 +518,9 @@ def _prepare_mcp_tools_data(
     ``tools_cache`` — кэш, которым владеет ВЫЗЫВАЮЩИЙ. Не передан — заводится
     свой, одноразовый: ровно прежнее поведение, каждая сборка платит полную
     дискавери (866–1405 мс на реальном конфиге). Передан — попадания считаются
-    по ``mcp-servers`` и TTL, и повторные сборки уже бесплатны.
+    по ``mcp-servers`` и TTL, и повторные сборки уже бесплатны. Это путь без
+    сервиса MCP: источник-потребитель сервиса сюда не доходит, у него своя
+    ветка (``_aview_mcp_tools_data``).
 
     Кэш прокидывается, а не сделан процессным синглтоном, намеренно. Такой
     синглтон мы только что лечили в другом месте: ``PersistentStdioRegistry``
@@ -598,6 +601,8 @@ def _assemble_mcp_tools_data(
     settings: Any,
     servers_cfg: Dict[str, Any],
     os_backend: Any = None,
+    *,
+    caller: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Собрать tools_data из результата дискавери. Ни сети, ни ожидания.
 
@@ -605,6 +610,9 @@ def _assemble_mcp_tools_data(
     асинхронную и синхронную. Между ними отличается ровно одна строка — как
     дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
     нормализации схем не за что.
+
+    ``caller`` — исполнитель вызова обёрток; без него — ``acall_mcp_tool``
+    (у источника-потребителя — его исполнитель, спека §5.2).
     """
     app = settings_of(settings)
     timeout = app.mcp.meta.request_timeout_sec or 600
@@ -622,7 +630,7 @@ def _assemble_mcp_tools_data(
                 timeout,
                 default_use_retry=default_use_retry,
                 os_backend=os_backend,
-                caller=acall_mcp_tool,
+                caller=caller or acall_mcp_tool,
             )
 
         return fabric
@@ -666,14 +674,19 @@ async def aget_mcp_tools_data_for_config(
     settings: Any,
     on_progress=None,
     *,
-    tools_cache: Optional[ToolsCache] = None,
+    tools_cache: Any = None,
     os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """MCP-тулы в формате tools_data, без потока на дискавери.
 
     Форма одна. Синхронного имени нет: единственный вызывающий — сборка
     набора тулов, и она корутинная.
+
+    Источник со срезом (``aview`` — потребитель сервиса, спека §5.2) идёт
+    своей веткой ДО подготовки кэша: ``rebind`` и бэкенда кэша у него нет.
     """
+    if getattr(tools_cache, "aview", None) is not None:
+        return await _aview_mcp_tools_data(settings, tools_cache, os_backend)
     prepared = _prepare_mcp_tools_data(
         settings, tools_cache=tools_cache, os_backend=os_backend
     )
@@ -692,6 +705,28 @@ async def aget_mcp_tools_data_for_config(
         settings,
         servers_cfg,
         os_backend=os_backend,
+    )
+
+
+async def _aview_mcp_tools_data(
+    settings: Any, source: Any, os_backend: Any
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """MCP-тулы из среза источника: записи, статусы, определения для
+    обёрток и исполнитель вызова. Прогресса нет — срез не ждёт сети."""
+    try:
+        view = await source.aview(settings, os_backend=os_backend)
+    except Exception:
+        logger.error("Failed to load MCP tools", exc_info=True)
+        return {}, {}
+    if not view.servers_cfg:
+        return {}, {}
+    return _assemble_mcp_tools_data(
+        view.registry,
+        view.status,
+        settings,
+        view.servers_cfg,
+        os_backend=os_backend,
+        caller=view.caller,
     )
 
 

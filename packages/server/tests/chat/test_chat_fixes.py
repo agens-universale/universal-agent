@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from gc_core.aio import AsyncAgent
 from gc_core.backends.local import LocalFsBackend
 from gc_core.execution.contracts import ModelFailure, ModelProviderError
-from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_core.tools.connect_mcp.service import McpService
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.fs.read_file import ReadFile
 from gc_server.chat.app import create_app
@@ -22,20 +22,25 @@ from gc_server.chat.errors import ApiError
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.index_store import ResponseIndex
 from gc_server.config import ChatConfig, ServerSection
+from gc_testkit.mcp.fixtures import mcp_home  # noqa: F401
 from gc_testkit.settings import make_settings
 from pydantic import ValidationError
 
 
 @pytest.mark.parametrize("cls", [ResponsesFacade, CompletionsFacade])
+@pytest.mark.usefixtures("mcp_home")
 async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
     discoveries = []
 
     async def discover(name, config, **kwargs):
+        # Сервер с тулом: пустой список потребитель считает неизвестным и
+        # подключает сервер сам, а здесь проверяется общий каталог.
         discoveries.append(name)
-        return [], {"status": "connected"}
+        return [{"name": "echo", "inputSchema": {"type": "object"}}]
 
     monkeypatch.setattr(
-        "gc_core.tools.connect_mcp.registry._adiscover_one", discover
+        "gc_core.tools.connect_mcp.consumer_connections.alist_raw_tools",
+        discover,
     )
     process = tmp_path / "process"
     root = tmp_path / "root"
@@ -56,7 +61,7 @@ async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
         settings=settings,
         agent_factory=AsyncAgent.create,
         os_backend=shared,
-        tools_cache=ToolsCache(os_backend=shared),
+        mcp_service=McpService(os_backend=shared, connect_on_start=False),
         section=ChatConfig(launch_root=str(root)),
     )
 
@@ -90,7 +95,10 @@ async def test_concurrent_agents_use_their_own_cwd(tmp_path, monkeypatch, cls):
         finally:
             await agent.aclose()
 
-    a, b = await asyncio.gather(one("a"), one("b"))
+    try:
+        a, b = await asyncio.gather(one("a"), one("b"))
+    finally:
+        await facade._mcp_service.aclose()
     assert a is not b
     assert os.getcwd() == str(process)
     assert not (process / "written.txt").exists()

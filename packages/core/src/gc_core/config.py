@@ -60,6 +60,7 @@ from gc_core.config_modules.model_registry import (
 from gc_core.config_modules.model_sections_validation import (
     validate_model_sections,
 )
+from gc_core.config_modules.plugins import PluginSource
 from gc_core.config_modules.profiles import (
     ProfileMeta,
     mtime_or_none,
@@ -68,6 +69,7 @@ from gc_core.config_modules.profiles import (
 from gc_core.config_modules.root import (
     SCHEMA_ERROR_PREFIX,
     AppConfig,
+    plugin_entry_path,
     resolve_paths,
     schema_error_details,
 )
@@ -78,6 +80,7 @@ from gc_core.config_modules.unknown_keys import (
     drop_unknown_keys,
     unknown_key_notice,
 )
+from gc_core.plugins.sources import source_dir
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
 
@@ -482,6 +485,45 @@ def _validated_app_config(raw_config: Dict[str, Any]) -> AppConfig:
         ) from exc
 
 
+def _plugin_entries_of(document: Any, config_dir: str) -> set[str]:
+    """Записи ``plugins.paths`` / ``sources`` одного слоя — каталогами, как
+    их увидит сборщик снимка (пути — по правилу ``resolve_paths``)."""
+    section = document.get("plugins") if isinstance(document, dict) else None
+    if not isinstance(section, dict):
+        return set()
+    entries = {
+        plugin_entry_path(config_dir, path)
+        for path in section.get("paths") or ()
+        if isinstance(path, str)
+    }
+    for raw in section.get("sources") or ():
+        try:
+            source = PluginSource.model_validate(raw)
+        except _PydanticValidationError:
+            continue  # битую запись отвергнет схема итогового конфига
+        entries.add(str(source_dir(source)))
+    return entries
+
+
+def _untrusted_plugin_entries(
+    base_document: Any, layer_documents, profile_ref, config_dir: str
+) -> frozenset[str]:
+    """Записи плагинов из конфига проекта и проектного профиля, которых нет
+    в доверенных слоях (база, managed, профиль пользователя), — спека §7.1."""
+    trusted = _plugin_entries_of(base_document, config_dir)
+    untrusted: set[str] = set()
+    project_profile = (
+        profile_ref is not None and profile_ref.root_kind == "project"
+    )
+    for name, _path, _before, document in layer_documents:
+        entries = _plugin_entries_of(document, config_dir)
+        is_project = name == "project" or (
+            name.startswith("profile:") and project_profile
+        )
+        (untrusted if is_project else trusted).update(entries)
+    return frozenset(untrusted - trusted)
+
+
 def load_settings(
     config_path: Optional[str] = None,
     *,
@@ -663,6 +705,9 @@ def load_settings(
             + notices
         ),
         voice_overridden_by_managed=_voice_overridden,
+        untrusted_plugin_entries=_untrusted_plugin_entries(
+            raw_base_after_env, layer_documents, ref, config_dir
+        ),
     )
     return LoadedSettings(
         settings=app_cfg,

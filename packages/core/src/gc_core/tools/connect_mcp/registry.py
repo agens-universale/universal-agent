@@ -5,17 +5,34 @@ import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+from gc_core.constants.tool_names import shorten_tool_name
+from gc_core.tools.connect_mcp.call_errors import first_leaf
+from gc_core.tools.connect_mcp.client import McpProtocolError
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.secret_mask import without_secrets
 from gc_core.tools.connect_mcp.transport import McpServerExitedError
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     # Развернуть ExceptionGroup/TaskGroup (anyio в stream_http) → внутренняя ошибка,
     # иначе причина выглядит как «unhandled errors in a TaskGroup».
-    depth = 0
-    while getattr(exc, "exceptions", None) and depth < 5:
-        exc = exc.exceptions[0]
-        depth += 1
+    exc = first_leaf(exc)
+    # Без секретов определения, как у причины сервиса: сообщение — до
+    # обрезки (иначе секрет на границе среза остался бы началом), итог — ещё
+    # раз (шаблоны подставляют ``url`` и ``command``).
+    message = without_secrets(str(exc), server_cfg)
+    reason = _discovery_error_text(exc, server_cfg, message)
+    return without_secrets(reason, server_cfg)
+
+
+def _discovery_error_text(
+    exc: BaseException, server_cfg: dict, message: str
+) -> str:
+    """Причина отказа по типу ``exc`` (группа уже развёрнута).
+
+    ``message`` — текст исключения для типов без своей формулировки;
+    вызывающий может подать его уже очищенным. Длинный текст обрезается.
+    """
     if isinstance(exc, McpServerExitedError):
         # Раньше — «нет соединения с …»: stdio-сервер упал при старте, а его
         # stderr уходил в никуда. Текст уже собран: строка причины и лог.
@@ -33,7 +50,7 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     ):
         target = server_cfg.get("url") or server_cfg.get("command") or "?"
         return f"нет соединения с {target}"
-    msg = str(exc).strip()
+    msg = message.strip()
     return (msg[:120] + "…") if len(msg) > 121 else (msg or name)
 
 
@@ -44,6 +61,12 @@ def _tool_title(tool: Dict[str, Any]) -> str | None:
     if isinstance(annotations, dict):
         candidates.append(annotations.get("title"))
     return next((c for c in candidates if isinstance(c, str) and c), None)
+
+
+def mcp_tool_full_name(server_name: str, base_name: str) -> str:
+    """Имя тула для модели ``mcp_<сервер>_<тул>``; длиннее предела — укорочено
+    с хешем полного имени. Вызов идёт по метаданным записи, а не по имени."""
+    return shorten_tool_name(f"mcp_{server_name}_{base_name}")
 
 
 def _normalize_tool(
@@ -69,7 +92,7 @@ def _normalize_tool(
     if not base_name:
         return None
 
-    combined_name = f"mcp_{server_name}_{base_name}"
+    combined_name = mcp_tool_full_name(server_name, base_name)
 
     base_description = tool.get("description") or ""
     extra_desc = f"\n\nFrom server: {server_display_name}"
@@ -150,9 +173,17 @@ def _registry_entry(
 
 
 def _apply_tools_whitelist(
-    server_name: str, server_cfg: Dict[str, Any], tools_raw: list
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list,
+    *,
+    quiet: bool = False,
 ) -> list:
-    """Отфильтровать tools_raw по mcp.servers.<name>.whitelist (если enabled)."""
+    """Отфильтровать tools_raw по mcp.servers.<name>.whitelist (если enabled).
+
+    ``quiet`` — без строк в лог: срез из каталога строится на каждой сборке
+    и входе в ход, и одни и те же строки повторялись бы на каждом.
+    """
     wl = server_cfg.get("whitelist") if isinstance(server_cfg, dict) else None
     if not isinstance(wl, dict) or not wl.get("enabled"):
         return tools_raw
@@ -161,7 +192,7 @@ def _apply_tools_whitelist(
     }
     present = {str(t.get("name")) for t in tools_raw if isinstance(t, dict)}
     missing = sorted(allowed - present)
-    if missing:
+    if missing and not quiet:
         logger.warning(
             "[MCP] %s: whitelist names not provided by server: %s",
             server_name,
@@ -172,7 +203,7 @@ def _apply_tools_whitelist(
         for t in tools_raw
         if isinstance(t, dict) and str(t.get("name")) in allowed
     ]
-    if len(filtered) != len(tools_raw):
+    if len(filtered) != len(tools_raw) and not quiet:
         logger.info(
             "[MCP] %s: %d of %d tools whitelisted",
             server_name,
@@ -180,6 +211,168 @@ def _apply_tools_whitelist(
             len(tools_raw),
         )
     return filtered
+
+
+_TRANSPORTS = (
+    "http",
+    "sse",
+    "stdio",
+    "stream_sse",
+    "stream_http",
+    "stream_stdio",
+)
+
+
+def _check_server_cfg(server_cfg: Any) -> tuple[str, str]:
+    """Проверить определение сервера: ``(транспорт, url)``.
+
+    У stdio-транспортов url пустой: они его не используют. Негодное
+    определение — ``ValueError`` с причиной для человека.
+    """
+    if not isinstance(server_cfg, dict):
+        raise ValueError("server_cfg не dict")
+    url = server_cfg.get("url")
+    transport = server_cfg.get("transport")
+    if transport not in _TRANSPORTS:
+        raise ValueError(f"неподдерживаемый transport: {transport!r}")
+    if transport in ("stdio", "stream_stdio"):
+        if not server_cfg.get("command"):
+            raise ValueError("не задан command для stdio")
+        return transport, ""
+    if not url:
+        raise ValueError("не задан url")
+    return transport, url
+
+
+def _normalized_tools(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list,
+    *,
+    transport: str,
+    url: str,
+    quiet: bool = False,
+) -> list:
+    """Сырой список тулов → нормализованные tool-dict'ы после whitelist."""
+    tools_raw = _apply_tools_whitelist(
+        server_name, server_cfg, tools_raw, quiet=quiet
+    )
+    # Поддержку опечатки «serever-name» в конфиге оставим.
+    server_display_name = (
+        server_cfg.get("server-name")
+        or server_cfg.get("serever-name")
+        or server_name
+    )
+    tools: list = []
+    for tool in tools_raw:
+        normalized = _normalize_tool(
+            server_name,
+            tool,
+            transport=transport,
+            url=url,
+            server_display_name=server_display_name,
+            server_description=server_cfg.get("description") or "",
+        )
+        if normalized is not None:
+            tools.append(normalized)
+    return tools
+
+
+def _entries_of(
+    server_name: str, server_cfg: Dict[str, Any], tools: list
+) -> Dict[str, Dict[str, Any]]:
+    """Записи реестра ``{полное имя: {"tool", "metadata"}}`` одного сервера."""
+    return {
+        mcp_tool_full_name(server_name, tool["name"]): _registry_entry(
+            server_name, server_cfg=server_cfg, tool=tool
+        )
+        for tool in tools
+        if tool.get("name")
+    }
+
+
+async def alist_raw_tools(
+    server_name: str, server_cfg: Dict[str, Any], *, timeout: float
+) -> list[Dict[str, Any]]:
+    """Сырой ответ ``tools/list`` сервера — до whitelist и оформления.
+
+    Его хранит каталог на диске. Строгий разбор: ответ без списка тулов
+    или со списком, который оформление тулов не принимает, —
+    ``McpProtocolError``, а не пустой список и не запись в каталог.
+    Негодное определение — ``ValueError``; ошибки связи — как у клиента.
+    """
+    _check_server_cfg(server_cfg)
+    client = resolve_mcp_client(server_name, server_cfg)
+    tools = await client.alist_tools(timeout=timeout, strict=True)
+    build_checked_entries(server_name, server_cfg, tools, quiet=True)
+    return tools
+
+
+def build_registry_entries(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list[Dict[str, Any]],
+    *,
+    quiet: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """Записи реестра тулов сервера из сырого списка — ответа или каталога.
+
+    Те же записи, что даёт дискавери (``_abuild_tools_registry``): whitelist,
+    описание и полное имя ``mcp_<ключ>_<тул>`` берутся из ``server_cfg``
+    вызывающего. ``quiet`` — без строк whitelist в лог.
+    """
+    transport, url = _check_server_cfg(server_cfg)
+    tools = _normalized_tools(
+        server_name,
+        server_cfg,
+        tools_raw,
+        transport=transport,
+        url=url,
+        quiet=quiet,
+    )
+    return _entries_of(server_name, server_cfg, tools)
+
+
+def build_checked_entries(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    tools_raw: list[Dict[str, Any]],
+    *,
+    quiet: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """``build_registry_entries``, где сбой оформления — отказ сервера.
+
+    Граница та же, что у прежнего обнаружения (``_adiscover_one``): тулы,
+    которые оформление пропускает (не словарь, без имени), отказом не
+    считаются; список, на котором оформление падает, — ``McpProtocolError``
+    с именем первого негодного тула.
+    """
+    try:
+        return build_registry_entries(
+            server_name, server_cfg, tools_raw, quiet=quiet
+        )
+    except Exception as exc:
+        name = _first_bad_tool(server_name, server_cfg, tools_raw)
+        raise McpProtocolError(
+            f"сервер вернул негодное описание тула «{name}»"
+        ) from exc
+
+
+def _first_bad_tool(
+    server_name: str, server_cfg: Dict[str, Any], tools_raw: list
+) -> str:
+    """Имя первого тула, на котором падает оформление; не нашёлся — «?»."""
+    for tool in tools_raw:
+        try:
+            build_registry_entries(server_name, server_cfg, [tool], quiet=True)
+        except Exception:
+            return str(tool.get("name")) if isinstance(tool, dict) else "?"
+    return "?"
+
+
+def unavailable_line(server_name: str, reason: str) -> str:
+    """Строка консоли о сервере, пропущенном из-за отказа подключения."""
+    return f"[MCP] {server_name}: недоступен — {reason} (пропущен)"
 
 
 async def _adiscover_one(
@@ -208,53 +401,14 @@ async def _adiscover_one(
     """
     t0 = time.monotonic()
     try:
-        if not isinstance(server_cfg, dict):
-            raise ValueError("server_cfg не dict")
-
-        url = server_cfg.get("url")
-        transport = server_cfg.get("transport")
-        if transport not in (
-            "http",
-            "sse",
-            "stdio",
-            "stream_sse",
-            "stream_http",
-            "stream_stdio",
-        ):
-            raise ValueError(f"неподдерживаемый transport: {transport!r}")
-        if transport in ("stdio", "stream_stdio"):
-            if not server_cfg.get("command"):
-                raise ValueError("не задан command для stdio")
-            url = ""  # stdio не использует url
-        elif not url:
-            raise ValueError("не задан url")
-
+        transport, url = _check_server_cfg(server_cfg)
         client = resolve_mcp_client(
             server_name, server_cfg, os_backend=os_backend
         )
         tools_raw = await client.alist_tools(timeout=timeout)
-        tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
-
-        server_display_name = (
-            server_cfg.get("server-name")
-            or server_cfg.get(
-                "serever-name"
-            )  # поддержку опечатки в конфиге оставим
-            or server_name
+        tools = _normalized_tools(
+            server_name, server_cfg, tools_raw, transport=transport, url=url
         )
-        tools: list = []
-        for tool in tools_raw:
-            normalized = _normalize_tool(
-                server_name,
-                tool,
-                transport=transport,
-                url=url,
-                server_display_name=server_display_name,
-                server_description=server_cfg.get("description") or "",
-            )
-            if normalized is not None:
-                tools.append(normalized)
-
         return tools, {
             "status": "connected",
             "reason": None,
@@ -262,11 +416,16 @@ async def _adiscover_one(
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
     except Exception as exc:  # дискавери никогда не бросает наверх
-        reason = _humanize_discovery_error(
-            exc, server_cfg if isinstance(server_cfg, dict) else {}
+        cfg = server_cfg if isinstance(server_cfg, dict) else {}
+        reason = _humanize_discovery_error(exc, cfg)
+        leaf = first_leaf(exc)
+        logger.warning(
+            "MCP discovery failed for %s: %s: %s",
+            server_name,
+            type(leaf).__name__,
+            without_secrets(str(leaf), cfg),
         )
-        logger.warning("MCP discovery failed for %s: %s", server_name, exc)
-        print(f"[MCP] {server_name}: недоступен — {reason} (пропущен)")
+        print(unavailable_line(server_name, reason))
         return [], {
             "status": "failed",
             "reason": reason,
@@ -304,8 +463,10 @@ async def _adiscover_all(
         if on_progress is not None:
             on_progress(name, result[1])
 
-    # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
-    # «таймаут подключения» у вызывающего: их просто нет в results.
+    # Общий дедлайн на весь веер — как и был (это путь без сервиса MCP; у
+    # потребителя сервиса веера нет, срок у каждого подключения свой). Не
+    # успевшие попадают в ветку «таймаут подключения» у вызывающего: их
+    # просто нет в results.
     try:
         async with asyncio.timeout(timeout):
             await asyncio.gather(
@@ -327,8 +488,10 @@ async def _abuild_tools_registry(
     """
     Построить словарь всех тулов со всех MCP-серверов (без кэширования).
 
-    Дискавери выполняется параллельно (daemon-потоки) с общим дедлайном
-    `discovery_timeout_sec` — fail-fast, без долгого backoff.
+    Дискавери выполняется параллельно (корутины; поток — только у
+    долгоживущего stdio) с общим дедлайном `discovery_timeout_sec` —
+    fail-fast, без долгого backoff. Это путь без сервиса MCP: у потребителя
+    сервиса тулы приходят срезом (``consumer_view``).
 
     Возвращает `(all_tools, status_map)`:
 
@@ -368,13 +531,7 @@ async def _abuild_tools_registry(
             if on_progress is not None:
                 on_progress(name, status)
         status_map[name] = status
-        for tool in tools:
-            base = tool.get("name")
-            if not base:
-                continue
-            all_tools[f"mcp_{name}_{base}"] = _registry_entry(
-                name, server_cfg=cfg, tool=tool
-            )
+        all_tools.update(_entries_of(name, cfg, tools))
     return all_tools, status_map
 
 
@@ -539,4 +696,8 @@ class ToolsCache:
 __all__ = [
     "ToolsCache",
     "_abuild_tools_registry",
+    "alist_raw_tools",
+    "build_checked_entries",
+    "build_registry_entries",
+    "unavailable_line",
 ]

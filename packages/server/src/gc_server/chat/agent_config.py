@@ -30,8 +30,8 @@ def prepare_agent_settings(
     )
 
 
-def agent_io(settings, cwd, backend, cache):
-    """Локальный I/O — на диалог; каталог MCP-тулов — общий на поверхность."""
+def agent_io(settings, cwd, backend):
+    """Локальный I/O — на диалог; MCP — у общего сервиса поверхности."""
     from gc_core.backends.factory import parse_os_backend_kind
     from gc_core.backends.local import LocalFsBackend
 
@@ -43,8 +43,7 @@ def agent_io(settings, cwd, backend, cache):
             if backend is not None
             else settings_of(settings).agent.exec_output_capture_max_chars
         )
-        scoped = LocalFsBackend(cwd=cwd, exec_output_capture_max_chars=cap)
-        # Для local MCP запускается в процессе агента, а не через scoped:
-        # смена cwd файловых инструментов не требует нового discovery.
-        return scoped, cache
-    return backend, cache
+        # Серверы MCP подключает сервис поверхности, а не scoped: смена cwd
+        # файловых инструментов не требует нового подключения.
+        return LocalFsBackend(cwd=cwd, exec_output_capture_max_chars=cap)
+    return backend

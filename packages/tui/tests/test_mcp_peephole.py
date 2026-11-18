@@ -159,3 +159,48 @@ def test_total_changes_only_with_the_generation():
     p.sync(src, {"a": None, "b": None}, None)
     p.sync(src, {"a": None}, None)
     assert p.total == 2
+
+
+def _settled_on(servers: dict) -> McpPeephole:
+    """Глазок, показавший итог поколения ``servers``."""
+    p = McpPeephole(len(servers))
+    p.sync(object(), servers, True)
+    _run(p, 40)
+    assert p.phase == "settled"
+    return p
+
+
+def test_new_generation_already_reported_keeps_result():
+    """Пересборка без изменений (спека §5.7): все серверы нового поколения
+    уже отчитались, пока шапка показывает итог, — загрузки нет, сразу итог
+    с теми же счётчиками; сигнал итога ждёт конца сборки."""
+    p = _settled_on({"a": OK, "b": BAD})
+    gen = p.generation
+    assert p.sync(object(), {"a": OK, "b": BAD}, None) is True
+    assert (p.generation, p.phase, p.outcome) == (gen + 1, "settled", None)
+    assert (p.connected, p.total, p.shown) == (1, 2, None)
+
+
+def test_new_generation_already_reported_still_fails():
+    """Сбой пересборки, начатой с итогом, показывается сбоем."""
+    p = _settled_on({"a": OK})
+    src = object()
+    p.sync(src, {"a": OK}, None)
+    assert not p.finished(src)
+    p.sync(src, {"a": OK}, False)
+    assert p.phase == "failed"
+
+
+def test_new_generation_with_unreported_server_loads():
+    """Новый сервер в наборе — загрузка, как раньше: `1/2` и глазок."""
+    p = _settled_on({"a": OK})
+    p.sync(object(), {"a": OK, "b": None}, None)
+    assert (p.phase, p.connected, p.total) == ("loading", 0, 2)
+
+
+def test_first_generation_reported_at_once_still_loads():
+    """Первое поколение показывает загрузку, даже если все серверы
+    отчитались до первого снимка: итога прошлого поколения нет."""
+    p = McpPeephole()
+    p.sync(object(), {"a": OK}, True)
+    assert p.phase == "loading"

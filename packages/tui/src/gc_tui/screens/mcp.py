@@ -12,9 +12,11 @@ from textual.widgets import Static
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
+from gc_tui.palette import NOTE_INK as _NOTE_INK
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.column_row import ColumnRow, ColumnRows
+from gc_tui.services.plural import plural_form
 from gc_tui.widgets.column_static import ColumnStatic
 
 _FOOTER = (
@@ -32,13 +34,39 @@ def _truncate(text: str, limit: int = 80) -> str:
 
 _TOOL_DESC_LIMIT = 80  # описание тула в раскрытом списке — одна строка
 
+# Показ статуса сервера: (одна форма, много) — склонение по числу в итоге.
+# «Не подключён» — тот же термин, что в уведомлении «MCP не подключились».
+_STATE_LABELS = {
+    "connected": ("подключён", "подключены"),
+    "connecting": ("подключается", "подключаются"),
+    "cached": ("из кэша", "из кэша"),
+    "failed": ("не подключён", "не подключены"),
+}
+# Сервер ещё не подключён, но и не отказал (спека §5.7): тулы записи
+# (кэш) модели уже предложены. Не отказ — ни глифом, ни в итоге.
+_WAITING = ("connecting", "cached")
+# Пояснение «из кэша» — первой строкой раскрытой карточки.
+_CACHED_NOTE = "соединения нет · тулы из кэша · подключится при первом вызове"
+
+
+def _label(status: str, n: int = 1) -> str:
+    one, many = _STATE_LABELS[status]
+    return plural_form(n, one, many, many)
+
+
+def _tools_count(n: int) -> str:
+    return f"{n} {plural_form(n, 'тул', 'тула', 'тулов')}"
+
 
 class ServerCard(ColumnStatic):
     """Карточка MCP-сервера: фокусируемая, Enter/Space/клик раскрывает тулы.
 
-    Рендер — Rich Text: маркер ▸/▾ ($deep-dim) + статус ✓/✗ ($ok/$err) + имя.
-    Раскрытие: connected — список «короткое имя + описание» (префикс
-    mcp_<server>_ срезан, колонка выровнена); failed — полная причина.
+    Рендер — Rich Text: маркер ▸/▾ ($deep-dim) + статус ✓/•/✗
+    ($ok/$note-ink/$err) + имя. «•» — сервер подключается или его тулы
+    из кэша. Раскрытие: connected, connecting и cached — список
+    «короткое имя + описание» (префикс mcp_<server>_ срезан, колонка
+    выровнена), у cached перед ним — строка пояснения; failed — полная
+    причина.
     """
 
     can_focus = True
@@ -83,62 +111,85 @@ class ServerCard(ColumnStatic):
     def _renderable(self) -> ColumnRows:
         info = self._info
         status = info.get("status", "unknown")
-        connected = status == "connected"
         tools = info.get("tools") or []
         t = Text()
         t.append("▾ " if self._expanded else "▸ ", style=_DEEP_DIM)
-        t.append("✓ " if connected else "✗ ", style=_OK if connected else _ERR)
-        t.append(self._name)  # имя — обычный $ink
-        t.append("    ")
-        if connected:
-            t.append(f"{status} · {len(tools)} тулов", style=_OK)
-        else:
-            t.append(status, style=_ERR)
-            reason = info.get("reason")
-            if reason:
-                t.append(" — ", style=_DIM)
-                t.append(_truncate(reason, 90), style=_DIM)
+        self._append_status(t, status, len(tools))
         desc = _truncate(info.get("description") or "")
         if desc:
             t.append(f"\n    · {desc}", style=_DEEP_DIM)
-        body = self._body_rows(connected, tools) if self._expanded else []
+        body = self._body_rows(status, tools) if self._expanded else []
         return ColumnRows([t, *body])
 
-    def _body_rows(
-        self, connected: bool, tools: list
-    ) -> list[ColumnRow | Text]:
-        """Строки раскрытой карточки: описание тула переносится в своей
-        колонке, под собой, а не под именем (дизайн-код §10)."""
-        if connected and tools:
-            prefix = f"mcp_{self._name}_"
-            shorts = [
-                (
-                    (tt.get("name") or "")[len(prefix) :]
-                    if (tt.get("name") or "").startswith(prefix)
-                    else (tt.get("name") or ""),
-                    (tt.get("description") or ""),
-                )
-                for tt in tools
-            ]
-            width = max(len(n) for n, _ in shorts)
+    def _append_status(self, t: Text, status: str, n_tools: int) -> None:
+        """Глиф, имя и статус: подключён, ждёт (подключается или тулы из
+        кэша), не подключён — с причиной; неизвестный статус — как есть,
+        отказным цветом."""
+        if status == "connected":
+            t.append("✓ ", style=_OK)
+            t.append(self._name)  # имя — обычный $ink
+            t.append(f"    {_label(status)}", style=_OK)
+            t.append(f" · {_tools_count(n_tools)}", style=_DIM)
+            return
+        if status in _WAITING:
+            t.append("• ", style=_NOTE_INK)
+            t.append(self._name)
+            t.append(f"    {_label(status)}", style=_NOTE_INK)
+            if n_tools:
+                t.append(f" · {_tools_count(n_tools)}", style=_DIM)
+            return
+        t.append("✗ ", style=_ERR)
+        t.append(self._name)
+        shown = _label(status) if status in _STATE_LABELS else status
+        t.append(f"    {shown}", style=_ERR)
+        reason = self._info.get("reason")
+        if reason:
+            t.append(" — ", style=_DIM)
+            t.append(_truncate(reason, 90), style=_DIM)
+
+    def _body_rows(self, status: str, tools: list) -> list[ColumnRow | Text]:
+        """Строки раскрытой карточки: у подключённого и подключающегося —
+        тулы; «из кэша» — пояснение, затем тулы; у отказа — причина."""
+        if status == "cached":
+            note = Text(f"    {_CACHED_NOTE}", style=_DIM)
+            return [note, *self._tool_rows(tools)]
+        if status in ("connected", "connecting"):
+            return self._tool_rows(tools)
+        reason = self._info.get("reason")
+        if reason:
             return [
-                ColumnRow(
-                    Text(f"    {n.ljust(width)}", style=_TOOL_NAME),
-                    [
-                        Text(
-                            f"  {_truncate(d, _TOOL_DESC_LIMIT)}",
-                            style=_DEEP_DIM,
-                        )
-                    ]
-                    if d
-                    else [],
-                )
-                for n, d in shorts
+                Text(f"    {ln}", style=_DIM)
+                for ln in str(reason).splitlines()
             ]
-        if not connected and self._info.get("reason"):
-            full = str(self._info["reason"])
-            return [Text(f"    {ln}", style=_DIM) for ln in full.splitlines()]
         return []
+
+    def _tool_rows(self, tools: list) -> list[ColumnRow]:
+        """Тулы: короткое имя и описание; описание переносится в своей
+        колонке, под собой, а не под именем (дизайн-код §10)."""
+        if not tools:
+            return []
+        prefix = f"mcp_{self._name}_"
+        shorts = [
+            (
+                (tt.get("name") or "")[len(prefix) :]
+                if (tt.get("name") or "").startswith(prefix)
+                else (tt.get("name") or ""),
+                (tt.get("description") or ""),
+            )
+            for tt in tools
+        ]
+        width = max(len(n) for n, _ in shorts)
+        # Промежуток до описания — в голове: колонка хвоста срезает ведущие
+        # пробелы куска, и перенос встаёт под начало описания.
+        return [
+            ColumnRow(
+                Text(f"    {n.ljust(width)}  ", style=_TOOL_NAME),
+                [Text(_truncate(d, _TOOL_DESC_LIMIT), style=_DEEP_DIM)],
+            )
+            if d
+            else ColumnRow(Text(f"    {n}", style=_TOOL_NAME), [])
+            for n, d in shorts
+        ]
 
 
 class McpScreen(Screen):
@@ -177,21 +228,30 @@ class McpScreen(Screen):
         return None
 
     def _summary_renderable(self) -> Text:
-        n_conn = n_fail = n_tools = 0
+        """Итог: ненулевые группы состояний и тулы, предложенные модели
+        (у ждущих — тулы каталога). Не подключён — всё, что не подключено
+        и не ждёт (в том числе неизвестный статус старых снимков)."""
+        counts = dict.fromkeys(_STATE_LABELS, 0)
+        n_tools = 0
         for info in self._snapshot.values():
             info = info or {}
-            if info.get("status") == "connected":
-                n_conn += 1
+            status = info.get("status")
+            if status == "connected" or status in _WAITING:
+                counts[status] += 1
                 n_tools += len(info.get("tools") or [])
             else:
-                n_fail += 1
+                counts["failed"] += 1
+        styles = {"connected": _OK, "failed": _ERR}
         t = Text()
         t.append("─" * 40 + "\n", style=_DEEP_DIM)
         t.append("итого: ", style=_DIM)
-        t.append(f"{n_conn} connected", style=_OK)
-        t.append(" · ", style=_DIM)
-        t.append(f"{n_fail} failed", style=_ERR if n_fail else _DIM)
-        t.append(f" · {n_tools} тулов", style=_DIM)
+        for status in ("connected", *_WAITING, "failed"):
+            n = counts[status]
+            if n:
+                style = styles.get(status, _NOTE_INK)
+                t.append(f"{n} {_label(status, n)}", style=style)
+                t.append(" · ", style=_DIM)
+        t.append(_tools_count(n_tools), style=_DIM)
         return t
 
     def compose(self) -> ComposeResult:

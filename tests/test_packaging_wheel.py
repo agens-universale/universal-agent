@@ -351,7 +351,7 @@ OWN_COMMANDS = {
     "gc_cli": {"gc-cli"},
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
-    "gc_mcp": {"gc-mcp", "gc-mcp-install"},
+    "gc_mcp": {"gc-mcp", "gc-mcp-install", "gc-plugin"},
     "gc_core_temporalio": {
         "gc-temporal",
         "gc-temporal-worker",

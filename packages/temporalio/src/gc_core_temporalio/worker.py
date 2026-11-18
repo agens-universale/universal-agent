@@ -13,6 +13,7 @@ from contextlib import AsyncExitStack
 
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.threads.file_store import FileThreadStore
+from gc_core.utils.logging_module import configure_host_logging
 from gc_stores.sqlite import SQLiteThreadStore
 from temporalio.client import Client
 from temporalio.common import VersioningBehavior, WorkerDeploymentVersion
@@ -308,7 +309,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    configure_host_logging(logging.INFO)
     asyncio.run(run_worker(WorkerConfig.load(args.config)))
 
 

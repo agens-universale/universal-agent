@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from gc_core.config_modules.field_meta import _nested_model
 from gc_core.config_modules.provenance import Provenance
 from gc_core.config_modules.root import AppConfig, resolve_paths
+from gc_core.plugins.snapshot import PluginSnapshot
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,9 @@ class RuntimeEnv:
     #: ограничения) и дополнительные запреты поверх глобального ``stop_tools``.
     subagent_tools_allow: Optional[tuple[str, ...]] = None
     subagent_tools_stop: tuple[str, ...] = ()
+    #: MCP-разрешения субагента плагина: «(ключ сервера, инструмент или None =
+    #: все)» — сверяются с полями записи инструмента, дополняют белый список.
+    subagent_mcp_allow: tuple[tuple[str, Optional[str]], ...] = ()
     #: Вид OS-бэкенда, выбранный встраивающим (``local``/``harbor``); None — local.
     os_backend: Optional[str] = None
     #: Режим запуска, объявленный фронтендом: ``tui``/``cli``/``server`` (от него
@@ -58,6 +62,12 @@ class RuntimeEnv:
     #: сервера, пир A2A), а не воля человека: судья действий видит их
     #: отдельным видом записи. Субагент наследует признак с рантаймом.
     external_user_words: bool = False
+    #: Снимок набора плагинов (``plugins.catalog``); собирает фронтенд после
+    #: всех оверрайдов.
+    plugins: PluginSnapshot = field(default_factory=PluginSnapshot)
+    #: Записи ``plugins.paths`` / ``sources`` из конфига и профилей проекта,
+    #: нормализованные как в ``resolve_paths``: хуки таких плагинов не идут.
+    untrusted_plugin_entries: frozenset[str] = frozenset()
 
     def with_values(self, **values: Any) -> RuntimeEnv:
         return replace(self, **values)
@@ -185,8 +195,10 @@ def override_settings(
 
     Правка ЗАМЕНЯЕТ значение по своему пути, а не сливается с ним: CLI,
     сервер и сессия сужают списки и словари (``--mcp.servers '{}'``
-    отключает серверы, ``allowed_read_roots`` не расширяется файловым
-    значением). Словарь на месте секции схемы раскладывается на её листья:
+    отключает серверы конфига, серверы плагинов выключаются через сами
+    плагины — ``plugins.use_installed``, ``plugins.paths``;
+    ``allowed_read_roots`` не расширяется файловым значением). Словарь на
+    месте секции схемы раскладывается на её листья:
     ``--security.read_guard '{"mode": "ask"}'`` меняет только режим и не
     сбрасывает остальные поля секции к умолчаниям. Объединение списков —
     только у файловых слоёв.

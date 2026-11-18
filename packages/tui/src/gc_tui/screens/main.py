@@ -47,10 +47,17 @@ from gc_core.persistence.turn_outcome import (
     parse_turn_outcome,
 )
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
+from gc_core.plugins.commands import (
+    Resolution,
+    listed_skill_ids,
+    resolve_slash_name,
+)
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
+from gc_core.settings import runtime_of
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.models import ThreadRecord
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.skills.skill_arg_resolver import (
     Failed,
     Resolved,
@@ -174,7 +181,10 @@ from gc_tui.services.session_title import (
     should_update_task,
     task_title,
 )
-from gc_tui.services.skill_view import skill_input_name
+from gc_tui.services.skill_view import (
+    plugin_command_rows,
+    skill_input_name,
+)
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.stores.record_view import tui_section
 from gc_tui.services.subagent_progress import (
@@ -5129,8 +5139,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         Сводка правок — тихий правый сегмент строки итога; compact ходом не
         считается, правок в нём нет. Сводка — по журналу треда прогона
         `task_id`; строке — только если этот тред на экране."""
-        self._skills_cache = None
-        self._warm_skills_cache()
+        self.drop_skills_cache()
         self._edits_baseline_taken = False
         if kind == "compact":
             return None
@@ -6433,6 +6442,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # не опрашиваем каждые 250 мс до конца сессии.
         if self._brand.finished(progress):
             return
+        # Серверы удачной сборки подключаются в фоне: окончательные статусы
+        # потребителя окна — в поколение на каждом тике (спека §5.7).
+        self.app.settle_mcp_progress(progress)
         servers, outcome = progress.state()
         self._brand.feed(progress, servers, outcome)
 
@@ -6774,6 +6786,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # выделенный текст; после разморозки снимок возьмётся свежий.
         if not _frozen:
             self._feed_start_header()
+        # Копии статусов MCP окна следуют за сервисом и после итога шапки:
+        # уведомления, значок футера, `/mcp` (спека §5.7).
+        self.app.refresh_mcp_snapshot()
         # Замок выбора в открытом пикере (`/profile` во время хода) снимается
         # с концом хода — без переоткрытия.
         if self._arg_picker is not None:
@@ -7291,7 +7306,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        servers = self.app.effective_settings().settings.mcp.servers
+        servers = effective_mcp_servers(self.app.effective_settings())
         brand = StartHeader(mcp_total=len(servers))
         brand.set_update(getattr(self.app, "_update_available", False))
         trace.mount(brand)
@@ -7984,6 +7999,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
+        self.app.refresh_plugin_set()
         self.spend_help_hint()
         palette = CommandPalette(
             self._registry,
@@ -8308,14 +8324,55 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         asking = self.app.tui_state.ask_human_state is not None
         if text.startswith("/"):
             name = (text[1:].split(None, 1) or [""])[0]
+            if self._is_plugin_command(name):
+                return False
             return not asking or self._is_known_command(name)
         return text.startswith("!") and not asking
 
+    def _slash_resolution(self, name: str) -> Resolution:
+        """`/имя` по командам плагинов снимка и прогретому кэшу скиллов —
+        функцией ядра, той же, что в цикле агента (§4.2)."""
+        commands = runtime_of(self.app.base_settings()).plugins.commands
+        skill_ids = listed_skill_ids(self._skills_cache or [])
+        return resolve_slash_name(name, commands, skill_ids)
+
+    def _has_plugin_command(self, slash: Resolution) -> bool:
+        """Среди вариантов есть команда плагина; неоднозначность только
+        скиллов решает разбор скиллов (у него есть bootstrap пакетов)."""
+        commands = runtime_of(self.app.base_settings()).plugins.commands
+        ids = {f"{plugin}:{cmd.name}" for plugin, cmd in commands}
+        return not ids.isdisjoint(slash.candidates)
+
+    def _is_plugin_command(self, name: str) -> bool:
+        """`/имя` — команда плагина (не перекрыта командой TUI): строка
+        уходит ядру обычным запросом, подстановку делает ядро."""
+        return self._plugin_command_name(name) is not None
+
+    def _plugin_command_name(self, name: str) -> str | None:
+        """Имя команды плагина, набранной как есть или в другой раскладке
+        (не перекрытой командой TUI); иначе None."""
+        known = self._known_name(name)
+        if known is None or self._registry.lookup(known) is not None:
+            return None
+        return known if self._is_plugin_word(known) else None
+
+    def _is_plugin_word(self, name: str) -> bool:
+        return self._slash_resolution(name).kind == "command"
+
+    def _plugin_command_text(self, text: str) -> str:
+        """Запрос `/команда …` плагина — с именем в нужной раскладке
+        (как в `_word_on_space`); прочее — как набрано."""
+        name = (text[1:].split(None, 1) or [""])[0]
+        if not text.startswith("/" + name):
+            return text
+        known = self._plugin_command_name(name)
+        return text if known is None else f"/{known}{text[1 + len(name) :]}"
+
     def _is_known_command(self, name: str) -> bool:
-        """`/имя` запустит команду (или алиас) или скилл — точный разбор
-        по прогретому кэшу, как при запуске. Набранное как есть важнее
-        перевода раскладки; среди набранного как есть команда сильнее
-        скилла с тем же именем."""
+        """`/имя` запустит команду (или алиас), скилл или команду плагина —
+        точный разбор по прогретому кэшу, как при запуске. Набранное как
+        есть важнее перевода раскладки; среди набранного как есть команда
+        сильнее скилла с тем же именем."""
         return self._known_name(name) is not None
 
     async def on_command_text_area_submitted(
@@ -8326,6 +8383,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if self._voice is not None and self._voice.state == "recording":
             self._voice.stop_and_transcribe()
             return
+        # Команды плагинов и скиллы — по набору на диске, до разбора ввода;
+        # сменился набор — скиллы нужны сейчас, не после фонового прогрева.
+        if self.app.refresh_plugin_set():
+            self._skills_cache = await self._load_skills_safe()
 
         # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
         # картинки; текст остаётся в поле (контракт §2).
@@ -8503,6 +8564,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                 self._stop_and_replace_runner()
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
+        # Новый запрос (не ответ живому вопросу) — команда плагина в нужной
+        # раскладке; ответ агенту уходит как набран.
+        text = self._plugin_command_text(text)
         if is_command and text.startswith("!"):
             self._handle_bang_shell(text)
             return
@@ -8941,12 +9005,20 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     def _cmd_mcp(self) -> None:
         from gc_tui.screens.mcp import McpScreen
 
+        # Экран читает снимок окна: перед открытием — по статусам сервиса.
+        self.app.refresh_mcp_snapshot()
         self.app.push_screen(
             McpScreen(
                 settings=self.app.base_settings(),
                 tools_snapshot=self._mcp_screen_snapshot(),
             )
         )
+
+    def _cmd_plugins(self) -> None:
+        from gc_tui.screens.plugins import PluginsScreen
+
+        self.app.refresh_plugin_set()
+        self.app.push_screen(PluginsScreen(settings=self.app.base_settings()))
 
     def _cmd_diff(self, *, source: Optional[str] = None) -> None:
         """Экран изменений. `source` задан — открыть сразу в нём (клик по сводке)."""
@@ -9299,6 +9371,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             if callable(release):
                 release()
         self.app.active_runner = None
+        self.app.drop_carried_plan_decisions()
         self.app.detach_run_sinks()
         self._return_queue_to_input(withdrawn)
 
@@ -9605,10 +9678,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self, name: str, knows: Callable[[str], bool] | None = None
     ) -> str | None:
         """`name`, если оно распознаётся (`knows`, по умолчанию — команда,
-        алиас или скилл); иначе то же слово в другой раскладке, если так
-        оно распознаётся (`ьщвуд` → `model`); иначе None. Набранное как
-        есть важнее перевода. Единственное место, где ввод переводится
-        между раскладками."""
+        алиас, скилл или команда плагина); иначе то же слово в другой
+        раскладке, если так оно распознаётся (`ьщвуд` → `model`); иначе
+        None. Набранное как есть важнее перевода. Единственное место, где
+        ввод переводится между раскладками."""
         knows = knows or self._knows
         if knows(name):
             return name
@@ -9616,7 +9689,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         return swapped if knows(swapped) else None
 
     def _knows(self, name: str) -> bool:
-        return self._registry.lookup(name) is not None or self._is_skill(name)
+        return (
+            self._registry.lookup(name) is not None
+            or self._is_skill(name)
+            or self._is_plugin_word(name)
+        )
 
     def _is_skill(self, name: str) -> bool:
         return isinstance(self._resolve_cached_skill(name), Resolved)
@@ -9657,20 +9734,29 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         return True
 
     def _palette_skills(self) -> list[dict]:
-        """Скиллы для палитры: запись + запускаемое имя (`input_name`) —
-        то же, что вставит Enter."""
-        return [
+        """Скиллы и команды плагинов для палитры: запись + запускаемое имя
+        (`input_name`) — то же, что вставит Enter."""
+        skills = [
             {**s, "input_name": self._skill_input_name(s)}
             for s in self._skills_cache or []
         ]
+        return skills + plugin_command_rows(
+            runtime_of(self.app.base_settings()).plugins.commands,
+            listed_skill_ids(self._skills_cache or []),
+            is_command=self._is_tui_command,
+        )
+
+    def _is_tui_command(self, name: str) -> bool:
+        return self._registry.lookup(name) is not None
 
     def _skill_input_name(self, skill: dict) -> str:
-        """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу
-        и реестру команд."""
+        """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу,
+        реестру команд и командам плагинов снимка."""
         return skill_input_name(
             str(skill.get("id", "")),
             self._skill_catalog(),
-            is_command=lambda name: self._registry.lookup(name) is not None,
+            is_command=self._is_tui_command,
+            commands=runtime_of(self.app.base_settings()).plugins.commands,
         )
 
     async def _cmd_skill(self, arg: str) -> None:
@@ -9694,7 +9780,16 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
         точном совпадении по прогретому кэшу. Опечатка скилл не запускает:
         «неизвестная команда» с кандидатами — команда, затем скиллы.
-        Холодный кэш — «неизвестная команда» (без ожидания прогрева)."""
+        Холодный кэш — «неизвестная команда» (без ожидания прогрева).
+        Короткое имя у команды плагина и скилла — неоднозначно."""
+        slash = self._slash_resolution(name)
+        if slash.kind == "ambiguous" and self._has_plugin_command(slash):
+            self._render_command_error(
+                name,
+                list(slash.candidates),
+                title="несколько команд и скиллов с именем",
+            )
+            return
         res = self._resolve_cached_skill(name)
         if isinstance(res, Resolved):
             await self._cmd_use_skill(res.canonical_id, prompt=arg)
@@ -10289,6 +10384,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if name == "mcp":
             self._cmd_mcp()
             return
+        if name == "plugins":
+            self._cmd_plugins()
+            return
         if name == "buffer":
             self.app.action_buffer()
             return
@@ -10569,15 +10667,21 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             return
         inp.refresh_command_highlight()
 
+    def drop_skills_cache(self) -> None:
+        """Забыть скиллы и прогреть заново: агент создал скилл или окно
+        сменило набор плагинов (`TuiApp.refresh_plugin_set`)."""
+        self._skills_cache = None
+        self._warm_skills_cache()
+
     def _warm_skills_cache(self) -> None:
         """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре
         скиллы нужны с первой буквы, без I/O на нажатие. Ошибка — только в
         лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам.
         `exclusive` отменяет прежний прогрев: его устаревший снимок в кэш не
-        попадёт; воркер экрана отменяется и при его снятии."""
-        self.run_worker(
-            self._warm_skills(), group="skills-warm", exclusive=True
-        )
+        попадёт; воркер экрана отменяется и при его снятии. Воркеру
+        отдаётся функция, а не корутина: прогрев, отменённый до старта
+        (сброс кеша сразу за прогревом), не оставляет неожиданной корутины."""
+        self.run_worker(self._warm_skills, group="skills-warm", exclusive=True)
 
     async def _warm_skills(self) -> None:
         try:

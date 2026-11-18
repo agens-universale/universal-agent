@@ -17,6 +17,8 @@ dependencies = [
 [project.scripts]
 gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
+# Менеджер плагинов лежит рядом с менеджером MCP: так он приезжает в каждый профиль.
+gc-plugin = "recommended_mcp.plugin_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/recommended_mcp"]

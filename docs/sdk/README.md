@@ -60,6 +60,9 @@ loaded = load_settings("config.yml").with_overrides({"agent.max_steps": 5})
 Неизвестный ключ или негодное значение — `ValidationError` сразу.
 Все ключи — [Конфигурация](../configuration.md).
 
+Плагины — только явно, `AsyncAgent.create(settings, plugins=[...])`:
+[Плагины в SDK](../plugins.md#в-sdk).
+
 ## Треды
 
 ```python

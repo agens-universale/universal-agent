@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from gc_core.intent_log.operations import append_user_ask
@@ -39,12 +40,15 @@ def append_user_asks_from_messages(
     messages: list[dict[str, Any]],
     *,
     user_turn_seq: int,
+    text_of: Callable[[dict[str, Any]], str] = extract_real_user_message_text,
 ) -> list[Any]:
+    """``text_of`` — текст реплики для лога (по умолчанию — реплика
+    человека как есть)."""
     out = list(current)
     for message in messages:
         if not isinstance(message, dict):
             continue
-        text = extract_real_user_message_text(message)
+        text = text_of(message)
         if text:
             out = append_user_ask_deduped(
                 out, text, user_turn_seq=user_turn_seq

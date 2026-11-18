@@ -22,12 +22,12 @@ def test_mcp_cards_text_shows_status_reason_tools():
     }
     scr = McpScreen(tools_snapshot=snap)
     text = mcp_text(scr)
-    assert "office" in text and "connected" in text
+    assert "✓ office    подключён · 1 тул" in text
     assert "Read office docs" in text
     assert "mcp_office_read" not in text  # свёрнуто: имён тулов нет
-    assert "computer" in text and "failed" in text
+    assert "✗ computer    не подключён" in text
     assert "команда 'computer-mcp' не найдена" in text
-    assert "1 connected" in text and "1 failed" in text
+    assert "итого: 1 подключён · 1 не подключён · 1 тул" in text
     scr.cards[0].toggle()  # раскрыли office
     assert "read" in mcp_text(scr)  # короткое имя (префикс mcp_office_ срезан)
 
@@ -66,7 +66,7 @@ async def test_mcp_screen_with_snapshot(tmp_path):
         await app.push_screen(scr)
         await pilot.pause()
         t = mcp_text(scr)
-        assert "search" in t and "connected" in t
+        assert "search    подключён" in t
         assert "search.web" not in t  # свёрнуто
         scr.cards[0].toggle()
         await pilot.pause()
@@ -166,10 +166,10 @@ def test_mcp_card_reason_on_failed_line():
         }
     }
     text = mcp_text(McpScreen(tools_snapshot=snap))
-    failed_line = next(ln for ln in text.splitlines() if "failed" in ln)
+    failed_line = next(ln for ln in text.splitlines() if "не подключён" in ln)
     assert (
         "команда не найдена" in failed_line
-    )  # причина в той же строке, что failed
+    )  # причина в той же строке, что «не подключён»
     assert "причина:" not in text  # старого отдельного «причина:» больше нет
 
 
@@ -214,7 +214,7 @@ def test_card_collapsed_shows_marker_glyph_and_desc_but_no_tools():
     )
     text = card._renderable().plain
     assert text.startswith("▸ ✓ office")  # маркер + статус-глиф + имя
-    assert "connected · 1 тулов" in text
+    assert "подключён · 1 тул" in text
     assert "· Read office docs" in text  # описание видно всегда
     assert "read_file" not in text  # тулы скрыты в свёрнутом виде
 
@@ -249,6 +249,48 @@ def test_card_expanded_lists_tools_with_stripped_prefix_and_description():
         ln for ln in text.splitlines() if "Читает" in ln or "Создаёт" in ln
     ]
     assert lines[0].index("Читает") == lines[1].index("Создаёт")
+
+
+def _rendered_lines(renderable, width: int) -> list[str]:
+    import io
+
+    from rich.console import Console
+
+    console = Console(width=width, file=io.StringIO(), color_system=None)
+    with console.capture() as cap:
+        console.print(renderable)
+    return [line.rstrip() for line in cap.get().splitlines()]
+
+
+def test_card_expanded_rendering_keeps_gap_after_longest_tool_name():
+    """Между самым длинным именем тула и описанием — два пробела и на
+    экране; перенос описания встаёт под его начало (дизайн-код §10)."""
+    card = _card(
+        "fixture",
+        {
+            "status": "connected",
+            "reason": None,
+            "description": "",
+            "tools": [
+                {"name": "mcp_fixture_echo", "description": "Вернуть текст."},
+                {
+                    "name": "mcp_fixture_add",
+                    "description": "Сложить два числа",
+                },
+                {"name": "mcp_fixture_ping", "description": ""},
+            ],
+        },
+    )
+    card.toggle()
+
+    assert _rendered_lines(card._renderable(), 80)[1:] == [
+        "    echo  Вернуть текст.",
+        "    add   Сложить два числа",
+        "    ping",
+    ]
+    narrow = _rendered_lines(card._renderable(), 24)
+    at = narrow.index("    add   Сложить два")
+    assert narrow[at + 1] == "          числа"
 
 
 def test_card_tool_name_without_prefix_kept_as_is():

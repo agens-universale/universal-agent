@@ -1,8 +1,8 @@
 """Pure batch preservation shared by local and durable compaction."""
 
-from gc_core.execution.message_keys import make_message_key
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    is_request_context_message,
 )
 
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
@@ -32,27 +32,22 @@ def remove_exact_suffix_if_matches(
     return True
 
 
-def _preserved_user_ask_batch(
-    current_messages: list[dict],
-    message_keys_already_persisted: frozenset[str] | None,
-) -> list[dict]:
-    scoped_messages = current_messages
-    if message_keys_already_persisted is not None:
-        incoming = [
-            m
-            for m in current_messages
-            if isinstance(m, dict)
-            and make_message_key(m) not in message_keys_already_persisted
-        ]
-        scoped_messages = incoming if incoming else [current_messages[-1]]
-    last = scoped_messages[-1]
+def _preserved_user_ask_batch(current_messages: list[dict]) -> list[dict]:
+    """Реплики человека, вложения и сообщения к запросу (вывод хука на
+    запрос, раскрытая команда) — их источник повтор не перезапускает — и
+    последнее сообщение."""
+    last = current_messages[-1]
     out: list[dict] = []
-    for msg in scoped_messages[:-1]:
+    for msg in current_messages[:-1]:
         if not isinstance(msg, dict):
             continue
         if str(msg.get("role", "")).strip().lower() != "user":
             continue
-        if not (extract_real_user_message_text(msg) or msg.get("attachments")):
+        if not (
+            extract_real_user_message_text(msg)
+            or msg.get("attachments")
+            or is_request_context_message(msg)
+        ):
             continue
         out.append(msg)
     out.append(last)
@@ -93,7 +88,6 @@ def build_preserved_batch(
     current_messages: list[dict],
     mode: str,
     state_messages: list[dict],
-    message_keys_already_persisted: frozenset[str] | None = None,
 ) -> list[dict]:
     """
     Собирает сообщения текущего backend-вызова, которые нужно сохранить от compaction.
@@ -102,12 +96,11 @@ def build_preserved_batch(
     pre-backend hook (до удаления суффикса текущего батча). Нужна для разрешения
     пар ``function_call`` → ``*_output``.
 
-    Для режима ``user_ask``: если передан непустой ``message_keys_already_persisted``,
-    сообщения режутся до **входа текущего шага** — только те элементы ``current_messages``,
-    чей ключ не был известен треду до ``persist_batch`` этого шага (уже сохранённые
-    ключи считаются повторным контекстом, а не новым входом шага). Из входа
-    остаются реплики человека, user-сообщения с вложениями (картинка тула или
-    ответа на вопрос агента — сводка её не несёт) и последнее сообщение.
+    Для режима ``user_ask``: из батча остаются реплики человека,
+    user-сообщения с вложениями (картинка тула или ответа на вопрос агента —
+    сводка её не несёт), сообщения к запросу (вывод хука на запрос,
+    раскрытая команда плагина — повтор их не пересоздаёт) и последнее
+    сообщение.
 
     Для режима ``function_call_output``: пара «вызов → ответ» уходит в сводку.
     После неё остаются реплики человека и сообщения с вложениями (картинка
@@ -117,9 +110,7 @@ def build_preserved_batch(
     if not current_messages:
         return []
     if mode == "user_ask":
-        return _preserved_user_ask_batch(
-            current_messages, message_keys_already_persisted
-        )
+        return _preserved_user_ask_batch(current_messages)
     if mode == "function_call_output":
         return _preserved_function_output_batch(
             current_messages, state_messages

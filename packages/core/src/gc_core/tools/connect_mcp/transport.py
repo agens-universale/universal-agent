@@ -27,6 +27,11 @@ from typing import (
 
 import httpx
 
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallOutcomeUnknown,
+    McpCallTimedOut,
+    McpServerGone,
+)
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 
 _SSE_DATA_PREFIX = "data:"
@@ -335,10 +340,11 @@ class _LineReader:
     кроссплатформенно — ``selectors`` не работает с pipe на Windows.
     """
 
-    __slots__ = ("_queue", "_stream", "_thread")
+    __slots__ = ("_ended", "_queue", "_stream", "_thread")
 
     def __init__(self, stream: "Any") -> None:
         self._stream = stream
+        self._ended = False
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._thread = threading.Thread(
             target=self._pump, daemon=True, name="mcp-stdio-reader"
@@ -360,8 +366,15 @@ class _LineReader:
             pass
         finally:
             # None — маркер «поток кончился»: без него читатель ждал бы таймаут
-            # на каждой строке после смерти процесса.
+            # на каждой строке после смерти процесса. Маркер один, поэтому
+            # чтения после него смотрят на ``_ended``.
+            self._ended = True
             self._queue.put(None)
+
+    @property
+    def ended(self) -> bool:
+        """Поток вывода кончился: процесс закрыл stdout или умер."""
+        return self._ended
 
     def readline(self, timeout: float) -> "str | None":
         import time as _time
@@ -380,7 +393,20 @@ class _LineReader:
             try:
                 return self._queue.get(timeout=min(0.02, remaining))
             except queue.Empty:
-                continue
+                if self._ended:
+                    return self._rest_after_end()
+
+    def _rest_after_end(self) -> "str | None":
+        """Конец потока увиден после пустой очереди.
+
+        Качальщик мог положить последнюю строку уже после того, как
+        очередь оказалась пустой, и только потом поставить флаг конца:
+        забираем её без ожидания, «конец» — только при пустой очереди.
+        """
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
 
     async def areadline(self, timeout: float) -> "str | None":
         """То же, но ожиданием очереди не занимает ни поток, ни loop.
@@ -405,7 +431,8 @@ class _LineReader:
             try:
                 return self._queue.get_nowait()
             except queue.Empty:
-                pass
+                if self._ended:
+                    return self._rest_after_end()
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
                 return None
@@ -444,6 +471,17 @@ async def _areadline_with_timeout(
     return None if reader is None else await reader.areadline(timeout)
 
 
+def stdio_stream_ended(stream: "Any") -> bool:
+    """Читатель этого потока видел его конец.
+
+    Пустое чтение отсюда отличает смерть сервера от истёкшего срока: конец
+    потока приходит раньше, чем процесс становится зомби, и мгновенный
+    ``poll()`` в этот момент ещё видит процесс живым.
+    """
+    reader = _READERS.get(id(stream))
+    return reader is not None and reader.ended
+
+
 def forget_stdio_reader(stream: "Any") -> None:
     """Забыть читателя закрытого процесса (зовётся при остановке сервера)."""
     if stream is not None:
@@ -463,6 +501,12 @@ def _resolve_command(command: str) -> str:
     return resolve_mcp_command(command)
 
 
+#: Команда сервера, которую запускает пускатель журнала процессов: в
+#: ``command`` тогда интерпретатор пускателя, а каталог первым в PATH
+#: (``mcp_process_env``) нужен каталог команды сервера.
+LAUNCHED_COMMAND_FIELD = "_gc_launched_command"
+
+
 def _stdio_command(
     server_cfg: Dict[str, Any],
 ) -> Tuple[List[str], Any, Dict[str, str]]:
@@ -471,7 +515,8 @@ def _stdio_command(
     Общее для обоих способов запуска — синхронного ``Popen`` (долгоживущая
     сессия) и ``create_subprocess_exec`` (одноразовый обмен). Второй копии
     разбора быть не должно: расхождение здесь означало бы, что один и тот же
-    сервер стартует с разным окружением.
+    сервер стартует с разным окружением. Под пускателем окружение строится
+    по команде сервера (``LAUNCHED_COMMAND_FIELD``).
     """
     command = server_cfg.get("command")
     if not command:
@@ -487,7 +532,8 @@ def _stdio_command(
 
     from gc_core.mcp_runtime.env import mcp_process_env
 
-    return cmd, cwd, mcp_process_env(command, server_cfg.get("env"))
+    env_command = server_cfg.get(LAUNCHED_COMMAND_FIELD) or command
+    return cmd, cwd, mcp_process_env(env_command, server_cfg.get("env"))
 
 
 # --- stderr stdio-сервера ----------------------------------------------------
@@ -745,18 +791,21 @@ async def _aread_response(
     Пропускаем: уведомления (нет ``id``), встречные запросы сервера (есть
     ``method``) и ответы с чужим ``id``. Таймаут — общий на ожидание, а не на
     строку: болтливый сервер иначе растягивал бы его без предела.
+
+    Ответа нет — ошибка, а не ``{}``: пустой ответ модель приняла бы за
+    успех. Конец вывода — ``McpServerGone``, срок — ``McpCallTimedOut``.
     """
     deadline = time.monotonic() + timeout
     while True:
         left = deadline - time.monotonic()
         if left <= 0:
-            return {}
+            raise McpCallTimedOut(timeout)
         try:
             raw = await asyncio.wait_for(proc.stdout.readline(), left)
         except TimeoutError:
-            return {}
+            raise McpCallTimedOut(timeout) from None
         if not raw:
-            return {}  # EOF: процесс закрыл вывод
+            raise McpServerGone()  # EOF: процесс закрыл вывод
         line_in = raw.decode("utf-8", "replace").strip()
         message = (
             _parse_rpc_response_line(line_in, want_id) if line_in else None
@@ -778,6 +827,22 @@ def _parse_rpc_response_line(
     if want_id is not None and message.get("id") != want_id:
         return None  # ответ на чужой запрос
     return message
+
+
+async def _aread_step(
+    proc, timeout: float, payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Ответ на шаг обмена; сбой рукопожатия — ошибка соединения.
+
+    «Исход неизвестен» значит «запрос мог исполниться», а на ``initialize``
+    сам запрос ещё не уходил: такой сбой повторяется, как любой обрыв.
+    """
+    try:
+        return await _aread_response(proc, timeout, payload.get("id"))
+    except McpCallOutcomeUnknown as exc:
+        if payload.get("method") != "initialize":
+            raise
+        raise ConnectionError(f"initialize: {exc}") from exc
 
 
 async def _astdio_exchange(
@@ -837,7 +902,7 @@ async def _aexchange_steps(
         if not expect_response:
             results.append({})
             continue
-        results.append(await _aread_response(proc, timeout, payload.get("id")))
+        results.append(await _aread_step(proc, timeout, payload))
 
 
 async def _araise_if_exited_at_start(
