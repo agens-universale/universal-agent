@@ -389,7 +389,9 @@ async def test_scroll_down_closes_gap_in_order(tmp_path):
 async def test_to_end_with_gap_mounts_tail_as_on_open(tmp_path, how):
     async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
         scr = await _open_session(pilot, tmp_path / "t")
-        opened = scr._window_first
+        tail = policy.tail_steps(
+            scr._window_estimates(scr._window_model()), policy.TAIL_MIN
+        )
         await _jump_up(pilot, scr)
         assert scr._window_gap
         if how == "to_end":
@@ -401,9 +403,15 @@ async def test_to_end_with_gap_mounts_tail_as_on_open(tmp_path, how):
         await pilot.pause()
         await _settled(pilot, scr)
         trace = _trace(scr)
+        # Как при открытии: хвост по оценке и догрузка, пока ленте не
+        # хватает запаса (при открытии высота блоков кода до раскладки ещё
+        # не известна — догрузка там может взять лишний ход).
         assert not scr._window_gap
-        assert scr._window_first == opened
-        assert _replies(scr) == list(range(opened, TURNS))
+        assert scr._window_first <= tail.start
+        assert not policy.underfilled(
+            trace.max_scroll_y, trace.container_size.height
+        )
+        assert _replies(scr) == list(range(scr._window_first, TURNS))
         assert scr._stick_bottom is True
         assert trace.scroll_y == trace.max_scroll_y
 
@@ -571,6 +579,12 @@ async def test_turns_on_screen_never_trimmed(tmp_path, monkeypatch):
         monkeypatch.setattr(policy, "WINDOW_LIMIT", 10)
         monkeypatch.setattr(policy, "CHUNK_MIN", 1)
         monkeypatch.setattr(policy, "PREFETCH_SCREENS", 0)
+        # Верхний ход окна — над экраном: снимать сверху есть что.
+        trace = _trace(scr)
+        second = scr._window_heads[scr._window_first + 1]
+        trace.scroll_to(y=trace.placed_top(second), animate=False)
+        await pilot.pause()
+        await _settled(pilot, scr)
         on_screen = _turns_on_screen(scr)
         first, gap = scr._window_first, scr._window_gap
         assert on_screen
