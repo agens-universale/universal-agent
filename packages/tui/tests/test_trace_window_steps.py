@@ -204,6 +204,31 @@ def test_calls_without_prose_split_at_call_boundaries():
         assert model.item_step(result) == model.item_step(model.call_item(cid))
 
 
+def test_parallel_batch_bounds_step_by_one_batch():
+    """Пачку параллельных вызовов граница не режет — вызовы ждут исходов:
+    шаг больше ``STEP_MAX_ITEMS`` ровно на пачку (R43), а вызов и исход
+    — в одном шаге."""
+    from gc_tui.services.history_model import HistoryModel
+
+    width = 10
+    evs = [_ev(1, "user", "запрос", message_id="u1")]
+    # Шаг из ``STEP_MAX_ITEMS - 2`` элементов: пачка начинается до
+    # обязательной границы.
+    for k in range(STEP_MAX_ITEMS - 3):
+        evs.append(_ev(len(evs) + 1, "agent", f"проза {k}"))
+    for k in range(width):
+        evs.append(_ev(len(evs) + 1, "call", call_id=f"p{k}"))
+    for k in range(width):
+        evs.append(_ev(len(evs) + 1, "result", "ok", call_id=f"p{k}"))
+    evs.append(_ev(len(evs) + 1, "agent", "дальше"))
+    model = HistoryModel(turn_starts=[0])
+    for ev in evs:
+        model.append_event(ev)
+    first = model.step_range(0)
+    assert len(first) == STEP_MAX_ITEMS - 2 + 2 * width
+    assert model.item_step(len(evs) - 1) == 1
+
+
 def test_steps_follow_live_appends():
     """Живой путь дописывает модель запись за записью — границы шагов те
     же, что у построения целиком (номер шага — устойчивый индекс окна)."""
