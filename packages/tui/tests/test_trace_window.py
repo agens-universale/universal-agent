@@ -21,10 +21,14 @@ _POLICY = {
 
 @pytest.fixture(autouse=True)
 def _small_window(monkeypatch):
-    """Окно в несколько ходов: ход фикстуры — реплика и ответ."""
-    monkeypatch.setattr(policy, "TAIL_MIN", 30)
-    monkeypatch.setattr(policy, "CHUNK_MIN", 24)
+    """Окно в несколько ходов: ход фикстуры — реплика и ответ. Лимит — под
+    вес строки ленты без обёртки `Horizontal`, хвост и кусок —
+    пропорционально ему: инвариант политики лимит ≥ хвост + 2 куска
+    держится."""
+    monkeypatch.setattr(policy, "TAIL_MIN", 20)
+    monkeypatch.setattr(policy, "CHUNK_MIN", 16)
     monkeypatch.setattr(policy, "WINDOW_LIMIT", 60)
+    assert policy.WINDOW_LIMIT >= policy.TAIL_MIN + 2 * policy.CHUNK_MIN
 
 
 def _msg(mid, role, content):
@@ -93,10 +97,17 @@ async def _read_to_start(pilot, screen) -> None:
 
 
 async def _filled(pilot, screen) -> None:
-    """Догрузка открытия закончилась: кусок не встаёт и не ждёт."""
-    for _ in range(3):
+    """Догрузка открытия закончилась: кусок не встаёт и не ждёт, верх
+    окна три проверки подряд тот же (догрузка идёт кусок за куском)."""
+    same, first = 0, None
+    for _ in range(60):
         await wait_until(pilot, lambda: not screen._window_busy, "встал")
         await pilot.pause(0.2)
+        same = same + 1 if screen._window_first == first else 0
+        first = screen._window_first
+        if same == 2:
+            return
+    raise AssertionError("догрузка не закончилась")
 
 
 def _focusable(screen) -> list:

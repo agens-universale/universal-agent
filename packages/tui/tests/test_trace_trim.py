@@ -22,11 +22,13 @@ _SIZE = (100, 30)
 
 @pytest.fixture(autouse=True)
 def _small_window(monkeypatch):
-    """Окно в несколько ходов (инвариант лимит ≥ хвост + 2 куска); лимит —
-    под вес строки ленты без обёртки `Horizontal`."""
-    monkeypatch.setattr(policy, "TAIL_MIN", 30)
-    monkeypatch.setattr(policy, "CHUNK_MIN", 24)
+    """Окно в несколько ходов. Лимит — под вес строки ленты без обёртки
+    `Horizontal`, хвост и кусок — пропорционально ему: инвариант политики
+    лимит ≥ хвост + 2 куска держится."""
+    monkeypatch.setattr(policy, "TAIL_MIN", 20)
+    monkeypatch.setattr(policy, "CHUNK_MIN", 16)
     monkeypatch.setattr(policy, "WINDOW_LIMIT", 60)
+    assert policy.WINDOW_LIMIT >= policy.TAIL_MIN + 2 * policy.CHUNK_MIN
 
 
 def _turn(i: int) -> list[dict]:
@@ -91,6 +93,9 @@ def _trace(scr):
 
 
 def _window_turns(scr) -> list[int]:
+    """Ходы окна; ход фикстуры — один шаг (номер хода — номер шага)."""
+    model = scr._feed_history
+    assert model.step_starts == model.turn_starts
     return sorted(scr._window_heads)
 
 
@@ -311,7 +316,7 @@ async def test_never_trims_current_focused_queue_live_refs(tmp_path):
             unpin()
             assert not scr._step_pinned(first), name
         del scr._poll_tick
-        last = scr._feed_history.turn_count() - 1
+        last = scr._feed_history.step_count() - 1
         assert scr._step_pinned(last)
         # Реплика в очереди прижата к низу — в текущем ходе, не снимается.
         queued = scr._mount_user_reply(

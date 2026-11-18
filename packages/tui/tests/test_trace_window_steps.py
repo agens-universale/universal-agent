@@ -649,6 +649,83 @@ async def test_turn_end_reaches_returned_steps_of_live_turn(
 
 
 @pytest.mark.asyncio
+async def test_forgotten_step_leaves_registries_neighbour_stays(tmp_path):
+    """Шаг многошагового хода снят (`forget_step`): ни один реестр экрана
+    не держит его виджеты, вида блоков его шага нет — а у соседнего шага
+    того же хода вид и виджеты на месте."""
+    from gc_tui.services.history_render import history_level
+    from test_forget_turn import _held
+
+    records = [*_giant_turn(0, CALLS), *_giant_turn(1, 3, outcome=False)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        fixture = HistoryFixture(
+            records=tuple(records), segments=(tuple(records),), sidecar=()
+        )
+        write_history(str(tmp_path / "t"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        model = scr._window_model()
+        step = scr._window_first
+        assert model.step_turn(step) == model.step_turn(step + 1) == 0
+        gone = {
+            w
+            for top in scr._window_step_widgets(step)
+            for w in top.walk_children(with_self=True)
+        }
+        kept = set(scr._window_step_widgets(step + 1))
+        assert history_level(step) in scr._history_views
+        assert scr.forget_step(step)
+        await pilot.pause()
+        assert not gone & set(_held(scr))
+        assert history_level(step) not in scr._history_views
+        assert history_level(step + 1) in scr._history_views
+        assert all(w.is_attached for w in kept)
+        _window_consistent(scr)
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_row_returns_with_its_step(tmp_path, monkeypatch):
+    """Эфемерная строка (без события модели) посреди живого гигантского
+    хода снимается у низа вместе со своим шагом и возвращается с ним при
+    подъёме — на своём месте, эфемерной."""
+    from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS
+
+    _small_window(monkeypatch)
+    records = _giant_turn(0, 180, outcome=False)
+    at = next(
+        i
+        for i, rec in enumerate(records)
+        if rec["payload"].get("id") == "msg_p00_009"
+    )
+    note = "эфемерная строка шага"
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        feed_live(scr, records[: at + 1], splits=())
+        scr._mount_trace_row(prefix="", content=note, kind_class="line-meta")
+        await _feed_turn(pilot, scr, records[at + 1 :])
+        trace = _trace(scr)
+        assert not any(note in t for _k, t, _c in feed_dump(trace))
+        for _ in range(200):
+            if scr._window_first == 0:
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+        assert scr._window_first == 0
+        rows = feed_dump(trace)
+        prose = next(
+            i for i, row in enumerate(rows) if "смотрю шаг 9." in row[1]
+        )
+        assert [r[1] for r in rows].count(note) == 1
+        assert rows[prose + 1][1] == note
+        assert EPHEMERAL_CLASS in rows[prose + 1][2]
+
+
+@pytest.mark.asyncio
 async def test_return_to_bottom_does_not_remount_giant_turn(
     tmp_path, monkeypatch
 ):

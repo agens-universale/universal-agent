@@ -132,7 +132,15 @@ async def live_session(pilot, prelude: list[dict] | None = None):
     scr._mark_pending_failed(None)
     feed_live(scr, records[_FIRST_TURN_END:], splits=(), sidecar=sidecar)
     await pilot.pause()
+    single_step_turns(scr)
     return scr
+
+
+def single_step_turns(scr) -> None:
+    """Ходы фикстуры — по одному шагу: номер хода в тесте — номер шага
+    окна (`forget_step`, `_window_step_widgets`)."""
+    model = scr._feed_history
+    assert model.step_starts == model.turn_starts
 
 
 def _expand_views(scr) -> None:
@@ -398,10 +406,10 @@ async def test_diff_body_restored_when_age_rule_would_compact(monkeypatch):
     """Дифф, показанный телом, возвращается телом, даже если по возрасту
     хода он был бы компактным: в памяти — только отметка."""
     from gc_tui.services import block_edits
-    from trace_readonly import render_turns
     from gc_tui.services.tool_blocks import BlockEdit
     from gc_tui.widgets.tool_blocks_view import diff_view_key
     from test_history_render import _Feed, _feed, _model
+    from trace_readonly import render_turns
 
     model = _model("calls")
     records = load_history_fixture("calls").records
@@ -454,6 +462,7 @@ async def test_opened_turns_restore_compaction_body_shown(tmp_path):
             "hidden" not in c and "Контекст сохранён" in t
             for _c, t, c in before
         )
+        single_step_turns(scr)
         last = scr._feed_history.turn_count() - 1
         first = scr._window_first
         for turn in range(first, last):
@@ -473,9 +482,9 @@ async def test_restored_group_phrase_belongs_to_its_turn():
         ChunkOptions,
         FeedHost,
     )
-    from trace_readonly import render_turns
     from gc_tui.widgets.user_reply import UserReplyContainer
     from test_history_render import _Feed, _feed
+    from trace_readonly import render_turns
 
     model = build_history(
         [{"messages": _records(), "compacted_by": None}],

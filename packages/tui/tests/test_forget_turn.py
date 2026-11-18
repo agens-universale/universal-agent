@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from feed_dump import HISTORY_THREAD, load_history_fixture, write_history
 from gc_tui.screens.main import _bound_widget
-from test_trace_ephemera import _SIZE, _app, live_session
+from test_trace_ephemera import _SIZE, _app, live_session, single_step_turns
 
 
 def _held(scr) -> list:
@@ -39,6 +39,7 @@ def _held(scr) -> list:
 
 
 def _step_subtree(scr, turn: int) -> set:
+    single_step_turns(scr)
     return {
         w
         for top in scr._window_step_widgets(turn)
@@ -68,6 +69,7 @@ async def test_registries_empty_after_forget_history_turns(tmp_path):
         assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
         await pilot.pause()
         assert scr._summary_marker_widgets
+        single_step_turns(scr)
         last = scr._feed_history.turn_count() - 1
         gone: set = set()
         for turn in range(scr._window_first, last):

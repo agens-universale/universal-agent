@@ -4,7 +4,8 @@
 видимого; живой ход остаётся, между прочитанным и им — разрыв. Снизу
 домонтируется перед разрывом, переход в конец при разрыве монтирует
 хвост, как при открытии. Боевые числа политики, ход — как у T150
-(десяток вызовов и длинный ответ)."""
+(десяток вызовов и длинный ответ с кодом) и один шаг: номера ходов в
+тестах — номера шагов окна (`_open_session` это проверяет)."""
 
 from __future__ import annotations
 
@@ -29,11 +30,11 @@ from textual import events
 
 _SIZE = (100, 30)
 TURNS = 40
-CALLS = 10
+CALLS = 9
 LINES = 10
-#: Подъём на столько ходов от конца — глубина замера §7 (с запасом над
-#: «лимит + кусок»: строка вызова — четыре виджета, ход фикстуры лёгкий).
-DEPTH = 30
+#: Подъём на столько ходов от конца — глубина замера §7; ход фикстуры
+#: тяжёлый настолько, что глубина больше «лимит + кусок».
+DEPTH = 20
 
 
 # ---- ходы ------------------------------------------------------------------
@@ -78,7 +79,10 @@ def _call(i: int, k: int) -> list[dict]:
 def _turn(i: int, *, outcome: bool = True) -> list[dict]:
     """Ход: реплика, вызовы, ответ в много строк и итог."""
     user, answer = f"m_u{i:04d}", f"msg_a{i:04d}"
-    text = "\n".join(f"ответ {i} строка {k}" for k in range(LINES))
+    text = "\n\n".join(
+        f"ответ {i} абзац {k}" + ("\n\n```\nкод\n```" if k % 4 == 0 else "")
+        for k in range(LINES)
+    )
     records = [
         _message({"role": "user", "id": user, "content": f"запрос {i}"}),
     ]
@@ -132,6 +136,7 @@ async def _open_session(pilot, threads_dir):
     assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
     await pilot.pause(0.3)
     await _settled(pilot, scr)
+    _single_step_turns(scr)
     return scr
 
 
@@ -152,7 +157,14 @@ async def _open_preview(pilot, *, outcomes: bool = False):
     await pilot.app.push_screen(screen)
     await pilot.pause(0.3)
     await _settled(pilot, screen)
+    _single_step_turns(screen)
     return screen
+
+
+def _single_step_turns(scr) -> None:
+    """Ход фикстуры — один шаг: номер хода — номер шага окна."""
+    model = scr._window_model()
+    assert model.step_starts == model.turn_starts
 
 
 # ---- экран -----------------------------------------------------------------
