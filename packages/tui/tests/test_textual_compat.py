@@ -714,13 +714,18 @@ async def test_lost_frame_callback_does_not_disable_holds(monkeypatch):
 
     monkeypatch.setattr(textual_compat, "mounted", never)
     monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
-    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.1)
+    # Потолок серии — с запасом над остатком без удержания
+    # (`_PAINT_HOLD_MIN`): равный ему остаток `until - now` в float бывает
+    # чуть меньше, и первое удержание не ставится вовсе.
+    limit = textual_compat._PAINT_HOLD_MIN * 1.5
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", limit)
     app = _Host()
     async with app.run_test() as pilot:
         monkeypatch.setattr(app, "call_after_refresh", lambda *_a: True)
         _, held = await _in_app(pilot, lambda: _mount_and_hold(app))
         await _released(pilot)
-        await asyncio.sleep(0.25)
+        # Срок возврата удержаний (потолок серии от потери сигнала) прошёл.
+        await asyncio.sleep(limit + 0.1)
         _, again = await _in_app(pilot, lambda: _mount_and_hold(app))
         assert (held, again) == (1, 1)
         await _released(pilot)
