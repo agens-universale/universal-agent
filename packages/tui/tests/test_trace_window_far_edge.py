@@ -393,7 +393,16 @@ async def test_to_end_with_gap_mounts_tail_as_on_open(tmp_path, how):
             scr._window_estimates(scr._window_model()), policy.TAIL_MIN
         )
         await _jump_up(pilot, scr)
-        assert scr._window_gap
+        gap = scr._window_gap
+        assert gap
+        inserted: list[range] = []
+        insert = scr._window_insert
+
+        def spy_insert(steps, *, before):
+            inserted.append(steps)
+            return insert(steps, before=before)
+
+        scr._window_insert = spy_insert
         if how == "to_end":
             scr._scroll_to_bottom()
         else:
@@ -405,8 +414,11 @@ async def test_to_end_with_gap_mounts_tail_as_on_open(tmp_path, how):
         trace = _trace(scr)
         # Как при открытии: хвост по оценке и догрузка, пока ленте не
         # хватает запаса (при открытии высота блоков кода до раскладки ещё
-        # не известна — догрузка там может взять лишний ход).
+        # не известна — догрузка там может взять лишний ход). Длинный
+        # разрыв не домонтирован целиком: прочитанное снято, перед
+        # закреплённым низом встал хвост.
         assert not scr._window_gap
+        assert inserted and inserted[0].start > gap.start
         assert scr._window_first <= tail.start
         assert not policy.underfilled(
             trace.max_scroll_y, trace.container_size.height
