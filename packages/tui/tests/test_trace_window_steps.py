@@ -309,12 +309,17 @@ async def test_steps_rendered_one_by_one_match_whole_turn():
 
 @pytest.mark.asyncio
 async def test_calls_without_prose_open_matches_live(tmp_path, monkeypatch):
-    """Шаги серии вызовов без прозы режут группу поисков: кусками при
-    открытии и живым путём лента одна и та же — группа закрывается на
-    границе шага на обоих путях."""
+    """Шаги серии вызовов без прозы режут группу поисков, шаги хода с
+    прозой встают на прозе: кусками при открытии и живым путём лента одна
+    и та же — группа закрывается на границе шага на обоих путях, дедуп
+    ответа — одним правилом."""
     monkeypatch.setattr(policy, "TAIL_MIN", 10**6)
     monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
-    records = [*_calls_turn(0, 120), *_giant_turn(1, 3)]
+    records = [
+        *_calls_turn(0, 120),
+        *_giant_turn(1, 40),
+        *_giant_turn(2, 3),
+    ]
     assert _model(records).step_count() > 3
     fixture = HistoryFixture(
         records=tuple(records), segments=(tuple(records),), sidecar=()

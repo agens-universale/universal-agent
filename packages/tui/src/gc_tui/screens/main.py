@@ -147,6 +147,8 @@ from gc_tui.services.history_model import (
 from gc_tui.services.history_render import (
     ChunkOptions,
     ChunkRefs,
+    answer_verdict,
+    finish_close,
     history_level,
 )
 from gc_tui.services.image_chips import strip_image_chips
@@ -240,6 +242,7 @@ from gc_tui.services.trace_retention import (
     parent_outside_retention,
     subagent_parent_ids_from_events,
 )
+from gc_tui.services.trace_steps import is_finish
 from gc_tui.services.turn_outcome import (
     kind_of,
     meta_status_of,
@@ -3167,16 +3170,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     def _render_finish(self, ev) -> None:
         """Конец хода turn_finish: отчёт ответом, запись «итог» или строка
         «заметка» (правило — turn_close.finish_close)."""
-        from gc_tui.services.trace_render import (
-            build_finish_widgets,
-            finish_close_of,
-        )
+        from gc_tui.services.trace_render import build_finish_widgets
 
         # A1: отчёт, уже показанный прозой, вторым блоком не рисуем. База
         # дедупа — только проза: попытки хода убирает свёртка ниже.
-        close = self._answer_flow.finish(
-            finish_close_of(ev), tracked=bool(ev.call_id)
-        )
+        close = finish_close(self._answer_flow, ev)
         following = self._stick_bottom
         widgets = build_finish_widgets(close, event_no=ev.no)
         for w in widgets:
@@ -4417,17 +4415,14 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             # Без гейта на live: перерисовка после компакции (stream_reset) —
             # единственный путь финализатора, если poll-тик не успел до неё;
             # от записей на реплее защищает should_update_task (счётчик live-only).
-            if ev.tool_name == "submit_solution":
+            if is_finish(ev):
                 self._seed_or_update_task_from_submit(ev)
                 self._render_finish(ev)
                 return
             # A1: дубль контента (проза → тот же финализатор / повтор) — молча
             # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
             # без маркера: завершение хода и так видно по готовому инпуту.
-            verdict = self._answer_flow.agent(
-                (ev.summary or "").strip(),
-                intermediate=ev.tool_name == "intermediate_reply",
-            )
+            verdict = answer_verdict(self._answer_flow, ev)
             if not verdict.show:
                 return
             if verdict.drop_attempt:

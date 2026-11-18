@@ -212,8 +212,8 @@ async def test_model_marks_collapse_across_chunk_boundary():
         ChunkOptions,
         FeedHost,
     )
-    from trace_readonly import render_turns
     from gc_tui.widgets.model_mark import ModelMark
+    from trace_readonly import render_turns
 
     model = _marks_model()
     whole, _refs = await _render(model)
@@ -459,3 +459,18 @@ async def test_chunk_mounts_feed_in_one_call():
         )
         await pilot.pause()
         assert batches == [len(feed.children)]
+
+
+def test_result_kinds_are_the_renderer_result_handlers():
+    """Страж одного источника: события, чьи виджеты встают якорем к
+    строке вызова у отрисовщика, — те же исходы, что модель и сплиттер
+    шагов считают исходами (`trace_steps.RESULT_KINDS`)."""
+    from gc_tui.services.history_render import _HANDLERS, _Chunk
+    from gc_tui.services.trace_steps import RESULT_KINDS
+
+    anchored = {
+        kind
+        for kind, handler in _HANDLERS.items()
+        if handler in (_Chunk._result, _Chunk._error_msg)
+    }
+    assert anchored == RESULT_KINDS

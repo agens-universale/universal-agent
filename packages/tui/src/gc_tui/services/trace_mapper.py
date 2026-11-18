@@ -9,6 +9,7 @@ from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import (
+    FINISH_TOOL_NAME,
     PROPOSE_PLAN_TOOL_NAME,
     SESSION_THINK_TOOL_NAME,
 )
@@ -74,6 +75,8 @@ _SUMMARY_SECTION_RE = re.compile(r"<([a-z][a-z0-9_]*)>(.*?)</\1>", re.DOTALL)
 
 #: Имя тула плана в том виде, в каком его видит маппер (без пространства имён).
 PROPOSE_PLAN_ID = tool_id(PROPOSE_PLAN_TOOL_NAME)
+#: Имя сдачи хода (``turn_finish``) в событиях ленты.
+FINISH_ID = tool_id(FINISH_TOOL_NAME)
 
 
 def _clean_summary(inner_raw: str) -> str:
