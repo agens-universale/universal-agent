@@ -289,7 +289,6 @@ from gc_tui.widgets.trace_row import (
 )
 from gc_tui.widgets.turn_line import (
     TURN_LINE_HELD,
-    TURN_LINE_LATEST,
     TurnLine,
 )
 
@@ -743,6 +742,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
         self._stream_answer_row = None  # type: Optional["TraceRow"]
+        # Что уже нарисовано в стрим-виджет: (версия sink, виджет). Совпала
+        # с текущей — `_refresh_stream_content` ничего не трогает.
+        self._stream_drawn: tuple[int, object] | None = None
         # Строки мыслей ленты (`ThoughtRow`, спека мыслей §7) — только из
         # стрима, нигде не хранятся: строка на попытку, законченные стоят на
         # своих местах до перерисовки ленты.
@@ -801,6 +803,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # записи не имеет, строка — по статусу сессии.
         self._last_turn_outcome: Optional[TurnOutcome] = None
         self._outcome_superseded: bool = False
+        # Свежая строка хода — та, что последней получила `freshen`
+        # (`_freshen_turn_line`); снятую `_fresh_turn_line` не отдаёт.
+        self._fresh_line: Optional[TurnLine] = None
         # Сводка правок закрытого хода открытого треда (`_close_turn_edits`):
         # строка итога получает её, когда встанет, — запись стопа может
         # дочитаться позже спадающего фронта.
@@ -2962,7 +2967,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._reveal_held()
         line = build_turn_line(outcome)
         # Причина записи хранится и у осевшей строки (освежить её снова).
-        line.freshen(summary, outcome_error(outcome))
+        self._freshen_turn_line(line, summary, outcome_error(outcome))
         if not fresh:
             line.settle()
         if self._bar_wanted():
@@ -3002,18 +3007,40 @@ class TraceScreen(TraceFollowMixin, Screen):
             w.state == "pending" for w in self._queued_tail(trace, sent=True)
         )
 
+    def _freshen_turn_line(
+        self,
+        line: TurnLine,
+        summary: Optional[tuple[int, int, int]],
+        error: Optional[str],
+    ) -> None:
+        """Единственный путь `freshen` на экране: прежняя свежая строка
+        оседает — свежей бывает не больше одной."""
+        if self._fresh_line is not line:
+            self._settle_turn_line()
+        line.freshen(summary, error)
+        self._fresh_line = line
+
     def _fresh_turn_line(self) -> Optional[TurnLine]:
-        """Свежая строка последнего хода в ленте; None — её нет."""
-        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
-        return lines[-1] if lines else None
+        """Свежая строка последнего хода в ленте; None — её нет. Ссылка
+        чинится сама: снятая любым путём или осевшая строка — None."""
+        line = self._fresh_line
+        if (
+            line is None
+            or not line.is_attached
+            or textual_compat.is_being_removed(line)
+            or not line.is_fresh
+        ):
+            return None
+        return line
 
     def _settle_turn_line(self) -> bool:
         """Начался новый ход: строка прошлого оседает в ленте. True — было
         чему оседать."""
-        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
-        for line in lines:
-            line.settle()
-        return bool(lines)
+        line = self._fresh_turn_line()
+        if line is None:
+            return False
+        line.settle()
+        return True
 
     def _turn_started_after_record(self, *, live: bool) -> None:
         """Реплика за записью итога — следующий ход. Пришла хвостом посреди
@@ -3144,7 +3171,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         line = self._fresh_turn_line()
         if outcome is not None:
             if line is not None:
-                line.freshen(summary, outcome_error(outcome))
+                self._freshen_turn_line(line, summary, outcome_error(outcome))
             return
         error = self._active_run_error() if word == "failed" else None
         if line is None or line.recorded:
@@ -3152,10 +3179,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             line = build_turn_line(
                 word=word, plan=plan, opened_by=self._last_user_message_id
             )
-            line.freshen(summary, error)
+            self._freshen_turn_line(line, summary, error)
             self._trace_mount(line, above_sent=True)
             return
-        line.freshen(summary, error)
+        self._freshen_turn_line(line, summary, error)
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
@@ -3175,35 +3202,50 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
         Зовётся poll-веткой (после mount/switch) и событийно (StreamPump → app →
-        call_from_thread). НЕ монтирует/снимает/переключает — это poll."""
+        `_post_stream_signal`). НЕ монтирует/снимает/переключает — это poll.
+        Без новых данных (та же версия sink, тот же виджет) — ничего не
+        трогает: лишние сигналы и тики опроса ничего не стоят."""
         # F3: freeze UI на время app-select — не красим стрим и не двигаем stick
         # (здесь зовутся _update_stick_state/_scroll_trace_end). Гейт железный:
-        # покрывает и poll, и событийный путь _stream_signal → call_from_thread.
+        # покрывает и poll, и событийный путь _stream_signal. Нарисованное не
+        # запоминается — после отпускания первый вызов догонит содержимое.
         if self._ui_frozen_for_select():
             return
         sink = getattr(self.app, "_stream_sink", None)
         if sink is None:
             return
+        version, think, answer = sink.versioned_snapshot()
+        target = self._stream_answer_row
+        if target is None:
+            target = self._stream_block
+        if target is None or (version, target) == self._stream_drawn:
+            return
+        self._update_stick_state()
+        if self._draw_stream(think, answer):
+            self._stream_drawn = (version, target)
+        if self._stick_bottom:
+            self._scroll_trace_end()
+
+    def _draw_stream(self, think: str, answer: str) -> bool:
+        """Нарисовать снимок sink в стрим-виджет; True — текст лёг.
+        `StreamBlock` до монтажа текст молча не берёт (опрос монтирует его
+        и зовёт перерисовку в одном обработчике), `TraceRow` берёт до
+        `compose`."""
         from gc_tui.services.markdown_render import render_prose
         from gc_tui.services.stream_sink import (
             format_reasoning_line,
             format_stream_block,
         )
 
-        self._update_stick_state()
-        think, answer = sink.snapshot()
         if self._stream_answer_row is not None:
             self._stream_answer_row.set_content(
                 render_prose(format_stream_block(answer=answer))
             )
-        elif self._stream_block is not None:
-            self._stream_block.set_text(
-                format_reasoning_line(think=think), thinking=True
-            )
-        else:
-            return
-        if self._stick_bottom:
-            self._scroll_trace_end()
+            return True
+        self._stream_block.set_text(
+            format_reasoning_line(think=think), thinking=True
+        )
+        return self._stream_block.is_mounted
 
     def _commit_stream(self) -> None:
         """Строка ленты закоммичена — живой вывод шага уходит из-под неё.
@@ -3227,6 +3269,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         reset_sink=False: виджет убирается, но sink не трогается — счётчик и
         reasoning-состояние индикатора продолжают жить (нужно для
         tui.show_*=False: действие в drain без сброса буфера)."""
+        self._stream_drawn = None
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None
@@ -3322,13 +3365,17 @@ class TraceScreen(TraceFollowMixin, Screen):
         `desired_height`), лента берёт остаток.
 
         Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
-        раздувает chrome и выдавливает поле ввода за край экрана."""
+        раздувает chrome и выдавливает поле ввода за край экрана.
+
+        Без оверлея и баннера капать нечего — выход до замеров хрома."""
+        overlay = self._open_overlay_widget()
+        banner = self._sticky_banner_widget()
+        if overlay is None and banner is None:
+            return
         try:
             root = self.query_one(_SEL_ROOT, Vertical)
         except Exception:
             return
-        overlay = self._open_overlay_widget()
-        banner = self._sticky_banner_widget()
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
         # Баннер/оверлей исключаем — их желаемую высоту считаем отдельно (иначе
         # ещё не ужатый region баннера раздувает chrome до available<=0).
@@ -6819,6 +6866,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             [c for c in trace.children if c.id not in self._TRACE_HEADER_IDS]
         )
         self._show_brand()  # defensive: монтирует, только если шапки ещё нет
+        # Снятая строка итога не должна держаться ссылкой до следующего хода.
+        self._fresh_line = None
         # Лента рисуется заново — с действующим флагом мыслей.
         self._thoughts_shown = self._thoughts_on()
 
@@ -8865,7 +8914,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             if w.opened_by != msg_id and not textual_compat.is_being_removed(w)
         ]
         if lines:
-            lines[-1].freshen(lines[-1].summary, lines[-1].error)
+            line = lines[-1]
+            self._freshen_turn_line(line, line.summary, line.error)
         snapshot, self._pre_run_tui_meta = self._pre_run_tui_meta, None
         if snapshot is not None and snapshot[0] == self._active_task_id:
             self._write_tui_meta(*snapshot)

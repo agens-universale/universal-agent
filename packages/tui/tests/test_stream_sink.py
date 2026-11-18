@@ -217,3 +217,35 @@ def test_screen_reset_keeps_thought_and_discard_drops_it():
     s.reset()
     s.discard_thoughts()
     assert s.take_thoughts() == []
+
+
+def test_version_grows_on_content_changes():
+    s = StreamSink()
+    steps = (
+        lambda: s.push("think", "a"),
+        lambda: s.push("answer", "b"),
+        lambda: s.push("reset", ""),
+        s.clear_answer,
+        s.reset,
+    )
+    for step in steps:
+        before = s.versioned_snapshot()[0]
+        step()
+        assert s.versioned_snapshot()[0] > before
+
+
+def test_version_ignores_tool_deltas():
+    s = StreamSink()
+    s.push("answer", "ответ")
+    version = s.versioned_snapshot()[0]
+    units = s.progress_units()
+    s.push("tool", '{"path": "a.py", "content": "x"}')
+    assert s.versioned_snapshot()[0] == version
+    assert s.progress_units() > units
+
+
+def test_versioned_snapshot_matches_snapshot():
+    s = StreamSink()
+    s.push("think", "мысль")
+    s.push("answer", "ответ")
+    assert s.versioned_snapshot()[1:] == s.snapshot()
