@@ -29,8 +29,10 @@ TUI работает с локальным файловым хранилищем
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+from collections.abc import Iterator
 from typing import Optional, Sequence
 
 from gc_core.message_format.serialization import (
@@ -103,6 +105,17 @@ class FileTaskStore:
         # курсор после чтения, отпечаток файлов до чтения).
         self._tail_seen: tuple | None = None
 
+    @contextlib.contextmanager
+    def _writing(self) -> Iterator[None]:
+        """Своя запись в тред: после неё кеш записи и пропуск хвоста
+        сброшены, не полагаясь на отпечаток файлов (чтение для
+        read-modify-write секции `tui` не должно видеть прошлую запись)."""
+        try:
+            yield
+        finally:
+            self._record = None
+            self._tail_seen = None
+
     def _key(self, task_id: str, system: Optional[str] = None) -> ThreadKey:
         return ThreadKey(system=system or self._system, thread=task_id)
 
@@ -149,24 +162,28 @@ class FileTaskStore:
     ) -> None:
         """Слить ``patch`` в состояние TUI треда (атомарно в хранилище; шаг
         исполнителя его не трогает). Треда нет — он создаётся."""
-        run_sync(
-            self._threads.update_frontend(
-                self._key(task_id, system), _TUI, dict(patch)
+        with self._writing():
+            run_sync(
+                self._threads.update_frontend(
+                    self._key(task_id, system), _TUI, dict(patch)
+                )
             )
-        )
 
     def append_messages(
         self, task_id: str, messages: list[dict], system: Optional[str] = None
     ) -> int:
         """Дописать сообщения в историю (уже сохранённые не повторяются)."""
-        return run_sync(
-            self._threads.append_messages(self._key(task_id, system), messages)
-        )
+        key = self._key(task_id, system)
+        with self._writing():
+            return run_sync(self._threads.append_messages(key, messages))
 
     def clear_plan(self, task_id: str, system: Optional[str] = None) -> bool:
         """Убрать план из сессии (`/plan clear`); True — план был. Решение и
         запись — в фасаде ``Threads`` (под арендой треда)."""
-        return run_sync(self._threads.clear_plan(self._key(task_id, system)))
+        with self._writing():
+            return run_sync(
+                self._threads.clear_plan(self._key(task_id, system))
+            )
 
     def append_model_choice(
         self,
@@ -180,13 +197,15 @@ class FileTaskStore:
         чужим ходом, записи не получают."""
         key = self._key(task_id, system)
         try:
-            return run_sync(self._threads.append_model_choice(key, record))
+            with self._writing():
+                return run_sync(self._threads.append_model_choice(key, record))
         except ThreadBusy:
             return False
 
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред: историю, архивы, трассу, картинки."""
-        run_sync(self._threads.delete(self._key(task_id, system)))
+        with self._writing():
+            run_sync(self._threads.delete(self._key(task_id, system)))
 
     def discard_message_by_id(
         self,
@@ -207,11 +226,11 @@ class FileTaskStore:
                 messages, tags=tags, strip_think=strip_think
             )
 
-        return run_sync(
-            self._threads.discard_message(
-                self._key(task_id, system), message_id, recount=recount
+        key = self._key(task_id, system)
+        with self._writing():
+            return run_sync(
+                self._threads.discard_message(key, message_id, recount=recount)
             )
-        )
 
     def read_subagent_trace(
         self, task_id: str, system: Optional[str] = None

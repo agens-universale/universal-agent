@@ -790,9 +790,10 @@ class FileThreadStore(ThreadStore):
     def files_stamp(
         self, key: ThreadKey, streams: Sequence[str] = ()
     ) -> tuple:
-        """Отпечаток файлов треда: размер и время записи (нс) meta, истории,
-        трассы субагентов, журнала правок, ``control.json`` (и старого, без
-        system в имени), файлов потоков ``streams`` и каталога тредов
+        """Отпечаток файлов треда: размер, время записи (нс) и inode meta,
+        истории, трассы субагентов, журнала правок, ``control.json`` (и
+        старого, без system в имени), файлов потоков ``streams`` и каталога
+        тредов
         (появление и удаление архивов). Из них `get_thread` собирает запись,
         а `read_stream` читает потоки: тот же отпечаток — та же запись и те
         же записи потоков. Читатель, который опрашивает тред (TUI на каждом
@@ -1370,13 +1371,15 @@ def _abandoned(base: Path, cutoff: float) -> bool:
 _TAIL_PROBE = 8 * 1024
 
 
-def _file_stamp(path: str | Path) -> tuple[int, int] | None:
-    """Размер и время записи (нс); файла нет — None."""
+def _file_stamp(path: str | Path) -> tuple[int, int, int] | None:
+    """Размер, время записи (нс) и inode; файла нет — None. Inode ловит
+    перезапись тем же размером в тот же такт времени записи: meta и
+    ``control.json`` пишутся атомарной заменой — новым файлом."""
     try:
         st = os.stat(path)
     except OSError:
         return None
-    return st.st_size, st.st_mtime_ns
+    return st.st_size, st.st_mtime_ns, st.st_ino
 
 
 def _last_seq(path: str | Path, stream: str) -> int:
