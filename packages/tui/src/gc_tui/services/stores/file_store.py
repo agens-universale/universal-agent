@@ -87,6 +87,7 @@ class FileTaskStore:
 
     def __init__(self, threads_dir: str, system: str = "cli") -> None:
         files = FileThreadStore(threads_dir)
+        self._files = files
         self._threads = Threads(files)
         self._system = system
         # Каталог тредов, как его читает хранилище (абсолютный): по нему
@@ -95,6 +96,12 @@ class FileTaskStore:
         # Разобранная трасса субагентов последнего прочитанного треда:
         # (тред, размер и время записи файла) → записи.
         self._subagents: tuple[tuple, list[dict]] | None = None
+        # Запись последнего прочитанного треда: (тред, отпечаток его
+        # файлов) → запись. Опрос хвоста спрашивает её на каждом тике.
+        self._record: tuple[tuple, ThreadRecord] | None = None
+        # Последний хвост без новых записей не перечитывается: (тред,
+        # курсор после чтения, отпечаток файлов до чтения).
+        self._tail_seen: tuple | None = None
 
     def _key(self, task_id: str, system: Optional[str] = None) -> ThreadKey:
         return ThreadKey(system=system or self._system, thread=task_id)
@@ -115,11 +122,27 @@ class FileTaskStore:
         self, task_id: str, system: Optional[str] = None
     ) -> Optional[ThreadRecord]:
         """Запись треда (части: ``info``, ``state``, ``usage``, ``runtime``,
-        ``frontend``, ``extra``); нет треда или он не читается — ``None``."""
+        ``frontend``, ``extra``); нет треда или он не читается — ``None``.
+        Файлы треда не менялись с прошлого чтения (тот же размер и время
+        записи, `FileThreadStore.files_stamp`) — без чтения meta: опрос
+        хвоста спрашивает запись на каждом тике. Отдаётся копия: вложенные
+        словари записи изменяемы, а кеш не должен видеть чужих правок."""
+        key = self._key(task_id, system)
+        files = self._files.files_stamp(key, _FEED)
+        stamp = (key, files)
+        cached = self._record
+        if cached is not None and cached[0] == stamp:
+            return cached[1].model_copy(deep=True)
         try:
-            return run_sync(self._threads.get(self._key(task_id, system)))
+            record = run_sync(self._threads.get(key))
         except (OSError, ValueError):
             return None
+        # Без meta на диске (тред ещё не записан) — не кешируется.
+        if record is None or files[0] is None:
+            self._record = None
+            return record
+        self._record = (stamp, record)
+        return record.model_copy(deep=True)
 
     def update_tui_meta(
         self, task_id: str, patch: dict, system: Optional[str] = None
@@ -310,7 +333,14 @@ class FileTaskStore:
                 new_records=_feed(key, batch),
                 next_cursor=_task_cursor(batch.cursor, len(record.archives)),
             )
+        # Файлы треда те же, что до прошлого чтения хвоста, а курсор — тот,
+        # что оно вернуло: нового нет (опрос раз в тик не читает meta и
+        # потоки).
+        stamp = self._files.files_stamp(key, _FEED)
+        if self._tail_seen == (key, cursor.position_token, stamp):
+            return TailResult(new_records=[], next_cursor=cursor)
         batch = run_sync(self._threads.tail(key, _FEED, cursor.position_token))
+        self._tail_seen = None
         if batch.reset:
             step = run_sync(_acompaction_step(self._threads, key, cursor))
             if step is not None:
@@ -321,6 +351,8 @@ class FileTaskStore:
                 stream_reset=True,
                 reason=_reset_reason(cursor.position_token, batch.cursor),
             )
+        if stamp[0] is not None:
+            self._tail_seen = (key, batch.cursor, stamp)
         return TailResult(
             new_records=_feed(key, batch),
             next_cursor=_task_cursor(batch.cursor, cursor.archives),
