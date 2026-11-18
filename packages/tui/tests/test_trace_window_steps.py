@@ -661,11 +661,16 @@ async def test_return_to_bottom_does_not_remount_giant_turn(
         await pilot.pause(0.3)
         await _settled(pilot, scr)
         trace = _trace(scr)
-        # Подняться на несколько экранов: сверху домонтированы шаги.
+        # Подняться на несколько экранов: сверху домонтированы шаги. Два
+        # щелчка за раз: один щелчок (две строки) не выходит из допуска
+        # липкости, и тик опроса возвращает ленту к низу.
         for _ in range(60):
-            trace.post_message(
-                events.MouseScrollUp(trace, 5, 5, 0, 0, 0, False, False, False)
-            )
+            for _click in range(2):
+                trace.post_message(
+                    events.MouseScrollUp(
+                        trace, 5, 5, 0, 0, 0, False, False, False
+                    )
+                )
             await pilot.pause()
             await _settled(pilot, scr)
         assert scr._stick_bottom is False
