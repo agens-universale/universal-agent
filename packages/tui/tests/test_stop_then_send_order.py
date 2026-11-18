@@ -253,3 +253,59 @@ async def test_record_read_after_send_goes_above_sent_reply(tmp_path):
         assert children[-1] is sent
         assert isinstance(sent, UserReplyContainer)
         assert sent.state == "pending"
+
+
+def _index_of(scr, text: str) -> int:
+    """Место в ленте первой строки с текстом ``text``."""
+    from feed_dump import feed_dump
+
+    rows = feed_dump(scr.query_one("#trace"))
+    return next(i for i, row in enumerate(rows) if text in row[1])
+
+
+@pytest.mark.asyncio
+async def test_record_goes_above_sent_reply_past_unpinned_row(tmp_path):
+    """Под отправленной репликой встала строка не из модели (вывод «!»,
+    служебная строка) — запись, дочитанная после отправки, всё равно
+    встаёт над репликой: правило не обрывается на первой незакреплённой
+    строке с конца."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_steps import _giant_turn
+
+    records = _giant_turn(0, 1, outcome=False)
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(scr, records[:1], splits=())
+        scr._mount_user_reply("новая", state="pending", client_id="c")
+        scr._mount_trace_row(
+            prefix="", content="служебная строка", kind_class="line-meta"
+        )
+        feed_live(scr, records[1:], splits=())
+        await pilot.pause()
+        sent, note = _index_of(scr, "новая"), _index_of(scr, "служебная")
+        assert _index_of(scr, "Ход 0: смотрю шаг 1.") < sent < note
+
+
+@pytest.mark.asyncio
+async def test_unmatched_user_record_releases_sent_reply(tmp_path):
+    """Реплика пользователя дочитана, но ни с одной отправленной не
+    сверилась (wire другой): отправленная реплика больше не держит
+    отрисовку модели над собой — иначе она навсегда последняя в ленте, а
+    все следующие ходы встают над ней."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_steps import _giant_turn
+
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        sent = scr._mount_user_reply("новая", state="pending", client_id="c")
+        feed_live(scr, _giant_turn(0, 1), splits=())
+        feed_live(scr, _giant_turn(1, 1, outcome=False), splits=())
+        await pilot.pause()
+        assert sent.state == "pending"
+        assert _index_of(scr, "новая") < _index_of(scr, "Ход 1: смотрю шаг 1.")

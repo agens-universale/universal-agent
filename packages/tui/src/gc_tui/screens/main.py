@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Optional
+from weakref import WeakSet
 
 if TYPE_CHECKING:
     from gc_core.model_choice import ModelChoiceApplied
@@ -734,6 +735,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, UserReplyContainer] = {}
+        # Отправленные реплики, которые больше не держат отрисовку модели
+        # над собой: их запись в треде не сверилась (`_release_sent_reply`).
+        self._sent_released: WeakSet[UserReplyContainer] = WeakSet()
         # client_id реплик, которые стоп или конец хода не сняли у ядра
         # (`_withdraw_queue`): ядро их держит, пока тред их не сверит.
         self._held_client_ids: set[str] = set()
@@ -2378,6 +2382,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._summary_marker_widgets.clear()
         self._held_reveals.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
+        self._sent_released = WeakSet()
         self._held_client_ids.clear()
         self._pending_wire_cache.clear()
         self._ephemera.clear()
@@ -4000,25 +4005,48 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             return
         view.event_closing()
 
-    @staticmethod
-    def _pinned_tail(trace, *, sent: bool = False) -> list:
+    def _pinned_tail(self, trace, *, sent: bool = False) -> list:
         """Прижатое к низу по порядку: реплики очереди и тихая отметка
         модели. Это всегда сплошной хвост ленты (`_trace_mount`), поэтому
-        обход с конца, а не всей ленты. ``sent`` — с ними и отправленные,
-        ещё не записанные ядром."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
+        обход с конца, а не всей ленты. ``sent`` — перед ними и
+        отправленные реплики, ещё не записанные ядром (`_sent_replies`),
+        где бы они ни стояли: под отправленной может встать строка не из
+        модели (вывод «!», служебная строка)."""
         tail = []
         for widget in reversed(trace.children):
-            sent_reply = (
-                sent
-                and isinstance(widget, UserReplyContainer)
-                and widget.state == "pending"
-            )
-            if not (pins_to_bottom(widget) or sent_reply):
+            if not pins_to_bottom(widget):
                 break
             tail.append(widget)
-        return tail[::-1]
+        tail.reverse()
+        return [*self._sent_replies(trace), *tail] if sent else tail
+
+    def _sent_replies(self, trace) -> list:
+        """Отправленные реплики, ещё не записанные ядром, по порядку
+        ленты: всё, что рисует модель, встаёт над ними — в файле треда они
+        будут после (R39). Отпущенные (`_release_sent_reply`) — нет."""
+        replies = [
+            w
+            for w in self._pending_user_widgets.values()
+            if w.state == "pending"
+            and w.parent is trace
+            and w not in self._sent_released
+        ]
+        if len(replies) > 1:
+            order = {w: i for i, w in enumerate(trace.children)}
+            replies.sort(key=order.__getitem__)
+        return replies
+
+    def _release_sent_reply(self) -> None:
+        """Реплика из треда не сверилась ни с одной отправленной (wire
+        другой): ядро её записало — самая ранняя отправленная больше не
+        держит отрисовку модели над собой. Иначе несверенная реплика
+        навсегда последняя в ленте, а все следующие ходы — над ней. Цена
+        ошибки (реплика треда не от отправки): запись, дочитанная до
+        записи отправленной, встанет под ней, как до R39."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        replies = self._sent_replies(trace)
+        if replies:
+            self._sent_released.add(replies[0])
 
     def _queued_tail(self, trace, *, sent: bool = False) -> list:
         """Реплики очереди по порядку (с ``sent`` — и отправленные, ещё не
@@ -4419,6 +4447,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                     self._refresh_queue_hint()
                     return
             # Без pending-матча — обычный mount (используем display_content = ev.summary).
+            self._release_sent_reply()
             self._mount_user_reply(
                 ev.summary,
                 event_no=ev.no,
