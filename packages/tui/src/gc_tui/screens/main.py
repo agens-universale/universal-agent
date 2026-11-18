@@ -3893,7 +3893,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
 
         above_sent=True — запись о прошлом (итог хода): встаёт и над
         отправленной репликой, которую ядро ещё не записало (`pending`), —
-        в файле треда она будет после.
+        в файле треда она будет после. Так же — всё, что рисует элемент
+        модели истории (`_model_drawing`): он дочитан из файла, а
+        отправленная реплика ляжет в файл за ним (ответ старого хода,
+        дочитанный после отправки, — над ней, как после переоткрытия).
 
         close_groups=False — виджет не событие верхнего уровня (вложенный
         без якоря): группы блоков он не закрывает.
@@ -3905,10 +3908,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
+        sent = above_sent or self._drawing_model > 0
         queue = (
             []
             if pins_to_bottom(widget)
-            else self._pinned_tail(trace, sent=above_sent)
+            else self._pinned_tail(trace, sent=sent)
         )
         if queue:
             self._feed_mount(trace, widget, before=queue[0])

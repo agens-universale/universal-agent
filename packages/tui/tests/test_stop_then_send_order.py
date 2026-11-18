@@ -227,3 +227,29 @@ async def test_new_turn_after_stop_waits_for_stopped_record(tmp_path):
         await pilot.pause()
         assert _trace(scr) == expected
         assert scr._feed_history.last_turn_outcome.opened_by == new
+
+
+@pytest.mark.asyncio
+async def test_record_read_after_send_goes_above_sent_reply(tmp_path):
+    """Запись треда, дочитанная после отправки новой реплики (ответ
+    старого хода, вызов и его вывод), встаёт над отправленной, ещё не
+    записанной репликой: в файле она раньше реплики — как строка итога и
+    как после переоткрытия."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_steps import _giant_turn
+
+    records = _giant_turn(0, 1, outcome=False)
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(scr, records[:1], splits=())
+        sent = scr._mount_user_reply("новая", state="pending", client_id="c")
+        feed_live(scr, records[1:], splits=())
+        await pilot.pause()
+        children = list(scr.query_one("#trace").children)
+        assert children[-1] is sent
+        assert isinstance(sent, UserReplyContainer)
+        assert sent.state == "pending"
