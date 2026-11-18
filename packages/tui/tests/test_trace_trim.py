@@ -279,11 +279,6 @@ def _pins(scr, widget):
         ("стрим", *attr("_stream_block")),
         ("строка ответа стрима", *attr("_stream_answer_row")),
         (
-            "попытки ответа",
-            lambda: scr._submit_solution_widgets.append([widget]),
-            lambda: scr._submit_solution_widgets.pop(),
-        ),
-        (
             "открытый блок «!»",
             lambda: setattr(ephemera, "bang_open_widgets", lambda: [widget]),
             lambda: setattr(ephemera, "bang_open_widgets", bang_open),

@@ -176,7 +176,9 @@ class ChunkRefs:
     (`trace_window.step_heads`); ``block_views`` — виды блоков шагов
     куска (по одному на шаг с вызовами, уровень в пространстве
     ``HISTORY_LEVEL_PREFIX``) — только для маршрута раскрытия, не в живой
-    реестр видов; ``thoughts`` — строки мыслей из памяти эфемерного."""
+    реестр видов; ``thoughts`` — строки мыслей из памяти эфемерного;
+    ``attempts`` — виджеты попыток сдачи последнего хода, которые ещё
+    может свернуть следующая (экран живого хода снимет их при свёртке)."""
 
     widgets: list[Widget] = field(default_factory=list)
     step_of: dict[Widget, int] = field(default_factory=dict)
@@ -187,6 +189,7 @@ class ChunkRefs:
     summary_bodies: dict[int, Widget] = field(default_factory=dict)
     block_views: BlockViews = field(default_factory=BlockViews)
     thoughts: list[Widget] = field(default_factory=list)
+    attempts: list[list[Widget]] = field(default_factory=list)
 
 
 def render_steps(
@@ -594,7 +597,12 @@ class _Chunk:
             self._finish_ids.add(ev.call_id)
         if ev.no in self._model.collapsed_attempts:
             return
-        self._mount_all(build_finish_widgets(close, event_no=ev.no))
+        widgets = build_finish_widgets(close, event_no=ev.no)
+        self._mount_all(widgets)
+        if ev.call_id and self._turn == self._model.turn_count() - 1:
+            # Её ещё может свернуть следующая попытка: экран живого хода
+            # берёт её в свёртку (R44).
+            self.refs.attempts.append(widgets)
 
     def _question(self, ev: TraceEvent) -> None:
         """Вопрос агента — видимая строка истории без баннера; «без

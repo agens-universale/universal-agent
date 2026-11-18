@@ -2928,7 +2928,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         """Шаг нельзя снимать (§5.3, R32, R41): последний шаг модели, шаг
         с прижатым хвостом, шаг со строкой, на которую держит ссылку живое
         состояние или фокус (`_live_widgets`: идущий вызов, «!», вопрос,
-        стрим, попытки сдачи). Прочие шаги текущего хода снимаются, как
+        стрим). Попытка сдачи шаг не держит (R44): снятая просто не стоит
+        в ленте, вернувшаяся куском — снова в свёртке
+        (`ChunkRefs.attempts`). Прочие шаги текущего хода снимаются, как
         шаги старых: гигантский живой ход у низа и при подъёме держится в
         пределах окна; раскрытое возвращается со снятым шагом снимком
         вида."""
@@ -2966,8 +2968,6 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             *self._pending_user_widgets.values(),
             *self._ephemera.bang_open_widgets(),
         }
-        for widgets in self._submit_solution_widgets:
-            live.update(widgets)
         live.discard(None)
         return live
 
@@ -3042,6 +3042,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._summary_marker_widgets.update(refs.summary_markers)
         self._summary_body_widgets.update(refs.summary_bodies)
         self._streamed_thoughts += refs.thoughts
+        # Попытка сдачи последнего хода, которую ещё может свернуть
+        # следующая, — в свёртку, где бы её ни нарисовали (R44).
+        self._submit_solution_widgets += refs.attempts
 
     def _seed_fresh_line(self, line: Optional[TurnLine]) -> None:
         """Свежая строка итога из куска — ссылкой экрана; пока стоит бар

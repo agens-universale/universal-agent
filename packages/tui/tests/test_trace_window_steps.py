@@ -1218,3 +1218,64 @@ async def test_refused_finish_long_work_trim_and_remount(
     assert sum("Отчёт 0 попытка 2." in t for _k, t, _c in live) == 1
     assert not any("Отчёт 0 попытка 1." in t for _k, t, _c in live)
     assert live == opened
+
+
+def _texts(scr) -> list[str]:
+    return [t for _k, t, _c in feed_dump(_trace(scr))]
+
+
+async def _climb(pilot, scr) -> None:
+    """Подъём к началу истории с текущим окном."""
+    trace = _trace(scr)
+    for _ in range(400):
+        if scr._window_first == 0:
+            break
+        trace.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        await _settled(pilot, scr)
+    assert scr._window_first == 0
+
+
+@pytest.mark.asyncio
+async def test_refused_attempt_does_not_pin_live_turn(tmp_path, monkeypatch):
+    """Отклонённая попытка текущего хода шаг не закрепляет (R44): сотня
+    вызовов после отказа у низа держит окно в пределах, шаг попытки
+    снимается. Подъём посреди хода возвращает её куском — экран берёт её
+    виджеты в свёртку, и вторая попытка снимает её, где бы она ни стояла:
+    ни в ленте, ни после подъёма и возврата отклонённой попытки нет."""
+    bound = _small_window(monkeypatch)
+    records = _refused_finish_turn(0, 110)
+    second = next(
+        i
+        for i, rec in enumerate(records)
+        if rec["payload"].get("id") == "fc_fin_0_2"
+    )
+    refused = "Отчёт 0 попытка 1."
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(
+            pilot, scr, records[:second], bound=bound, whole_calls=True
+        )
+        model = scr._window_model()
+        attempt = model.item_step(
+            next(
+                i
+                for i, it in enumerate(model.items)
+                if it.event is not None and it.event.call_id == "fin_0_1"
+            )
+        )
+        assert scr._window_first > attempt
+        assert not any(refused in t for t in _texts(scr))
+        await _climb(pilot, scr)
+        assert sum(refused in t for t in _texts(scr)) == 1
+        await _feed_turn(pilot, scr, records[second:], whole_calls=True)
+        assert not any(refused in t for t in _texts(scr))
+        scr._scroll_to_bottom()
+        await pilot.pause()
+        await _settled(pilot, scr)
+        await _climb(pilot, scr)
+        texts = _texts(scr)
+        assert not any(refused in t for t in texts)
+        assert sum("Отчёт 0 попытка 2." in t for t in texts) == 1
