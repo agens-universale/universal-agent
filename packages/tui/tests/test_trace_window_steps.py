@@ -992,16 +992,17 @@ def _finish(i: int, n: int, *, ok: bool) -> list[dict]:
 
 
 def _refused_finish_turn(i: int, after: int) -> list[dict]:
-    """Ход: первая сдача — первое, что рисует шаг (одна группа поисков до
-    предела шага — закрыться ей негде, и граница встаёт на пределе, на
-    прозе, которую гасит дедуп ответа: она повторяет прошлую), судья её
-    отклоняет, потом ``after`` вызовов и вторая, принятая сдача."""
+    """Ход: первая сдача — первое, что рисует шаг. Первый шаг откатывается
+    к началу группы поисков, и второй шаг — одна группа: закрыться ей
+    внутри шага негде, граница встаёт на пределе — на прозе, которую гасит
+    дедуп ответа (она повторяет прошлую). Судья сдачу отклоняет, потом
+    ``after`` вызовов и вторая, принятая сдача."""
     user = f"m_u{i:04d}"
     records = [
         _message({"role": "user", "id": user, "content": f"запрос {i}"}),
         _prose(i, 0),
     ]
-    for k in range(10):
+    for k in range(11):
         records += _find(i, k)
     again = _prose(i, 0)
     again["payload"] = {**again["payload"], "id": f"msg_again_{i}"}
@@ -2132,12 +2133,15 @@ def test_cap_boundary_moves_back_to_group_close():
 
 
 def test_uniform_run_still_cut_at_cap():
-    """Длинная серия однородных чтений без прозы — группа нигде не
-    закрывается сама: граница — на пределе, как раньше (R50)."""
+    """Длинная серия однородных чтений без прозы — внутри серии группа
+    нигде не закрывается сама: граница — на пределе, как раньше (R50).
+    Первый шаг откатывается к началу серии — шаг из одной реплики (R51)."""
     model = _model_of_events(_turn_events([("call", "fs_read_file")] * 120))
     starts = model.step_starts
     assert len(starts) > 5
-    assert starts[1] - starts[0] == STEP_MAX_ITEMS - 1
+    assert starts[:2] == [0, 1]
+    for s in range(1, model.step_count() - 1):
+        assert len(model.step_range(s)) in (STEP_MAX_ITEMS - 1, STEP_MAX_ITEMS)
     for s in range(model.step_count()):
         assert len(model.step_range(s)) <= STEP_MAX_ITEMS
 
@@ -2261,3 +2265,20 @@ async def test_moved_back_boundary_live_matches_open(tmp_path, monkeypatch):
             assert scr._window_first > 0
             live = await _climb_whole(pilot, scr, monkeypatch)
     assert live == opened
+
+
+def test_short_runs_keep_group_with_early_close_point():
+    """Место, где группа закрылась бы сама, раньше минимума шага — тоже
+    место для границы (R51): «4 команды, 10 чтений» — одна группа
+    «Explored 10», «проза, 11 чтений» — 11 чтений в одном шаге."""
+    for spec, reads in (
+        ([("call", "exec_command")] * 4 + [("call", "fs_read_file")] * 10, 10),
+        ([("say", "смотрю")] + [("call", "fs_read_file")] * 11, 11),
+    ):
+        model = _model_of_events(_turn_events(spec))
+        steps = {
+            model.item_step(i)
+            for i, it in enumerate(model.items)
+            if it.event.kind == "call" and it.event.wire_name == "fs_read_file"
+        }
+        assert len(steps) == 1, (reads, model.step_starts)

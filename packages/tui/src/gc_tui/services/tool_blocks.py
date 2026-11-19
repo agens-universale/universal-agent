@@ -157,8 +157,8 @@ def block_kind(category: DisplayCategory) -> Optional[BlockKind]:
 
 def call_block_kind(wire_name: str) -> Optional[BlockKind]:
     """Вид блока вызова по wire-имени — без сведений о серверах MCP (вне
-    экрана: модель истории). MCP и неизвестные — одиночные, как и с
-    ними; тул MCP, скрытый политикой, отсюда не виден (одиночный)."""
+    экрана: модель истории). Тот же вид, что у ленты: вызов MCP —
+    одиночный и с ними, и без них (`tool_display`)."""
     return block_kind(tool_display(wire_name).category)
 
 
