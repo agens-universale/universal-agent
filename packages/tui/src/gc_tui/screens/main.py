@@ -4441,7 +4441,13 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                 if ev.tool_name == "ask_human" and ev.call_id
                 else None
             )
-            for cid, widget in list(self._pending_user_widgets.items()):
+            # Ответ на известный вопрос — сначала его отправленный ответ, потом
+            # по порядку отправки по wire.
+            pending = sorted(
+                self._pending_user_widgets.items(),
+                key=lambda item: item[0] != answered,
+            )
+            for cid, widget in pending:
                 if cid == answered or self._pending_wire_match(
                     cid, polled_wire
                 ):

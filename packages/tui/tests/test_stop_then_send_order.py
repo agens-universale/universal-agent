@@ -407,3 +407,55 @@ async def test_unmatched_answer_reconciles_by_question(tmp_path):
         assert sent.state == "normal"
         assert [r.plain_text for r in replies].count("этот") == 1
         assert not any("[#1] этот" in r.plain_text for r in replies)
+
+
+@pytest.mark.asyncio
+async def test_answer_reconciles_before_same_text_queued_reply(tmp_path):
+    """Раньше отправлена реплика «да», и ответ на вопрос — тоже «да»:
+    запись ответа сверяется с отправленным ответом (по вопросу), а не с
+    первой по порядку отправленной, хотя wire совпал у обеих (R49 m3)."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_far_edge import _message
+    from test_trace_window_steps import _giant_turn
+
+    question = _message(
+        {
+            "type": "function_call",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fc_q1",
+            "status": "completed",
+            "arguments": json.dumps({"question": "продолжать?"}),
+        }
+    )
+    answer = _message(
+        {
+            "type": "function_call_output",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fco_q1",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "response": "да"}
+            ),
+        }
+    )
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(
+            scr, [*_giant_turn(0, 1, outcome=False)[:1], question], splits=()
+        )
+        queued_cid = scr._track_pending(display_text="да", wire_content="да")
+        queued = scr._mount_user_reply(
+            "да", state="pending", client_id=queued_cid
+        )
+        scr._ask_human_call_id = "q1"
+        cid = scr._track_pending(display_text="да", wire_content="да")
+        scr._track_answer(cid)
+        sent = scr._mount_user_reply("да", state="pending", client_id=cid)
+        feed_live(scr, [answer], splits=())
+        await pilot.pause()
+        assert sent.state == "normal"
+        assert queued.state == "pending"
