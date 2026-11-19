@@ -1412,3 +1412,98 @@ async def test_empty_step_after_gap_does_not_stop_bottom_trim(
             await _settled(pilot, scr)
             assert _unpinned_widgets(scr) <= bound
         assert scr._window_first == 0
+
+
+# ---- липкая реплика при чтении гигантского хода (R46) ----------------------
+
+
+async def _open_giant(pilot, tmp_path, records):
+    fixture = HistoryFixture(
+        records=tuple(records), segments=(tuple(records),), sidecar=()
+    )
+    write_history(str(tmp_path), fixture)
+    scr = pilot.app.screen
+    assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+    await pilot.pause(0.3)
+    await _settled(pilot, scr)
+    return scr
+
+
+async def _scroll_to(pilot, scr, y: int):
+    _trace(scr).scroll_to(y=y, animate=False)
+    await pilot.pause()
+    await _settled(pilot, scr)
+    scr._refresh_trace_overlays()
+    await pilot.pause()
+
+
+def _sticky(scr):
+    from gc_tui.widgets.trace_overlays import StickyReply
+
+    return scr.query_one("#trace-sticky-reply", StickyReply)
+
+
+def _sticky_text(scr) -> str | None:
+    sticky = _sticky(scr)
+    if not sticky.display or sticky.reply is None:
+        return None
+    return sticky.reply.quiet_line().plain
+
+
+@pytest.mark.asyncio
+async def test_sticky_reply_of_giant_turn_read_deep(tmp_path, monkeypatch):
+    """Чтение посреди гигантского хода, чей первый шаг снят окном: липкая
+    реплика — реплика этого хода из модели, тем же видом (R46). Клик —
+    шаги до реплики домонтируются, реплика наверху. Ниже, в следующем
+    ходе, — его реплика; у низа липкой реплики нет."""
+    from gc_tui.messages import ScrollToReply
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    _small_window(monkeypatch)
+    records = [*_giant_turn(0, 60), *_giant_turn(1, 90), *_giant_turn(2, 60)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_giant(pilot, tmp_path / "t", records)
+        model = scr._window_model()
+        trace = _trace(scr)
+        assert _sticky_text(scr) is None
+        # Читать вверх по ходу 2, пока его первый шаг не снят и чтение не
+        # ушло в ход 1 глубже его снятого начала.
+        for _ in range(200):
+            await _scroll_to(pilot, scr, max(0, trace.scroll_y - 20))
+            row = scr._window_reading_row()
+            step = scr._window_step_at(row)
+            if (
+                step is not None
+                and model.step_turn(step) == 1
+                and scr._window_first > model.turn_step(1)
+            ):
+                break
+        else:
+            raise AssertionError("не дошли до глубины хода 1")
+        assert scr._stick_bottom is False
+        assert _sticky_text(scr) == "› запрос 1"
+        sticky = _sticky(scr)
+        assert not sticky.reply.is_attached  # реплика — из модели
+        scr.post_message(ScrollToReply(sticky.reply))
+        await pilot.pause()
+        await _settled(pilot, scr)
+        await pilot.pause()
+        head = scr._window_heads.get(model.turn_step(1))
+        assert isinstance(head, UserReplyContainer)
+        assert head.plain_text == "запрос 1"
+        # Верх реплики (с её отступом) — первая строка видимой области.
+        top = round(trace.scroll_y) + head.styles.margin.top
+        assert trace.placed_top(head) == top
+        # Вниз, в ход 2 глубже его реплики.
+        start2 = model.turn_step(2)
+        for _ in range(400):
+            await _scroll_to(pilot, scr, trace.scroll_y + 20)
+            step = scr._window_step_at(scr._window_reading_row())
+            if step is not None and step > start2:
+                break
+        assert _sticky_text(scr) == "› запрос 2"
+        scr._scroll_to_bottom()
+        await pilot.pause()
+        await _settled(pilot, scr)
+        scr._refresh_trace_overlays()
+        assert _sticky_text(scr) is None

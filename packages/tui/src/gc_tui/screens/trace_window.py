@@ -31,7 +31,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from bisect import bisect_right
+from collections.abc import Iterable, Mapping, Sequence
 from itertools import takewhile
 from typing import TYPE_CHECKING, Literal
 from weakref import WeakKeyDictionary
@@ -42,11 +43,14 @@ from gc_tui.services.history_render import (
     ChunkOptions,
     FeedHost,
     render_steps,
+    reply_widget,
 )
+from gc_tui.services.trace_steps import shown
 
 if TYPE_CHECKING:
     from textual.widget import Widget
 
+    from gc_tui.messages import ScrollToReply
     from gc_tui.services.history_model import HistoryModel
     from gc_tui.services.history_render import (
         ChunkRefs,
@@ -118,6 +122,9 @@ class TraceWindowMixin:
         self._window_step_of: WeakKeyDictionary[Widget, int] = (
             WeakKeyDictionary()
         )
+        # Реплики ходов из модели для липкой строки (номер события → виджет
+        # вне ленты), когда шаг реплики снят (R46).
+        self._window_replies: dict[int, Widget] = {}
 
     @property
     def _window_heads(self) -> dict[int, Widget]:
@@ -193,6 +200,7 @@ class TraceWindowMixin:
         self._window_grown = 0
         self._window_grow_step = -1
         self._window_step_of = WeakKeyDictionary()
+        self._window_replies = {}
         self._window_first = 0
         self._window_gap = range(0)
         self._window_feed().hold_first_visible(None)
@@ -827,6 +835,97 @@ class TraceWindowMixin:
             if widgets or widget is start:
                 widgets.append(widget)
         return widgets
+
+    # ---- липкая реплика (R46) --------------------------------------------
+
+    def _sticky_reply(self, placements, scroll_y: int) -> Widget | None:
+        """Реплика липкой строки (R46): смонтированная ближайшая выше края
+        — как раньше, если она из хода читаемой строки; нет такой, а шаг
+        реплики этого хода снят окном (чтение посреди гигантского хода), —
+        реплика хода из модели тем же видом. Шаг строки и реплики — по
+        меткам, без прохода по ленте."""
+        mounted = super()._sticky_reply(placements, scroll_y)
+        step = self._window_step_in(placements, scroll_y)
+        if step is None:
+            return mounted
+        model = self._window_model()
+        turn = model.step_turn(step)
+        own = None if mounted is None else self._window_step_of.get(mounted)
+        if (own is not None and model.step_turn(own) == turn) or (
+            mounted is not None and own is None
+        ):
+            return mounted
+        if self._window_mounted(model.turn_step(turn)):
+            return mounted
+        return self._window_turn_reply(turn) or mounted
+
+    def _window_step_in(
+        self, placements: Sequence, scroll_y: int
+    ) -> int | None:
+        """Шаг строки ленты на ``scroll_y``: метка ближайшего помеченного
+        виджета на ней или выше (раскладка ``placements`` — по порядку
+        ленты)."""
+        at = bisect_right(placements, scroll_y, key=lambda p: p.region.y)
+        for i in range(at - 1, -1, -1):
+            step = self._window_step_of.get(placements[i].widget)
+            if step is not None:
+                return step
+        return None
+
+    def _window_mounted(self, step: int) -> bool:
+        """Шаг в смонтированном диапазоне окна (вне разрыва)."""
+        return step >= self._window_first and step not in self._window_gap
+
+    def _window_turn_reply(self, turn: int) -> Widget | None:
+        """Реплика хода ``turn`` из модели — виджет вне ленты (как его
+        рисует кусок); у хода без показанной реплики — None."""
+        model = self._window_model()
+        if turn >= model.turn_count():
+            return None
+        ev = model.items[model.turn_starts[turn]].event
+        if ev is None or ev.kind != "user" or not shown(ev, model.withdrawn):
+            return None
+        reply = self._window_replies.get(ev.no)
+        if reply is None:
+            reply = self._window_replies[ev.no] = reply_widget(ev)
+        return reply
+
+    def on_scroll_to_reply(self, message: ScrollToReply) -> None:
+        """Клик по липкой реплике из модели: шаги от реплики до читаемого
+        домонтируются обычным куском окна (шаги одного хода), реплика —
+        наверху. Смонтированная — как раньше."""
+        reply = message.reply
+        if reply.is_attached or self._window_busy:
+            super().on_scroll_to_reply(message)
+            return
+        model = self._window_model()
+        no = getattr(reply, "event_no", 0)
+        if self._window_replies.get(no) is not reply:
+            return
+        step = model.turn_step(model.turn_index_of(no))
+        if self._window_mounted(step):
+            return
+        gap = self._window_gap
+        if step < self._window_first:
+            steps = range(step, self._window_first)
+            refs = self._window_insert(steps, before=self._window_top())
+            self._window_first = step
+            side: Side = "top"
+        else:
+            steps = range(step, gap.stop)
+            refs = self._window_insert(steps, before=self._window_gap_head())
+            self._window_set_gap(gap.start, step)
+            side = "bottom"
+        self._window_settle_later(refs, side, False)
+        self._window_feed().call_after_layout(
+            lambda: self._window_show_head(step)
+        )
+
+    def _window_show_head(self, step: int) -> None:
+        """Первый виджет шага ``step`` — наверху ленты."""
+        head = self._window_heads.get(step)
+        if head is not None:
+            self._window_feed().scroll_to_widget(head, animate=False, top=True)
 
     # ---- отклик на прокрутку ---------------------------------------------
 

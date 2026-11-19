@@ -215,6 +215,19 @@ def render_steps(
     return chunk.finish()
 
 
+def reply_widget(ev: TraceEvent) -> Widget:
+    """Виджет реплики события ``ev`` — как его рисует кусок; им же окно
+    показывает липкую реплику хода, чей шаг снят."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    return UserReplyContainer(
+        ev.summary,
+        event_no=ev.no,
+        images=ev.attachments,
+        skill=ev.skill or None,
+    )
+
+
 def history_level(step: int) -> str:
     """Уровень блоков шага ``step`` куска."""
     return f"{HISTORY_LEVEL_PREFIX}{step}"
@@ -549,17 +562,8 @@ class _Chunk:
     def _user(self, ev: TraceEvent) -> None:
         """Реплика (и ответ на вопрос агента): дедуп ответа и попытки
         сбрасываются."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
         replay_answer(self._flow, ev)
-        self.mount(
-            UserReplyContainer(
-                ev.summary,
-                event_no=ev.no,
-                images=ev.attachments,
-                skill=ev.skill or None,
-            )
-        )
+        self.mount(reply_widget(ev))
 
     def _agent(self, ev: TraceEvent) -> None:
         if is_finish(ev):

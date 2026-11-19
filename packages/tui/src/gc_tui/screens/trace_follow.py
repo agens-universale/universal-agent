@@ -166,9 +166,15 @@ class TraceFollowMixin:
         # кэш раскладки. Иной размер пересчитал бы её и сбил якорь
         # (`AnchoredScroll.arrange`).
         placements = trace.arrange(box.size).placements
-        reply = reply_above(placements, round(trace.scroll_y), _is_top_reply)
+        reply = self._sticky_reply(placements, round(trace.scroll_y))
         sticky.show(reply, box)
         pill.show(self._end_pill_label(), box, self._pill_row(trace))
+
+    def _sticky_reply(self, placements, scroll_y: int) -> Widget | None:
+        """Реплика липкой строки: ближайшая смонтированная выше края
+        (`placements` — раскладка ленты). Окно ленты достаёт реплику хода
+        из модели, когда её шаг снят (`TraceWindowMixin`)."""
+        return reply_above(placements, scroll_y, _is_top_reply)
 
     def _pill_row(self, trace: VerticalScroll) -> int:
         """Ряд плашки «в конец» — последний ряд ленты."""
