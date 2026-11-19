@@ -703,9 +703,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._edits_lookup = None  # Optional[EditsLookup]
         self._edits_lookup_key: Optional[tuple] = None
         self._submit_solution_call_ids: set[str] = set()
-        # Виджеты последней попытки turn_finish хода (ответ, код, итог,
-        # заметка) — при повторе свернуть предыдущую.
-        self._submit_solution_widgets: list[list[Widget]] = []
+        # Виджеты попыток turn_finish хода (ответ, код, итог, заметка) по
+        # номеру события: свёрнутые моделью снимаются
+        # (`_drop_collapsed_attempts`).
+        self._submit_solution_widgets: dict[int, list[Widget]] = {}
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
         self._summary_body_widgets: dict[int, CompactionBody] = {}
         self._summary_marker_widgets: dict[int, CompactionRule] = {}
@@ -3025,11 +3026,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._streamed_thoughts = [
             w for w in self._streamed_thoughts if w not in gone
         ]
-        self._submit_solution_widgets = [
-            ws
-            for ws in self._submit_solution_widgets
+        self._submit_solution_widgets = {
+            no: ws
+            for no, ws in self._submit_solution_widgets.items()
             if not any(w in gone for w in ws)
-        ]
+        }
         self._held_reveals = [
             fn for fn in self._held_reveals if _bound_widget(fn) not in gone
         ]
@@ -3049,7 +3050,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._streamed_thoughts += refs.thoughts
         # Попытка сдачи последнего хода, которую ещё может свернуть
         # следующая, — в свёртку, где бы её ни нарисовали (R44).
-        self._submit_solution_widgets += refs.attempts
+        self._submit_solution_widgets.update(refs.attempts)
 
     def _seed_fresh_line(self, line: Optional[TurnLine]) -> None:
         """Свежая строка итога из куска — ссылкой экрана; пока стоит бар
@@ -3182,12 +3183,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         )
         if following:
             self._scroll_trace_end()
-        if self._answer_flow.collapsed:
-            self._drop_finish_attempts()
+        self._drop_collapsed_attempts()
         if not ev.call_id:
             return
         self._submit_solution_call_ids.add(ev.call_id)
-        self._submit_solution_widgets.append(widgets)
+        self._submit_solution_widgets[ev.no] = widgets
         self._new_attempt_replies = int(counted)
         # Финальный ответ виден — переключаем индикатор в режим
         # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
@@ -3196,17 +3196,23 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         if self._thinking is not None:
             self._thinking.set_state("validating")
 
-    def _drop_finish_attempts(self) -> None:
-        """Убрать прошлые попытки turn_finish хода.
+    def _drop_collapsed_attempts(self) -> None:
+        """Убрать попытки turn_finish хода, которые модель истории пометила
+        свёрнутыми (`HistoryModel.collapsed_attempts`, одно правило с
+        отрисовщиком кусков): следующая попытка или проза, повторившая
+        отчёт.
 
         Отклонённые intent_guard'ом попытки убираем молча (как regenerate
         в чатах): внутренняя кухня качества юзеру не показывается, обе
         попытки сохранены в jsonl треда. Убранная попытка уходит и из
         счётчика плашки: он равен видимым новым ответам."""
-        for prev_widgets in self._submit_solution_widgets:
-            for w in prev_widgets:
+        collapsed = self._feed_history.collapsed_attempts
+        gone = [no for no in self._submit_solution_widgets if no in collapsed]
+        if not gone:
+            return
+        for no in gone:
+            for w in self._submit_solution_widgets.pop(no):
                 w.remove()
-        self._submit_solution_widgets.clear()
         if self._new_attempt_replies:
             self._new_replies -= self._new_attempt_replies
             self._new_attempt_replies = 0
@@ -4469,10 +4475,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             verdict = answer_verdict(self._answer_flow, ev)
             if not verdict.show:
                 return
-            if self._answer_flow.collapsed:
-                # Ответ модели повторил отчёт отклонённой попытки: попытка
-                # уходит, текст остаётся ответом — свёртка не унесёт его.
-                self._drop_finish_attempts()
+            # Ответ модели повторил отчёт отклонённой попытки: попытка
+            # уходит, текст остаётся ответом — свёртка не унесёт его.
+            self._drop_collapsed_attempts()
             if ev.tool_name == "intermediate_reply":
                 from gc_tui.services.trace_render import (
                     build_intermediate_widgets,

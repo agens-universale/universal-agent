@@ -1572,3 +1572,29 @@ async def test_reused_call_ids_across_turns_render_by_steps():
             await pilot.pause()
             top = step_heads(feed.children, refs.step_of).get(s, top)
         assert feed_dump(feed) == whole
+
+
+@pytest.mark.asyncio
+async def test_live_collapse_follows_model_marks(tmp_path):
+    """Живой путь снимает попытки по пометкам модели — один источник
+    свёртки (R47): даже если дедуп ответа экрана начат заново посреди
+    хода, вторая попытка снимает первую."""
+    from gc_tui.services.answer_flow import AnswerFlow
+
+    records = _refused_finish_turn(0, 2)
+    second = next(
+        i
+        for i, rec in enumerate(records)
+        if rec["payload"].get("id") == "fc_fin_0_2"
+    )
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, records[:second], whole_calls=True)
+        assert any("Отчёт 0 попытка 1." in t for t in _texts(scr))
+        scr._answer_flow = AnswerFlow()
+        await _feed_turn(pilot, scr, records[second:], whole_calls=True)
+        texts = _texts(scr)
+        assert not any("Отчёт 0 попытка 1." in t for t in texts)
+        assert sum("Отчёт 0 попытка 2." in t for t in texts) == 1

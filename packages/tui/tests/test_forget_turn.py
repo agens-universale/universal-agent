@@ -21,7 +21,7 @@ def _held(scr) -> list:
         *scr._summary_marker_widgets.values(),
         *scr._summary_body_widgets.values(),
         *scr._streamed_thoughts,
-        *(w for ws in scr._submit_solution_widgets for w in ws),
+        *(w for ws in scr._submit_solution_widgets.values() for w in ws),
         *map(_bound_widget, scr._held_reveals),
         *scr._question_rows.values(),
         *scr._window_heads.values(),
