@@ -992,20 +992,20 @@ def _finish(i: int, n: int, *, ok: bool) -> list[dict]:
 
 
 def _refused_finish_turn(i: int, after: int) -> list[dict]:
-    """Ход: первая сдача — первое, что рисует шаг (шаг начат на 22-м
-    элементе прозой, которую гасит дедуп ответа: она повторяет прошлую),
-    судья её отклоняет, потом ``after`` вызовов и вторая, принятая
-    сдача."""
+    """Ход: первая сдача — первое, что рисует шаг (одна группа поисков до
+    предела шага — закрыться ей негде, и граница встаёт на пределе, на
+    прозе, которую гасит дедуп ответа: она повторяет прошлую), судья её
+    отклоняет, потом ``after`` вызовов и вторая, принятая сдача."""
     user = f"m_u{i:04d}"
     records = [
         _message({"role": "user", "id": user, "content": f"запрос {i}"}),
         _prose(i, 0),
     ]
-    for k in range(9):
-        records += _call(i, k)
-    again = _prose(i, 1)
+    for k in range(10):
+        records += _find(i, k)
+    again = _prose(i, 0)
     again["payload"] = {**again["payload"], "id": f"msg_again_{i}"}
-    records += [_prose(i, 1), again, *_finish(i, 1, ok=False)]
+    records += [again, *_finish(i, 1, ok=False)]
     for k in range(10, 10 + after):
         records += _call(i, k)
     records += _finish(i, 2, ok=True)
