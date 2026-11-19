@@ -1687,9 +1687,12 @@ async def test_sticky_click_brings_reply_by_bounded_chunks(
         for _ in range(400):
             await _scroll_to(pilot, scr, max(0, trace.scroll_y - 20))
             step = scr._window_step_at(scr._window_reading_row())
-            if step is not None and model.step_turn(step) == 1:
-                if step - start1 >= 40:
-                    break
+            if (
+                step is not None
+                and model.step_turn(step) == 1
+                and step - start1 >= 40
+            ):
+                break
         assert scr._window_first - start1 >= 30
         assert _sticky_text(scr) == "› запрос 1"
         chunks, worst = [], []
@@ -1723,6 +1726,100 @@ async def test_sticky_click_brings_reply_by_bounded_chunks(
         assert max(chunks) <= policy.CHUNK_MAX
         assert max(worst) <= bound
         head = scr._window_heads.get(start1)
+        assert isinstance(head, UserReplyContainer)
+        top = round(trace.scroll_y) + head.styles.margin.top
+        assert trace.placed_top(head) == top
+
+
+async def _island_reading_giant(pilot, scr, model, monkeypatch):
+    """Остров: шаг старого хода закреплён (ссылка идущего вызова), подъём
+    к началу и переход в конец — прочитанное не снимается дальше
+    закреплённого, перед закреплённым низом встаёт хвост; нижний конец
+    прочитанного закреплён так же. Гигантский последний ход начат в
+    разрыве. Читаем в закреплённом низу."""
+    trace = _trace(scr)
+    for _ in range(400):
+        if scr._window_first == 0:
+            break
+        trace.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        await _settled(pilot, scr)
+    pinned = model.turn_step(0)
+    scr._poll_tick = lambda: None
+    scr._active_calls["pin"] = scr._window_step_widgets(pinned)[0]
+    # Хвост перехода в конец выше экрана: читаемая строка — в
+    # закреплённом низу.
+    monkeypatch.setattr(policy, "TAIL_MIN", 400)
+    monkeypatch.setattr(policy, "WINDOW_LIMIT", 600)
+    scr._scroll_to_bottom()
+    await pilot.pause()
+    await _settled(pilot, scr)
+    # Нижний конец прочитанного — тоже закреплён: остров.
+    bottom = scr._window_gap.start - 1
+    scr._active_calls["pin2"] = scr._window_step_widgets(bottom)[0]
+    gap_y = scr._window_gap_y()
+    assert gap_y + 1 < trace.max_scroll_y - scr._STICK_TOL
+    await _scroll_to(pilot, scr, gap_y + 1)
+    assert scr._stick_bottom is False
+    assert scr._window_gap
+    assert scr._window_island()
+    return pinned
+
+
+@pytest.mark.asyncio
+async def test_sticky_click_reaches_reply_above_pinned_bottom(
+    tmp_path, monkeypatch
+):
+    """Клик по липкой реплике, чей шаг — в разрыве над закреплённым низом
+    острова (R48 I1): куски идут от закреплённого низа вверх, в пределах
+    хода реплики, каждый не больше ``CHUNK_MAX``; окно не растёт от
+    прочитанного; реплика наверху."""
+    from gc_tui.messages import ScrollToReply
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    _small_window(monkeypatch)
+    records = [
+        *(r for i in range(5) for r in _giant_turn(i, 3)),
+        *_giant_turn(5, 90),
+    ]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_giant(pilot, tmp_path / "t", records)
+        model = scr._window_model()
+        trace = _trace(scr)
+        await _island_reading_giant(pilot, scr, model, monkeypatch)
+        reply_step = model.turn_step(5)
+        assert reply_step in scr._window_gap
+        assert _sticky_text(scr) == "› запрос 5"
+        inserted, chunks = [], []
+        insert, settle = scr._window_insert, scr._window_settle
+
+        def spy_insert(steps, *, before):
+            # Куски пути к реплике; после него окно живёт как обычно.
+            if scr._window_reply_step is not None:
+                inserted.append(steps)
+            return insert(steps, before=before)
+
+        def spy_settle(gen, widgets, side, focus):
+            if scr._window_reply_step is not None:
+                chunks.append(
+                    sum(len(w.walk_children(with_self=True)) for w in widgets)
+                )
+            settle(gen, widgets, side, focus)
+
+        scr._window_insert = spy_insert
+        scr._window_settle = spy_settle
+        scr.post_message(ScrollToReply(_sticky(scr).reply))
+        for _ in range(200):
+            await pilot.pause()
+            await _settled(pilot, scr)
+            if scr._window_reply_step is None and not scr._window_busy:
+                break
+        await pilot.pause()
+        await _settled(pilot, scr)
+        assert inserted
+        assert all(steps.start >= reply_step for steps in inserted)
+        assert max(chunks) <= policy.CHUNK_MAX
+        head = scr._window_heads.get(reply_step)
         assert isinstance(head, UserReplyContainer)
         top = round(trace.scroll_y) + head.styles.margin.top
         assert trace.placed_top(head) == top

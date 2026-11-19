@@ -985,18 +985,45 @@ class TraceWindowMixin:
                 lambda: self._window_show_head(step)
             )
             return
-        feed = self._window_feed()
         if step < self._window_first:
-            feed.scroll_to(y=0, animate=False, immediate=True)
+            self._window_reply_scroll(0)
             done = self._window_prepend(focus=False)
         else:
-            gap_y = self._window_gap_y()
-            if gap_y is not None:
-                y = max(0, gap_y - feed.container_size.height)
-                feed.scroll_to(y=y, animate=False, immediate=True)
-            done = self._window_append(focus=False)
+            done = self._window_reach_gap_bottom(step)
         if not done:
             self._window_reply_step = None
+
+    def _window_reply_scroll(self, y: float) -> None:
+        """Прокрутка ленты самим путём к реплике — запомнена, чтобы не
+        принять её за уход человека (`_on_trace_scrolled`)."""
+        feed = self._window_feed()
+        y = min(y, feed.max_scroll_y)
+        self._window_reply_y = round(y)
+        feed.scroll_to(y=y, animate=False, immediate=True)
+
+    def _window_reach_gap_bottom(self, step: int) -> bool:
+        """Шаг реплики в разрыве — у его нижнего края, над закреплённым
+        низом (читаемое за разрывом, ход начат в разрыве): кусок, который
+        кончается на конце разрыва, — перед закреплённым низом, разрыв
+        сужается снизу; зеркально подъёму, не выходя за ход реплики.
+        Лента — к верху закреплённого низа."""
+        gap = self._window_gap
+        prev = policy.prev_chunk(
+            gap.stop,
+            self._window_estimates(self._window_model()),
+            policy.CHUNK_MIN,
+            policy.CHUNK_MAX,
+        )
+        steps = range(max(prev.start, gap.start, step), gap.stop)
+        if not steps:
+            return False
+        gap_y = self._window_gap_y()
+        if gap_y is not None:
+            self._window_reply_scroll(gap_y)
+        refs = self._window_insert(steps, before=self._window_gap_head())
+        self._window_set_gap(gap.start, steps.start)
+        self._window_settle_later(refs, "bottom", False)
+        return True
 
     def _window_show_head(self, step: int) -> None:
         """Первый виджет шага ``step`` — наверху ленты."""
