@@ -264,8 +264,11 @@ class _Chunk:
         # Виджеты позиции куска, ещё не отданные ленте (`flush`).
         self._pending: list[Widget] = []
         self._item_of: dict[Widget, int] = {}
-        # Элемент модели, который рисуется (метка смонтированного).
+        # Элемент модели, который рисуется (метка смонтированного), и
+        # последний нарисованный элемент шага — метка того, что встаёт после
+        # элементов (конец части хода: фразы из снимка вида, итог хода).
         self._at: int | None = None
+        self._last_at: int | None = None
         self._view: ToolBlocksView | None = None
         self._step: int | None = None
         self._turn: int | None = None
@@ -296,11 +299,26 @@ class _Chunk:
             self.flush()
             self._host.mount(widget, before=before, after=after)
         self._mounted.append(widget)
-        if self._step is not None and self._at is not None:
-            self._item_of[widget] = self._at
+        item = self._mark_of(before, after)
+        if item is not None:
+            self._item_of[widget] = item
         view = self._view
         if view is not None and not view.issued(widget):
             view.event_closing()
+
+    def _mark_of(self, before, after) -> int | None:
+        """Метка виджета куска: рисуемый элемент; после элементов шага —
+        элемент якоря (фраза под строкой своей группы; якорь без метки —
+        без метки) или последний элемент шага (встаёт в конец куска).
+        Вложенное — без метки."""
+        if self._at is not None:
+            return self._at
+        if self._step is None:
+            return None
+        anchor = before if before is not None else after
+        if anchor is not None:
+            return self._item_of.get(anchor)
+        return self._last_at
 
     def flush(self) -> None:
         """Накопленное — в ленту одним вызовом перед ``before`` куска."""
@@ -348,6 +366,7 @@ class _Chunk:
         self._mount_ephemeral(rows, None)
         self._settle_calls(s, span.stop)
         self._at = None
+        self._last_at = span.stop - 1
         self._turn_stop = span.stop
 
     def _turn_end(self) -> int:
@@ -710,7 +729,7 @@ class _Chunk:
         )
 
     def _meta(self, ev: TraceEvent) -> None:
-        if ev.tool_name == "ask_human" and self._question_shown(ev.call_id):
+        if not self._model.meta_drawn(ev):
             return
         summary = ev.summary or ""
         m = TAG_RE.match(summary)
@@ -720,12 +739,6 @@ class _Chunk:
             )
         else:
             self._row("", summary, "line-meta", ev.no)
-
-    def _question_shown(self, call_id: str | None) -> bool:
-        """«Без ответа» вопроса уже стоит под его строкой (её рисует
-        вопрос по модели). Вопроса в истории нет (ушёл в сжатие) —
-        событие рисуется строкой."""
-        return self._model.has_question(call_id)
 
     def _row(self, prefix: str, content: str, kind: str, no: int) -> None:
         from gc_tui.widgets.trace_row import TraceRow

@@ -496,6 +496,7 @@ async def test_toggle_at_bottom_one_movement(tmp_path, monkeypatch, ends):
         scr = await _two_blocks(pilot, thread)
         trace = scr.query_one("#trace", VerticalScroll)
         block = _block_of(scr, "r10")
+        assert _blocks(scr)[-1] == f"/{block}"
         header = _header_of(scr, block)
         for end in ends:
             frames = await _toggle_frames(

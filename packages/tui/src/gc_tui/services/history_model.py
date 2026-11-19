@@ -162,6 +162,17 @@ class HistoryModel:
         """В ленте есть вопрос агента с этим call_id."""
         return bool(call_id) and call_id in self._question_ids
 
+    def meta_drawn(self, ev: TraceEvent) -> bool:
+        """Служебное событие ``ev`` рисуется своей строкой: «без ответа»
+        вопроса агента, что уже в ленте, — нет (его ставит под своей
+        строкой сам вопрос). Одно правило отрисовщика кусков и сплиттера
+        шагов (такое событие группу вызовов не закрывает)."""
+        return not (
+            ev.kind == "system"
+            and ev.tool_name == "ask_human"
+            and self.has_question(ev.call_id)
+        )
+
     def turn_index_of(self, no: int) -> int:
         """Ход события с номером ``no``; номера нет — ``KeyError``."""
         return bisect_right(self.turn_starts, self._item_of_no[no]) - 1
@@ -286,7 +297,7 @@ class HistoryModel:
         self._note_call(ev)
         drawn = True
         if kind == "event" and shown(ev, self.withdrawn):
-            drawn = replay_answer(self._answers, ev)
+            drawn = replay_answer(self._answers, ev) and self.meta_drawn(ev)
             self.collapsed_attempts.update(self._answers.collapsed)
         self._append(HistoryItem(kind, event=ev), drawn=drawn)
         self.next_no = ev.no + 1

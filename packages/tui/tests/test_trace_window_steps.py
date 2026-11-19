@@ -2282,3 +2282,87 @@ def test_short_runs_keep_group_with_early_close_point():
             if it.event.kind == "call" and it.event.wire_name == "fs_read_file"
         }
         assert len(steps) == 1, (reads, model.step_starts)
+
+
+@pytest.mark.asyncio
+async def test_splitter_close_points_are_renderer_closes():
+    """Страж опасной стороны правила группировки (R51 M2): где сплиттер
+    считает, что группа закрылась сама (туда может встать граница задним
+    числом), отрисовщик её действительно закрывает — соседние вызовы по
+    обе стороны в разных блоках. Сплиттер может видеть меньше закрытий,
+    но не больше."""
+    from gc_tui.services.history_model import HistoryModel
+    from gc_tui.services.history_render import (
+        ChunkOptions,
+        FeedHost,
+        render_steps,
+    )
+    from gc_tui.services.trace_steps import StepSplitter
+
+    closes: dict[int, bool] = {}
+
+    class Recorder(StepSplitter):
+        def _group_closes(self, ev, drawn):
+            closes[ev.no] = result = super()._group_closes(ev, drawn)
+            return result
+
+    evs = [_ev(1, "user", "запрос", message_id="u1")]
+
+    def add(kind, summary="", **kw):
+        evs.append(_ev(len(evs) + 1, kind, summary, **kw))
+
+    def call(wire):
+        cid = f"c{len(evs) + 1}"
+        add("call", call_id=cid, wire_name=wire, tool_name=wire)
+        add("result", "ok", call_id=cid)
+
+    for wire in ("fs_read_file", "fs_read_file", "exec_command"):
+        call(wire)
+    add("agent", "проза")
+    for wire in ("fs_apply_file_edits",) * 3 + ("fs_read_file",) * 2:
+        call(wire)
+    add("agent", "проза")  # повтор — дедуп не рисует, группа не закрыта
+    call("fs_read_file")
+    add("ask_human", "вопрос?", call_id="q1", tool_name="ask_human")
+    call("fs_read_file")
+    add("system", "без ответа", call_id="q1", tool_name="ask_human")
+    call("fs_read_file")
+    call("exec_fetch_url")
+    model = HistoryModel(turn_starts=[0])
+    model._steps = Recorder()
+    for ev in evs:
+        model.append_event(ev)
+    async with _Feed().run_test(size=(120, 60)) as pilot:
+        feed = pilot.app.query_one("#feed", VerticalScroll)
+        refs = render_steps(
+            FeedHost(feed),
+            model,
+            range(model.step_count()),
+            before=None,
+            options=ChunkOptions(),
+        )
+        await pilot.pause()
+    views = list(refs.block_views.values())
+
+    def block(ev):
+        return next(
+            b for v in views if (b := v.model.block_of(ev.call_id)) is not None
+        )
+
+    checked = 0
+    calls = [ev for ev in evs if ev.kind == "call"]
+    for ev in evs:
+        if not closes.get(ev.no):
+            continue
+        before = [c for c in calls if c.no < ev.no]
+        after = [c for c in calls if c.no >= ev.no]
+        if not before or not after:
+            continue
+        prev, nxt = before[-1], after[0]
+        if model.item_step(model.call_before(prev.call_id, 10**6)) != (
+            model.item_step(model.call_before(nxt.call_id, 10**6))
+        ):
+            continue
+        assert block(prev) != block(nxt), (prev.wire_name, ev.kind)
+        checked += 1
+    assert checked >= 5

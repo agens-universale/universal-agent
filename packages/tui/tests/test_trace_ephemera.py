@@ -505,6 +505,9 @@ async def test_restored_group_phrase_belongs_to_its_turn():
         )
         await pilot.pause()
         texts = [t for _c, t, _ in feed_dump(_feed(pilot.app))]
+        # Все пути монтажа куска помечены, и фразы из снимка вида в конце
+        # части хода тоже (R51 M1).
+        assert all(w in refs.item_of for w in refs.widgets)
         heads = step_heads(
             _feed(pilot.app).children, _marks(model, refs.item_of)
         )
