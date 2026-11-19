@@ -1,4 +1,5 @@
 import json
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -29,6 +30,7 @@ def _verdict(*, accept: bool) -> str:
 _YES = _verdict(accept=True)
 _NO = _verdict(accept=False)
 _SINGLE_QUOTED_NO = _NO.replace('"', "'")
+_SINGLE_QUOTED_KEYS_NO = re.sub(r'"([a-z_]+)":', r"'\1':", _NO)
 _JSON_FENCE_NO = f"```json\n{_NO}\n```"
 
 
@@ -207,3 +209,141 @@ def test_finish_gate_review_safety(first, retry, calls, status, findings):
     expected_mismatches = ["unsupported report"] if findings else []
     assert gate["trace_gaps"] == expected_gaps
     assert gate["report_mismatches"] == expected_mismatches
+
+
+@pytest.mark.parametrize(
+    ("first", "retry", "calls", "gaps", "mismatches"),
+    [
+        (
+            f"Example: {_YES}\nActual:\n```text\n{_SINGLE_QUOTED_KEYS_NO}\n```",
+            _NO,
+            2,
+            ["missing test"],
+            ["unsupported report"],
+        ),
+        (
+            f"Example: {_YES}\nActual:\n```text\n{_NO[:-1]},}}\n```",
+            _NO,
+            2,
+            ["missing test"],
+            ["unsupported report"],
+        ),
+        (
+            _NO
+            + "\n"
+            + _NO.replace("missing test", "missing check").replace(
+                "unsupported report", "unsupported claim"
+            ),
+            "No verdict",
+            2,
+            ["missing test", "missing check"],
+            ["unsupported report", "unsupported claim"],
+        ),
+        (
+            f"```json\n{_NO}\n```\n```json\n{_NO.replace('missing test', 'missing check').replace('unsupported report', 'unsupported claim')}\n```",
+            "No verdict",
+            2,
+            ["missing test", "missing check"],
+            ["unsupported report", "unsupported claim"],
+        ),
+        (
+            f'{_NO}\n```text\nDebug metadata mentions "trace_ok": false in a log.\n```',
+            "No verdict",
+            1,
+            ["missing test"],
+            ["unsupported report"],
+        ),
+        (
+            f"```json\n{_YES}\n```\nActual verdict:\n```text\n{_NO[:-1]}",
+            _NO,
+            2,
+            ["missing test"],
+            ["unsupported report"],
+        ),
+        *[
+            (
+                prefix
+                + (
+                    _NO.replace("missing test", "expected literal `")
+                    if suffix.startswith(" Log")
+                    else _NO
+                )
+                + suffix,
+                "No verdict",
+                1,
+                ["expected literal `"]
+                if suffix.startswith(" Log")
+                else ["missing test"],
+                ["unsupported report"],
+            )
+            for prefix in ("", "Final verdict follows.\n")
+            for suffix in (
+                "\nLog output:\n```text\nINFO runner stopped",
+                "\nLog output:\n~~~text\n</think>\n~~~",
+                "\nLog output:\n````text\n</think>\n````",
+                " Log contains `command`.",
+            )
+        ],
+    ],
+)
+def test_neighbor_verdicts_keep_findings(
+    first, retry, calls, gaps, mismatches
+):
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": True,
+        },
+        logger=None,
+        auxiliary_llm=SimpleNamespace(max_tokens=8192, judge_max_tokens=10000),
+    )
+    raw_output = run_coro(
+        SubmitSolution().acall(
+            solution_type="direct_answer", task_report="done", handoff="{}"
+        )
+    )
+    state = SimpleNamespace(
+        messages=[
+            {
+                "type": "function_call_output",
+                "call_id": "finish",
+                "output": raw_output,
+            }
+        ],
+        parent_state_id=None,
+        current_user_intent=[],
+        user_intent_log=[],
+        finish_gate_rejection_count=0,
+    )
+    digest = FinishGateTraceDigest(
+        trace_digest_text="saved trace", digest_chars=11
+    )
+    with (
+        patch(
+            "gc_core.summarize.llm.arequest_chat_completion_text",
+            side_effect=[first, retry],
+        ) as model,
+        patch(
+            "gc_core.intent_guard.guard.build_finish_gate_trace_digest",
+            return_value=digest,
+        ),
+        patch(
+            "gc_core.intent_guard.final_report_consistency.build_finish_gate_trace_digest",
+            return_value=digest,
+        ),
+    ):
+        decision = run_coro(
+            FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(
+                finish_handoff_arguments={"solution_type": "direct_answer"}
+            )
+        )
+    assert model.call_count == calls
+    assert run_coro(
+        apply_finish_gate_to_turn_finish_output_in_state(
+            state=state, finish_call_id="finish", decision=decision
+        )
+    )
+    output = json.loads(state.messages[0]["output"])
+    assert output["status"] == "rejected_by_finish_gate"
+    assert output["finish_gate"]["trace_gaps"] == gaps
+    assert output["finish_gate"]["report_mismatches"] == mismatches

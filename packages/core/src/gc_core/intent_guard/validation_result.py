@@ -33,14 +33,10 @@ _SALVAGE_RAW_MAX_CHARS = 4000
 _THINK_CLOSE_RE = re.compile(
     r"^[ \t]*</think[ \t]*>[ \t]*$", re.IGNORECASE | re.MULTILINE
 )
-_FENCE_RE = re.compile(
-    r"^[ \t]*```(?P<lang>[\w-]*)[ \t]*\r?\n"
-    r"(?P<body>.*?)^[ \t]*```[ \t]*(?:\r?\n|$)",
-    re.MULTILINE | re.DOTALL,
+_FENCE_LINE_RE = re.compile(
+    r"^[ \t]*(?P<marker>`{3,}|~{3,})(?P<lang>[\w-]*)[ \t]*$"
 )
-_FENCE_OPEN_RE = re.compile(
-    r"^[ \t]*```[\w-]*[ \t]*\r?\n", re.IGNORECASE | re.MULTILINE
-)
+_FENCE_CLOSE_RE = re.compile(r"^[ \t]*(?P<marker>`{3,}|~{3,})[ \t]*$")
 _VERDICT_KEY_RE = re.compile(
     r"[\"'](?:trace_ok|report_ok|is_question|trace_gaps|report_mismatches)[\"']\s*:"
     r"|[\"']action[\"']\s*:\s*[\"']"
@@ -48,7 +44,6 @@ _VERDICT_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _JSON_FENCE_LABELS = frozenset({"json", "jsonc", "json5", "js"})
-_INLINE_CODE_RE = re.compile(r"(?<!\\)`[^`\n]+`")
 
 
 @dataclass
@@ -64,6 +59,72 @@ class ValidationResult:
     coverage_score: float
     feedback_for_agent: str
     is_question: bool = False
+
+
+@dataclass(frozen=True)
+class _MarkdownFence:
+    start: int
+    end: int
+    body: str
+    lang: str
+    closed: bool
+
+
+def _markdown_fences(text: str) -> list[_MarkdownFence]:
+    fences: list[_MarkdownFence] = []
+    opening: tuple[int, int, str, str] | None = None
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        if opening is None:
+            match = _FENCE_LINE_RE.fullmatch(stripped)
+            if match is not None:
+                opening = (
+                    offset,
+                    offset + len(line),
+                    match["marker"],
+                    match["lang"],
+                )
+        else:
+            close = _FENCE_CLOSE_RE.fullmatch(stripped)
+            start, body_start, marker, lang = opening
+            if (
+                close is not None
+                and close["marker"][0] == marker[0]
+                and len(close["marker"]) >= len(marker)
+            ):
+                fences.append(
+                    _MarkdownFence(
+                        start,
+                        offset + len(line),
+                        text[body_start:offset],
+                        lang,
+                        True,
+                    )
+                )
+                opening = None
+        offset += len(line)
+    if opening is not None:
+        start, body_start, _, lang = opening
+        fences.append(
+            _MarkdownFence(start, len(text), text[body_start:], lang, False)
+        )
+    return fences
+
+
+def _outside_fences(text: str) -> str:
+    fences = _markdown_fences(text)
+    if not fences:
+        return text
+    parts: list[str] = []
+    position = 0
+    for fence in fences:
+        parts.extend(
+            (text[position : fence.start], " " * (fence.end - fence.start))
+        )
+        position = fence.end
+    parts.append(text[position:])
+    return "".join(parts)
 
 
 def fail_open_validation_result() -> ValidationResult:
@@ -249,7 +310,9 @@ def _object_ranges(text: str) -> list[tuple[int, int]]:
 
 def _reasoning_boundary(raw: str) -> int:
     """Find a standalone closing tag, excluding quoted JSON literals."""
-    fenced_ranges = [match.span() for match in _FENCE_RE.finditer(raw)]
+    fenced_ranges = [
+        (fence.start, fence.end) for fence in _markdown_fences(raw)
+    ]
     boundaries = [
         match.end()
         for match in _THINK_CLOSE_RE.finditer(raw)
@@ -268,30 +331,53 @@ def _parse_json_verdict(text: str) -> ValidationResult | None:
     return _parse_verdict_object(parsed)
 
 
-def _fenced_verdict_bodies(text: str) -> tuple[bool, list[str]]:
-    fences = list(_FENCE_RE.finditer(text))
+def _has_verdict_object_start(text: str) -> bool:
+    position = 0
+    while (start := text.find("{", position)) != -1:
+        key_start = start + 1
+        while key_start < len(text) and text[key_start].isspace():
+            key_start += 1
+        if _VERDICT_KEY_RE.match(text, key_start):
+            return True
+        position = start + 1
+    return False
+
+
+def _fenced_verdict_bodies(text: str) -> tuple[bool, list[str], bool]:
+    fences = _markdown_fences(text)
     bodies = [
-        m.group("body")
-        for m in fences
-        if m.group("lang").lower() in _JSON_FENCE_LABELS
-        or not m.group("lang")
-        or _parse_json_verdict(m.group("body")) is not None
+        fence.body
+        for fence in fences
+        if fence.closed
+        and (
+            fence.lang.lower() in _JSON_FENCE_LABELS
+            or not fence.lang
+            or _parse_json_verdict(fence.body) is not None
+            or _has_verdict_object_start(fence.body)
+        )
     ]
-    unclosed = _FENCE_OPEN_RE.search(_FENCE_RE.sub("", text))
-    return bool(bodies or unclosed), bodies
+    unclosed = any(
+        not fence.closed
+        and (
+            fence.lang.lower() in _JSON_FENCE_LABELS
+            or not fence.lang
+            or _has_verdict_object_start(fence.body)
+        )
+        for fence in fences
+    )
+    return bool(bodies or unclosed), bodies, unclosed
 
 
 def _parse_fenced_verdict(text: str) -> tuple[bool, ValidationResult | None]:
-    has_fence, bodies = _fenced_verdict_bodies(text)
-    if len(bodies) != 1:
+    has_fence, bodies, unclosed = _fenced_verdict_bodies(text)
+    if unclosed or len(bodies) != 1:
         return has_fence, None
     return True, _parse_json_verdict(bodies[0])
 
 
-def _mask_inline_code(text: str) -> str:
-    """Hide Markdown code outside strict JSON objects, preserving offsets."""
+def _strict_json_object_ranges(text: str) -> list[tuple[int, int]]:
     decoder = json.JSONDecoder()
-    json_ranges: list[tuple[int, int]] = []
+    ranges: list[tuple[int, int]] = []
     position = 0
     while (start := text.find("{", position)) != -1:
         try:
@@ -300,18 +386,39 @@ def _mask_inline_code(text: str) -> str:
             position = start + 1
             continue
         if isinstance(parsed, dict):
-            json_ranges.append((start, end))
+            ranges.append((start, end))
         position = end
+    return ranges
 
-    def replace(match: re.Match[str]) -> str:
-        if any(
-            start < match.start() and match.end() < end
-            for start, end in json_ranges
+
+def _mask_inline_code(text: str) -> str:
+    """Hide Markdown code outside strict JSON objects, preserving offsets."""
+    json_ranges = _strict_json_object_ranges(text)
+    visible = list(text)
+    opening: int | None = None
+    position = 0
+    range_index = 0
+    while position < len(text):
+        if (
+            range_index < len(json_ranges)
+            and position == json_ranges[range_index][0]
         ):
-            return match.group()
-        return " " * len(match.group())
-
-    return _INLINE_CODE_RE.sub(replace, text)
+            position = json_ranges[range_index][1]
+            range_index += 1
+            continue
+        char = text[position]
+        if char == "\n":
+            opening = None
+        elif char == "`" and (position == 0 or text[position - 1] != "\\"):
+            if opening is None:
+                opening = position
+            else:
+                visible[opening : position + 1] = " " * (
+                    position + 1 - opening
+                )
+                opening = None
+        position += 1
+    return "".join(visible)
 
 
 def _unfenced_candidate_bodies(text: str) -> tuple[list[str], bool]:
@@ -346,7 +453,7 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     has_fence, fenced_verdict = _parse_fenced_verdict(cleaned)
     if has_fence:
         if fenced_verdict is not None and fenced_verdict.ok:
-            outside = _FENCE_RE.sub("", cleaned)
+            outside = _outside_fences(cleaned)
             others, incomplete = _unfenced_candidate_bodies(outside)
             if incomplete or any(
                 (other := _parse_json_verdict(body)) is None or not other.ok
@@ -354,21 +461,20 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
             ):
                 return None
         return fenced_verdict
-    return _parse_unfenced_verdict(_FENCE_RE.sub("", cleaned))
+    return _parse_unfenced_verdict(_outside_fences(cleaned))
 
 
 def conflicting_validator_verdicts(raw: str) -> ValidationResult | None:
     """Keep unresolved candidate conflicts from being accepted by salvage."""
     source = (raw or "")[_reasoning_boundary(raw or "") :]
     cleaned = project_text_for_model(source, strip_think=True)
-    has_fence, bodies = _fenced_verdict_bodies(cleaned)
-    outside = _FENCE_RE.sub("", cleaned)
+    has_fence, bodies, _ = _fenced_verdict_bodies(cleaned)
+    outside = _outside_fences(cleaned)
     others, _ = _unfenced_candidate_bodies(outside)
     bodies = bodies + others if has_fence else others
     parsed = [(body, _parse_json_verdict(body)) for body in bodies]
     verdicts = [verdict for _, verdict in parsed if verdict is not None]
-    axes = {(verdict.trace_ok, verdict.report_ok) for verdict in verdicts}
-    if len(axes) < 2:
+    if len(verdicts) < 2 or all(verdict.ok for verdict in verdicts):
         malformed = [body for body, verdict in parsed if verdict is None]
         return _malformed_conflict_result(verdicts, malformed)
     trace_ok = all(verdict.trace_ok for verdict in verdicts)
