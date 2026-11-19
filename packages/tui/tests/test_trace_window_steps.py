@@ -151,6 +151,13 @@ def _session() -> list[dict]:
     ]
 
 
+def _call_and_result(model, call_id: str) -> tuple[int, int | None]:
+    """Индексы последнего вызова ``call_id`` и его первого исхода."""
+    call = model.call_before(call_id, len(model.items))
+    assert call is not None
+    return call, model.result_of(call)
+
+
 def _model(records: list[dict]):
     from gc_tui.services.history_model import HistoryInputs, build_history
 
@@ -200,8 +207,8 @@ def test_calls_without_prose_split_at_call_boundaries():
         assert len(span) * policy.ITEM_WIDGETS <= policy.CHUNK_MAX
     for k in range(calls):
         cid = f"find_0_{k}" if k % 40 < 30 else f"call_0_{k}"
-        result = model.first_result(cid)
-        assert model.item_step(result) == model.item_step(model.call_item(cid))
+        call, result = _call_and_result(model, cid)
+        assert model.item_step(result) == model.item_step(call)
 
 
 def test_parallel_batch_bounds_step_by_one_batch():
@@ -306,7 +313,7 @@ async def test_steps_rendered_one_by_one_match_whole_turn():
     model = model_of(*_split_events())
     assert model.step_count() > 1
     # Исход «late» — в следующем шаге после своего вызова.
-    call, result = model.call_item("late"), model.first_result("late")
+    call, result = _call_and_result(model, "late")
     assert model.item_step(result) == model.item_step(call) + 1
     async with _Feed().run_test(size=(120, 60)) as pilot:
         feed = pilot.app.query_one("#feed", VerticalScroll)
@@ -490,7 +497,7 @@ def _event_step(model, i: int) -> int:
     """Шаг, в котором отрисовщик рисует элемент ``i``: исход — в шаге
     своего вызова."""
     ev = model.items[i].event
-    call = model.call_item(ev.call_id) if ev.kind in RESULT_KINDS else None
+    call = model.call_of(i) if ev.kind in RESULT_KINDS else None
     return model.item_step(i if call is None else call)
 
 
@@ -677,7 +684,7 @@ async def test_running_call_in_old_live_step_stays_mounted(
         row = scr._active_calls[running]
         assert row.parent is _trace(scr)
         model = scr._window_model()
-        step = model.item_step(model.call_item(running))
+        step = model.item_step(_call_and_result(model, running)[0])
         assert step < model.step_count() - 1
         assert scr._window_pinned(step)
         assert step in scr._window_heads
@@ -1507,3 +1514,61 @@ async def test_sticky_reply_of_giant_turn_read_deep(tmp_path, monkeypatch):
         await _settled(pilot, scr)
         scr._refresh_trace_overlays()
         assert _sticky_text(scr) is None
+
+
+def _reused_ids_model():
+    """Два хода с одними и теми же call_id (бэкенд нумерует вызовы
+    заново в каждом ходе): во втором ходе исход «late» лёг в следующий
+    шаг после своего вызова."""
+    from dataclasses import replace
+
+    from gc_tui.services.history_model import HistoryModel
+
+    first = _split_events()
+    second = [replace(ev, no=ev.no + 100) for ev in first]
+    second[0] = replace(second[0], summary="запрос 2", message_id="u2")
+    model = HistoryModel()
+    model.turn_starts.append(0)
+    for ev in first:
+        model.append_event(ev)
+    model.turn_starts.append(len(model.items))
+    for ev in second:
+        model.append_event(ev)
+    return model
+
+
+@pytest.mark.asyncio
+async def test_reused_call_ids_across_turns_render_by_steps():
+    """call_id повторён в позднем ходе: исход принадлежит ближайшему
+    вызову выше с тем же id. Шаги второго хода по одному (как подъём) —
+    та же лента, что весь ход разом: исход не сирота и не у чужого
+    вызова."""
+    from gc_tui.screens.trace_window import step_heads
+    from gc_tui.services.history_render import (
+        ChunkOptions,
+        FeedHost,
+        render_steps,
+    )
+
+    model = _reused_ids_model()
+    second = range(model.turn_step(1), model.step_count())
+    async with _Feed().run_test(size=(120, 60)) as pilot:
+        feed = pilot.app.query_one("#feed", VerticalScroll)
+        render_steps(
+            FeedHost(feed), model, second, before=None, options=ChunkOptions()
+        )
+        await pilot.pause()
+        whole = feed_dump(feed)
+        await feed.remove_children()
+        top = None
+        for s in reversed(second):
+            refs = render_steps(
+                FeedHost(feed),
+                model,
+                range(s, s + 1),
+                before=top,
+                options=ChunkOptions(),
+            )
+            await pilot.pause()
+            top = step_heads(feed.children, refs.step_of).get(s, top)
+        assert feed_dump(feed) == whole

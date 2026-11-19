@@ -359,9 +359,9 @@ class _Chunk:
         model = self._model
         stop = self._turn_end()
         for call_id in list(self._open):
-            at = model.first_result(call_id)
-            call = model.call_item(call_id)
-            if at is None or call is None or not start <= at < stop:
+            call = model.call_before(call_id, start)
+            at = None if call is None else model.result_of(call)
+            if at is None or not start <= at < stop:
                 continue
             if model.item_step(call) == s:
                 self._event(model.items[at].event)
@@ -373,9 +373,7 @@ class _Chunk:
         ev = model.items[k].event
         if ev is None or ev.kind not in RESULT_KINDS:
             return False
-        if model.first_result(ev.call_id) != k:
-            return False
-        call = model.call_item(ev.call_id)
+        call = model.call_of(k)
         if call is None:
             return False
         step = model.item_step(k)

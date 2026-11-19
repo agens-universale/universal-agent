@@ -118,10 +118,13 @@ class HistoryModel:
     )
     # call_id вопросов агента (`ask_human`).
     _question_ids: set[str] = field(default_factory=set, repr=False)
-    # call_id → индекс события вызова и первого показанного исхода после
-    # него (исход может лечь в следующий шаг, `trace_steps`).
-    _call_items: dict[str, int] = field(default_factory=dict, repr=False)
-    _first_results: dict[str, int] = field(default_factory=dict, repr=False)
+    # call_id → индексы событий вызова по порядку: бэкенд вправе повторить
+    # id в позднем ходе. Исход принадлежит ближайшему вызову выше с тем
+    # же id; первый показанный исход вызова и обратно — по индексам
+    # (исход может лечь в следующий шаг, `trace_steps`).
+    _calls: dict[str, list[int]] = field(default_factory=dict, repr=False)
+    _result_of: dict[int, int] = field(default_factory=dict, repr=False)
+    _call_of: dict[int, int] = field(default_factory=dict, repr=False)
     # Номера событий попыток сдачи хода, которые свернула следующая
     # попытка или проза, повторившая отчёт (R42): отрисовщик кусков их не
     # рисует, живой путь снимает, когда свёртка приходит. Правило — дедуп
@@ -206,14 +209,24 @@ class HistoryModel:
         """Шаг элемента ``i``."""
         return bisect_right(self.step_starts, i) - 1
 
-    def call_item(self, call_id: str | None) -> int | None:
-        """Индекс события вызова ``call_id``."""
-        return self._call_items.get(call_id) if call_id else None
+    def call_before(self, call_id: str | None, index: int) -> int | None:
+        """Индекс ближайшего события вызова ``call_id`` выше элемента
+        ``index``."""
+        calls = self._calls.get(call_id) if call_id else None
+        if not calls:
+            return None
+        at = bisect_left(calls, index)
+        return calls[at - 1] if at else None
 
-    def first_result(self, call_id: str | None) -> int | None:
-        """Индекс первого показанного исхода вызова ``call_id`` после
-        него (исход, ошибка, техническая ошибка с его call_id)."""
-        return self._first_results.get(call_id) if call_id else None
+    def result_of(self, call: int) -> int | None:
+        """Индекс первого показанного исхода вызова на элементе ``call``
+        (исход, ошибка, техническая ошибка с его call_id)."""
+        return self._result_of.get(call)
+
+    def call_of(self, result: int) -> int | None:
+        """Индекс вызова, чей первый показанный исход — элемент
+        ``result``; не первый исход — None."""
+        return self._call_of.get(result)
 
     def last_reply(self, *, with_images: bool = False) -> TraceEvent | None:
         """Последняя реплика пользователя в ленте (снятые откатом не в
@@ -297,14 +310,19 @@ class HistoryModel:
             self.last_model_choice = rec
 
     def _note_call(self, ev: TraceEvent) -> None:
-        """Вызов и первый показанный исход после него — по call_id."""
+        """Вызов и первый показанный исход после него: исход — ближайшему
+        вызову выше с тем же call_id."""
         cid = ev.call_id
         if not cid or ev.hidden:
             return
+        at = len(self.items)
         if ev.kind == "call":
-            self._call_items.setdefault(cid, len(self.items))
-        elif ev.kind in RESULT_KINDS and cid in self._call_items:
-            self._first_results.setdefault(cid, len(self.items))
+            self._calls.setdefault(cid, []).append(at)
+        elif ev.kind in RESULT_KINDS and cid in self._calls:
+            call = self._calls[cid][-1]
+            if call not in self._result_of:
+                self._result_of[call] = at
+                self._call_of[at] = call
 
     def _append(self, item: HistoryItem) -> None:
         """Элемент — в конец ленты и в шаги: начало хода — новый шаг, внутри
