@@ -3182,10 +3182,11 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         )
         if following:
             self._scroll_trace_end()
+        if self._answer_flow.collapsed:
+            self._drop_finish_attempts()
         if not ev.call_id:
             return
         self._submit_solution_call_ids.add(ev.call_id)
-        self._drop_finish_attempts()
         self._submit_solution_widgets.append(widgets)
         self._new_attempt_replies = int(counted)
         # Финальный ответ виден — переключаем индикатор в режим
@@ -4465,7 +4466,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             verdict = answer_verdict(self._answer_flow, ev)
             if not verdict.show:
                 return
-            if verdict.drop_attempt:
+            if self._answer_flow.collapsed:
                 # Ответ модели повторил отчёт отклонённой попытки: попытка
                 # уходит, текст остаётся ответом — свёртка не унесёт его.
                 self._drop_finish_attempts()
