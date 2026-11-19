@@ -46,16 +46,30 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         "late_batch",
         "incomplete_compression",
         "truncated_compression",
+        "ambiguous_compression",
+        "ambiguous_primary",
+        "truncated_primary_missing_repair_section",
+        "truncated_primary_truncated_repair_section",
+        "truncated_final_after_draft",
+        "reasoning_boundary_without_final",
+        "quoted_example_without_final",
+        "fenced_example_without_final",
     ],
 )
 async def test_failed_summary_preserves_live_and_saved_history(
     tmp_path, monkeypatch, has_previous_summary, response_mode
 ):
+    truncated_primary = response_mode.startswith("truncated_primary_")
     compression_failure = response_mode in {
         "compression",
         "oversize",
         "incomplete_compression",
         "truncated_compression",
+        "ambiguous_compression",
+        "truncated_final_after_draft",
+        "reasoning_boundary_without_final",
+        "quoted_example_without_final",
+        "fenced_example_without_final",
     }
     thread_id = f"failed-summary-{has_previous_summary}"
     prior = valid_summary_xml_for_tests(seed="confirmed-prior-context")
@@ -89,6 +103,70 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if truncated_primary:
+            if (
+                response_mode == "truncated_primary_missing_repair_section"
+                and kwargs["request_label"] == "summary_repair"
+            ):
+                return assemble_summary_xml(
+                    {"task_and_context": "partial repair"}, only_present=True
+                )
+            summary = assemble_summary_xml(
+                {
+                    "task_and_context": "confirmed context",
+                    "recent_artifacts": "Verification is recorded at reports/final-",
+                }
+            )
+            return (
+                "Reasoning\n</think>\n"
+                + summary.split("</recent_artifacts>")[0]
+            )
+        if response_mode == "fenced_example_without_final":
+            if kwargs["request_label"] == "summary_compress":
+                example = valid_summary_xml_for_tests(seed="unrelated example")
+                return (
+                    "</think>\nExample of the XML format:\n```xml\n"
+                    + example
+                    + "\n```"
+                )
+            return assemble_summary_xml({"task_and_context": "x" * 1200})
+        if response_mode == "quoted_example_without_final":
+            if kwargs["request_label"] == "summary_compress":
+                example = valid_summary_xml_for_tests(seed="unrelated example")
+                return "</think>\nExample of the XML format: `" + example + "`"
+            return assemble_summary_xml({"task_and_context": "x" * 1200})
+        if response_mode == "reasoning_boundary_without_final":
+            if kwargs["request_label"] == "summary_compress":
+                return (
+                    valid_summary_xml_for_tests(seed="previous draft")
+                    + "\n</think>"
+                )
+            return assemble_summary_xml({"task_and_context": "x" * 1200})
+        if response_mode == "truncated_final_after_draft":
+            if kwargs["request_label"] == "summary_compress":
+                return (
+                    valid_summary_xml_for_tests(seed="previous draft")
+                    + "\n</think>\n<summary><task_and_context>truncated final"
+                )
+            return valid_summary_xml_for_tests(seed="valid-before-compression")
+        if response_mode == "ambiguous_primary":
+            if kwargs["request_label"].startswith("summary_batch"):
+                return (
+                    valid_summary_xml_for_tests(seed="first")
+                    + "\n"
+                    + valid_summary_xml_for_tests(seed="second")
+                )
+            return assemble_summary_xml(
+                {"task_and_context": "partial repair"}, only_present=True
+            )
+        if response_mode == "ambiguous_compression":
+            if kwargs["request_label"] == "summary_compress":
+                return (
+                    valid_summary_xml_for_tests(seed="first")
+                    + "\n"
+                    + valid_summary_xml_for_tests(seed="second")
+                )
+            return valid_summary_xml_for_tests(seed="valid-before-compression")
         if response_mode == "truncated_compression":
             if kwargs["request_label"] == "summary_compress":
                 return (
@@ -158,8 +236,18 @@ async def test_failed_summary_preserves_live_and_saved_history(
         )
 
     trace_path = tmp_path / "rejected-summary.jsonl"
+    if response_mode in {
+        "reasoning_boundary_without_final",
+        "quoted_example_without_final",
+        "fenced_example_without_final",
+    }:
+        limit = 1000
+    elif compression_failure:
+        limit = 100
+    else:
+        limit = 20000
     ctx = _ctx(
-        100 if compression_failure else 20000,
+        limit,
         batch_chars=1 if response_mode == "late_batch" else 100000,
     )
     ctx.summary_trace_path = str(trace_path)
@@ -193,23 +281,35 @@ async def test_failed_summary_preserves_live_and_saved_history(
         assert batch["compression"]["output_summary_text"]
     else:
         assert batch["repair"]["repaired_text"]
+    if truncated_primary:
+        assert batch["repair"]["missing_tags"] == ["recent_artifacts"]
+        assert batch["repair"]["resolution"] == "rejected"
     if response_mode == "late_batch":
         assert len(trace["step1_batches"]) == 2
     if has_previous_summary:
         assert "confirmed-prior-context" in str(state.messages)
 
 
-async def test_hidden_only_summary_does_not_replace_visible_context(
+async def test_constraints_only_summary_does_not_replace_visible_history(
     monkeypatch,
 ):
-    """The memory patch may hide active_constraints from the main model."""
-    # Keep this case at the application boundary: a full XML document can be
-    # structurally valid while its short agent slice has no useful content.
+    """A constraints-only summary cannot replace other visible history."""
     from gc_core.summarize import compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
     hidden_only = assemble_summary_xml(
         {"active_constraints": "keep hidden fact"}
+    )
+    history = [
+        {"role": "user", "content": "Prepare a rollback checklist."},
+        {
+            "role": "tool",
+            "content": "The verified rollback snapshot is checkpoint-97d.",
+        },
+    ]
+    history.extend(
+        {"role": "user", "content": f"Check item {index}."}
+        for index in range(10)
     )
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -219,9 +319,8 @@ async def test_hidden_only_summary_does_not_replace_visible_context(
         previous_response_id=None,
         user_intent_log=[],
         current_user_intent=[],
-        messages=[{"role": "user", "content": "Visible source fact"}],
+        messages=history.copy(),
     )
-    before = list(state.messages)
 
     async def summarize(**_kwargs):
         return {
@@ -240,7 +339,8 @@ async def test_hidden_only_summary_does_not_replace_visible_context(
         await arun_summary_compaction(
             ctx=_ctx(), state=state, trigger_reason="test", is_cli_mode=False
         )
-    assert state.messages == before
+    assert state.messages == history
+    assert "checkpoint-97d" in repr(state.messages)
 
 
 @pytest.mark.parametrize("summary_outcome", ["failed", "partial", "success"])

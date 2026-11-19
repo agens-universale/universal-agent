@@ -12,6 +12,7 @@ from gc_core.summarize.summary_validation import (
     SummaryRejectedError,
     validate_summary_text,
 )
+from gc_core.summarize.summary_xml_extraction import extract_final_summary_xml
 
 
 async def acompress_summary_text(
@@ -58,6 +59,7 @@ async def acompress_summary_text(
             "max_body_chars": max_chars,
             "output_summary_text": text,
         }
+    text = extract_final_summary_xml(text) or text
     valid, reason = validate_summary_text(text, require_closed_structure=True)
     if not valid:
         raise SummaryRejectedError(

@@ -54,6 +54,7 @@ from gc_core.summarize.summary_message_body import (
 )
 from gc_core.summarize.summary_spec import (
     agent_summary_slice_mode,
+    extract_summary_bodies,
     slice_summary,
 )
 from gc_core.summarize.summary_validation import (
@@ -508,9 +509,41 @@ async def arun_summary_compaction(
         if isinstance(memory_patch, dict)
         else False
     )
+    memory_append_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_append_deltas")
+    )
+    memory_replace_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_replace_deltas")
+    )
+    memory_append_touched = summary_result.get("memory_append_touched")
+    memory_replace_touched = summary_result.get("memory_replace_touched")
+    active_constraints = extract_summary_bodies(raw_summary).get(
+        "active_constraints", ""
+    )
+    try:
+        visible_summary = slice_summary(raw_summary, "short")
+    except ValueError:
+        visible_summary = ""
+    if not has_nonempty_summary_body(visible_summary):
+        error = SummaryRejectedError("compaction produced no usable summary")
+        await aappend_rejected_summary_trace(
+            ctx, trigger_reason=trigger_reason, trace=trace, error=error
+        )
+        raise error
+    patched_memory = _patched_snapshot(
+        memory_snapshot,
+        memory_append_deltas,
+        memory_replace_deltas,
+        memory_append_touched,
+        memory_replace_touched,
+    )
     agent_slice = agent_summary_slice_mode(
         num_batches=num_batches,
         patch_executed=patch_executed,
+        constraints_transferred=bool(
+            active_constraints
+            and active_constraints == patched_memory.constraints.strip()
+        ),
     )
     try:
         agent_summary_text = slice_summary(raw_summary, agent_slice)
@@ -522,21 +555,6 @@ async def arun_summary_compaction(
             raw_summary_chars=len(raw_summary),
         )
         agent_summary_text = raw_summary
-    # Reject unusable projected content before changing state or persistence.
-    if not has_nonempty_summary_body(agent_summary_text):
-        error = SummaryRejectedError("compaction produced no usable summary")
-        await aappend_rejected_summary_trace(
-            ctx, trigger_reason=trigger_reason, trace=trace, error=error
-        )
-        raise error
-    memory_append_deltas = coerce_working_memory_deltas(
-        summary_result.get("memory_append_deltas")
-    )
-    memory_replace_deltas = coerce_working_memory_deltas(
-        summary_result.get("memory_replace_deltas")
-    )
-    memory_append_touched = summary_result.get("memory_append_touched")
-    memory_replace_touched = summary_result.get("memory_replace_touched")
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
     log_summary_raw_text(logger, log_ctx, raw_summary)
 

@@ -38,6 +38,14 @@ class SummarySpecTest(unittest.TestCase):
     def test_agent_summary_slice_mode_table(self) -> None:
         self.assertEqual(
             agent_summary_slice_mode(num_batches=1, patch_executed=True),
+            "full",
+        )
+        self.assertEqual(
+            agent_summary_slice_mode(
+                num_batches=1,
+                patch_executed=True,
+                constraints_transferred=True,
+            ),
             "short",
         )
         self.assertEqual(
