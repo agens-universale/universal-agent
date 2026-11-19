@@ -48,6 +48,8 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         "truncated_compression",
         "ambiguous_compression",
         "ambiguous_primary",
+        "truncated_primary_missing_repair_section",
+        "truncated_primary_truncated_repair_section",
         "truncated_final_after_draft",
         "reasoning_boundary_without_final",
         "quoted_example_without_final",
@@ -57,6 +59,7 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
 async def test_failed_summary_preserves_live_and_saved_history(
     tmp_path, monkeypatch, has_previous_summary, response_mode
 ):
+    truncated_primary = response_mode.startswith("truncated_primary_")
     compression_failure = response_mode in {
         "compression",
         "oversize",
@@ -100,6 +103,24 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if truncated_primary:
+            if (
+                response_mode == "truncated_primary_missing_repair_section"
+                and kwargs["request_label"] == "summary_repair"
+            ):
+                return assemble_summary_xml(
+                    {"task_and_context": "partial repair"}, only_present=True
+                )
+            summary = assemble_summary_xml(
+                {
+                    "task_and_context": "confirmed context",
+                    "recent_artifacts": "Verification is recorded at reports/final-",
+                }
+            )
+            return (
+                "Reasoning\n</think>\n"
+                + summary.split("</recent_artifacts>")[0]
+            )
         if response_mode == "fenced_example_without_final":
             if kwargs["request_label"] == "summary_compress":
                 example = valid_summary_xml_for_tests(seed="unrelated example")
@@ -260,6 +281,9 @@ async def test_failed_summary_preserves_live_and_saved_history(
         assert batch["compression"]["output_summary_text"]
     else:
         assert batch["repair"]["repaired_text"]
+    if truncated_primary:
+        assert batch["repair"]["missing_tags"] == ["recent_artifacts"]
+        assert batch["repair"]["resolution"] == "rejected"
     if response_mode == "late_batch":
         assert len(trace["step1_batches"]) == 2
     if has_previous_summary:

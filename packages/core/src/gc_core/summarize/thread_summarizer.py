@@ -31,7 +31,10 @@ from gc_core.summarize.summary_validation import (
     missing_section_tags,
     validate_summary_text,
 )
-from gc_core.summarize.summary_xml_extraction import extract_final_summary_xml
+from gc_core.summarize.summary_xml_extraction import (
+    extract_final_summary_xml,
+    extract_summary_candidate,
+)
 from gc_core.summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
     parse_memory_deltas,
@@ -52,6 +55,13 @@ class _NullLogger:
 
 
 _NULL_LOGGER = _NullLogger()
+
+
+def _extract_repair_text(raw_repaired: str) -> tuple[str, str]:
+    try:
+        return extract_final_summary_xml(raw_repaired) or raw_repaired, ""
+    except SummaryRejectedError as exc:
+        return raw_repaired, str(exc)
 
 
 def _int_param(raw: Any, default: int) -> int:
@@ -248,11 +258,15 @@ class _BatchRun:
             text,
         )
         ambiguous_draft = False
+        partial_final = False
         try:
-            text = extract_final_summary_xml(text) or text
+            candidate, partial_final = extract_summary_candidate(text)
+            text = candidate or text
         except SummaryRejectedError:
             ambiguous_draft = True
-        is_valid, reason = validate_summary_text(text)
+        is_valid, reason = validate_summary_text(
+            text, require_closed_structure=partial_final
+        )
         if ambiguous_draft:
             is_valid, reason = False, "ambiguous_structure"
         if not is_valid:
@@ -264,6 +278,7 @@ class _BatchRun:
                 accumulated_summary,
                 trace_batch,
                 preserve_partial=not ambiguous_draft,
+                require_closed_sections=partial_final,
             )
         accumulated_summary = text
         body_chars = summary_body_chars(accumulated_summary)
@@ -295,7 +310,9 @@ class _BatchRun:
         batch_history_text: str,
         accumulated_summary: str,
         trace_batch: Dict[str, Any],
+        *,
         preserve_partial: bool = True,
+        require_closed_sections: bool = False,
     ) -> str:
         self.log.warning(
             "summary_batch_invalid batch=%s/%s reason=%s text_chars=%s text_preview=%s",
@@ -314,8 +331,10 @@ class _BatchRun:
             len(self.summarizer_prefix),
             len(text or ""),
         )
-        missing_tags = missing_section_tags(text)
-        repaired = await summary_llm_steps.arepair_summary_text(
+        missing_tags = missing_section_tags(
+            text, allow_unclosed=not require_closed_sections
+        )
+        raw_repaired = await summary_llm_steps.arepair_summary_text(
             ctx=self.ctx,
             state=self.state,
             history_text=batch_history_text,
@@ -326,13 +345,29 @@ class _BatchRun:
             missing_tags=missing_tags,
             max_tokens=self.max_tokens,
         )
-        repaired = extract_final_summary_xml(repaired) or repaired
-        merged = merge_repaired_summary(
-            invalid_text=text if preserve_partial else "",
-            repaired_text=repaired,
+        repaired, extraction_error = _extract_repair_text(raw_repaired)
+        merged = (
+            merge_repaired_summary(
+                invalid_text=text if preserve_partial else "",
+                repaired_text=repaired,
+                allow_unclosed=not require_closed_sections,
+            )
+            if not extraction_error
+            else ""
         )
-        merged_valid = preserve_partial and validate_summary_text(merged)[0]
-        repaired_valid, _ = validate_summary_text(repaired)
+        merged_valid = (
+            preserve_partial
+            and not extraction_error
+            and validate_summary_text(
+                merged, require_closed_structure=require_closed_sections
+            )[0]
+        )
+        repaired_valid = (
+            not extraction_error
+            and validate_summary_text(
+                repaired, require_closed_structure=require_closed_sections
+            )[0]
+        )
         if merged_valid:
             final_text, repair_resolution = merged, "merged_valid"
         elif repaired_valid:
@@ -341,6 +376,7 @@ class _BatchRun:
             final_text, repair_resolution = "", "rejected"
         trace_batch["repair"] = {
             "reason": reason,
+            "extraction_error": extraction_error,
             "missing_tags": list(missing_tags),
             "repaired_text": repaired,
             "merged_text": merged,
@@ -352,6 +388,7 @@ class _BatchRun:
         if not final_text:
             raise SummaryRejectedError(
                 "summary repair produced no usable summary"
+                + (f" ({extraction_error})" if extraction_error else "")
             )
         self.log.info(
             "summary_batch_repair_result batch=%s/%s merged_valid=%s repaired_chars=%s merged_chars=%s final_chars=%s final_preview=%s",

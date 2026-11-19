@@ -2,7 +2,7 @@
 
 import re
 
-from gc_core.summarize.summary_spec import section_tags
+from gc_core.summarize.summary_spec import extract_summary_bodies, section_tags
 from gc_core.summarize.summary_validation import (
     SummaryRejectedError,
     validate_summary_text,
@@ -19,7 +19,7 @@ _FENCED_CODE = re.compile(
 )
 _INLINE_CODE = re.compile(r"(?<![\\`])(`+)(?!`)[^`\n]*\1(?!`)")
 _QUOTED_XML = re.compile(
-    r"(?s)(?<![\\`])(`{1,2})(?!`)[ \t]*<summary>.*?</summary>[ \t]*\1(?!`)"
+    r"(?s)(?<![\\`])(`{1,2})(?!`)[ \t]*<summary>(?:(?!\1).)*?</summary>[ \t]*\1(?!`)"
 )
 _QUOTED_THINK = re.compile(r"(?<!\\)([\"'])</think>\1")
 _SUMMARY_OPEN = "<summary>"
@@ -146,8 +146,21 @@ def _single_summary(source: str, boundary: int) -> str | None:
     return source[boundary + opens[0].start() : boundary + closes[0].end()]
 
 
-def extract_final_summary_xml(text: str) -> str | None:
-    """Return one final summary, keeping partial drafts for the repair path."""
+def _partial_summary(source: str, boundary: int) -> str | None:
+    answer = source[boundary:]
+    tokens = _outer_tokens(answer)
+    opens = [match for match in tokens if match.group() == _SUMMARY_OPEN]
+    closes = [match for match in tokens if match.group() == _SUMMARY_CLOSE]
+    if len(opens) != 1 or closes:
+        return None
+    partial = answer[opens[0].start() :].strip()
+    if not any(extract_summary_bodies(partial, allow_unclosed=False).values()):
+        return None
+    return partial
+
+
+def extract_summary_candidate(text: str) -> tuple[str | None, bool]:
+    """Return the selected summary text and whether its envelope is incomplete."""
     source = text or ""
     boundaries = _reasoning_boundaries(source)
     if boundaries:
@@ -158,8 +171,17 @@ def extract_final_summary_xml(text: str) -> str | None:
                 candidate, require_closed_structure=True
             )[0]
         ):
-            return candidate
+            return candidate, False
+        partial = _partial_summary(source, boundaries[-1])
+        if partial is not None:
+            return partial, True
         raise SummaryRejectedError(
             "summary produced no usable summary after reasoning boundary"
         )
-    return _single_summary(source, 0)
+    return _single_summary(source, 0), False
+
+
+def extract_final_summary_xml(text: str) -> str | None:
+    """Return one final summary, keeping partial drafts for the repair path."""
+    candidate, _ = extract_summary_candidate(text)
+    return candidate
