@@ -469,15 +469,21 @@ def _window_consistent(scr) -> None:
 
 
 def _drawable(model, s: int) -> bool:
-    """У шага ``s`` есть что рисовать: показанное событие или черта смены
-    модели (шаг откаченной реплики без вывода — пустой)."""
+    """У шага ``s`` есть что рисовать: показанное событие (не свёрнутая
+    попытка сдачи) или черта смены модели. Шаг откаченной реплики без
+    вывода и шаг, где осталась только свёрнутая попытка, — пустые."""
     from gc_tui.services.trace_steps import shown
 
-    return any(
-        model.items[i].kind == "model_choice"
-        or shown(model.items[i].event, model.withdrawn)
-        for i in model.step_range(s)
-    )
+    def drawn(i: int) -> bool:
+        item = model.items[i]
+        if item.kind == "model_choice":
+            return True
+        ev = item.event
+        return shown(ev, model.withdrawn) and (
+            ev.no not in model.collapsed_attempts
+        )
+
+    return any(drawn(i) for i in model.step_range(s))
 
 
 def _event_step(model, i: int) -> int:
