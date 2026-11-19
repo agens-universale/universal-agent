@@ -562,9 +562,14 @@ class TraceWindowMixin:
 
     def _window_step_at(self, widget: Widget) -> int | None:
         """Шаг, в котором ``widget`` лежит по ленте (от головы шага до
-        следующей); выше первой головы или не в ленте — None."""
+        следующей); выше первой головы или не в ленте — None. У помеченного
+        виджета — его метка: якоря рядом со своим виджетом (строки блоков,
+        вложенное) помечены шагом по ленте; проход по ленте — только для
+        непомеченного (вложенное из куска)."""
+        step = self._window_step_of.get(widget)
+        if step is not None:
+            return step
         step_at = {w: t for t, w in self._window_heads.items()}
-        step = None
         for child in self._window_feed().children:
             step = step_at.get(child, step)
             if child is widget:

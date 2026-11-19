@@ -2939,7 +2939,12 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         widgets = self._window_step_widgets(step)
         if any(pins_to_bottom(w) for w in widgets):
             return True
-        return bool(self._step_subtree(step) & self._live_widgets())
+        live = self._live_widgets()
+        return any(
+            w in live
+            for top in widgets
+            for w in top.walk_children(with_self=True)
+        )
 
     def _step_subtree(self, step: int) -> set:
         """Все виджеты поддерева ленты шага ``step``."""
