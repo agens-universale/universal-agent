@@ -1279,3 +1279,20 @@ async def test_refused_attempt_does_not_pin_live_turn(tmp_path, monkeypatch):
         texts = _texts(scr)
         assert not any(refused in t for t in texts)
         assert sum("Отчёт 0 попытка 2." in t for t in texts) == 1
+
+
+@pytest.mark.asyncio
+async def test_settled_turn_line_does_not_pin_its_step(tmp_path, monkeypatch):
+    """Строка итога прошлого хода осела с началом следующего — она больше
+    не живое состояние: её шаг снимается сверху, гигантский следующий ход
+    у низа держит окно в пределах."""
+    bound = _small_window(monkeypatch)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, _giant_turn(0, 3), whole_calls=True)
+        await _feed_turn(
+            pilot, scr, _giant_turn(1, 90), bound=bound, whole_calls=True
+        )
+        assert scr._window_first > 0

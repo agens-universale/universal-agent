@@ -2960,7 +2960,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         ленты, §9)."""
         live = {
             self.focused,
-            self._fresh_line,
+            self._fresh_turn_line(),
             self._ask_human_question_row,
             self._stream_block,
             self._stream_answer_row,
