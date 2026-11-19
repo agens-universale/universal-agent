@@ -284,10 +284,11 @@ class HistoryModel:
         """Событие с окончательным номером — в конец ленты."""
         self._item_of_no[ev.no] = len(self.items)
         self._note_call(ev)
-        self._append(HistoryItem(kind, event=ev))
+        drawn = True
         if kind == "event" and shown(ev, self.withdrawn):
-            replay_answer(self._answers, ev)
+            drawn = replay_answer(self._answers, ev)
             self.collapsed_attempts.update(self._answers.collapsed)
+        self._append(HistoryItem(kind, event=ev), drawn=drawn)
         self.next_no = ev.no + 1
         if ev.tool_name == "ask_human" and ev.kind == "system" and ev.call_id:
             self.unanswered.add(ev.call_id)
@@ -324,10 +325,12 @@ class HistoryModel:
                 self._result_of[call] = at
                 self._call_of[at] = call
 
-    def _append(self, item: HistoryItem) -> None:
+    def _append(self, item: HistoryItem, *, drawn: bool = True) -> None:
         """Элемент — в конец ленты и в шаги: начало хода — новый шаг, внутри
-        хода границу решает `StepSplitter`. Пока ходов нет, нет и шагов;
-        первый шаг, как и первый ход, начинается с 0."""
+        хода границу решает `StepSplitter` (и задним числом — в последнем
+        месте шага, где группа вызовов и так закрылась). Пока ходов нет, нет
+        и шагов; первый шаг, как и первый ход, начинается с 0. ``drawn`` —
+        False у прозы, которую дедуп ответа не рисует."""
         at = len(self.items)
         self.items.append(item)
         if not self.turn_starts:
@@ -338,9 +341,11 @@ class HistoryModel:
             self._steps.turn_started()
             if self.step_starts[-1] != at:
                 self.step_starts.append(at)
-            self._steps.feed(item, self.withdrawn)
-        elif self._steps.feed(item, self.withdrawn):
-            self.step_starts.append(at)
+            self._steps.feed(item, self.withdrawn, drawn=drawn)
+            return
+        back = self._steps.feed(item, self.withdrawn, drawn=drawn)
+        if back is not None:
+            self.step_starts.append(at - back)
 
     def carry_response_tail(self, payloads: list, *, live: bool) -> list:
         """Хвост ответа после порции ``payloads``. Живой опрос несёт хвост

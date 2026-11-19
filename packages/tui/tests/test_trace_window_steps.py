@@ -2072,3 +2072,192 @@ async def test_reply_walk_round_without_progress_ends_walk(
         scr._window_reach_reply()
         assert rounds == [1]
         assert scr._window_reply_step is None
+
+
+# ---- R50: обязательная граница — где группа и так закрывается --------------
+
+
+def _turn_events(spec: list[tuple[str, str]]):
+    """События хода по описанию: ("say", текст) — проза, ("call", wire) —
+    вызов с исходом."""
+    evs = [_ev(1, "user", "запрос", message_id="u1")]
+    for kind, value in spec:
+        no = len(evs) + 1
+        if kind == "say":
+            evs.append(_ev(no, "agent", value))
+        else:
+            cid = f"c{no}"
+            evs.append(
+                _ev(no, "call", call_id=cid, wire_name=value, tool_name=value)
+            )
+            evs.append(_ev(no + 1, "result", "ok", call_id=cid))
+    return evs
+
+
+def _model_of_events(evs):
+    from gc_tui.services.history_model import HistoryModel
+
+    model = HistoryModel(turn_starts=[0])
+    for ev in evs:
+        model.append_event(ev)
+    return model
+
+
+def test_cap_boundary_moves_back_to_group_close():
+    """Ход снапшота (проза, 7 чтений, команда, проза, 3 правки, команда,
+    проза — 25 элементов): шаг дорастает до предела на второй правке, но
+    граница встаёт раньше — перед правками, где группа и так закрывается;
+    правки — в одном шаге (R50)."""
+    spec = [
+        ("say", "смотрю"),
+        *[("call", "fs_read_file")] * 7,
+        ("call", "exec_command"),
+        ("say", "поправлю"),
+        *[("call", "fs_apply_file_edits")] * 3,
+        ("call", "exec_command"),
+        ("say", "готово"),
+    ]
+    evs = _turn_events(spec)
+    model = _model_of_events(evs)
+    edits = [
+        i
+        for i, it in enumerate(model.items)
+        if it.event.kind == "call" and it.event.wire_name.startswith("fs_ap")
+    ]
+    assert model.step_count() == 2
+    assert {model.item_step(i) for i in edits} == {1}
+    assert model.step_starts[1] == edits[0]
+    for s in range(model.step_count()):
+        assert len(model.step_range(s)) <= STEP_MAX_ITEMS
+
+
+def test_uniform_run_still_cut_at_cap():
+    """Длинная серия однородных чтений без прозы — группа нигде не
+    закрывается сама: граница — на пределе, как раньше (R50)."""
+    model = _model_of_events(_turn_events([("call", "fs_read_file")] * 120))
+    starts = model.step_starts
+    assert len(starts) > 5
+    assert starts[1] - starts[0] == STEP_MAX_ITEMS - 1
+    for s in range(model.step_count()):
+        assert len(model.step_range(s)) <= STEP_MAX_ITEMS
+
+
+def _fetch(i: int, k: int) -> list[dict]:
+    """Загрузка страницы — вызов группы `Fetched`."""
+    cid = f"fetch_{i}_{k}"
+    args = {"url": f"https://example.org/{k}"}
+    output = {"tool": "exec_fetch_url", "ok": True, **args, "status": 200}
+    return [
+        _message(
+            {
+                "arguments": json.dumps(args),
+                "call_id": cid,
+                "name": "exec_fetch_url",
+                "type": "function_call",
+                "id": f"fc_{cid}",
+                "status": "completed",
+            }
+        ),
+        _message(
+            {
+                "id": f"fco_{cid}",
+                "type": "function_call_output",
+                "call_id": cid,
+                "output": json.dumps(output),
+            }
+        ),
+    ]
+
+
+def _kinds_turn(i: int, runs: int) -> list[dict]:
+    """Ход без прозы: серии поисков по 7 и загрузок по 6 вперемежку —
+    предел шага приходится внутрь серии, а смена вида группы — раньше."""
+    user = f"m_u{i:04d}"
+    records = [
+        _message({"role": "user", "id": user, "content": f"запрос {i}"})
+    ]
+    k = 0
+    for r in range(runs):
+        make, size = (_find, 7) if r % 2 == 0 else (_fetch, 6)
+        for _ in range(size):
+            records += make(i, k)
+            k += 1
+    answer = _prose(i, k)
+    return [*records, answer, _outcome(user, answer["payload"]["id"])]
+
+
+def test_renderer_grouping_follows_shared_predicate():
+    """Страж одного правила (R50): отрисовщик ставит вызов в блок над ним
+    только там, где `may_join` это допускает, и закрывает группу везде,
+    где не допускает; сплиттер шагов зовёт ту же функцию."""
+    from gc_tui.services.history_render import (
+        ChunkOptions,
+        FeedHost,
+        render_steps,
+    )
+    from gc_tui.services.tool_blocks import call_block_kind, may_join
+
+    model = _model(_kinds_turn(0, 6))
+
+    async def render():
+        async with _Feed().run_test(size=(120, 60)) as pilot:
+            feed = pilot.app.query_one("#feed", VerticalScroll)
+            return render_steps(
+                FeedHost(feed),
+                model,
+                range(model.step_count()),
+                before=None,
+                options=ChunkOptions(),
+            )
+
+    import asyncio
+    from itertools import pairwise
+
+    refs = asyncio.run(render())
+    views = list(refs.block_views.values())
+    pairs = 0
+    for s in range(model.step_count()):
+        events = [model.items[i].event for i in model.step_range(s)]
+        calls = [ev for ev in events if ev is not None and ev.kind == "call"]
+        if len(calls) < 2:
+            continue
+        view = next(v for v in views if v.model.block_of(calls[0].call_id))
+        for prev, cur in pairwise(calls):
+            joined = view.model.block_of(prev.call_id) == view.model.block_of(
+                cur.call_id
+            )
+            allowed = may_join(
+                call_block_kind(prev.wire_name), call_block_kind(cur.wire_name)
+            )
+            assert joined == allowed, (prev.wire_name, cur.wire_name)
+            pairs += 1
+    assert pairs > 10
+
+
+@pytest.mark.asyncio
+async def test_moved_back_boundary_live_matches_open(tmp_path, monkeypatch):
+    """Граница, поставленная задним числом на смене вида группы (R50):
+    вживую виджеты уже нарисованных элементов переходят в новый шаг сами
+    (метка — элемент модели); снятие сверху и подъём — лента как при
+    открытии, каждое событие — в своём шаге."""
+    records = [*_kinds_turn(0, 8), *_kinds_turn(1, 8)]
+    model = _model(records)
+    moved = [
+        model.step_starts[s]
+        for s in range(model.step_count())
+        if (ev := model.items[model.step_starts[s]].event) is not None
+        and ev.kind == "call"
+    ]
+    assert moved
+    with pinned_snapshot_clock(monkeypatch):
+        opened = await _opened_dump(tmp_path / "open", records, monkeypatch)
+        _small_window(monkeypatch)
+        async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+            scr = pilot.app.screen
+            assert scr.attach_active_task(HISTORY_THREAD)
+            await pilot.pause()
+            await _feed_turn(pilot, scr, records, whole_calls=True)
+            assert scr._window_model().step_starts == model.step_starts
+            assert scr._window_first > 0
+            live = await _climb_whole(pilot, scr, monkeypatch)
+    assert live == opened

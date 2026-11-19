@@ -110,11 +110,12 @@ def finish_close(flow: AnswerFlow, ev: TraceEvent) -> TurnClose:
     )
 
 
-def replay_answer(flow: AnswerFlow, ev: TraceEvent) -> None:
+def replay_answer(flow: AnswerFlow, ev: TraceEvent) -> bool:
     """Событие ``ev`` — в дедуп ответа хода так же, как его подаёт
     отрисовка: реплика начинает ход, сдача и проза — по своим правилам.
     Кусок, начатый внутри хода, проигрывает так элементы хода до себя;
-    модель истории так узнаёт, какие попытки сдачи свернутся."""
+    модель истории так узнаёт, какие попытки сдачи свернутся. False —
+    проза, которую дедуп не рисует."""
     from gc_tui.services.trace_mapper import is_finish
 
     if ev.kind == "user":
@@ -122,4 +123,5 @@ def replay_answer(flow: AnswerFlow, ev: TraceEvent) -> None:
     elif is_finish(ev):
         finish_close(flow, ev)
     elif ev.kind == "agent":
-        answer_verdict(flow, ev)
+        return answer_verdict(flow, ev).show
+    return True

@@ -445,9 +445,7 @@ async def test_expand_at_bottom_stays_bottom(tmp_path):
 
 
 async def _two_blocks(pilot, thread):
-    """Два блока чтений, разделённые ответом; лента у низа. Второй блок
-    длиннее шага хода: граница шага делит его на две группы
-    (`trace_steps`), последняя — `r12…r17`."""
+    """Два блока чтений, разделённые ответом; лента у низа."""
     scr = await _open(pilot)
     await _tail(pilot, thread, *_reads(*range(8)))
     await _tail(pilot, thread, _answer("a1", "Посмотрю ещё."))
@@ -497,8 +495,7 @@ async def test_toggle_at_bottom_one_movement(tmp_path, monkeypatch, ends):
     async with _app(tmp_path).run_test(size=(100, 20)) as pilot:
         scr = await _two_blocks(pilot, thread)
         trace = scr.query_one("#trace", VerticalScroll)
-        block = _block_of(scr, "r17")
-        assert _blocks(scr)[-1] == f"/{block}"
+        block = _block_of(scr, "r10")
         header = _header_of(scr, block)
         for end in ends:
             frames = await _toggle_frames(
