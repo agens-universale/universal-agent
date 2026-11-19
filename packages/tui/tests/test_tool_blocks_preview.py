@@ -576,8 +576,10 @@ async def test_preview_collapse_brings_header_into_view(tmp_path):
     from gc_tui.messages import BlockToggle
     from textual.containers import VerticalScroll
 
+    # Десять чтений — одна группа: серия длиннее шага хода делится
+    # границей шага на группы (`trace_steps`).
     thread = _Thread(tmp_path, status="stopped")
-    thread.add(*[p for i in range(12) for p in _read(i)])
+    thread.add(*[p for i in range(10) for p in _read(i)])
     thread.add(_say("a1", "\n\n".join(f"абзац {i}" for i in range(20))))
     async with _app(tmp_path).run_test(size=(100, 14)) as pilot:
         preview = await _open_preview(pilot)
