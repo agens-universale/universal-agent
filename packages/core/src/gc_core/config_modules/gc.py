@@ -14,6 +14,7 @@ UI-цикл процесса интерфейса) и server (``gc.collect()`` �
 См. ``docs_md/actual/2026-07-29-gc-collect-placement-spec.md``.
 """
 
+import gc
 from typing import Any
 
 
@@ -43,3 +44,13 @@ def gc_run_collect_enabled(*, is_tui: bool) -> bool:
     поэтому решает только ``is_tui``.
     """
     return not is_tui
+
+
+def collect_run_garbage(ctx: Any) -> None:
+    """Точки C1 и C2 — одно правило: по режиму (`gc_run_collect_enabled`)
+    сборкой рантайма из контекста ``ctx.collect_garbage`` (Temporal
+    подменяет её: общий worker не останавливается ради одного workflow),
+    без неё — ``gc.collect``. Контекста нет — режим не TUI."""
+    if not gc_run_collect_enabled(is_tui=bool(getattr(ctx, "is_tui", False))):
+        return
+    (getattr(ctx, "collect_garbage", None) or gc.collect)()

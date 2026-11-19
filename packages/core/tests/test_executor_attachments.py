@@ -83,7 +83,10 @@ async def _executor(monkeypatch, tmp_path, on_call):
     from gc_core.run_context import acreate_run_context
 
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
 
     async def _stub(messages, state, ctx, **kw):
         await on_call(messages, kw)
@@ -330,7 +333,10 @@ async def test_sdk_run_passes_attachments_and_the_tail_carries_its_own(
         "AgentExecutor",
         ae.AgentExecutor,
     )
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
     batches: list = []
     teardown_steps: list = []
 

@@ -597,7 +597,7 @@ class AsyncAgent:
         from gc_core.agent_executor import _aclose_mcp_and_release
         from gc_core.mcp_session_owner import set_owner
 
-        await _aclose_mcp_and_release(set_owner(owner))
+        await _aclose_mcp_and_release(set_owner(owner), ctx=ctx)
 
     async def __aenter__(self) -> AsyncAgent:
         return self

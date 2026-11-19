@@ -46,7 +46,10 @@ async def env(monkeypatch, tmp_path):
     from gc_core.run_context import acreate_run_context
 
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
     h = types.SimpleNamespace(
         batches=[], teardown_steps=[], fail=False, ae=ae, tmp_path=tmp_path
     )

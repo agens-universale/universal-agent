@@ -44,7 +44,10 @@ async def _executor(monkeypatch, tmp_path, loop, close):
     from gc_core.run_context import acreate_run_context
 
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
     monkeypatch.setattr(ae, "arun_agent", loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", close)
     ctx = await acreate_run_context(_cfg(tmp_path), auth_connector=None)

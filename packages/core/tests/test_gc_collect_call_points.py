@@ -60,7 +60,9 @@ def _coord(
         rsc, "exceeded_summary_triggers", lambda **kw: threshold_exceeded
     )
     monkeypatch.setattr(
-        rsc, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+        importlib.import_module("gc_core.config_modules.gc"),
+        "gc",
+        types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
     )
     return coord
 
@@ -200,7 +202,9 @@ class TestC2AgentExecutorFinally:
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(
-            ae, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+            importlib.import_module("gc_core.config_modules.gc"),
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
         )
 
         # run_agent — немедленный выход без HTTP/MCP.
@@ -231,7 +235,9 @@ class TestC2AgentExecutorFinally:
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(
-            ae, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+            importlib.import_module("gc_core.config_modules.gc"),
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
         )
 
         async def _arun_agent_boom(*a, **kw):
@@ -260,7 +266,9 @@ class TestC2AgentExecutorFinally:
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(
-            ae, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+            importlib.import_module("gc_core.config_modules.gc"),
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
         )
 
         async def _arun_agent_stub(*_a, **_kw):
@@ -313,6 +321,46 @@ class TestC2AgentExecutorFinally:
             system="cli",
         )
         assert len(gc_calls) == collects
+
+
+# ---------------------------------------------------------------------------
+# Один помощник C1/C2: режим и сборка рантайма
+# ---------------------------------------------------------------------------
+
+
+class TestRunCollectHelper:
+    def test_helper_follows_mode_and_runtime_collector(self, monkeypatch):
+        """``collect_run_garbage`` — одно правило C1/C2: в TUI ничего,
+        иначе сборка рантайма (Temporal подменяет её), без неё —
+        ``gc.collect``."""
+        from gc_core.config_modules import gc as gcmod
+
+        gc_calls, rt_calls = [], []
+        monkeypatch.setattr(
+            gcmod,
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
+        )
+        runtime = types.SimpleNamespace(
+            is_tui=False, collect_garbage=lambda: rt_calls.append(1)
+        )
+        gcmod.collect_run_garbage(runtime)
+        gcmod.collect_run_garbage(types.SimpleNamespace(is_tui=False))
+        gcmod.collect_run_garbage(types.SimpleNamespace(is_tui=True))
+        assert (rt_calls, gc_calls) == ([1], [1])
+
+    async def test_portless_teardown_uses_runtime_collector(self):
+        """Уборка без порта ``mcp_cleanup`` собирает мусор сборкой
+        рантайма из контекста, а не голым ``gc.collect``."""
+        from gc_core.mcp_session_owner import set_owner
+
+        ae = importlib.import_module("gc_core.agent_executor")
+        rt_calls = []
+        ctx = types.SimpleNamespace(
+            is_tui=False, collect_garbage=lambda: rt_calls.append(1)
+        )
+        await ae._aclose_mcp_and_release(set_owner("gc-test"), ctx=ctx)
+        assert rt_calls == [1]
 
 
 # ---------------------------------------------------------------------------

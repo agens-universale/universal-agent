@@ -55,7 +55,10 @@ def _dropped(caplog) -> list:
 @pytest.fixture()
 def env(monkeypatch):
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
     h = types.SimpleNamespace(batches=[], teardown_steps=[], calls=[], ae=ae)
 
     async def _loop(messages, state, ctx, **kw):

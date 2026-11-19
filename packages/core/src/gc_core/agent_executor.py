@@ -8,7 +8,6 @@ State создаётся заново при каждом run(). Возвращ�
 
 import asyncio
 import contextlib
-import gc
 import logging
 import threading
 from copy import copy as _shallow_copy_msg
@@ -22,7 +21,7 @@ from gc_core.attachments.store import (
     awith_committed_attachments,
 )
 from gc_core.auto_routing import state_ops
-from gc_core.config_modules.gc import gc_run_collect_enabled
+from gc_core.config_modules.gc import collect_run_garbage
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
@@ -182,7 +181,7 @@ async def _aappend_trace_id_to_meta(
 
 
 async def _aclose_mcp_and_release(
-    owner_reset: Any, *, collect: bool = True
+    owner_reset: Any, *, ctx: Any = None
 ) -> None:
     """Уборка после прогона: stdio-сессии, stream-сессии, владение.
 
@@ -219,20 +218,12 @@ async def _aclose_mcp_and_release(
     except Exception:
         pass
     # C2: после закрытия MCP/stdio — подбираем циклический мусор
-    # (pipes, ClientSession, loop buffers); режим решает вызывающий.
-    if collect:
-        gc.collect()
+    # (pipes, ClientSession, loop buffers) — по режиму контекста ``ctx``.
+    collect_run_garbage(ctx)
     # Владение снимаем последним: всё выше его требует.
     reset_owner(owner_reset)
     if cancelled is not None:
         raise cancelled
-
-
-def _collect_garbage(ctx: Any) -> None:
-    """C2 после уборки хода портом ``mcp_cleanup``. Рантайм может заменить
-    сборку (Temporal: общий worker не останавливается ради одного
-    workflow); локально — ``gc.collect``."""
-    (getattr(ctx, "collect_garbage", None) or gc.collect)()
 
 
 def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
@@ -1525,19 +1516,15 @@ class AgentExecutor:
                 m for m in self._pending_messages if _INBOX_MARK not in m
             )
             self._pending_messages = []
-        collect = gc_run_collect_enabled(
-            is_tui=bool(getattr(self._ctx, "is_tui", False))
-        )
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
             if cleanup is None:
-                await _aclose_mcp_and_release(owner_reset, collect=collect)
+                await _aclose_mcp_and_release(owner_reset, ctx=self._ctx)
             else:
                 try:
                     await cleanup()
                     # C2 и после уборки потребителя — по режиму.
-                    if collect:
-                        _collect_garbage(self._ctx)
+                    collect_run_garbage(self._ctx)
                 except Exception:
                     # Как локальная уборка: сбой закрытия MCP не отменяет
                     # готовый ответ хода.
