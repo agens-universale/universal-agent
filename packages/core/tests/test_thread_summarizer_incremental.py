@@ -15,9 +15,14 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_core.summarize.summary_spec import assemble_summary_xml
 from gc_core.summarize.thread_summarizer import (
+    _arun_patch_step,
     asummarize_dialog_via_chat_completions,
 )
-from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_core.summarize.working_memory_gateway import (
+    WorkingMemoryDeltas,
+    WorkingMemorySnapshot,
+    apply_summary_memory_patch,
+)
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
@@ -351,6 +356,91 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
     assert "[TODO] run tests" in wm_state
     assert "<state>" in content
     assert "stale TODO" not in content.split("<session_memory>")[1]
+
+
+def test_memory_patch_uses_final_registers_after_formatter_preamble(
+    monkeypatch,
+):
+    history = _flatten_turns([_make_turn("continue task", "ack")])
+
+    async def _fake_summary(**_kwargs):
+        return _valid_summary("memory-registers")
+
+    async def _fake_replace(**_kwargs):
+        return types.SimpleNamespace(
+            request_messages=[],
+            raw_response=(
+                "<knowledge>: draft\n</think>\n"
+                "<goal>finish task</goal>\n<state>next action</state>\n"
+                "<knowledge>verified fact</knowledge>"
+            ),
+        )
+
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
+    )
+    _patch_chat_completion(monkeypatch, _fake_summary)
+    monkeypatch.setattr(
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        _fake_replace,
+    )
+    state = types.SimpleNamespace(
+        default_model="test-model",
+        shared=types.SimpleNamespace(working_memory={"knowledge": "old fact"}),
+        messages=[],
+        dialog_steps_offset=0,
+        previous_response_id=None,
+        user_intent_log=[],
+        current_user_intent=[],
+    )
+
+    result = run_coro(
+        asummarize_dialog_via_chat_completions(
+            ctx=_ctx(trigger_chars=999999),
+            state=state,
+            full_history_messages=history,
+        )
+    )
+    apply_summary_state_patch(
+        state=state,
+        raw_summary=result["raw_summary"],
+        last_dialog_steps=result["last_dialog_steps"],
+        memory_append_deltas=result["memory_append_deltas"],
+        memory_replace_deltas=result["memory_replace_deltas"],
+        summarized_messages_count=len(history),
+        can_propose_plan=True,
+    )
+
+    assert state.shared.working_memory["goal"] == "finish task"
+    assert state.shared.working_memory["state"] == "next action"
+    assert state.shared.working_memory["knowledge"] == "verified fact"
+
+
+def test_memory_patch_applies_markdown_literal_without_format_repair():
+    knowledge = "Keep the `<state>` element in the exported document."
+    raw = (
+        "<goal>Validate XML export</goal>"
+        "<constraints>Keep its schema</constraints>"
+        "<state>Validate the rendered XML next</state>"
+        f"<knowledge>{knowledge}</knowledge>"
+    )
+    result = types.SimpleNamespace(raw_response=raw)
+
+    deltas, touched, repaired, _, _ = run_coro(
+        _arun_patch_step(None, None, result, None)
+    )
+    updated = apply_summary_memory_patch(
+        WorkingMemorySnapshot(knowledge="old fact"),
+        deltas,
+        replace_touched=touched,
+    )
+
+    assert repaired is False
+    assert updated.goal == "Validate XML export"
+    assert updated.constraints == "Keep its schema"
+    assert updated.state == "Validate the rendered XML next"
+    assert updated.knowledge == knowledge
 
 
 def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):

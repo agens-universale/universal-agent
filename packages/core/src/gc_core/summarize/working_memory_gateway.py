@@ -313,22 +313,240 @@ def _build_register_body_patterns() -> dict[str, re.Pattern[str]]:
 
 
 _REGISTER_BODY_PATTERNS = _build_register_body_patterns()
+_REGISTER_TAG_TOKEN = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9_]*)>")
+_REGISTER_NAMES = frozenset(REGISTER_ORDER)
+_RESERVED_REGISTER_TAG = re.compile(
+    rf"<(/?)({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>"
+)
+_MARKDOWN_CODE_SPAN = re.compile(r"(?<!\\)(?:\\\\)*(`+)(.*?)\1", re.DOTALL)
+_INLINE_CODE_CAPTION = re.compile(r"\A(`+)[^`\n]+\1\s*:?[ \t]*\Z")
+_BOLD_REGISTER_CAPTION = re.compile(r"\*\*([A-Za-z]+)\*\*:?")
+_REGISTER_BOUNDARY_IN_SPAN = re.compile(
+    rf"</(?:{'|'.join(REGISTER_ORDER)})>.*?<(?:{'|'.join(REGISTER_ORDER)})>",
+    re.DOTALL,
+)
+_PATCH_FENCE = re.compile(
+    r"^(?P<marker>`{3,})[^`\n]*\n(?P<body>.*?)\n(?P=marker)[ \t]*(?=\n|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+_EXAMPLE_CUE = re.compile(
+    r"\b(?:example|for instance|do not use|пример|для иллюстрации формата)\b|\be\.g\.",
+    re.I,
+)
+_FENCED_EXAMPLE_CAPTION = re.compile(
+    r"^[ \t]*(?:for example\b|example\b|e\.g\.|пример\b|"
+    r"например\b|для иллюстрации формата\b|do not use[ \t]*:)",
+    re.I | re.MULTILINE,
+)
+_OUTSIDE_TAG_LIKE = re.compile(r"</?[A-Za-z]")
+_REGISTER_END_TAG = re.compile(
+    rf"</({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>\Z"
+)
+_BROKEN_REGISTER_TAIL = re.compile(
+    rf"</?(?:{'|'.join(re.escape(name) for name in REGISTER_ORDER)})\s*\Z"
+)
+_REGISTER_WRAPPER_END = re.compile(
+    r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
+)
+_PERSISTENT_STATE_WITH_TODO = re.compile(
+    r"<persistent_state>\s*<session_memory>(?P<memory>.*?)</session_memory>\s*"
+    r"<session_todo>(?:(?!</session_todo>).)*</session_todo>\s*</persistent_state>",
+    re.DOTALL,
+)
+_THINK_PATCH_BOUNDARY = re.compile(
+    rf"</think>\s*(?=<(?:{'|'.join(REGISTER_ORDER)}|persistent_state)>|`{{3,}})"
+)
+
+
+def _is_markdown_literal(position: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= position < end for start, end in spans)
+
+
+def _next_unquoted_tag(
+    pattern: re.Pattern[str],
+    text: str,
+    start: int,
+    spans: list[tuple[int, int]],
+) -> re.Match[str] | None:
+    return next(
+        (
+            tag
+            for tag in pattern.finditer(text, start)
+            if not _is_markdown_literal(tag.start(), spans)
+        ),
+        None,
+    )
+
+
+def _next_structural_tag(
+    text: str, start: int, spans: list[tuple[int, int]]
+) -> re.Match[str] | None:
+    for tag in _REGISTER_TAG_TOKEN.finditer(text, start):
+        if _is_markdown_literal(tag.start(), spans):
+            continue
+        line_start = text.rfind("\n", start, tag.start()) + 1
+        before = text[max(start, line_start) : tag.start()].strip()
+        if before:
+            if _EXAMPLE_CUE.search(before):
+                continue
+            bold_caption = _BOLD_REGISTER_CAPTION.fullmatch(before)
+            if _INLINE_CODE_CAPTION.fullmatch(before) is None and (
+                not (
+                    before.endswith(":")
+                    or before == ","
+                    or (
+                        bold_caption is not None
+                        and bold_caption.group(1).lower() == tag.group(2)
+                    )
+                )
+                or tag.group(1)
+                or tag.group(2) not in _REGISTER_NAMES
+                or _matching_register_close(
+                    text, tag.end(), tag.group(2), spans
+                )
+                is None
+            ):
+                continue
+        return tag
+    return None
+
+
+def _register_opening(text: str, cursor: int) -> re.Match[str] | None:
+    opening = _REGISTER_TAG_TOKEN.match(text, cursor)
+    if (
+        opening is None
+        or opening.group(1)
+        or opening.group(2) not in _REGISTER_NAMES
+    ):
+        return None
+    return opening
+
+
+def _matching_register_close(
+    text: str, start: int, name: str, spans: list[tuple[int, int]]
+) -> re.Match[str] | None:
+    closing = _next_unquoted_tag(_RESERVED_REGISTER_TAG, text, start, spans)
+    if closing is None or closing.group(1) != "/" or closing.group(2) != name:
+        return None
+    return closing
+
+
+def _parse_register_block(
+    text: str, start: int, spans: list[tuple[int, int]]
+) -> dict[str, str] | None:
+    """Parse one contiguous, balanced run of register tags from ``start``."""
+    bodies: dict[str, str] = {}
+    cursor = start
+    while cursor < len(text):
+        opening = _register_opening(text, cursor)
+        if opening is None:
+            return None
+        name = opening.group(2)
+        closing = _matching_register_close(text, opening.end(), name, spans)
+        if closing is None:
+            return None
+        bodies[name] = text[opening.end() : closing.start()].strip()
+        cursor = closing.end()
+        if _REGISTER_WRAPPER_END.fullmatch(text[cursor:].strip()):
+            return bodies
+        next_tag = _next_structural_tag(text, cursor, spans)
+        if next_tag is None:
+            if _BROKEN_REGISTER_TAIL.search(text[cursor:]):
+                return None
+            return bodies
+        if next_tag.group(1) or next_tag.group(2) not in _REGISTER_NAMES:
+            return None
+        cursor = next_tag.start()
+    return None
+
+
+def _extract_balanced_registers(s: str) -> dict[str, str]:
+    spans = [
+        match.span()
+        for match in _MARKDOWN_CODE_SPAN.finditer(s)
+        if len(match.group(1)) >= 3
+        or _REGISTER_BOUNDARY_IN_SPAN.search(match.group()) is None
+        or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
+    ]
+    for token in _REGISTER_TAG_TOKEN.finditer(s):
+        if _is_markdown_literal(token.start(), spans):
+            continue
+        if token.group(1) or token.group(2) not in _REGISTER_NAMES:
+            continue
+        return _parse_register_block(s, token.start(), spans) or {}
+    return {}
+
+
+def _unwrap_session_memory_with_todo(text: str) -> str:
+    wrapper = _PERSISTENT_STATE_WITH_TODO.fullmatch(text)
+    return wrapper.group("memory").strip() if wrapper else text
+
+
+def _select_patch_fence(text: str) -> tuple[str, str] | None:
+    """Return the body and surrounding prose of one plausible patch fence."""
+    fences = list(_PATCH_FENCE.finditer(text))
+    if not fences:
+        return None
+    outside = _PATCH_FENCE.sub("\n", text)
+    fenced = fences[0]
+    if len(fences) > 1:
+        register_fences = [
+            fence
+            for fence in fences
+            if _RESERVED_REGISTER_TAG.search(fence.group("body"))
+        ]
+        if len(register_fences) != 1 or "```" in outside:
+            return None
+        fenced = register_fences[0]
+    elif text.count(fenced.group("marker")) != 2:
+        return None
+    return fenced.group("body").strip(), outside
+
+
+def _extract_register_candidate(s: str) -> dict[str, str]:
+    s = _unwrap_session_memory_with_todo(s)
+    selected = _select_patch_fence(s)
+    if selected is None:
+        return _extract_balanced_registers(s)
+    inner, outside = selected
+    if _OUTSIDE_TAG_LIKE.search(outside):
+        enclosing = _extract_balanced_registers(s)
+        return (
+            enclosing
+            if any("```" in body for body in enclosing.values())
+            else {}
+        )
+    if _FENCED_EXAMPLE_CAPTION.search(outside):
+        return {}
+    inner = _unwrap_session_memory_with_todo(inner)
+    if (
+        _RESERVED_REGISTER_TAG.match(inner) is None
+        or _REGISTER_END_TAG.search(inner) is None
+    ):
+        return {}
+    return _extract_balanced_registers(inner)
 
 
 def extract_register_bodies(text: str) -> dict[str, str]:
-    """Вырезает тела регистров ``<name>…</name>`` (последний match); пустое тело → ``''``."""
-    s = (text or "").strip()
+    """Extract a balanced register block, excluding a formatter preamble."""
+    s = _unwrap_session_memory_with_todo((text or "").strip())
     if not s:
         return {}
-    bodies: dict[str, str] = {}
-    for reg in SESSION_MEMORY_REGISTERS:
-        pattern = _REGISTER_BODY_PATTERNS[reg.name]
-        last_match: re.Match[str] | None = None
-        for match in pattern.finditer(s):
-            last_match = match
-        if last_match is not None:
-            bodies[reg.name] = last_match.group(1).strip()
-    return bodies
+    spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]
+    for boundary in _THINK_PATCH_BOUNDARY.finditer(s):
+        if _is_markdown_literal(boundary.start(), spans):
+            continue
+        after_think = _extract_register_candidate(s[boundary.end() :].strip())
+        if after_think:
+            return after_think
+    full = _extract_register_candidate(s)
+    if full:
+        return full
+    for boundary in re.finditer(r"</think>", s):
+        after_think = _extract_register_candidate(s[boundary.end() :].strip())
+        if after_think:
+            return after_think
+    return full
 
 
 def parse_memory_deltas(
