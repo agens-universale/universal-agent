@@ -2918,12 +2918,13 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         эфемерное и снимок вида уходят в память, ни один реестр экрана не
         держит снятый виджет; события остаются в модели. Не снимаются
         (False): шаг не на конце и живой (`_step_pinned`)."""
-        if not self._window_removable(step) or self._step_pinned(step):
-            return False
-        gone = self._step_subtree(step)
-        self._remember_step(step, gone)
-        self._forget_widgets(gone)
-        return super()._window_forget_step(step)
+        with self._window_scope():
+            if not self._window_removable(step) or self._step_pinned(step):
+                return False
+            gone = self._step_subtree(step)
+            self._remember_step(step, gone)
+            self._forget_widgets(gone)
+            return super()._window_forget_step(step)
 
     def _step_pinned(self, step: int) -> bool:
         """Шаг нельзя снимать (§5.3, R32, R41): последний шаг модели, шаг

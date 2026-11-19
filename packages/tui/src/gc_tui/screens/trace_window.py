@@ -31,6 +31,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from itertools import takewhile
@@ -91,6 +92,26 @@ def step_heads(
     return heads
 
 
+class _Snapshot:
+    """Шаги ленты на одну операцию окна: головы и виджеты каждого шага —
+    одним проходом (`TraceWindowMixin._window_scope`)."""
+
+    def __init__(self, heads: dict[int, Widget], children) -> None:
+        self.heads = heads
+        self.widgets: dict[int, list[Widget]] = {}
+        step_at = {w: t for t, w in heads.items()}
+        step = None
+        for widget in children:
+            step = step_at.get(widget, step)
+            if step is not None:
+                self.widgets.setdefault(step, []).append(widget)
+
+    def forget(self, step: int) -> None:
+        """Шаг ``step`` снят окном целиком."""
+        self.heads.pop(step, None)
+        self.widgets.pop(step, None)
+
+
 class TraceWindowMixin:
     """Окно ленты: хвост, домонтирование и снятие с краёв, разрыв."""
 
@@ -114,6 +135,10 @@ class TraceWindowMixin:
     _window_grow_queued = False
     # Шаг последнего виджета, дописанного живым путём.
     _window_grow_step = -1
+    # Операция окна идёт (`_window_scope`): шаги ленты считаются один раз
+    # на операцию, снимок — в `_window_snap`.
+    _window_scoped = 0
+    _window_snap: _Snapshot | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -133,8 +158,36 @@ class TraceWindowMixin:
         Снятое мимо окна (свёртка попыток сдачи, откат реплики) голову не
         уносит: она переходит к следующему виджету шага. У шага без
         виджетов головы нет; границы окна (`_window_first`, края разрыва)
-        проматываются через такие шаги (`_window_skip_empty`)."""
-        return step_heads(self._window_feed().children, self._window_step_of)
+        проматываются через такие шаги (`_window_skip_empty`). Внутри
+        операции окна — из её снимка (`_window_scope`)."""
+        return self._window_shot().heads
+
+    def _window_shot(self) -> _Snapshot:
+        """Шаги ленты: внутри операции окна — снимок на всю операцию,
+        вне — заново."""
+        snap = self._window_snap
+        if snap is None:
+            children = self._window_feed().children
+            snap = _Snapshot(
+                step_heads(children, self._window_step_of), children
+            )
+            if self._window_scoped:
+                self._window_snap = snap
+        return snap
+
+    @contextlib.contextmanager
+    def _window_scope(self):
+        """Операция окна (снятие, закрытие разрыва, «забыть шаг»): головы
+        и виджеты шагов считаются один раз — на операцию, а не на каждое
+        обращение. Ленту внутри меняет только само окно: снятие шага
+        правит снимок (`_Snapshot.forget`), монтаж куска его сбрасывает."""
+        self._window_scoped += 1
+        try:
+            yield
+        finally:
+            self._window_scoped -= 1
+            if not self._window_scoped:
+                self._window_snap = None
 
     # ---- что даёт экран --------------------------------------------------
 
@@ -218,6 +271,7 @@ class TraceWindowMixin:
             nested=self._window_nested(),
         )
         self._window_step_of.update(refs.step_of)
+        self._window_snap = None
         return refs
 
     @staticmethod
@@ -528,6 +582,10 @@ class TraceWindowMixin:
 
     def _window_forget_read_range(self) -> None:
         """Снять прочитанный диапазон с обоих концов, до закреплённых."""
+        with self._window_scope():
+            self._window_forget_read_range_now()
+
+    def _window_forget_read_range_now(self) -> None:
         for edge in ("top", "bottom"):
             while self._window_gap:
                 gap = self._window_gap
@@ -605,6 +663,12 @@ class TraceWindowMixin:
             return
         if self._window_busy:
             return
+        with self._window_scope():
+            self._window_trim_now(edge)
+        self.call_after_refresh(self._window_fill)
+
+    def _window_trim_now(self, edge: Edge) -> None:
+        """Тело `_window_trim` — внутри одной операции окна."""
         self._window_skip_empty()
         steps, counts = self._window_mounted_counts()
         excess = policy.trim_to(
@@ -632,7 +696,6 @@ class TraceWindowMixin:
         for step, _count in dropped:
             if not self._window_forget_step(step):
                 break
-        self.call_after_refresh(self._window_fill)
 
     def _window_keep_filled(
         self, dropped: list[tuple[int, int]]
@@ -647,32 +710,37 @@ class TraceWindowMixin:
         if feed.placed_between(0, 1) is None:
             return dropped
         height = feed.container_size.height
-        rows = [self._window_step_rows(step) for step, _count in dropped]
+        rows_of = self._window_rows_by_step()
+        rows = [rows_of.get(step, 0) for step, _count in dropped]
         left = feed.virtual_size.height - sum(rows)
         while dropped and policy.underfilled(left - height, height):
             dropped = dropped[:-1]
             left += rows.pop()
         return dropped
 
-    def _window_step_rows(self, step: int) -> int:
-        """Строк ленты под шагом ``step`` по последней раскладке: от верха
-        первого его показанного виджета до верха следующего показанного
-        за ним (или конца ленты); показанных нет — ноль."""
+    def _window_rows_by_step(self) -> dict[int, int]:
+        """Строк ленты под каждым смонтированным шагом по последней
+        раскладке — одним проходом: от верха первого показанного виджета
+        шага до верха первого показанного виджета следующих шагов (или
+        конца ленты); у шага без показанных — нет записи."""
         feed = self._window_feed()
-        widgets = self._window_step_widgets(step)
-        tops = [feed.placed_top(w) for w in widgets]
-        shown = [t for t in tops if t is not None]
-        if not shown:
-            return 0
-        children = list(feed.children)
-        bottom: int | None = None
-        for widget in children[children.index(widgets[-1]) + 1 :]:
-            bottom = feed.placed_top(widget)
-            if bottom is not None:
-                break
-        if bottom is None:
-            bottom = feed.virtual_size.height
-        return max(0, bottom - min(shown))
+        step_at = {w: t for t, w in self._window_heads.items()}
+        rows: dict[int, int] = {}
+        step = current = None
+        top_of_current = 0
+        for widget in feed.children:
+            step = step_at.get(widget, step)
+            if step is None or step == current:
+                continue
+            top = feed.placed_top(widget)
+            if top is None:
+                continue
+            if current is not None:
+                rows[current] = max(0, top - top_of_current)
+            current, top_of_current = step, top
+        if current is not None:
+            rows[current] = max(0, feed.virtual_size.height - top_of_current)
+        return rows
 
     def _window_edge_order(
         self, edge: Edge, mounted: list[tuple[int, int]]
@@ -761,6 +829,8 @@ class TraceWindowMixin:
         widgets = self._window_step_widgets(step)
         self._window_drop(step)
         self._window_feed().remove_children(widgets)
+        if self._window_snap is not None:
+            self._window_snap.forget(step)
         return True
 
     def _window_drop(self, step: int) -> None:
@@ -822,19 +892,7 @@ class TraceWindowMixin:
         """Виджеты ленты шага ``step``: от его первого виджета до первого
         виджета следующего смонтированного шага. Шаг без виджетов —
         пусто."""
-        heads = self._window_heads
-        start = heads.get(step)
-        if start is None:
-            return []
-        later = [t for t in heads if t > step]
-        stop = heads[min(later)] if later else None
-        widgets: list[Widget] = []
-        for widget in self._window_feed().children:
-            if widget is stop:
-                break
-            if widgets or widget is start:
-                widgets.append(widget)
-        return widgets
+        return list(self._window_shot().widgets.get(step, ()))
 
     # ---- липкая реплика (R46) --------------------------------------------
 

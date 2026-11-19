@@ -1628,3 +1628,38 @@ async def test_copy_numbering_matches_feed_with_refused_attempt(tmp_path):
             if text in candidates
         ]
     assert shown == answers
+
+
+@pytest.mark.asyncio
+async def test_trim_walks_feed_constant_times(tmp_path, monkeypatch):
+    """Снятие десятка шагов за раз считает головы и границы шагов один
+    раз на операцию, а не на каждый шаг и каждое обращение (R47 #2, #3):
+    проходов по ленте за снятие — не больше нескольких, сколько бы шагов
+    ни снималось."""
+    from gc_tui.screens import trace_window
+
+    _small_window(monkeypatch)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
+        await _feed_turn(
+            pilot, scr, _giant_turn(0, 120, outcome=False), whole_calls=True
+        )
+        assert scr._window_first == 0
+        steps_before = len(scr._window_heads)
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 100)
+        walks = []
+        heads = trace_window.step_heads
+
+        def counted(children, step_of):
+            walks.append(1)
+            return heads(children, step_of)
+
+        monkeypatch.setattr(trace_window, "step_heads", counted)
+        scr._window_trim("top")
+        monkeypatch.setattr(trace_window, "step_heads", heads)
+        dropped = steps_before - len(scr._window_heads)
+        assert scr._window_first >= 8
+        assert len(walks) <= 4, (len(walks), dropped)
