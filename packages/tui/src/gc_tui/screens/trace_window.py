@@ -154,6 +154,8 @@ class TraceWindowMixin:
     # ушёл, путь отменяется.
     _window_reply_step: int | None = None
     _window_reply_y: int | None = None
+    # Края окна (первый шаг, разрыв) на начале прошлого раунда пути.
+    _window_reply_bounds: tuple | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -986,6 +988,7 @@ class TraceWindowMixin:
             return
         model = self._window_model()
         self._window_reply_step = model.turn_step(model.turn_index_of(no))
+        self._window_reply_bounds = None
         self._window_reach_reply()
 
     def _window_reach_reply(self) -> None:
@@ -1003,6 +1006,13 @@ class TraceWindowMixin:
                 lambda: self._window_show_head(step)
             )
             return
+        bounds = (self._window_first, self._window_gap)
+        if bounds == self._window_reply_bounds:
+            # Прошлый раунд не сдвинул края (кусок без виджетов) — путь
+            # окончен, а не повторяет тот же кусок.
+            self._window_reply_step = None
+            return
+        self._window_reply_bounds = bounds
         if step < self._window_first:
             self._window_reply_scroll(0)
             done = self._window_prepend(focus=False)
@@ -1024,8 +1034,13 @@ class TraceWindowMixin:
         низом (читаемое за разрывом, ход начат в разрыве): кусок, который
         кончается на конце разрыва, — перед закреплённым низом, разрыв
         сужается снизу; зеркально подъёму, не выходя за ход реплики.
-        Лента — к верху закреплённого низа."""
+        Лента — к верху закреплённого низа; края окна — после неё."""
+        gap_y = self._window_gap_y()
+        if gap_y is not None:
+            self._window_reply_scroll(gap_y)
         gap = self._window_gap
+        if step not in gap:
+            return False
         prev = policy.prev_chunk(
             gap.stop,
             self._window_estimates(self._window_model()),
@@ -1033,11 +1048,6 @@ class TraceWindowMixin:
             policy.CHUNK_MAX,
         )
         steps = range(max(prev.start, gap.start, step), gap.stop)
-        if not steps:
-            return False
-        gap_y = self._window_gap_y()
-        if gap_y is not None:
-            self._window_reply_scroll(gap_y)
         refs = self._window_insert(steps, before=self._window_gap_head())
         self._window_set_gap(gap.start, steps.start)
         self._window_settle_later(refs, "bottom", False)
@@ -1057,15 +1067,18 @@ class TraceWindowMixin:
         super()._on_trace_scrolled(value)
         if self._ui_frozen_for_select():
             return
-        if self._window_reply_step is not None and (
-            round(value) != self._window_reply_y
-        ):
+        walking = self._window_reply_step is not None
+        if walking and round(value) != self._window_reply_y:
             # Человек ушёл прокруткой сам — путь к реплике не перехватывает.
-            self._window_reply_step = None
+            self._window_reply_step = walking = None
         feed = self._window_feed()
         feed.hold_first_visible(
             None if self._stick_bottom else self._window_reading_row()
         )
+        if walking:
+            # Своя прокрутка пути: кусок раунда ставит сам путь — догрузка
+            # не начинает второй поверх него (R49).
+            return
         self._window_prefetch()
         # Лента стала ниже запаса (свёртка, снятие) — догрузить.
         self._window_fill()

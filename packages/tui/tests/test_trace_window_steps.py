@@ -1704,6 +1704,8 @@ async def test_sticky_click_brings_reply_by_bounded_chunks(
             )
             settle(gen, widgets, side, focus)
 
+        overlaps = _overlap_probe(scr)
+
         def mounted() -> int:
             steps, counts = scr._window_mounted_counts()
             last = dict(zip(steps, counts, strict=True)).get(
@@ -1723,6 +1725,7 @@ async def test_sticky_click_brings_reply_by_bounded_chunks(
         await pilot.pause()
         await _settled(pilot, scr)
         assert chunks
+        assert overlaps == []
         assert max(chunks) <= policy.CHUNK_MAX
         assert max(worst) <= bound
         head = scr._window_heads.get(start1)
@@ -1731,7 +1734,25 @@ async def test_sticky_click_brings_reply_by_bounded_chunks(
         assert trace.placed_top(head) == top
 
 
-async def _island_reading_giant(pilot, scr, model, monkeypatch):
+def _overlap_probe(scr) -> list:
+    """Вставки кусков за путь к реплике, сделанные, пока прежний кусок
+    ещё встаёт (``_window_busy``): их быть не должно — один кусок на
+    раунд."""
+    overlaps: list = []
+    insert = scr._window_insert
+
+    def probe(steps, *, before):
+        if scr._window_reply_step is not None and scr._window_busy:
+            overlaps.append(steps)
+        return insert(steps, before=before)
+
+    scr._window_insert = probe
+    return overlaps
+
+
+async def _island_reading_giant(
+    pilot, scr, model, monkeypatch, pinned_turns=(0,)
+):
     """Остров: шаг старого хода закреплён (ссылка идущего вызова), подъём
     к началу и переход в конец — прочитанное не снимается дальше
     закреплённого, перед закреплённым низом встаёт хвост; нижний конец
@@ -1744,9 +1765,10 @@ async def _island_reading_giant(pilot, scr, model, monkeypatch):
         trace.scroll_to(y=0, animate=False)
         await pilot.pause()
         await _settled(pilot, scr)
-    pinned = model.turn_step(0)
     scr._poll_tick = lambda: None
-    scr._active_calls["pin"] = scr._window_step_widgets(pinned)[0]
+    for turn in pinned_turns:
+        pinned = model.turn_step(turn)
+        scr._active_calls[f"pin{turn}"] = scr._window_step_widgets(pinned)[0]
     # Хвост перехода в конец выше экрана: читаемая строка — в
     # закреплённом низу.
     monkeypatch.setattr(policy, "TAIL_MIN", 400)
@@ -1756,7 +1778,7 @@ async def _island_reading_giant(pilot, scr, model, monkeypatch):
     await _settled(pilot, scr)
     # Нижний конец прочитанного — тоже закреплён: остров.
     bottom = scr._window_gap.start - 1
-    scr._active_calls["pin2"] = scr._window_step_widgets(bottom)[0]
+    scr._active_calls["pin_bottom"] = scr._window_step_widgets(bottom)[0]
     gap_y = scr._window_gap_y()
     assert gap_y + 1 < trace.max_scroll_y - scr._STICK_TOL
     await _scroll_to(pilot, scr, gap_y + 1)
@@ -1808,6 +1830,7 @@ async def test_sticky_click_reaches_reply_above_pinned_bottom(
 
         scr._window_insert = spy_insert
         scr._window_settle = spy_settle
+        overlaps = _overlap_probe(scr)
         scr.post_message(ScrollToReply(_sticky(scr).reply))
         for _ in range(200):
             await pilot.pause()
@@ -1817,6 +1840,7 @@ async def test_sticky_click_reaches_reply_above_pinned_bottom(
         await pilot.pause()
         await _settled(pilot, scr)
         assert inserted
+        assert overlaps == []
         assert all(steps.start >= reply_step for steps in inserted)
         assert max(chunks) <= policy.CHUNK_MAX
         head = scr._window_heads.get(reply_step)
@@ -1920,3 +1944,79 @@ async def test_window_hot_paths_walk_feed_once(tmp_path, monkeypatch):
         monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
         scr._window_trim("top")
         assert "_window_fill" not in scheduled
+
+
+@pytest.mark.asyncio
+async def test_sticky_click_on_island_below_mounted_top(tmp_path, monkeypatch):
+    """Остров ниже начала истории (``_window_first > 0``): своя прокрутка
+    пути к верху закреплённого низа не запускает подъём сверху — один
+    кусок на раунд, куски в пределах хода реплики (R49 N1)."""
+    from gc_tui.messages import ScrollToReply
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    _small_window(monkeypatch)
+    records = [
+        *(r for i in range(5) for r in _giant_turn(i, 6)),
+        *_giant_turn(5, 90),
+    ]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_giant(pilot, tmp_path / "t", records)
+        model = scr._window_model()
+        trace = _trace(scr)
+        await _island_reading_giant(
+            pilot, scr, model, monkeypatch, pinned_turns=(1, 2, 3, 4)
+        )
+        assert scr._window_first > 0
+        reply_step = model.turn_step(5)
+        assert reply_step in scr._window_gap
+        assert _sticky_text(scr) == "› запрос 5"
+        inserted = []
+        insert = scr._window_insert
+
+        def spy_insert(steps, *, before):
+            if scr._window_reply_step is not None:
+                inserted.append(steps)
+            return insert(steps, before=before)
+
+        scr._window_insert = spy_insert
+        overlaps = _overlap_probe(scr)
+        scr.post_message(ScrollToReply(_sticky(scr).reply))
+        for _ in range(200):
+            await pilot.pause()
+            await _settled(pilot, scr)
+            if scr._window_reply_step is None and not scr._window_busy:
+                break
+        await pilot.pause()
+        await _settled(pilot, scr)
+        assert inserted
+        assert overlaps == []
+        assert all(steps.start >= reply_step for steps in inserted)
+        head = scr._window_heads.get(reply_step)
+        assert isinstance(head, UserReplyContainer)
+        top = round(trace.scroll_y) + head.styles.margin.top
+        assert trace.placed_top(head) == top
+
+
+@pytest.mark.asyncio
+async def test_reply_walk_round_without_progress_ends_walk(
+    tmp_path, monkeypatch
+):
+    """Раунд пути к реплике, который не сдвинул края окна (кусок не дал
+    виджетов), заканчивает путь — а не берёт тот же кусок снова (R49
+    m2)."""
+    _small_window(monkeypatch)
+    records = [*_giant_turn(0, 3), *_giant_turn(1, 120), *_giant_turn(2, 3)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_giant(pilot, tmp_path / "t", records)
+        assert scr._window_first > 0
+        rounds = []
+        monkeypatch.setattr(
+            scr, "_window_prepend", lambda *, focus: rounds.append(1) or True
+        )
+        scr._window_reply_step = 0
+        scr._window_reply_bounds = None
+        scr._window_reach_reply()
+        scr._window_reach_reply()
+        scr._window_reach_reply()
+        assert rounds == [1]
+        assert scr._window_reply_step is None
