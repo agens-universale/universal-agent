@@ -325,7 +325,7 @@ _REGISTER_BOUNDARY_IN_SPAN = re.compile(
     rf"</(?:{'|'.join(REGISTER_ORDER)})>.*?<(?:{'|'.join(REGISTER_ORDER)})>",
     re.DOTALL,
 )
-_SINGLE_PATCH_FENCE = re.compile(
+_PATCH_FENCE = re.compile(
     r"^(?P<marker>`{3,})[^`\n]*\n(?P<body>.*?)\n(?P=marker)[ \t]*(?=\n|\Z)",
     re.DOTALL | re.MULTILINE,
 )
@@ -335,7 +335,7 @@ _EXAMPLE_CUE = re.compile(
 )
 _FENCED_EXAMPLE_CAPTION = re.compile(
     r"^[ \t]*(?:for example\b|example\b|e\.g\.|пример\b|"
-    r"например\b|для иллюстрации формата\b)",
+    r"например\b|для иллюстрации формата\b|do not use[ \t]*:)",
     re.I | re.MULTILINE,
 )
 _OUTSIDE_TAG_LIKE = re.compile(r"</?[A-Za-z]")
@@ -348,8 +348,13 @@ _BROKEN_REGISTER_TAIL = re.compile(
 _REGISTER_WRAPPER_END = re.compile(
     r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
 )
+_PERSISTENT_STATE_WITH_TODO = re.compile(
+    r"<persistent_state>\s*<session_memory>(?P<memory>.*?)</session_memory>\s*"
+    r"<session_todo>(?:(?!</session_todo>).)*</session_todo>\s*</persistent_state>",
+    re.DOTALL,
+)
 _THINK_PATCH_BOUNDARY = re.compile(
-    rf"</think>\s*(?=<(?:{'|'.join(REGISTER_ORDER)})>|`{{3,}})"
+    rf"</think>\s*(?=<(?:{'|'.join(REGISTER_ORDER)}|persistent_state)>|`{{3,}})"
 )
 
 
@@ -472,13 +477,38 @@ def _extract_balanced_registers(s: str) -> dict[str, str]:
     return {}
 
 
+def _unwrap_session_memory_with_todo(text: str) -> str:
+    wrapper = _PERSISTENT_STATE_WITH_TODO.fullmatch(text)
+    return wrapper.group("memory").strip() if wrapper else text
+
+
+def _select_patch_fence(text: str) -> tuple[str, str] | None:
+    """Return the body and surrounding prose of one plausible patch fence."""
+    fences = list(_PATCH_FENCE.finditer(text))
+    if not fences:
+        return None
+    outside = _PATCH_FENCE.sub("\n", text)
+    fenced = fences[0]
+    if len(fences) > 1:
+        register_fences = [
+            fence
+            for fence in fences
+            if _RESERVED_REGISTER_TAG.search(fence.group("body"))
+        ]
+        if len(register_fences) != 1 or "```" in outside:
+            return None
+        fenced = register_fences[0]
+    elif text.count(fenced.group("marker")) != 2:
+        return None
+    return fenced.group("body").strip(), outside
+
+
 def _extract_register_candidate(s: str) -> dict[str, str]:
-    fenced = _SINGLE_PATCH_FENCE.search(s)
-    if fenced is None:
+    s = _unwrap_session_memory_with_todo(s)
+    selected = _select_patch_fence(s)
+    if selected is None:
         return _extract_balanced_registers(s)
-    if s.count(fenced.group("marker")) != 2:
-        return _extract_balanced_registers(s)
-    outside = f"{s[: fenced.start()]}\n{s[fenced.end() :]}"
+    inner, outside = selected
     if _OUTSIDE_TAG_LIKE.search(outside):
         enclosing = _extract_balanced_registers(s)
         return (
@@ -488,7 +518,7 @@ def _extract_register_candidate(s: str) -> dict[str, str]:
         )
     if _FENCED_EXAMPLE_CAPTION.search(outside):
         return {}
-    inner = fenced.group("body").strip()
+    inner = _unwrap_session_memory_with_todo(inner)
     if (
         _RESERVED_REGISTER_TAG.match(inner) is None
         or _REGISTER_END_TAG.search(inner) is None
@@ -499,7 +529,7 @@ def _extract_register_candidate(s: str) -> dict[str, str]:
 
 def extract_register_bodies(text: str) -> dict[str, str]:
     """Extract a balanced register block, excluding a formatter preamble."""
-    s = (text or "").strip()
+    s = _unwrap_session_memory_with_todo((text or "").strip())
     if not s:
         return {}
     spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]

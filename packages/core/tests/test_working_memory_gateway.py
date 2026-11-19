@@ -162,6 +162,32 @@ def test_single_fenced_register_block_with_text_on_both_sides_is_applied():
     assert deltas.knowledge == "new fact"
 
 
+@pytest.mark.parametrize("commands_first", [False, True])
+def test_fenced_register_patch_with_separate_command_block(commands_first):
+    snapshot = WorkingMemorySnapshot(
+        **{name: f"body-{name}" for name in REGISTER_ORDER}
+    )
+    payload = "\n".join(
+        f"<{name}>{value}</{name}>"
+        for name, value in snapshot.to_dict().items()
+    )
+    patch = f"```xml\n{payload}\n```"
+    commands = "```bash\npwd\n```"
+    blocks = (commands, patch) if commands_first else (patch, commands)
+
+    deltas, present = parse_memory_deltas("\n\n".join(blocks))
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.to_dict() == snapshot.to_dict()
+
+
+@pytest.mark.parametrize("caption", ["For example:", "Do not use:"])
+def test_fenced_patch_example_next_to_command_block_stays_quoted(caption):
+    raw = f"{caption}\n```xml\n<goal>sample</goal>\n```\n```bash\npwd\n```"
+
+    assert extract_register_bodies(raw) == {}
+
+
 def test_fenced_example_inside_register_body_stays_literal():
     value = "Run:\n```xml\n<state>example</state>\n```\nKeep this text."
 
@@ -446,9 +472,10 @@ def test_terminal_fenced_example_is_not_a_memory_patch():
     assert deltas.is_empty()
 
 
-def test_multiple_fenced_register_blocks_are_ambiguous():
+@pytest.mark.parametrize("commands", ["", "```bash\npwd\n```\n"])
+def test_multiple_fenced_register_blocks_are_ambiguous(commands):
     raw = (
-        "```xml\n<knowledge>draft</knowledge>\n```\n"
+        f"```xml\n<knowledge>draft</knowledge>\n```\n{commands}"
         "```xml\n<knowledge>final</knowledge>\n```"
     )
 
@@ -496,14 +523,35 @@ def test_unclosed_or_nested_registers_do_not_apply():
         assert present == frozenset()
 
 
-def test_render_persistent_state_roundtrip_all_registers():
+@pytest.mark.parametrize("include_todo", [False, True])
+def test_render_persistent_state_roundtrip_all_registers(include_todo):
     snapshot = WorkingMemorySnapshot(
         **{name: f"body-{name}" for name in REGISTER_ORDER}
     )
-    rendered = render_persistent_state_for_prompt(snapshot)
+    todo = [{"status": "pending", "content": "Verify <goal>sample</goal>."}]
+    rendered = render_persistent_state_for_prompt(
+        snapshot, session_todo=todo if include_todo else None
+    )
     extracted = extract_register_bodies(rendered)
     for name in REGISTER_ORDER:
         assert extracted[name] == f"body-{name}"
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_persistent_state_with_todo_after_reasoning_boundary(fenced):
+    snapshot = WorkingMemorySnapshot(
+        goal="verified goal", state="current step"
+    )
+    rendered = render_persistent_state_for_prompt(
+        snapshot,
+        session_todo=[{"status": "pending", "content": "Run checks"}],
+    )
+    patch = (
+        f"```xml\n{rendered}\n```\n```bash\npwd\n```" if fenced else rendered
+    )
+    raw = "<goal>draft</goal> End of notes.</think>\n" + patch
+
+    assert extract_register_bodies(raw) == snapshot.to_dict()
 
 
 def test_render_persistent_state_for_prompt_contains_all_registers():
