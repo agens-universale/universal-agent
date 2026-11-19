@@ -1,5 +1,6 @@
 import types
 
+import pytest
 from gc_core.summarize.working_memory_gateway import (
     _REGISTER_BODY_PATTERNS,
     REGISTER_MERGE_MODES,
@@ -203,6 +204,66 @@ def test_inline_code_caption_before_register_does_not_drop_update():
     assert present == frozenset({"goal", "knowledge", "state"})
     assert updated.state == "new state"
     assert updated.knowledge == "Keep `</think>` literal and `run` in notes."
+
+
+def test_quoted_think_between_registers_keeps_earlier_update():
+    raw = "<goal>new goal</goal>\nThe log says `</think>`.\n<state>new state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.state == "new state"
+
+
+def test_prose_caption_before_complete_register_keeps_update():
+    raw = "<goal>new goal</goal>\nCurrent state: <state>Run checks</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.state == "Run checks"
+
+
+def test_complete_register_in_explanatory_sentence_stays_literal():
+    raw = "<goal>Current goal</goal>\nDo not use <state>Example state</state>."
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal"})
+    assert deltas.goal == "Current goal"
+
+
+def test_multiple_command_fences_inside_register_stay_literal():
+    value = "Commands\n```sh\nls\n```\n```sh\npwd\n```"
+    raw = f"<knowledge>{value}\n</knowledge><state>next</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert deltas.knowledge == value
+    assert deltas.state == "next"
+
+
+def test_quoted_register_boundary_inside_body_stays_literal():
+    value = "Quoted `</knowledge><state>` is literal."
+    raw = f"<knowledge>{value}</knowledge><state>real state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert deltas.knowledge == value
+    assert deltas.state == "real state"
+
+
+@pytest.mark.parametrize("caption", ["Для иллюстрации формата", "E.g.:"])
+def test_illustrative_fenced_register_is_not_applied(caption):
+    raw = f"{caption}\n```xml\n<goal>sample goal</goal>\n```"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
 
 
 def test_escaped_backtick_does_not_hide_later_code_span():

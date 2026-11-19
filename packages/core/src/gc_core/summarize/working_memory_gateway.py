@@ -327,7 +327,10 @@ _REGISTER_BOUNDARY_IN_SPAN = re.compile(
 _SINGLE_PATCH_FENCE = re.compile(
     r"^```[^\n]*\n(.*?)\n```[ \t]*(?=\n|\Z)", re.DOTALL | re.MULTILINE
 )
-_EXAMPLE_CUE = re.compile(r"\b(?:example|for instance|e\.g\.|пример)\b", re.I)
+_EXAMPLE_CUE = re.compile(
+    r"\b(?:example|for instance|пример|для иллюстрации формата)\b|\be\.g\.",
+    re.I,
+)
 _OUTSIDE_TAG_LIKE = re.compile(r"</?[A-Za-z]")
 _REGISTER_END_TAG = re.compile(
     rf"</({'|'.join(re.escape(name) for name in REGISTER_ORDER)})>\Z"
@@ -368,11 +371,19 @@ def _next_structural_tag(
             continue
         line_start = text.rfind("\n", start, tag.start()) + 1
         before = text[max(start, line_start) : tag.start()].strip()
-        if before and (
-            _INLINE_CODE_CAPTION.fullmatch(before) is None
-            or _EXAMPLE_CUE.search(before)
-        ):
-            continue
+        if before:
+            if _EXAMPLE_CUE.search(before):
+                continue
+            if _INLINE_CODE_CAPTION.fullmatch(before) is None and (
+                not before.endswith(":")
+                or tag.group(1)
+                or tag.group(2) not in _REGISTER_NAMES
+                or _matching_register_close(
+                    text, tag.end(), tag.group(2), spans
+                )
+                is None
+            ):
+                continue
         return tag
     return None
 
@@ -432,6 +443,7 @@ def _extract_balanced_registers(s: str) -> dict[str, str]:
         for match in _MARKDOWN_CODE_SPAN.finditer(s)
         if len(match.group(1)) >= 3
         or _REGISTER_BOUNDARY_IN_SPAN.search(match.group()) is None
+        or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
     ]
     for token in _REGISTER_TAG_TOKEN.finditer(s):
         if _is_markdown_literal(token.start(), spans):
@@ -447,7 +459,7 @@ def _extract_register_candidate(s: str) -> dict[str, str]:
     if fenced is None:
         return _extract_balanced_registers(s)
     if s.count("```") != 2:
-        return {}
+        return _extract_balanced_registers(s)
     outside = f"{s[: fenced.start()]}\n{s[fenced.end() :]}"
     if _OUTSIDE_TAG_LIKE.search(outside):
         enclosing = _extract_balanced_registers(s)
@@ -473,7 +485,7 @@ def extract_register_bodies(text: str) -> dict[str, str]:
     if not s:
         return {}
     full = _extract_register_candidate(s)
-    if any("</think>" in body for body in full.values()):
+    if full:
         return full
     for boundary in re.finditer(r"</think>", s):
         after_think = _extract_register_candidate(s[boundary.end() :].strip())
