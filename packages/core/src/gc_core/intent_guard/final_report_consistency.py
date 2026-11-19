@@ -201,9 +201,7 @@ def _resolve_after_unparseable_replies(
     logger: Any,
 ) -> ValidationResult:
     """Retry уже сделан; пробуем salvage осей, иначе fail-open accept."""
-    conflict = conflicting_validator_verdicts(
-        raw_retry
-    ) or conflicting_validator_verdicts(raw)
+    conflict = conflicting_validator_verdicts(raw_retry, previous_raw=raw)
     if conflict is not None:
         if logger is not None:
             logger.warning(

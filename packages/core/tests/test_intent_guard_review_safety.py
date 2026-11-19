@@ -32,6 +32,22 @@ _NO = _verdict(accept=False)
 _SINGLE_QUOTED_NO = _NO.replace('"', "'")
 _SINGLE_QUOTED_KEYS_NO = re.sub(r'"([a-z_]+)":', r"'\1':", _NO)
 _JSON_FENCE_NO = f"```json\n{_NO}\n```"
+_CONTINUE = json.dumps(
+    {
+        **json.loads(_NO),
+        "action": "continue_work",
+        "report_ok": True,
+        "report_mismatches": [],
+    }
+)
+_FIX_REPORT = json.dumps(
+    {
+        **json.loads(_NO),
+        "action": "fix_report",
+        "trace_ok": True,
+        "trace_gaps": [],
+    }
+)
 
 
 @pytest.mark.parametrize(
@@ -140,6 +156,58 @@ _JSON_FENCE_NO = f"```json\n{_NO}\n```"
             f"{_JSON_FENCE_NO}\n```json\n{_YES}\n```",
             f"{_JSON_FENCE_NO}\n```json\n{_YES}\n```",
             2,
+            "rejected_by_finish_gate",
+            True,
+        ),
+        *[
+            (
+                f"Example: {_YES}\nActual verdict:\n```text\n{json.dumps({'ok': False, **json.loads(_NO)})[:-1]},}}\n```",
+                _NO,
+                2,
+                "rejected_by_finish_gate",
+                True,
+            ),
+            (
+                f"Example: {_YES}\nActual verdict:\n```text\n{json.dumps({'coverage_score': 0, **json.loads(_NO)})[:-1]},}}\n```",
+                _NO,
+                2,
+                "rejected_by_finish_gate",
+                True,
+            ),
+        ],
+        (
+            f"{_NO}\nAn example:\n```json\n{_YES[:-1]}",
+            "No verdict",
+            2,
+            "rejected_by_finish_gate",
+            True,
+        ),
+        (
+            f"Final verdict:\n{_NO}\nAn example:\n```json\n{_YES[:-1]}",
+            "No verdict",
+            2,
+            "rejected_by_finish_gate",
+            True,
+        ),
+        (f"```json\n{_NO}", _YES, 1, "rejected_by_finish_gate", True),
+        (
+            f"```\nls -la\n```\nActual verdict: {_YES}",
+            "No verdict",
+            1,
+            "submitted",
+            False,
+        ),
+        (
+            f"```json\n{_YES}\n```\n```json\n{_YES}\n```",
+            "No verdict",
+            1,
+            "submitted",
+            False,
+        ),
+        (
+            f"Reasoning\n```text\nunclosed reasoning\n</think>\n{_NO}",
+            "No verdict",
+            1,
             "rejected_by_finish_gate",
             True,
         ),
@@ -260,6 +328,13 @@ def test_finish_gate_review_safety(first, retry, calls, status, findings):
             ["missing test"],
             ["unsupported report"],
         ),
+        (
+            f"```json\n{_CONTINUE}\n```\n```json\n{_YES}\n```",
+            f"```json\n{_FIX_REPORT}\n```\n```json\n{_YES}\n```",
+            2,
+            ["missing test"],
+            ["unsupported report"],
+        ),
         *[
             (
                 prefix
@@ -345,5 +420,7 @@ def test_neighbor_verdicts_keep_findings(
     )
     output = json.loads(state.messages[0]["output"])
     assert output["status"] == "rejected_by_finish_gate"
+    assert output["finish_gate"]["trace_ok"] is False
+    assert output["finish_gate"]["report_ok"] is False
     assert output["finish_gate"]["trace_gaps"] == gaps
     assert output["finish_gate"]["report_mismatches"] == mismatches

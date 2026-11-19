@@ -310,14 +310,17 @@ def _object_ranges(text: str) -> list[tuple[int, int]]:
 
 def _reasoning_boundary(raw: str) -> int:
     """Find a standalone closing tag, excluding quoted JSON literals."""
-    fenced_ranges = [
-        (fence.start, fence.end) for fence in _markdown_fences(raw)
-    ]
+    fences = _markdown_fences(raw)
     boundaries = [
         match.end()
         for match in _THINK_CLOSE_RE.finditer(raw)
         if not any(
-            start <= match.start() < end for start, end in fenced_ranges
+            fence.start <= match.start() < fence.end
+            and (
+                fence.closed
+                or _parse_unfenced_verdict(raw[match.end() :]) is None
+            )
+            for fence in fences
         )
     ]
     return boundaries[-1] if boundaries else 0
@@ -334,12 +337,10 @@ def _parse_json_verdict(text: str) -> ValidationResult | None:
 def _has_verdict_object_start(text: str) -> bool:
     position = 0
     while (start := text.find("{", position)) != -1:
-        key_start = start + 1
-        while key_start < len(text) and text[key_start].isspace():
-            key_start += 1
-        if _VERDICT_KEY_RE.match(text, key_start):
+        end = _balanced_object_end(text, start) or len(text)
+        if _VERDICT_KEY_RE.search(text[start:end]):
             return True
-        position = start + 1
+        position = end
     return False
 
 
@@ -348,19 +349,15 @@ def _fenced_verdict_bodies(text: str) -> tuple[bool, list[str], bool]:
     bodies = [
         fence.body
         for fence in fences
-        if fence.closed
-        and (
-            fence.lang.lower() in _JSON_FENCE_LABELS
-            or not fence.lang
-            or _parse_json_verdict(fence.body) is not None
-            or _has_verdict_object_start(fence.body)
-        )
+        if _parse_json_verdict(fence.body) is not None
+        or _has_verdict_object_start(fence.body)
+        or (fence.closed and fence.lang.lower() in _JSON_FENCE_LABELS)
     ]
     unclosed = any(
         not fence.closed
+        and _parse_json_verdict(fence.body) is None
         and (
             fence.lang.lower() in _JSON_FENCE_LABELS
-            or not fence.lang
             or _has_verdict_object_start(fence.body)
         )
         for fence in fences
@@ -370,7 +367,11 @@ def _fenced_verdict_bodies(text: str) -> tuple[bool, list[str], bool]:
 
 def _parse_fenced_verdict(text: str) -> tuple[bool, ValidationResult | None]:
     has_fence, bodies, unclosed = _fenced_verdict_bodies(text)
-    if unclosed or len(bodies) != 1:
+    if (
+        unclosed
+        or not bodies
+        or any(body.strip() != bodies[0].strip() for body in bodies[1:])
+    ):
         return has_fence, None
     return True, _parse_json_verdict(bodies[0])
 
@@ -464,14 +465,21 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     return _parse_unfenced_verdict(_outside_fences(cleaned))
 
 
-def conflicting_validator_verdicts(raw: str) -> ValidationResult | None:
-    """Keep unresolved candidate conflicts from being accepted by salvage."""
+def _candidate_verdict_bodies(raw: str) -> list[str]:
     source = (raw or "")[_reasoning_boundary(raw or "") :]
     cleaned = project_text_for_model(source, strip_think=True)
-    has_fence, bodies, _ = _fenced_verdict_bodies(cleaned)
-    outside = _outside_fences(cleaned)
-    others, _ = _unfenced_candidate_bodies(outside)
-    bodies = bodies + others if has_fence else others
+    _, bodies, _ = _fenced_verdict_bodies(cleaned)
+    others, _ = _unfenced_candidate_bodies(_outside_fences(cleaned))
+    return bodies + others
+
+
+def conflicting_validator_verdicts(
+    raw: str, previous_raw: str | None = None
+) -> ValidationResult | None:
+    """Keep unresolved candidate conflicts from being accepted by salvage."""
+    bodies = _candidate_verdict_bodies(raw)
+    if previous_raw is not None:
+        bodies.extend(_candidate_verdict_bodies(previous_raw))
     parsed = [(body, _parse_json_verdict(body)) for body in bodies]
     verdicts = [verdict for _, verdict in parsed if verdict is not None]
     if len(verdicts) < 2 or all(verdict.ok for verdict in verdicts):
