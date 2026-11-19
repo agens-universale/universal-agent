@@ -741,6 +741,9 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # Отправленные реплики, которые больше не держат отрисовку модели
         # над собой: их запись в треде не сверилась (`_release_sent_reply`).
         self._sent_released: WeakSet[UserReplyContainer] = WeakSet()
+        # call_id вопроса агента → client_id отправленного ответа на него
+        # (`_track_answer`).
+        self._question_answers: dict[str, str] = {}
         # client_id реплик, которые стоп или конец хода не сняли у ядра
         # (`_withdraw_queue`): ядро их держит, пока тред их не сверит.
         self._held_client_ids: set[str] = set()
@@ -2386,6 +2389,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._held_reveals.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
         self._sent_released = WeakSet()
+        self._question_answers.clear()
         self._held_client_ids.clear()
         self._pending_wire_cache.clear()
         self._ephemera.clear()
@@ -4432,8 +4436,15 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                 c = ev.full_payload.get("content")
                 if isinstance(c, str):
                     polled_wire = c
+            answered = (
+                self._question_answers.pop(ev.call_id, None)
+                if ev.tool_name == "ask_human" and ev.call_id
+                else None
+            )
             for cid, widget in list(self._pending_user_widgets.items()):
-                if self._pending_wire_match(cid, polled_wire):
+                if cid == answered or self._pending_wire_match(
+                    cid, polled_wire
+                ):
                     widget.set_state("normal")
                     self._top_blocks().queued_admitted()
                     widget.set_event_no(ev.no)
@@ -4449,8 +4460,8 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                     return
             # Без pending-матча — обычный mount (используем display_content = ev.summary).
             if ev.tool_name != "ask_human":
-                # Ответ на вопрос агента — не реплика хода: несверенный, он
-                # отправленную реплику не отпускает.
+                # Ответ на вопрос агента сверяется ещё и по вопросу (выше);
+                # чужой ответ отправленные реплики не отпускает.
                 self._release_sent_reply()
             self._mount_user_reply(
                 ev.summary,
@@ -6339,6 +6350,13 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         self._pending_wire_cache[client_id] = wire_content
         self._last_pending_client_id = client_id
         return client_id
+
+    def _track_answer(self, client_id: str) -> None:
+        """Отправленная реплика — ответ на вопрос агента, что сейчас на
+        баннере: запись ответа сверится с ней и по вопросу (call_id), если
+        wire не совпал."""
+        if self._ask_human_call_id:
+            self._question_answers[self._ask_human_call_id] = client_id
 
     def _record_pending_widget(self, client_id: str, widget) -> None:
         """Связать только что смонтированный pending-виджет с его client_id."""
@@ -8633,6 +8651,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                     client_id = self._track_pending(
                         display_text=text, wire_content=text, images=images
                     )
+                    self._track_answer(client_id)
                     self._mount_user_reply(
                         text,
                         state="pending",

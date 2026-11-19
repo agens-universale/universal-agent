@@ -355,3 +355,55 @@ async def test_ask_human_answer_does_not_release_sent_reply(tmp_path):
         feed_live(scr, [answer, _prose(0, 7)], splits=())
         await pilot.pause()
         assert _index_of(scr, "Ход 0: смотрю шаг 7.") < _index_of(scr, "новая")
+
+
+@pytest.mark.asyncio
+async def test_unmatched_answer_reconciles_by_question(tmp_path):
+    """Ответ на вопрос агента, отправленный этим экраном, не сверился по
+    wire (ядро дописало плашку картинки): он сверяется по вопросу
+    (call_id) — отправленная реплика ответа становится записанной, второй
+    реплики нет (R48 M5)."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_far_edge import _message
+    from test_trace_window_steps import _giant_turn
+
+    question = _message(
+        {
+            "type": "function_call",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fc_q1",
+            "status": "completed",
+            "arguments": json.dumps({"question": "какой файл?"}),
+        }
+    )
+    answer = _message(
+        {
+            "type": "function_call_output",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fco_q1",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "response": "[#1] этот"}
+            ),
+        }
+    )
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(
+            scr, [*_giant_turn(0, 1, outcome=False)[:1], question], splits=()
+        )
+        scr._ask_human_call_id = "q1"
+        cid = scr._track_pending(display_text="этот", wire_content="этот")
+        scr._track_answer(cid)
+        sent = scr._mount_user_reply("этот", state="pending", client_id=cid)
+        feed_live(scr, [answer], splits=())
+        await pilot.pause()
+        replies = list(scr.query_one("#trace").query(UserReplyContainer))
+        assert sent.state == "normal"
+        assert [r.plain_text for r in replies].count("этот") == 1
+        assert not any("[#1] этот" in r.plain_text for r in replies)
