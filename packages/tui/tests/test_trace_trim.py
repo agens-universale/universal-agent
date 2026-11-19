@@ -262,6 +262,22 @@ def _pins(scr, widget):
 
         return pin, unpin
 
+    def fresh_line():
+        # Живое состояние — только свежая строка: осевшая шаг не держит.
+        from gc_tui.widgets.turn_line import TURN_LINE_LATEST, TurnLine
+
+        assert isinstance(widget, TurnLine)
+
+        def pin() -> None:
+            scr._fresh_line = widget
+            widget.add_class(TURN_LINE_LATEST)
+
+        def unpin() -> None:
+            widget.remove_class(TURN_LINE_LATEST)
+            scr._fresh_line = None
+
+        return pin, unpin
+
     def keyed(registry):
         return (
             lambda: registry.__setitem__("pin", widget),
@@ -274,7 +290,7 @@ def _pins(scr, widget):
         ("фокус", focus, lambda: scr.set_focus(None)),
         ("идущий вызов", *keyed(scr._active_calls)),
         ("отправленная реплика", *keyed(scr._pending_user_widgets)),
-        ("свежая строка итога", *attr("_fresh_line")),
+        ("свежая строка итога", *fresh_line()),
         ("строка вопроса", *attr("_ask_human_question_row")),
         ("стрим", *attr("_stream_block")),
         ("строка ответа стрима", *attr("_stream_answer_row")),
