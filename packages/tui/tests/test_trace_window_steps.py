@@ -1344,3 +1344,65 @@ async def test_settled_turn_line_does_not_pin_its_step(tmp_path, monkeypatch):
             pilot, scr, _giant_turn(1, 90), bound=bound, whole_calls=True
         )
         assert scr._window_first > 0
+
+
+@pytest.mark.asyncio
+async def test_empty_step_after_gap_does_not_stop_bottom_trim(
+    tmp_path, monkeypatch
+):
+    """Пустой шаг (откаченная реплика) встал сразу за разрывом — первым
+    шагом закреплённого низа: при чтении вверх он не останавливает снятие
+    снизу (R45, край ``gap.stop``). Исправленная реплика, подъём, пока шаг
+    исправленной реплики последний, ход продолжается шагами — подъём к
+    началу держит окно в пределах после каждого куска."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    bound = _small_window(monkeypatch)
+    later = _giant_turn(2, 90, outcome=False)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, _giant_turn(0, 90), whole_calls=True)
+        user = "m_u0001"
+        feed_live(
+            scr,
+            [_message({"role": "user", "id": user, "content": "отменю"})],
+            splits=(),
+        )
+        await pilot.pause()
+        model = scr._window_model()
+        empty = model.step_count() - 1
+        scr._withdraw_from_history(user)
+        list(scr.query(UserReplyContainer))[-1].remove()
+        feed_live(scr, later[:3], splits=())
+        await pilot.pause()
+        await _settled(pilot, scr)
+        assert model.step_count() - 1 == empty + 1
+        trace = _trace(scr)
+
+        # Разрыв дошёл до пустого шага: он на краю закреплённого низа.
+        def at_gap() -> bool:
+            gap = scr._window_gap
+            return bool(gap) and gap.start <= empty <= gap.stop
+
+        for _ in range(50):
+            if at_gap():
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+        assert at_gap()
+        for batch in _batches(later[3:], 10, whole_calls=True):
+            feed_live(scr, batch, splits=())
+            await pilot.pause()
+        await _settled(pilot, scr)
+        assert model.step_count() - 1 > empty + 2
+        for _ in range(400):
+            if scr._window_first == 0:
+                break
+            trace.scroll_to(y=0, animate=False)
+            await pilot.pause()
+            await _settled(pilot, scr)
+            assert _unpinned_widgets(scr) <= bound
+        assert scr._window_first == 0
