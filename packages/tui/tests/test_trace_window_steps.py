@@ -1856,3 +1856,67 @@ async def test_user_scroll_cancels_reply_walk(tmp_path, monkeypatch):
         assert scr._window_reply_step is None
         await _settled(pilot, scr)
         assert start1 not in scr._window_heads
+
+
+@pytest.mark.asyncio
+async def test_window_hot_paths_walk_feed_once(tmp_path, monkeypatch):
+    """Горячие пути окна (R48 M2–M4): проверка острова на прокрутке —
+    один проход голов на оба конца; высоты шагов при снятии — одной картой
+    раскладки, без поиска по ней на каждый шаг; снятие, которому нечего
+    снимать, догрузку не ставит."""
+    from gc_tui import textual_compat
+    from gc_tui.screens import trace_window
+
+    bound = _small_window(monkeypatch)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(
+            pilot,
+            scr,
+            _giant_turn(0, 60, outcome=False),
+            bound=bound,
+            whole_calls=True,
+        )
+        # Верхний шаг закреплён: проверка острова смотрит оба конца.
+        scr._poll_tick = lambda: None
+        first = scr._window_first
+        scr._active_calls["pin"] = scr._window_step_widgets(first)[0]
+        heads = trace_window.step_heads
+        walks = []
+
+        def counted(children, step_of):
+            walks.append(1)
+            return heads(children, step_of)
+
+        monkeypatch.setattr(trace_window, "step_heads", counted)
+        scr._window_gap = range(first + 2, first + 3)
+        scr._window_island()
+        scr._window_gap = range(0)
+        assert len(walks) == 1
+        monkeypatch.setattr(trace_window, "step_heads", heads)
+
+        lookups = []
+        placed = textual_compat._placed_y
+
+        def counted_placed(arranged, widget):
+            lookups.append(1)
+            return placed(arranged, widget)
+
+        monkeypatch.setattr(textual_compat, "_placed_y", counted_placed)
+        assert scr._window_rows_by_step()
+        assert lookups == []
+        monkeypatch.setattr(textual_compat, "_placed_y", placed)
+
+        scheduled = []
+        later = scr.call_after_refresh
+
+        def spy_later(fn, *args):
+            scheduled.append(getattr(fn, "__name__", ""))
+            return later(fn, *args)
+
+        monkeypatch.setattr(scr, "call_after_refresh", spy_later)
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
+        scr._window_trim("top")
+        assert "_window_fill" not in scheduled

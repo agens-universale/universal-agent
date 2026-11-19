@@ -93,23 +93,32 @@ def step_heads(
 
 
 class _Snapshot:
-    """Шаги ленты на одну операцию окна: головы и виджеты каждого шага —
-    одним проходом (`TraceWindowMixin._window_scope`)."""
+    """Шаги ленты на одну операцию окна (`TraceWindowMixin._window_scope`):
+    головы — проходом при создании, виджеты каждого шага — одним проходом
+    при первом обращении к ним."""
 
     def __init__(self, heads: dict[int, Widget], children) -> None:
         self.heads = heads
-        self.widgets: dict[int, list[Widget]] = {}
-        step_at = {w: t for t, w in heads.items()}
-        step = None
-        for widget in children:
-            step = step_at.get(widget, step)
-            if step is not None:
-                self.widgets.setdefault(step, []).append(widget)
+        self._children = children
+        self._widgets: dict[int, list[Widget]] | None = None
+
+    @property
+    def widgets(self) -> dict[int, list[Widget]]:
+        if self._widgets is None:
+            self._widgets = {}
+            step_at = {w: t for t, w in self.heads.items()}
+            step = None
+            for widget in self._children:
+                step = step_at.get(widget, step)
+                if step is not None:
+                    self._widgets.setdefault(step, []).append(widget)
+        return self._widgets
 
     def forget(self, step: int) -> None:
         """Шаг ``step`` снят окном целиком."""
         self.heads.pop(step, None)
-        self.widgets.pop(step, None)
+        if self._widgets is not None:
+            self._widgets.pop(step, None)
 
 
 class TraceWindowMixin:
@@ -533,10 +542,11 @@ class TraceWindowMixin:
         """Остров: прочитанное не ужать — оба его конца закреплены.
         Снятие идёт только с концов (второго разрыва не бывает), поэтому
         разрыв под ним не закрыть, даже если между закреплёнными остались
-        обычные ходы."""
-        return self._window_pinned(self._window_first) and (
-            self._window_pinned(self._window_gap.start - 1)
-        )
+        обычные ходы. Оба конца — по одному снимку шагов."""
+        with self._window_scope():
+            return self._window_pinned(self._window_first) and (
+                self._window_pinned(self._window_gap.start - 1)
+            )
 
     def _window_on_bottom(self) -> None:
         """Переход к низу — одна точка всех путей (отправка, команда,
@@ -673,21 +683,23 @@ class TraceWindowMixin:
         if self._window_busy:
             return
         with self._window_scope():
-            self._window_trim_now(edge)
-        self.call_after_refresh(self._window_fill)
+            dropped = self._window_trim_now(edge)
+        if dropped:
+            self.call_after_refresh(self._window_fill)
 
-    def _window_trim_now(self, edge: Edge) -> None:
-        """Тело `_window_trim` — внутри одной операции окна."""
+    def _window_trim_now(self, edge: Edge) -> bool:
+        """Тело `_window_trim` — внутри одной операции окна; True — шаги
+        сняты."""
         self._window_skip_empty()
         steps, counts = self._window_mounted_counts()
         excess = policy.trim_to(
             sum(counts), policy.WINDOW_LIMIT, policy.CHUNK_MIN
         )
         if excess is None:
-            return
+            return False
         kept = self._window_kept_steps()
         if kept is None:
-            return
+            return False
         order = self._window_edge_order(edge, list(zip(steps, counts)))
         removable = list(
             takewhile(
@@ -699,12 +711,13 @@ class TraceWindowMixin:
             removable[: policy.edge_drops([c for _t, c in removable], excess)]
         )
         if not dropped:
-            return
+            return False
         if edge == "top" and not self._stick_bottom:
             self._window_feed().hold_first_visible(self._window_reading_row())
         for step, _count in dropped:
             if not self._window_forget_step(step):
                 break
+        return True
 
     def _window_keep_filled(
         self, dropped: list[tuple[int, int]]
@@ -731,8 +744,10 @@ class TraceWindowMixin:
         """Строк ленты под каждым смонтированным шагом по последней
         раскладке — одним проходом: от верха первого показанного виджета
         шага до верха первого показанного виджета следующих шагов (или
-        конца ленты); у шага без показанных — нет записи."""
+        конца ленты); у шага без показанных — нет записи. Верх виджетов —
+        одной картой раскладки."""
         feed = self._window_feed()
+        tops = feed.placed_tops() or {}
         step_at = {w: t for t, w in self._window_heads.items()}
         rows: dict[int, int] = {}
         step = current = None
@@ -741,7 +756,7 @@ class TraceWindowMixin:
             step = step_at.get(widget, step)
             if step is None or step == current:
                 continue
-            top = feed.placed_top(widget)
+            top = tops.get(widget)
             if top is None:
                 continue
             if current is not None:

@@ -237,6 +237,14 @@ class AnchoredScroll(VerticalScroll):
             return None
         return _placed_y(arranged, widget)
 
+    def placed_tops(self) -> dict[Widget, int] | None:
+        """Верх каждого ребёнка ленты по последней раскладке — одним
+        проходом; раскладки не было (или иная версия Textual) — ``None``."""
+        arranged = self._arranged
+        if arranged is None or not textual_is_patched_version():
+            return None
+        return {p.widget: p.region.y for p in arranged.placements}
+
     def placed_between(self, top: float, bottom: float) -> set[Widget] | None:
         """Дети ленты, задевающие строки ``[top, bottom)`` по последней
         раскладке, — без пересборки карты экрана. Раскладки не было (или
