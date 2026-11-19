@@ -320,16 +320,23 @@ _RESERVED_REGISTER_TAG = re.compile(
 )
 _MARKDOWN_CODE_SPAN = re.compile(r"(?<!\\)(?:\\\\)*(`+)(.*?)\1", re.DOTALL)
 _INLINE_CODE_CAPTION = re.compile(r"\A(`+)[^`\n]+\1\s*:?[ \t]*\Z")
+_BOLD_REGISTER_CAPTION = re.compile(r"\*\*([A-Za-z]+)\*\*:?")
 _REGISTER_BOUNDARY_IN_SPAN = re.compile(
     rf"</(?:{'|'.join(REGISTER_ORDER)})>.*?<(?:{'|'.join(REGISTER_ORDER)})>",
     re.DOTALL,
 )
 _SINGLE_PATCH_FENCE = re.compile(
-    r"^```[^\n]*\n(.*?)\n```[ \t]*(?=\n|\Z)", re.DOTALL | re.MULTILINE
+    r"^(?P<marker>`{3,})[^`\n]*\n(?P<body>.*?)\n(?P=marker)[ \t]*(?=\n|\Z)",
+    re.DOTALL | re.MULTILINE,
 )
 _EXAMPLE_CUE = re.compile(
-    r"\b(?:example|for instance|пример|для иллюстрации формата)\b|\be\.g\.",
+    r"\b(?:example|for instance|do not use|пример|для иллюстрации формата)\b|\be\.g\.",
     re.I,
+)
+_FENCED_EXAMPLE_CAPTION = re.compile(
+    r"^[ \t]*(?:for example\b|example\b|e\.g\.|пример\b|"
+    r"например\b|для иллюстрации формата\b)",
+    re.I | re.MULTILINE,
 )
 _OUTSIDE_TAG_LIKE = re.compile(r"</?[A-Za-z]")
 _REGISTER_END_TAG = re.compile(
@@ -340,6 +347,9 @@ _BROKEN_REGISTER_TAIL = re.compile(
 )
 _REGISTER_WRAPPER_END = re.compile(
     r"(?:</session_memory>\s*)?(?:</persistent_state>\s*)?\Z"
+)
+_THINK_PATCH_BOUNDARY = re.compile(
+    rf"</think>\s*(?=<(?:{'|'.join(REGISTER_ORDER)})>|`{{3,}})"
 )
 
 
@@ -374,8 +384,16 @@ def _next_structural_tag(
         if before:
             if _EXAMPLE_CUE.search(before):
                 continue
+            bold_caption = _BOLD_REGISTER_CAPTION.fullmatch(before)
             if _INLINE_CODE_CAPTION.fullmatch(before) is None and (
-                not before.endswith(":")
+                not (
+                    before.endswith(":")
+                    or before == ","
+                    or (
+                        bold_caption is not None
+                        and bold_caption.group(1).lower() == tag.group(2)
+                    )
+                )
                 or tag.group(1)
                 or tag.group(2) not in _REGISTER_NAMES
                 or _matching_register_close(
@@ -458,7 +476,7 @@ def _extract_register_candidate(s: str) -> dict[str, str]:
     fenced = _SINGLE_PATCH_FENCE.search(s)
     if fenced is None:
         return _extract_balanced_registers(s)
-    if s.count("```") != 2:
+    if s.count(fenced.group("marker")) != 2:
         return _extract_balanced_registers(s)
     outside = f"{s[: fenced.start()]}\n{s[fenced.end() :]}"
     if _OUTSIDE_TAG_LIKE.search(outside):
@@ -468,9 +486,9 @@ def _extract_register_candidate(s: str) -> dict[str, str]:
             if any("```" in body for body in enclosing.values())
             else {}
         )
-    if _EXAMPLE_CUE.search(outside):
+    if _FENCED_EXAMPLE_CAPTION.search(outside):
         return {}
-    inner = fenced.group(1).strip()
+    inner = fenced.group("body").strip()
     if (
         _RESERVED_REGISTER_TAG.match(inner) is None
         or _REGISTER_END_TAG.search(inner) is None
@@ -484,6 +502,13 @@ def extract_register_bodies(text: str) -> dict[str, str]:
     s = (text or "").strip()
     if not s:
         return {}
+    spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]
+    for boundary in _THINK_PATCH_BOUNDARY.finditer(s):
+        if _is_markdown_literal(boundary.start(), spans):
+            continue
+        after_think = _extract_register_candidate(s[boundary.end() :].strip())
+        if after_think:
+            return after_think
     full = _extract_register_candidate(s)
     if full:
         return full

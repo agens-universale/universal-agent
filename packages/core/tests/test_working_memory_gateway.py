@@ -234,6 +234,93 @@ def test_complete_register_in_explanatory_sentence_stays_literal():
     assert deltas.goal == "Current goal"
 
 
+def test_complete_register_in_negative_caption_stays_literal():
+    raw = (
+        "<goal>Current goal</goal>\nDo not use: <state>Example state</state>."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal"})
+    assert deltas.goal == "Current goal"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "<goal>new goal</goal>\n**Constraints** <constraints>new constraints</constraints>\n<state>new state</state>",
+        "<goal>new goal</goal>, <constraints>new constraints</constraints>, <state>new state</state>",
+    ],
+)
+def test_formatted_caption_and_comma_preserve_complete_registers(raw):
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "constraints", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.constraints == "new constraints"
+    assert deltas.state == "new state"
+
+
+@pytest.mark.parametrize(
+    "intro",
+    [
+        "This patch keeps a worked example.",
+        "Update the goal, e.g. to preserve the verified test.",
+    ],
+)
+def test_example_word_in_prose_does_not_invalidate_real_fenced_patch(intro):
+    raw = (
+        f"{intro}\n```xml\n<goal>new goal</goal><state>new state</state>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.state == "new state"
+
+
+def test_explicit_example_caption_with_detail_does_not_apply_fenced_patch():
+    raw = (
+        "For example, use this format:\n```xml\n<goal>sample goal</goal>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_four_backtick_fence_can_wrap_one_complete_patch():
+    raw = "````xml\n<goal>new goal</goal><state>new state</state>\n````"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.state == "new state"
+
+
+def test_two_four_backtick_fenced_patches_are_ambiguous():
+    raw = (
+        "````xml\n<goal>draft</goal>\n````\n````xml\n<goal>final</goal>\n````"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_register_before_think_boundary_is_not_part_of_final_patch():
+    raw = "<state>DRAFT</state> End of notes.</think><goal>new goal</goal>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal"})
+    assert deltas.goal == "new goal"
+
+
 def test_multiple_command_fences_inside_register_stay_literal():
     value = "Commands\n```sh\nls\n```\n```sh\npwd\n```"
     raw = f"<knowledge>{value}\n</knowledge><state>next</state>"
