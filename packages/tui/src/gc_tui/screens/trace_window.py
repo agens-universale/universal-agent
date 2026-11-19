@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import contextlib
 from bisect import bisect_right
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from itertools import takewhile
 from typing import TYPE_CHECKING, Literal
 from weakref import WeakKeyDictionary
@@ -68,7 +68,7 @@ Edge = Literal["top", "bottom"]
 
 
 def step_heads(
-    children: Iterable[Widget], step_of: Mapping[Widget, int]
+    children: Iterable[Widget], step_of: Callable[[Widget], int | None]
 ) -> dict[int, Widget]:
     """Голова каждого шага — первый по ленте его виджет (метка шага
     ``step_of``), который не снимается: снятый мимо окна виджет передаёт
@@ -80,7 +80,7 @@ def step_heads(
     heads: dict[int, Widget] = {}
     last = -1
     for widget in children:
-        step = step_of.get(widget)
+        step = step_of(widget)
         if (
             step is None
             or step <= last
@@ -161,7 +161,11 @@ class TraceWindowMixin:
         super().__init__(*args, **kwargs)
         # Шаг каждого смонтированного виджета ленты (кусок и живой путь);
         # снятый виджет уходит сам.
-        self._window_step_of: WeakKeyDictionary[Widget, int] = (
+        # Элемент модели каждого смонтированного виджета ленты (кусок и
+        # живой путь); шаг виджета — шаг его элемента по модели сейчас
+        # (`_window_mark`): граница шага, поставленная задним числом
+        # (`trace_steps`), сама переносит виджеты. Снятый виджет уходит сам.
+        self._window_item_of: WeakKeyDictionary[Widget, int] = (
             WeakKeyDictionary()
         )
         # Реплики ходов из модели для липкой строки (номер события → виджет
@@ -185,9 +189,7 @@ class TraceWindowMixin:
         snap = self._window_snap
         if snap is None:
             children = self._window_feed().children
-            snap = _Snapshot(
-                step_heads(children, self._window_step_of), children
-            )
+            snap = _Snapshot(step_heads(children, self._window_mark), children)
             if self._window_scoped:
                 self._window_snap = snap
         return snap
@@ -269,7 +271,7 @@ class TraceWindowMixin:
         self._window_trim_due = False
         self._window_grown = 0
         self._window_grow_step = -1
-        self._window_step_of = WeakKeyDictionary()
+        self._window_item_of = WeakKeyDictionary()
         self._window_replies = {}
         self._window_reply_step = None
         self._window_first = 0
@@ -288,7 +290,7 @@ class TraceWindowMixin:
             ephemera=self._window_ephemera(),
             nested=self._window_nested(),
         )
-        self._window_step_of.update(refs.step_of)
+        self._window_item_of.update(refs.item_of)
         self._window_snap = None
         return refs
 
@@ -629,14 +631,22 @@ class TraceWindowMixin:
 
     # ---- снятие ----------------------------------------------------------
 
-    def _window_appended(self, step: int, widget: Widget) -> None:
-        """Живой путь смонтировал ``widget`` шага ``step``: метка шага.
-        Сверка с лимитом — не на каждый виджет (это пересчёт окна): с
-        началом шага и после роста на кусок по оценке, после
+    def _window_mark(self, widget: Widget) -> int | None:
+        """Шаг виджета по метке его элемента модели; без метки — None."""
+        item = self._window_item_of.get(widget)
+        if item is None:
+            return None
+        return self._window_model().item_step(item)
+
+    def _window_appended(self, item: int, widget: Widget) -> None:
+        """Живой путь смонтировал ``widget`` элемента модели ``item``:
+        метка. Сверка с лимитом — не на каждый виджет (это пересчёт окна):
+        с началом шага и после роста на кусок по оценке, после
         раскладки."""
+        step = self._window_model().item_step(item)
         if step < 0:
             return
-        self._window_step_of[widget] = step
+        self._window_item_of[widget] = item
         new_step = step > self._window_grow_step
         self._window_grow_step = max(step, self._window_grow_step)
         self._window_grown += policy.ITEM_WIDGETS
@@ -653,7 +663,7 @@ class TraceWindowMixin:
         виджета — его метка: якоря рядом со своим виджетом (строки блоков,
         вложенное) помечены шагом по ленте; проход по ленте — только для
         непомеченного (вложенное из куска)."""
-        step = self._window_step_of.get(widget)
+        step = self._window_mark(widget)
         if step is not None:
             return step
         step_at = {w: t for t, w in self._window_heads.items()}
@@ -662,6 +672,15 @@ class TraceWindowMixin:
             if child is widget:
                 return step
         return None
+
+    def _window_item_at(self, widget: Widget) -> int | None:
+        """Элемент модели, к которому относится ``widget``: его метка;
+        без метки — первый элемент шага, в котором он лежит по ленте."""
+        item = self._window_item_of.get(widget)
+        if item is not None:
+            return item
+        step = self._window_step_at(widget)
+        return None if step is None else self._window_model().step_starts[step]
 
     def _window_on_grown(self) -> None:
         """Лента выросла у низа: снять старые шаги сверх лимита — только
@@ -934,7 +953,7 @@ class TraceWindowMixin:
             return mounted
         model = self._window_model()
         turn = model.step_turn(step)
-        own = None if mounted is None else self._window_step_of.get(mounted)
+        own = None if mounted is None else self._window_mark(mounted)
         if (own is not None and model.step_turn(own) == turn) or (
             mounted is not None and own is None
         ):
@@ -951,7 +970,7 @@ class TraceWindowMixin:
         ленты)."""
         at = bisect_right(placements, scroll_y, key=lambda p: p.region.y)
         for i in range(at - 1, -1, -1):
-            step = self._window_step_of.get(placements[i].widget)
+            step = self._window_mark(placements[i].widget)
             if step is not None:
                 return step
         return None

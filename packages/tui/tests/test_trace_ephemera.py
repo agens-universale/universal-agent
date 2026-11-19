@@ -485,6 +485,7 @@ async def test_restored_group_phrase_belongs_to_its_turn():
     )
     from gc_tui.widgets.user_reply import UserReplyContainer
     from test_history_render import _Feed, _feed
+    from test_trace_window_steps import _marks
     from trace_readonly import render_turns
 
     model = build_history(
@@ -504,7 +505,9 @@ async def test_restored_group_phrase_belongs_to_its_turn():
         )
         await pilot.pause()
         texts = [t for _c, t, _ in feed_dump(_feed(pilot.app))]
-        heads = step_heads(_feed(pilot.app).children, refs.step_of)
+        heads = step_heads(
+            _feed(pilot.app).children, _marks(model, refs.item_of)
+        )
         head = heads[1]
         assert isinstance(head, UserReplyContainer)
         assert head.plain_text == "turn 2 calls=1 light"

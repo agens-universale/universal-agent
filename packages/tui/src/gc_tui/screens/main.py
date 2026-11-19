@@ -811,7 +811,7 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         # Шаг элемента модели, который сейчас рисует живой путь из готовой
         # модели (`_draw_live_items`); None — живой путь дописывает модель,
         # его шаг — последний (`_note_step`).
-        self._drawing_step: Optional[int] = None
+        self._drawing_item: Optional[int] = None
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
@@ -2855,10 +2855,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
         replies = Counter(p for p in history.reply_points if p >= start)
         try:
             for i in range(start, len(history.items)):
-                self._drawing_step = history.item_step(i)
+                self._drawing_item = i
                 self._draw_live_item(history.items[i], replies[i])
         finally:
-            self._drawing_step = None
+            self._drawing_item = None
         # Повтор реплики последней записью — тоже начало хода.
         self._settle_for_replies(replies[len(history.items)])
 
@@ -3984,19 +3984,19 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
             self._drawing_model -= 1
 
     def _note_step(self, widget, anchor=None) -> None:
-        """Виджет живого пути — меткой в окно своего шага (§5.3: окно
-        режет ленту по шагам ходов, голова шага — первый по ленте его
-        виджет): встал рядом со своим виджетом ``anchor`` — шаг якоря по
-        ленте (заголовок группы, исход вызова прошлого шага, вложенное);
-        иначе шаг рисуемого элемента готовой модели (`_draw_live_items`);
-        иначе — последний в модели (живой путь сначала дописывает элемент,
-        потом рисует)."""
-        step = None if anchor is None else self._window_step_at(anchor)
-        if step is None:
-            step = self._drawing_step
-        if step is None:
-            step = self._feed_history.step_count() - 1
-        self._window_appended(step, widget)
+        """Виджет живого пути — меткой своего элемента модели в окно (§5.3:
+        окно режет ленту по шагам ходов, голова шага — первый по ленте его
+        виджет): встал рядом со своим виджетом ``anchor`` — элемент якоря
+        (заголовок группы, исход вызова прошлого шага, вложенное); иначе
+        рисуемый элемент готовой модели (`_draw_live_items`); иначе —
+        последний в модели (живой путь сначала дописывает элемент, потом
+        рисует)."""
+        item = None if anchor is None else self._window_item_at(anchor)
+        if item is None:
+            item = self._drawing_item
+        if item is None:
+            item = len(self._feed_history.items) - 1
+        self._window_appended(item, widget)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение

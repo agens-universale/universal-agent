@@ -151,6 +151,16 @@ def _session() -> list[dict]:
     ]
 
 
+def _marks(model, item_of):
+    """Шаг виджета по метке его элемента модели (`ChunkRefs.item_of`)."""
+
+    def step_of(widget):
+        item = item_of.get(widget)
+        return None if item is None else model.item_step(item)
+
+    return step_of
+
+
 def _call_and_result(model, call_id: str) -> tuple[int, int | None]:
     """Индексы последнего вызова ``call_id`` и его первого исхода."""
     call = model.call_before(call_id, len(model.items))
@@ -337,7 +347,9 @@ async def test_steps_rendered_one_by_one_match_whole_turn():
                 options=ChunkOptions(),
             )
             await pilot.pause()
-            top = step_heads(feed.children, refs.step_of).get(s, top)
+            top = step_heads(feed.children, _marks(model, refs.item_of)).get(
+                s, top
+            )
         assert feed_dump(feed) == whole
 
 
@@ -1570,7 +1582,9 @@ async def test_reused_call_ids_across_turns_render_by_steps():
                 options=ChunkOptions(),
             )
             await pilot.pause()
-            top = step_heads(feed.children, refs.step_of).get(s, top)
+            top = step_heads(feed.children, _marks(model, refs.item_of)).get(
+                s, top
+            )
         assert feed_dump(feed) == whole
 
 

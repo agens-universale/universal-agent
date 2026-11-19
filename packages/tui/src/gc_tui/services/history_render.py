@@ -171,8 +171,9 @@ class ChunkOptions:
 @dataclass
 class ChunkRefs:
     """Что кусок отдаёт экрану. ``widgets`` — прямые дети ленты, которые
-    смонтировал кусок; ``step_of`` — шаг каждого из них (вложенное без
-    метки — лежит внутри шага): по меткам окно находит головы шагов
+    смонтировал кусок; ``item_of`` — элемент модели каждого из них
+    (вложенное без метки — лежит внутри шага): по меткам окно находит
+    головы шагов
     (`trace_window.step_heads`); ``block_views`` — виды блоков шагов
     куска (по одному на шаг с вызовами, уровень в пространстве
     ``HISTORY_LEVEL_PREFIX``) — только для маршрута раскрытия, не в живой
@@ -182,7 +183,7 @@ class ChunkRefs:
     свёртке)."""
 
     widgets: list[Widget] = field(default_factory=list)
-    step_of: dict[Widget, int] = field(default_factory=dict)
+    item_of: dict[Widget, int] = field(default_factory=dict)
     fresh_turn_line: Widget | None = None
     call_rows: dict[str, Widget] = field(default_factory=dict)
     question_rows: dict[str, Widget] = field(default_factory=dict)
@@ -262,7 +263,9 @@ class _Chunk:
         self._mounted: list[Widget] = []
         # Виджеты позиции куска, ещё не отданные ленте (`flush`).
         self._pending: list[Widget] = []
-        self._step_of: dict[Widget, int] = {}
+        self._item_of: dict[Widget, int] = {}
+        # Элемент модели, который рисуется (метка смонтированного).
+        self._at: int | None = None
         self._view: ToolBlocksView | None = None
         self._step: int | None = None
         self._turn: int | None = None
@@ -293,8 +296,8 @@ class _Chunk:
             self.flush()
             self._host.mount(widget, before=before, after=after)
         self._mounted.append(widget)
-        if self._step is not None:
-            self._step_of[widget] = self._step
+        if self._step is not None and self._at is not None:
+            self._item_of[widget] = self._at
         view = self._view
         if view is not None and not view.issued(widget):
             view.event_closing()
@@ -338,11 +341,13 @@ class _Chunk:
         self._step = s
         rows = self._ephemera.for_step(model, s) if self._ephemera else []
         for k in span:
+            self._at = k
             if not self._settled_early(k):
                 self._item(k, model.items[k])
             rows = self._mount_ephemeral(rows, k + 1)
         self._mount_ephemeral(rows, None)
         self._settle_calls(s, span.stop)
+        self._at = None
         self._turn_stop = span.stop
 
     def _turn_end(self) -> int:
@@ -365,6 +370,8 @@ class _Chunk:
             if at is None or not start <= at < stop:
                 continue
             if model.item_step(call) == s:
+                # Исход встаёт к строке вызова — в элементе вызова.
+                self._at = call
                 self._event(model.items[at].event)
 
     def _settled_early(self, k: int) -> bool:
@@ -500,7 +507,7 @@ class _Chunk:
             drop_mark_before(below)
         refs = self.refs
         refs.widgets = [w for w in self._mounted if not is_being_removed(w)]
-        refs.step_of = self._step_of
+        refs.item_of = self._item_of
         return refs
 
     def _restore_view(
