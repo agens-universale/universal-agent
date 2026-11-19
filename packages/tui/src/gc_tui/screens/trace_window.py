@@ -140,8 +140,11 @@ class TraceWindowMixin:
     _window_scoped = 0
     _window_snap: _Snapshot | None = None
     # Шаг реплики, к которой ведёт клик по липкой строке из модели:
-    # кусками, как подъём (`_window_reach_reply`); None — не ведёт.
+    # кусками, как подъём (`_window_reach_reply`); None — не ведёт. Строка,
+    # куда путь прокрутил ленту сам: прокрутка в другое место — человек
+    # ушёл, путь отменяется.
     _window_reply_step: int | None = None
+    _window_reply_y: int | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -1039,6 +1042,11 @@ class TraceWindowMixin:
         super()._on_trace_scrolled(value)
         if self._ui_frozen_for_select():
             return
+        if self._window_reply_step is not None and (
+            round(value) != self._window_reply_y
+        ):
+            # Человек ушёл прокруткой сам — путь к реплике не перехватывает.
+            self._window_reply_step = None
         feed = self._window_feed()
         feed.hold_first_visible(
             None if self._stick_bottom else self._window_reading_row()

@@ -1823,3 +1823,36 @@ async def test_sticky_click_reaches_reply_above_pinned_bottom(
         assert isinstance(head, UserReplyContainer)
         top = round(trace.scroll_y) + head.styles.margin.top
         assert trace.placed_top(head) == top
+
+
+@pytest.mark.asyncio
+async def test_user_scroll_cancels_reply_walk(tmp_path, monkeypatch):
+    """Человек ушёл прокруткой сам, пока путь к реплике идёт (R48 M1):
+    путь отменён, лента не прыгает к реплике."""
+    from gc_tui.messages import ScrollToReply
+
+    _small_window(monkeypatch)
+    records = [*_giant_turn(0, 3), *_giant_turn(1, 320), *_giant_turn(2, 3)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_giant(pilot, tmp_path / "t", records)
+        model = scr._window_model()
+        trace = _trace(scr)
+        start1 = model.turn_step(1)
+        for _ in range(400):
+            await _scroll_to(pilot, scr, max(0, trace.scroll_y - 20))
+            step = scr._window_step_at(scr._window_reading_row())
+            if (
+                step is not None
+                and model.step_turn(step) == 1
+                and step - start1 >= 40
+            ):
+                break
+        scr.post_message(ScrollToReply(_sticky(scr).reply))
+        await pilot.pause()
+        assert scr._window_reply_step is not None
+        y = trace.max_scroll_y // 2
+        trace.scroll_to(y=y, animate=False, immediate=True)
+        await pilot.pause()
+        assert scr._window_reply_step is None
+        await _settled(pilot, scr)
+        assert start1 not in scr._window_heads
