@@ -1121,19 +1121,23 @@ async def test_expanded_step_of_live_turn_is_not_pinned(tmp_path):
         await _feed_turn(pilot, scr, records, whole_calls=True)
         model = scr._window_model()
         assert model.open_turn() == 0
-        assert model.step_count() > 1
+        # Шаг группы — не последний; до него — шаг реплики (граница
+        # откатывается к началу группы, R51).
+        group = model.item_step(_call_and_result(model, "find_0_0")[0])
+        assert group < model.step_count() - 1
         view = scr._block_views[""]
         view.toggle(view.model.block_of("find_0_0"))
         await pilot.pause()
         texts = [t for _k, t, _c in feed_dump(_trace(scr))]
         assert "    − свернуть группу" in texts
-        assert not scr._step_pinned(0)
-        assert scr.forget_step(0)
+        assert not scr._step_pinned(group)
+        for step in range(group + 1):
+            assert scr.forget_step(step)
         await pilot.pause()
         assert "    − свернуть группу" not in [
             t for _k, t, _c in feed_dump(_trace(scr))
         ]
-        refs = scr._window_render(range(1), before=scr._window_top())
+        refs = scr._window_render(range(group + 1), before=scr._window_top())
         scr._window_first = 0
         scr._window_adopt_chunk(refs)
         await pilot.pause()
