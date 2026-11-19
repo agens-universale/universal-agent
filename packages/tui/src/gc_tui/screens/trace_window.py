@@ -139,6 +139,9 @@ class TraceWindowMixin:
     # на операцию, снимок — в `_window_snap`.
     _window_scoped = 0
     _window_snap: _Snapshot | None = None
+    # Шаг реплики, к которой ведёт клик по липкой строке из модели:
+    # кусками, как подъём (`_window_reach_reply`); None — не ведёт.
+    _window_reply_step: int | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -254,6 +257,7 @@ class TraceWindowMixin:
         self._window_grow_step = -1
         self._window_step_of = WeakKeyDictionary()
         self._window_replies = {}
+        self._window_reply_step = None
         self._window_first = 0
         self._window_gap = range(0)
         self._window_feed().hold_first_visible(None)
@@ -450,6 +454,7 @@ class TraceWindowMixin:
             # конец): низ — заново и запомнен, иначе уход вверх меряется
             # от прежнего низа и прилипание не снимается.
             self._scroll_trace_end()
+        self._window_reach_reply()
         self.call_after_refresh(self._window_prefetch)
         self.call_after_refresh(self._window_fill)
 
@@ -539,6 +544,7 @@ class TraceWindowMixin:
         низа)."""
         if self._ui_frozen_for_select():
             return
+        self._window_reply_step = None
         self._window_trim_due = self._window_busy
         if self._window_busy:
             return
@@ -949,35 +955,48 @@ class TraceWindowMixin:
         return reply
 
     def on_scroll_to_reply(self, message: ScrollToReply) -> None:
-        """Клик по липкой реплике из модели: шаги от реплики до читаемого
-        домонтируются обычным куском окна (шаги одного хода), реплика —
-        наверху. Смонтированная — как раньше."""
+        """Клик по липкой реплике из модели: шаги до реплики встают
+        обычными кусками окна, как подъём (`_window_reach_reply`),
+        реплика — наверху. Смонтированная — как раньше."""
         reply = message.reply
-        if reply.is_attached or self._window_busy:
+        if reply.is_attached:
+            self._window_reply_step = None
             super().on_scroll_to_reply(message)
             return
-        model = self._window_model()
         no = getattr(reply, "event_no", 0)
         if self._window_replies.get(no) is not reply:
             return
-        step = model.turn_step(model.turn_index_of(no))
-        if self._window_mounted(step):
+        model = self._window_model()
+        self._window_reply_step = model.turn_step(model.turn_index_of(no))
+        self._window_reach_reply()
+
+    def _window_reach_reply(self) -> None:
+        """Шаг к реплике клика (R47): шаг реплики смонтирован — она
+        наверху, путь окончен; нет — лента к краю смонтированного и
+        кусок к нему (не больше ``CHUNK_MAX``), противоположный край
+        снимается, как при подъёме. Следующий шаг — когда кусок встанет
+        (`_window_settle`)."""
+        step = self._window_reply_step
+        if step is None or self._window_busy:
             return
-        gap = self._window_gap
+        if self._window_mounted(step):
+            self._window_reply_step = None
+            self._window_feed().call_after_layout(
+                lambda: self._window_show_head(step)
+            )
+            return
+        feed = self._window_feed()
         if step < self._window_first:
-            steps = range(step, self._window_first)
-            refs = self._window_insert(steps, before=self._window_top())
-            self._window_first = step
-            side: Side = "top"
+            feed.scroll_to(y=0, animate=False, immediate=True)
+            done = self._window_prepend(focus=False)
         else:
-            steps = range(step, gap.stop)
-            refs = self._window_insert(steps, before=self._window_gap_head())
-            self._window_set_gap(gap.start, step)
-            side = "bottom"
-        self._window_settle_later(refs, side, False)
-        self._window_feed().call_after_layout(
-            lambda: self._window_show_head(step)
-        )
+            gap_y = self._window_gap_y()
+            if gap_y is not None:
+                y = max(0, gap_y - feed.container_size.height)
+                feed.scroll_to(y=y, animate=False, immediate=True)
+            done = self._window_append(focus=False)
+        if not done:
+            self._window_reply_step = None
 
     def _window_show_head(self, step: int) -> None:
         """Первый виджет шага ``step`` — наверху ленты."""

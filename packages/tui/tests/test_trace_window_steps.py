@@ -1663,3 +1663,66 @@ async def test_trim_walks_feed_constant_times(tmp_path, monkeypatch):
         dropped = steps_before - len(scr._window_heads)
         assert scr._window_first >= 8
         assert len(walks) <= 4, (len(walks), dropped)
+
+
+@pytest.mark.asyncio
+async def test_sticky_click_brings_reply_by_bounded_chunks(
+    tmp_path, monkeypatch
+):
+    """Клик по липкой реплике хода, читаемого на десятки шагов ниже
+    начала: шаги до реплики встают обычными кусками окна (R47 #1) —
+    каждый не больше ``CHUNK_MAX``, смонтированное в пределах «лимит +
+    кусок», в конце реплика наверху."""
+    from gc_tui.messages import ScrollToReply
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    bound = _small_window(monkeypatch)
+    records = [*_giant_turn(0, 3), *_giant_turn(1, 320), *_giant_turn(2, 3)]
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = await _open_giant(pilot, tmp_path / "t", records)
+        model = scr._window_model()
+        trace = _trace(scr)
+        start1 = model.turn_step(1)
+        assert model.turn_step(2) - start1 >= 50
+        for _ in range(400):
+            await _scroll_to(pilot, scr, max(0, trace.scroll_y - 20))
+            step = scr._window_step_at(scr._window_reading_row())
+            if step is not None and model.step_turn(step) == 1:
+                if step - start1 >= 40:
+                    break
+        assert scr._window_first - start1 >= 30
+        assert _sticky_text(scr) == "› запрос 1"
+        chunks, worst = [], []
+        settle = scr._window_settle
+
+        def spy_settle(gen, widgets, side, focus):
+            chunks.append(
+                sum(len(w.walk_children(with_self=True)) for w in widgets)
+            )
+            settle(gen, widgets, side, focus)
+
+        def mounted() -> int:
+            steps, counts = scr._window_mounted_counts()
+            last = dict(zip(steps, counts, strict=True)).get(
+                model.step_count() - 1, 0
+            )
+            return sum(counts) - last
+
+        scr._window_settle = spy_settle
+        scr.post_message(ScrollToReply(_sticky(scr).reply))
+        for _ in range(400):
+            await pilot.pause()
+            await _settled(pilot, scr)
+            worst.append(mounted())
+            head = scr._window_heads.get(start1)
+            if head is not None and not scr._window_busy:
+                break
+        await pilot.pause()
+        await _settled(pilot, scr)
+        assert chunks
+        assert max(chunks) <= policy.CHUNK_MAX
+        assert max(worst) <= bound
+        head = scr._window_heads.get(start1)
+        assert isinstance(head, UserReplyContainer)
+        top = round(trace.scroll_y) + head.styles.margin.top
+        assert trace.placed_top(head) == top
