@@ -456,7 +456,9 @@ def _window_consistent(scr) -> None:
     model = scr._window_model()
     gap = scr._window_gap
     expected = [
-        s for s in range(scr._window_first, model.step_count()) if s not in gap
+        s
+        for s in range(scr._window_first, model.step_count())
+        if s not in gap and _drawable(model, s)
     ]
     heads = scr._window_heads
     assert sorted(heads) == expected
@@ -464,6 +466,18 @@ def _window_consistent(scr) -> None:
     order = [children.index(heads[s]) for s in expected]
     assert order == sorted(order)
     _events_in_their_steps(scr, children)
+
+
+def _drawable(model, s: int) -> bool:
+    """У шага ``s`` есть что рисовать: показанное событие или черта смены
+    модели (шаг откаченной реплики без вывода — пустой)."""
+    from gc_tui.services.trace_steps import shown
+
+    return any(
+        model.items[i].kind == "model_choice"
+        or shown(model.items[i].event, model.withdrawn)
+        for i in model.step_range(s)
+    )
 
 
 def _event_step(model, i: int) -> int:
@@ -1279,6 +1293,40 @@ async def test_refused_attempt_does_not_pin_live_turn(tmp_path, monkeypatch):
         texts = _texts(scr)
         assert not any(refused in t for t in texts)
         assert sum("Отчёт 0 попытка 2." in t for t in texts) == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_step_does_not_stop_top_trim(tmp_path, monkeypatch):
+    """Реплика записана — модель открыла её ход и шаг, — и откачена до
+    вывода агента: у шага виджетов нет навсегда. Снятие сверху у низа
+    проходит через него (R45): гигантские ходы после отката держат окно в
+    пределах после каждой пачки."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    bound = _small_window(monkeypatch)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(pilot, scr, _giant_turn(0, 3), whole_calls=True)
+        user = "m_u0001"
+        feed_live(
+            scr,
+            [_message({"role": "user", "id": user, "content": "отменю"})],
+            splits=(),
+        )
+        await pilot.pause()
+        model = scr._window_model()
+        empty = model.step_count() - 1
+        scr._withdraw_from_history(user)
+        list(scr.query(UserReplyContainer))[-1].remove()
+        await pilot.pause()
+        assert empty not in scr._window_heads
+        for i in (2, 3):
+            await _feed_turn(
+                pilot, scr, _giant_turn(i, 90), bound=bound, whole_calls=True
+            )
+        assert scr._window_first > empty
 
 
 @pytest.mark.asyncio

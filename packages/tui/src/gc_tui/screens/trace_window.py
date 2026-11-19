@@ -124,8 +124,9 @@ class TraceWindowMixin:
         """Голова каждого смонтированного шага — первый по ленте его
         виджет (`step_heads`), одно правило для кусков и живого пути.
         Снятое мимо окна (свёртка попыток сдачи, откат реплики) голову не
-        уносит: она переходит к следующему виджету шага, а шаг без
-        виджетов уходит из окна."""
+        уносит: она переходит к следующему виджету шага. У шага без
+        виджетов головы нет; границы окна (`_window_first`, края разрыва)
+        проматываются через такие шаги (`_window_skip_empty`)."""
         return step_heads(self._window_feed().children, self._window_step_of)
 
     # ---- что даёт экран --------------------------------------------------
@@ -591,6 +592,7 @@ class TraceWindowMixin:
             return
         if self._window_busy:
             return
+        self._window_skip_empty()
         steps, counts = self._window_mounted_counts()
         excess = policy.trim_to(
             sum(counts), policy.WINDOW_LIMIT, policy.CHUNK_MIN
@@ -762,6 +764,36 @@ class TraceWindowMixin:
             self._window_gap = range(step, gap.stop)
         else:
             self._window_gap = range(gap.start, step + 1)
+        self._window_skip_empty()
+
+    def _window_skip_empty(self) -> None:
+        """Границы прочитанного диапазона — по шагам с виджетами (R45).
+        Шаг, чьи виджеты все сняты мимо окна (откат реплики до вывода
+        агента, свёртка единственной попытки шага), головы не имеет: снятие
+        его не видит, и «первым» или краем разрыва он остановил бы снятие
+        навсегда. Верх окна проматывается через такие шаги (до последнего
+        шага модели), нижний край прочитанного — вверх; прочитанное без
+        виджетов — окно сходится к закреплённому низу."""
+        heads = self._window_heads
+        last = self._window_model().step_count() - 1
+        while True:
+            gap = self._window_gap
+            stop = gap.start if gap else last
+            while (
+                self._window_first < stop and self._window_first not in heads
+            ):
+                self._window_first += 1
+            if not gap or self._window_first < gap.start:
+                break
+            self._window_first, self._window_gap = gap.stop, range(0)
+        gap = self._window_gap
+        while (
+            gap
+            and gap.start - 1 > self._window_first
+            and (gap.start - 1 not in heads)
+        ):
+            gap = range(gap.start - 1, gap.stop)
+        self._window_gap = gap
 
     def _window_step_widgets(self, step: int) -> list[Widget]:
         """Виджеты ленты шага ``step``: от его первого виджета до первого
