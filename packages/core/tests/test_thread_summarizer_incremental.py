@@ -154,6 +154,73 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     assert len(calls) == 1
 
 
+def test_preamble_sections_do_not_trigger_compression(monkeypatch):
+    history = _flatten_turns([_make_turn("first user", "first assistant")])
+    summary = _valid_summary("final summary")
+    calls = []
+
+    async def _fake_request(**kwargs):
+        calls.append(kwargs["request_label"])
+        return (
+            "Analysis: <task_and_context>"
+            + "x" * 20100
+            + "</task_and_context>\n</think>\n"
+            + summary
+        )
+
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
+    )
+    _patch_chat_completion(monkeypatch, _fake_request)
+    _patch_memory_patch_empty(monkeypatch)
+
+    result = run_coro(
+        asummarize_dialog_via_chat_completions(
+            ctx=_ctx(trigger_chars=999999),
+            state=_state(),
+            full_history_messages=history,
+        )
+    )
+    assert result["raw_summary"] == summary
+    assert calls == ["summary_batch_1"]
+
+
+def test_nested_primary_summary_uses_repair(monkeypatch):
+    history = _flatten_turns([_make_turn("first user", "first assistant")])
+    repaired = _valid_summary("repaired nested draft")
+    calls = []
+
+    async def _fake_request(**kwargs):
+        label = kwargs["request_label"]
+        calls.append(label)
+        if label == "summary_batch_1":
+            return (
+                "<summary>Draft follows\n<summary>"
+                "<task_and_context>missing fields</task_and_context></summary>"
+            )
+        if label == "summary_repair":
+            return repaired
+        raise AssertionError(label)
+
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
+    )
+    _patch_chat_completion(monkeypatch, _fake_request)
+    _patch_memory_patch_empty(monkeypatch)
+
+    result = run_coro(
+        asummarize_dialog_via_chat_completions(
+            ctx=_ctx(trigger_chars=999999),
+            state=_state(),
+            full_history_messages=history,
+        )
+    )
+    assert result["raw_summary"] == repaired
+    assert calls == ["summary_batch_1", "summary_repair"]
+
+
 def test_memory_deltas_applied_to_working_memory_not_inside_summary(
     monkeypatch,
 ):
