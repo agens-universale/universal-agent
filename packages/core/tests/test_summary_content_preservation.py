@@ -199,17 +199,26 @@ async def test_failed_summary_preserves_live_and_saved_history(
         assert "confirmed-prior-context" in str(state.messages)
 
 
-async def test_hidden_only_summary_does_not_replace_visible_context(
+async def test_constraints_only_summary_does_not_replace_visible_history(
     monkeypatch,
 ):
-    """The memory patch may hide active_constraints from the main model."""
-    # Keep this case at the application boundary: a full XML document can be
-    # structurally valid while its short agent slice has no useful content.
+    """A constraints-only summary cannot replace other visible history."""
     from gc_core.summarize import compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
     hidden_only = assemble_summary_xml(
         {"active_constraints": "keep hidden fact"}
+    )
+    history = [
+        {"role": "user", "content": "Prepare a rollback checklist."},
+        {
+            "role": "tool",
+            "content": "The verified rollback snapshot is checkpoint-97d.",
+        },
+    ]
+    history.extend(
+        {"role": "user", "content": f"Check item {index}."}
+        for index in range(10)
     )
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -219,9 +228,8 @@ async def test_hidden_only_summary_does_not_replace_visible_context(
         previous_response_id=None,
         user_intent_log=[],
         current_user_intent=[],
-        messages=[{"role": "user", "content": "Visible source fact"}],
+        messages=history.copy(),
     )
-    before = list(state.messages)
 
     async def summarize(**_kwargs):
         return {
@@ -240,7 +248,8 @@ async def test_hidden_only_summary_does_not_replace_visible_context(
         await arun_summary_compaction(
             ctx=_ctx(), state=state, trigger_reason="test", is_cli_mode=False
         )
-    assert state.messages == before
+    assert state.messages == history
+    assert "checkpoint-97d" in repr(state.messages)
 
 
 @pytest.mark.parametrize("summary_outcome", ["failed", "partial", "success"])

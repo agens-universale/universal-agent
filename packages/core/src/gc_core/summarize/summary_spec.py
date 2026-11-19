@@ -230,9 +230,12 @@ def merge_summary_bodies(
 
 
 def agent_summary_slice_mode(
-    *, num_batches: int, patch_executed: bool
+    *,
+    num_batches: int,
+    patch_executed: bool,
+    constraints_transferred: bool = False,
 ) -> SummarySliceMode:
-    if num_batches <= 1 and patch_executed:
+    if num_batches <= 1 and patch_executed and constraints_transferred:
         return "short"
     return "full"
 
