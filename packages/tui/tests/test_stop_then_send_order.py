@@ -309,3 +309,49 @@ async def test_unmatched_user_record_releases_sent_reply(tmp_path):
         await pilot.pause()
         assert sent.state == "pending"
         assert _index_of(scr, "новая") < _index_of(scr, "Ход 1: смотрю шаг 1.")
+
+
+@pytest.mark.asyncio
+async def test_ask_human_answer_does_not_release_sent_reply(tmp_path):
+    """Ответ на вопрос агента — тоже запись `user`, но не реплика хода: не
+    сверившись с отправленной (wire другой — плашки картинок), он её не
+    отпускает. Запись модели после ответа — над отправленной репликой."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_far_edge import _message
+    from test_trace_window_steps import _giant_turn, _prose
+
+    question = [
+        _message(
+            {
+                "type": "function_call",
+                "name": "ask_human",
+                "call_id": "q1",
+                "id": "fc_q1",
+                "status": "completed",
+                "arguments": json.dumps({"question": "какой файл?"}),
+            }
+        ),
+    ]
+    answer = _message(
+        {
+            "type": "function_call_output",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fco_q1",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "response": "этот"}
+            ),
+        }
+    )
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(
+            scr, [*_giant_turn(0, 1, outcome=False)[:1], *question], splits=()
+        )
+        scr._mount_user_reply("новая", state="pending", client_id="c")
+        feed_live(scr, [answer, _prose(0, 7)], splits=())
+        await pilot.pause()
+        assert _index_of(scr, "Ход 0: смотрю шаг 7.") < _index_of(scr, "новая")

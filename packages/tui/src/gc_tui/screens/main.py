@@ -4441,7 +4441,10 @@ class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
                     self._refresh_queue_hint()
                     return
             # Без pending-матча — обычный mount (используем display_content = ev.summary).
-            self._release_sent_reply()
+            if ev.tool_name != "ask_human":
+                # Ответ на вопрос агента — не реплика хода: несверенный, он
+                # отправленную реплику не отпускает.
+                self._release_sent_reply()
             self._mount_user_reply(
                 ev.summary,
                 event_no=ev.no,
