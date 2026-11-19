@@ -50,6 +50,8 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         "ambiguous_primary",
         "truncated_final_after_draft",
         "reasoning_boundary_without_final",
+        "quoted_example_without_final",
+        "fenced_example_without_final",
     ],
 )
 async def test_failed_summary_preserves_live_and_saved_history(
@@ -63,6 +65,8 @@ async def test_failed_summary_preserves_live_and_saved_history(
         "ambiguous_compression",
         "truncated_final_after_draft",
         "reasoning_boundary_without_final",
+        "quoted_example_without_final",
+        "fenced_example_without_final",
     }
     thread_id = f"failed-summary-{has_previous_summary}"
     prior = valid_summary_xml_for_tests(seed="confirmed-prior-context")
@@ -96,6 +100,20 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if response_mode == "fenced_example_without_final":
+            if kwargs["request_label"] == "summary_compress":
+                example = valid_summary_xml_for_tests(seed="unrelated example")
+                return (
+                    "</think>\nExample of the XML format:\n```xml\n"
+                    + example
+                    + "\n```"
+                )
+            return assemble_summary_xml({"task_and_context": "x" * 1200})
+        if response_mode == "quoted_example_without_final":
+            if kwargs["request_label"] == "summary_compress":
+                example = valid_summary_xml_for_tests(seed="unrelated example")
+                return "</think>\nExample of the XML format: `" + example + "`"
+            return assemble_summary_xml({"task_and_context": "x" * 1200})
         if response_mode == "reasoning_boundary_without_final":
             if kwargs["request_label"] == "summary_compress":
                 return (
@@ -197,7 +215,11 @@ async def test_failed_summary_preserves_live_and_saved_history(
         )
 
     trace_path = tmp_path / "rejected-summary.jsonl"
-    if response_mode == "reasoning_boundary_without_final":
+    if response_mode in {
+        "reasoning_boundary_without_final",
+        "quoted_example_without_final",
+        "fenced_example_without_final",
+    }:
         limit = 1000
     elif compression_failure:
         limit = 100

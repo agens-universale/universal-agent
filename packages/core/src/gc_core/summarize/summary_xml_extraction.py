@@ -18,6 +18,10 @@ _FENCED_CODE = re.compile(
     r"(?ms)^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*(?=\n|$)"
 )
 _INLINE_CODE = re.compile(r"(?<![\\`])(`+)(?!`)[^`\n]*\1(?!`)")
+_QUOTED_XML = re.compile(
+    r"(?s)(?<![\\`])(`{1,2})(?!`)[ \t]*<summary>.*?</summary>[ \t]*\1(?!`)"
+)
+_QUOTED_THINK = re.compile(r"(?<!\\)([\"'])</think>\1")
 _SUMMARY_OPEN = "<summary>"
 _SUMMARY_CLOSE = "</summary>"
 _THINK_CLOSE = "</think>"
@@ -54,10 +58,32 @@ def _outside_closed_sections(source: str):
             yield match
 
 
+def _example_fenced_xml_spans(source: str) -> list[tuple[int, int]]:
+    spans = []
+    for match in _FENCED_CODE.finditer(source):
+        caption = source[: match.start()].rstrip("\r\n").rsplit("\n", 1)[-1]
+        caption = caption.strip().casefold()
+        label = match.group().split("\n", 1)[0].casefold()
+        if (
+            caption.endswith(":")
+            and caption.startswith(
+                ("example", "for example", "пример", "например")
+            )
+            and "xml" in label
+        ):
+            spans.append(match.span())
+    return spans
+
+
 def _reasoning_boundaries(source: str) -> list[int]:
     literal_spans = [
         match.span()
-        for pattern in (_FENCED_CODE, _INLINE_CODE)
+        for pattern in (
+            _FENCED_CODE,
+            _INLINE_CODE,
+            _QUOTED_XML,
+            _QUOTED_THINK,
+        )
         for match in pattern.finditer(source)
     ]
     return [
@@ -71,7 +97,11 @@ def _reasoning_boundaries(source: str) -> list[int]:
 
 
 def _candidate_tokens(source: str):
+    quoted_spans = [match.span() for match in _QUOTED_XML.finditer(source)]
+    quoted_spans.extend(_example_fenced_xml_spans(source))
     for match in _outside_closed_sections(source):
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            continue
         if match.group() == _SUMMARY_OPEN and not _ROOT_FIRST_SECTION.match(
             source, match.end()
         ):

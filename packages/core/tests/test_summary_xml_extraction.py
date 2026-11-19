@@ -12,7 +12,9 @@ from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.settings import fake_ctx
 
 
-async def _run_summary_with_responses(monkeypatch, responses):
+async def _run_summary_with_responses(
+    monkeypatch, responses, *, max_chars=20000
+):
     calls = []
 
     async def response(**kwargs):
@@ -43,7 +45,7 @@ async def _run_summary_with_responses(monkeypatch, responses):
         {
             "agent.model": "test-model",
             "backend.completions_url": "http://example.test/v1/chat/completions",
-            "summary.max_accumulated_summary_chars": 20000,
+            "summary.max_accumulated_summary_chars": max_chars,
         },
         logger=None,
     )
@@ -85,6 +87,56 @@ async def test_repair_ignores_prose_tag_mention(monkeypatch):
     assert result["raw_summary"] == final
     assert calls == ["summary_batch_1", "summary_repair"]
     assert result["trace"]["step1_batches"][0]["repair"]["repaired_text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fenced_example", [False, True])
+async def test_compression_uses_real_xml_after_quoted_example(
+    monkeypatch, fenced_example
+):
+    draft = valid_summary_xml_for_tests(seed="draft context")
+    example = valid_summary_xml_for_tests(seed="example context")
+    final = valid_summary_xml_for_tests(seed="real context")
+    if fenced_example:
+        quoted = "\n```xml\n" + example + "\n```"
+    else:
+        quoted = " `" + example + "`"
+    response_text = (
+        "</think>\nExample of the XML format:"
+        + quoted
+        + "\nFinal summary follows:\n"
+        + final
+    )
+    result, calls = await _run_summary_with_responses(
+        monkeypatch,
+        {
+            "summary_batch_1": draft.replace("draft context", "x" * 1200),
+            "summary_compress": response_text,
+        },
+        max_chars=1000,
+    )
+    assert result["raw_summary"] == final
+    assert calls == ["summary_batch_1", "summary_compress"]
+
+
+@pytest.mark.asyncio
+async def test_compression_accepts_unlabelled_fenced_xml(monkeypatch):
+    final = valid_summary_xml_for_tests(seed="real context")
+
+    async def response(**_kwargs):
+        return "</think>\n```xml\n" + final + "\n```"
+
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", response
+    )
+    actual = await acompress_summary_text(
+        ctx=None,
+        state=None,
+        summary_text=assemble_summary_xml({"task_and_context": "x" * 11000}),
+        max_chars=10000,
+        max_tokens=1000,
+    )
+    assert actual == final
 
 
 @pytest.mark.asyncio
@@ -230,6 +282,7 @@ async def test_compression_keeps_outer_summary_around_quoted_example(
     [
         "\nThe log displays `</think>` literally.",
         "\nThe log displays ``</think>`` literally.",
+        '\nThe log displayed "</think>".',
         "\nA log excerpt follows:\n```text\n</think>\n```",
     ],
 )
