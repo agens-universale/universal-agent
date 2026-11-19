@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Optional
 
 from gc_core.attachments.model import attachments_of, chip_of, wh_text
 from gc_core.auto_routing.levels import AUTO
@@ -15,13 +14,16 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.persistence.model_choice_record import parse_model_choice
 
-from gc_tui.services.answer_flow import AnswerFlow
+from gc_tui.services.answer_flow import (
+    AnswerFlow,
+    answer_verdict,
+    finish_close,
+)
 from gc_tui.services.trace_mapper import (
     collect_render_context,
     is_finish,
     map_message,
 )
-from gc_tui.services.trace_render import finish_close_of
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _TECH_INNER_RE = re.compile(
@@ -279,18 +281,16 @@ def agent_answers(segments: list[dict]) -> list[str]:
     ]
     context = collect_render_context(payloads)
     flow = AnswerFlow()
-    answers: list[str] = []
-    attempt: Optional[int] = None  # индекс отчёта попытки в answers
+    answers: list[tuple[int, str]] = []  # (номер события, текст)
     for no, payload in enumerate(_first_by_id(payloads)):
         ev = map_message(payload, no=no, ts="", context=context)
         if ev is None:
             continue
         if ev.kind == "user":
             flow.new_turn()
-            attempt = None
         elif ev.kind == "agent":
-            attempt = _take_agent(flow, ev, answers, attempt)
-    return answers
+            _take_agent(flow, ev, answers)
+    return [text for _no, text in answers]
 
 
 def _first_by_id(payloads: list[dict]) -> list[dict]:
@@ -307,36 +307,31 @@ def _first_by_id(payloads: list[dict]) -> list[dict]:
     return out
 
 
-def _take_agent(flow, ev, answers: list[str], attempt: Optional[int]):
-    """Учесть agent-событие; вернуть индекс отчёта текущей попытки."""
+def _take_agent(flow, ev, answers: list[tuple[int, str]]) -> None:
+    """Учесть agent-событие тем же правилом, что лента (`finish_close`,
+    `answer_verdict`); свёрнутые им попытки сдачи (`flow.collapsed`)
+    уходят из ответов."""
     if is_finish(ev):
-        close = flow.finish(finish_close_of(ev), tracked=bool(ev.call_id))
+        close = finish_close(flow, ev)
+        _forget(answers, flow.collapsed)
         text = (close.body or close.note).strip()
         if flow.report_of_intermediate:
             text = ev.summary.strip()
-        if ev.call_id:
-            _forget(answers, attempt)
-            attempt = None
         if text:
-            answers.append(text)
-            if ev.call_id:
-                attempt = len(answers) - 1
-        return attempt
+            answers.append((ev.no, text))
+        return
     if not (ev.summary or "").strip():
-        return attempt
+        return
+    verdict = answer_verdict(flow, ev)
+    _forget(answers, flow.collapsed)
     intermediate = ev.tool_name == "intermediate_reply"
-    verdict = flow.agent((ev.summary or "").strip(), intermediate=intermediate)
-    if verdict.drop_attempt:
-        _forget(answers, attempt)
-        attempt = None
     if verdict.final_of_intermediate or (verdict.show and not intermediate):
-        answers.append(ev.summary)
-    return attempt
+        answers.append((ev.no, ev.summary))
 
 
-def _forget(answers: list[str], index: Optional[int]) -> None:
-    if index is not None:
-        del answers[index]
+def _forget(answers: list[tuple[int, str]], collapsed: list[int]) -> None:
+    if collapsed:
+        answers[:] = [a for a in answers if a[0] not in collapsed]
 
 
 # --- public API -----------------------------------------------------------

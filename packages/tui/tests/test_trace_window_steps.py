@@ -1598,3 +1598,33 @@ async def test_live_collapse_follows_model_marks(tmp_path):
         texts = _texts(scr)
         assert not any("Отчёт 0 попытка 1." in t for t in texts)
         assert sum("Отчёт 0 попытка 2." in t for t in texts) == 1
+
+
+@pytest.mark.asyncio
+async def test_copy_numbering_matches_feed_with_refused_attempt(tmp_path):
+    """/copy N — те же ответы и в том же порядке, что видит человек в
+    ленте: проза без повтора, отклонённая попытка не считается, принятый
+    отчёт — последним (одно правило дедупа и свёртки)."""
+    from gc_tui.services.export import agent_answers
+
+    records = [*_refused_finish_turn(0, 2), *_giant_turn(1, 3)]
+    answers = agent_answers([{"messages": records, "compacted_by": None}])
+    assert answers[-1] == "Ход 1: смотрю шаг 3."
+    assert "Отчёт 0 попытка 1." not in answers
+    assert answers.count("Отчёт 0 попытка 2.") == 1
+    fixture = HistoryFixture(
+        records=tuple(records), segments=(tuple(records),), sidecar=()
+    )
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        write_history(str(tmp_path / "t"), fixture)
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD, is_resume=True)
+        await pilot.pause(0.3)
+        await _settled(pilot, scr)
+        candidates = set(answers) | {"Отчёт 0 попытка 1."}
+        shown = [
+            text
+            for text in (t.removeprefix("●\n") for t in _texts(scr))
+            if text in candidates
+        ]
+    assert shown == answers
