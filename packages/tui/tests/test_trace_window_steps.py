@@ -1998,6 +1998,44 @@ async def test_sticky_click_on_island_below_mounted_top(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_trim_with_nothing_droppable_schedules_no_fill(
+    tmp_path, monkeypatch
+):
+    """Окно сверх лимита, но снять нечего — всё удерживается или
+    закреплено: догрузка не ставится (R49 m4)."""
+    bound = _small_window(monkeypatch)
+    async with _app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        await pilot.pause()
+        await _feed_turn(
+            pilot,
+            scr,
+            _giant_turn(0, 60, outcome=False),
+            bound=bound,
+            whole_calls=True,
+        )
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 10)
+        scheduled = []
+        later = scr.call_after_refresh
+
+        def spy_later(fn, *args):
+            scheduled.append(getattr(fn, "__name__", ""))
+            return later(fn, *args)
+
+        monkeypatch.setattr(scr, "call_after_refresh", spy_later)
+        mounted = set(scr._window_heads)
+        monkeypatch.setattr(scr, "_window_kept_steps", lambda: mounted)
+        scr._window_trim("top")
+        monkeypatch.undo()
+        monkeypatch.setattr(policy, "WINDOW_LIMIT", 10)
+        monkeypatch.setattr(scr, "call_after_refresh", spy_later)
+        monkeypatch.setattr(scr, "_window_pinned", lambda _step: True)
+        scr._window_trim("top")
+        assert "_window_fill" not in scheduled
+
+
+@pytest.mark.asyncio
 async def test_reply_walk_round_without_progress_ends_walk(
     tmp_path, monkeypatch
 ):
