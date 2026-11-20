@@ -86,6 +86,7 @@ from gc_core.execution.contracts import (
     MainModelUnavailable,
     ModelRequestStopped,
 )
+from gc_core.execution.message_keys import has_tool_call_identity
 from gc_core.execution.model import arequest_model
 from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
@@ -100,6 +101,14 @@ from gc_core.execution.progress import (
     run_command_text,
     todo_items_from_arguments,
     tool_args_summary,
+)
+from gc_core.execution.run_trace import (
+    bind_trace_root,
+    finish_model_trace,
+    start_model_trace,
+    trace_committed_messages,
+    trace_discarded_response,
+    trace_observer,
 )
 from gc_core.execution.turn_clock import (
     TurnClock,
@@ -310,9 +319,13 @@ async def _maybe_persist(
     асинхронный (история треда может лежать в базе, и ждать её надо нативно),
     а внешние вызывающие и тесты — обычный синхронный.
     """
-    if callback is None:
+    observer = trace_observer(state)
+    if callback is None and observer is None:
         return
     if is_persist_discarded(state, pairing=pairing):
+        return
+    trace_committed_messages(observer, messages)
+    if callback is None:
         return
     if any(_is_agent_record(m) for m in messages):
         state.produced_output = True
@@ -1267,6 +1280,7 @@ async def _arequest_responses_once(
     )
     if take_probe():
         use_retry = False
+    request_trace = start_model_trace(state)
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"
     ):
@@ -1287,7 +1301,12 @@ async def _arequest_responses_once(
         or any(not isinstance(item, dict) for item in res["output"])
     ):
         raise UnparseableModelResponse("Invalid Responses API output")
-    return res["output"], str(res["id"]), res_headers
+    output = _deduplicate_tool_call_ids(res["output"])
+    response_id = str(res["id"])
+    finish_model_trace(
+        request_trace, res, call_data.get("model"), output, response_id
+    )
+    return output, response_id, res_headers
 
 
 def _chat_token_limits(
@@ -1731,6 +1750,7 @@ async def _arequest_backend_canonical_once(
             "config_proxy": config_proxy,
         },
     )
+    request_trace = start_model_trace(state)
     res, call_data = await _asend_with_image_fallback(
         state,
         ctx,
@@ -1777,10 +1797,13 @@ async def _arequest_backend_canonical_once(
         persist_reasoning_content=persist_reasoning,
         recover_invalid_tool_calls=settings.agent.stop_on_no_tool_response,
     )
-    resp_messages = canonical["output"]
+    resp_messages = _deduplicate_tool_call_ids(canonical["output"])
     response_id = str(canonical.get("id") or res.get("id") or "")
     if not response_id:
         raise ValueError("chat/completions response id is empty")
+    finish_model_trace(
+        request_trace, res, call_data.get("model"), resp_messages, response_id
+    )
     remember_main_prompt_tokens(
         state,
         res.get("usage"),
@@ -1877,10 +1900,7 @@ def _drop_unidentifiable_tool_calls(messages: List[Dict]) -> List[Dict]:
         message
         for message in messages
         if message.get("type") != "function_call"
-        or all(
-            isinstance(value, str) and value.strip()
-            for value in (message.get("call_id"), message.get("name"))
-        )
+        or has_tool_call_identity(message)
     ]
     if len(filtered) != len(
         messages
@@ -1889,6 +1909,31 @@ def _drop_unidentifiable_tool_calls(messages: List[Dict]) -> List[Dict]:
             "Model tool calls have no usable identity"
         )
     return filtered
+
+
+def _deduplicate_tool_call_ids(messages: List[Dict]) -> List[Dict]:
+    """Keep the first usable call for each ID in one model response."""
+    retained: dict[str, int] = {}
+    duplicates: set[int] = set()
+    for index, message in enumerate(messages):
+        if message.get("type") != "function_call":
+            continue
+        call_id = message.get("call_id")
+        if not isinstance(call_id, str) or not call_id.strip():
+            continue
+        previous = retained.setdefault(call_id, index)
+        if previous == index:
+            continue
+        if has_tool_call_identity(message) and not has_tool_call_identity(
+            messages[previous]
+        ):
+            retained[call_id] = index
+            duplicates.add(previous)
+        else:
+            duplicates.add(index)
+    if not duplicates:
+        return messages
+    return [m for index, m in enumerate(messages) if index not in duplicates]
 
 
 def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
@@ -2021,6 +2066,7 @@ async def _amaybe_reroute_for_floors(
         return resp_messages, response_id, res_headers
     logger = getattr(ctx, "logger", None) or _fallback_logger
 
+    trace_discarded_response(state, response_id)
     discarded_calls, discarded_text = discarded_answer(resp_messages)
     log_artifact_reroute(
         logger,
@@ -3801,8 +3847,15 @@ class _AgentLoop:
         режима) может добавиться следом. Реплика из отложенного хвоста на
         диск уже не попадёт — в намерения открытого хода её пишем до сброса.
         """
-        self._discard_nudges_after_summary(skip_fill=True)
         state = self.state
+        observer = trace_observer(state)
+        if observer is not None:
+            held = self._nudges.followers
+            if self._nudges.carrier is not None:
+                held = [self._nudges.carrier, *held]
+            # These messages reached the old history, which the summary replaced.
+            trace_committed_messages(observer, held)
+        self._discard_nudges_after_summary(skip_fill=True)
         state.current_user_intent = append_user_asks_from_messages(
             state.current_user_intent,
             self._nudges.followers,
@@ -4436,4 +4489,8 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         mark_finalizing=mark_finalizing,
         mark_finish_gate_checking=mark_finish_gate_checking,
     )
-    return await loop.arun(messages)
+    with bind_trace_root(state):
+        observer = trace_observer(state)
+        if observer is not None:
+            trace_committed_messages(observer, state.messages)
+        return await loop.arun(messages)

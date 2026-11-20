@@ -5,8 +5,10 @@ Requires the `harbor` framework (dependency-group `test`).
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
+from stat import S_IMODE
 from types import SimpleNamespace
 
 import pytest
@@ -113,37 +115,38 @@ def test_non_agent_reasoning_is_not_exported():
     assert steps[1].observation.results[0].content == "result"
 
 
-def test_trajectory_json_preserves_archived_and_live_reasoning(tmp_path):
-    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
-    agent._evicted_messages = [
-        {
-            "role": "assistant",
-            "content": "old",
-            "reasoning_content": "old thought",
-        },
+def test_trajectory_preserves_reasoning_after_history_compaction(tmp_path):
+    from datetime import UTC, datetime
+
+    from adapters.atif import TrajectoryRecorder
+    from gc_core.execution.run_trace import ModelResponse
+
+    adapter = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
+    recorder = TrajectoryRecorder()
+    first = {
+        "role": "assistant",
+        "content": "old",
+        "reasoning_content": "old thought",
+    }
+    second = {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "new thought",
+    }
+    for index, response in enumerate((first, second)):
+        recorder.observe(
+            ModelResponse(
+                f"response-{index}", "m", datetime.now(UTC), [response], None
+            )
+        )
+
+    state = SimpleNamespace(messages=[second])
+    assert adapter._write_trajectory(state, recorder.freeze()) == 2
+    steps = json.loads((tmp_path / "trajectory.json").read_text())["steps"]
+    assert [step["reasoning_content"] for step in steps] == [
+        "old thought",
+        "new thought",
     ]
-    state = SimpleNamespace(
-        messages=[
-            {
-                "role": "assistant",
-                "content": "",
-                "reasoning_content": "new thought",
-            },
-            {
-                "type": "function_call",
-                "name": "exec_command",
-                "arguments": "{}",
-            },
-            {"type": "function_call_output", "output": "done"},
-        ]
-    )
-    assert agent._write_trajectory(state) == 3
-    payload = json.loads((tmp_path / "trajectory.json").read_text())
-    assert payload["steps"][0]["reasoning_content"] == "old thought"
-    assert payload["steps"][1]["reasoning_content"] == "new thought"
-    assert (
-        payload["steps"][2]["observation"]["results"][0]["content"] == "done"
-    )
 
 
 def test_trajectory_records_no_tool_stop_reason(tmp_path):
@@ -156,6 +159,32 @@ def test_trajectory_records_no_tool_stop_reason(tmp_path):
     payload = json.loads((tmp_path / "trajectory.json").read_text())
     assert payload["extra"]["terminal_outcome"] == "no_tool_response"
     assert [step["source"] for step in payload["steps"]] == ["user"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file permission bits")
+def test_trajectory_permissions_follow_creation_and_replacement_modes(
+    tmp_path,
+):
+    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
+    state = SimpleNamespace(messages=[{"role": "user", "content": "task"}])
+    reference = tmp_path / "reference.json"
+    reference.write_text("{}")
+    trajectory = tmp_path / "trajectory.json"
+
+    assert agent._write_trajectory(state) == 1
+    assert S_IMODE(trajectory.stat().st_mode) == S_IMODE(
+        reference.stat().st_mode
+    )
+
+    trajectory.chmod(0o640)
+    state.messages[0]["content"] = "updated task"
+    assert agent._write_trajectory(state) == 1
+    assert S_IMODE(trajectory.stat().st_mode) == 0o640
+    assert (
+        json.loads(trajectory.read_text())["steps"][0]["message"]
+        == "updated task"
+    )
+    assert set(tmp_path.iterdir()) == {reference, trajectory}
 
 
 def test_stringify_handles_none_str_and_parts():
@@ -345,6 +374,152 @@ def test_usage_totals_reach_agent_context():
     )
 
 
+def test_trajectory_reports_trial_usage_without_inflating_step_metrics(
+    tmp_path, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    from adapters.atif import TrajectoryRecorder
+    from adapters.step_timings import StepTimings
+    from gc_core.execution.run_trace import ModelResponse
+    from gc_core.usage.account import (
+        CATEGORY_FINISH_GATE,
+        CATEGORY_MAIN,
+        UsageAccount,
+    )
+    from gc_core.usage.context import record_usage, usage_scope
+
+    usage = UsageAccount()
+    usage.add(CATEGORY_MAIN, input_tokens=12, output_tokens=3, cached_tokens=8)
+    usage.add(CATEGORY_FINISH_GATE, input_tokens=20, output_tokens=2)
+    with usage_scope(usage, CATEGORY_FINISH_GATE):
+        record_usage({"prompt_tokens": 5})
+        record_usage(None)
+    state = SimpleNamespace(state_id="local-run-id", usage=usage)
+    trace = TrajectoryRecorder()
+    trace.observe(
+        ModelResponse(
+            "reply",
+            "m",
+            datetime.now(UTC),
+            [{"role": "assistant", "content": "Ready."}],
+            {
+                "prompt_tokens": 12,
+                "completion_tokens": 3,
+                "prompt_tokens_details": {"cached_tokens": 8},
+            },
+        )
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
+    adapter = GcCliExternal(
+        logs_dir=tmp_path, model_name="openai/m", api_base="http://test/v1"
+    )
+    context = AgentContext()
+    adapter._dump_outcome(
+        state,
+        trace,
+        timings=StepTimings(tmp_path / "timings.jsonl"),
+        context=context,
+        partial=False,
+    )
+
+    payload = (tmp_path / "trajectory.json").read_text()
+    assert "test-secret" not in payload
+    trajectory = json.loads(payload)
+    assert (
+        trajectory["session_id"]
+        == context.metadata["session_id"]
+        == "local-run-id"
+    )
+    assert trajectory["final_metrics"] == {
+        "total_steps": 1,
+        "total_prompt_tokens": 12,
+        "total_completion_tokens": 3,
+        "total_cached_tokens": 8,
+    }
+    assert trajectory["extra"] == {
+        "model_calls": 4,
+        "atif_model_calls": 1,
+        "atif_model_calls_match": False,
+        "call_statistics": {"model_calls_without_usage": 1},
+        "trial_usage": {
+            "prompt_tokens": 37,
+            "completion_tokens": 5,
+            "cached_tokens": 8,
+        },
+    }
+    assert context.metadata["llm_calls"] == 4
+    assert (
+        context.n_input_tokens,
+        context.n_output_tokens,
+        context.n_cache_tokens,
+    ) == (37, 5, 8)
+
+
+def test_partial_trace_freezes_before_the_trial_usage_snapshot(tmp_path):
+    from datetime import UTC, datetime
+
+    from adapters.atif import TrajectoryRecorder
+    from adapters.step_timings import StepTimings
+    from gc_core.execution.run_trace import ModelResponse
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
+    trace = TrajectoryRecorder()
+    timestamp = datetime.now(UTC)
+    trace.observe(
+        ModelResponse(
+            "first",
+            "model",
+            timestamp,
+            [],
+            {"prompt_tokens": 10, "completion_tokens": 2},
+        )
+    )
+
+    class RunningUsage(UsageAccount):
+        def totals(self):
+            snapshot = super().totals()
+            self.add(CATEGORY_MAIN, input_tokens=20, output_tokens=3)
+            trace.observe(
+                ModelResponse(
+                    "late",
+                    "model",
+                    timestamp,
+                    [],
+                    {"prompt_tokens": 20, "completion_tokens": 3},
+                )
+            )
+            return snapshot
+
+    usage = RunningUsage()
+    usage.add(CATEGORY_MAIN, input_tokens=10, output_tokens=2)
+    context = AgentContext()
+    adapter = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
+    adapter._dump_outcome(
+        SimpleNamespace(usage=usage),
+        trace,
+        timings=StepTimings(tmp_path / "timings.jsonl"),
+        context=context,
+        partial=True,
+    )
+
+    trajectory = json.loads((tmp_path / "trajectory.json").read_text())
+    assert [step["extra"]["response_id"] for step in trajectory["steps"]] == [
+        "first"
+    ]
+    assert trajectory["extra"]["partial"] is True
+    assert (
+        trajectory["extra"]["atif_model_calls"]
+        == trajectory["extra"]["model_calls"]
+        == 1
+    )
+    assert (
+        trajectory["final_metrics"]["total_prompt_tokens"]
+        == context.n_input_tokens
+        == 10
+    )
+
+
 def test_usage_sums_across_categories():
     """Summariser, finish gate and subagent calls are part of what the run cost."""
     from gc_core.usage.account import (
@@ -434,3 +609,651 @@ def test_usage_by_model_failure_never_breaks_the_run():
     """Same finally-path as _populate_usage: a broken bucket yields None, not a raise."""
     state = SimpleNamespace(usage=SimpleNamespace(by_model={"m": None}))
     assert _agent()._usage_by_model(state) is None
+
+
+def _captured_tool(call_id, name, arguments):
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": json.dumps(arguments)},
+    }
+
+
+def _captured_response(response_id, model, calls, usage, *, message=None):
+    return {
+        "id": response_id,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": message,
+                    "tool_calls": calls,
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": usage,
+    }
+
+
+def _run_scripted_trajectory(tmp_path, monkeypatch, responses, **overrides):
+    import httpx
+    from gc_core import processing_responses as loop
+    from gc_core.utils import connect_backend
+    from gc_testkit.runtime_probe import probe_stdout
+    from harbor.models.trajectories import Trajectory
+
+    replies = iter(responses)
+    requested_models = []
+
+    def respond(request):
+        requested_models.append(json.loads(request.content)["model"])
+        return httpx.Response(200, json=next(replies))
+
+    monkeypatch.setattr(
+        connect_backend,
+        "get_async_client",
+        lambda **_kw: httpx.AsyncClient(
+            transport=httpx.MockTransport(respond)
+        ),
+    )
+
+    class Environment:
+        async def exec(self, command, **_kwargs):
+            return SimpleNamespace(
+                stdout=probe_stdout(command)
+                or ("1\n" if "if test " in command else "/workspace\n"),
+                stderr="",
+                return_code=0,
+            )
+
+        async def is_dir(self, path, **_kwargs):
+            return path == "/workspace"
+
+    execute = loop.aapply_tool
+
+    async def invoke(**kwargs):
+        if kwargs["tool_name"] in {"exec_command", "fs_read_file"}:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "result": kwargs["call_id"],
+                    "tool_name": kwargs["tool_name"],
+                }
+            )
+        return await execute(**kwargs)
+
+    monkeypatch.setattr(loop, "aapply_tool", invoke)
+    adapter = GcCliExternal(
+        logs_dir=tmp_path,
+        model_name="openai/requested",
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions",
+            "agent.strict_turn_finish_validation": False,
+            "agent.use_local_subagents": False,
+            "agent.max_steps": 5,
+            **overrides,
+        },
+    )
+    context = AgentContext()
+    asyncio.run(adapter.run("Read both values.", Environment(), context))
+
+    trajectory = Trajectory.model_validate_json(
+        (tmp_path / "trajectory.json").read_text()
+    )
+    return trajectory, context, requested_models
+
+
+@pytest.mark.parametrize(
+    "missing_usage, compact", [(False, False), (True, False), (False, True)]
+)
+def test_run_exports_each_model_response_with_linked_results(
+    tmp_path, monkeypatch, missing_usage, compact
+):
+    from datetime import UTC, datetime
+
+    from gc_core.run_summary_coordinator import RunSummaryCoordinator
+    from gc_testkit.scripted_model import FINISH
+
+    compactions = []
+
+    async def compact_outputs(self, _messages, mode):
+        if mode != "function_call_output" or compactions:
+            return False
+        original = self._state.messages
+        self._state.messages = [
+            message
+            for message in original
+            if message.get("type")
+            not in {"function_call", "function_call_output"}
+        ]
+        compactions.append(True)
+        return True
+
+    if compact:
+        monkeypatch.setattr(
+            RunSummaryCoordinator,
+            "apre_backend_compaction_hook",
+            compact_outputs,
+        )
+    calls = [
+        _captured_tool(call_id, "exec_command", {"command": f"echo {marker}"})
+        for call_id, marker in (("call-a", "alpha"), ("call-b", "beta"))
+    ]
+    first = _captured_response(
+        "model-response-1",
+        "provider/served",
+        calls,
+        {
+            "prompt_tokens": 40,
+            "completion_tokens": 9,
+            "prompt_tokens_details": {"cached_tokens": 25},
+            "completion_tokens_details": {"reasoning_tokens": 4},
+        },
+        message="Reading both values.",
+    )
+    second = {**FINISH, "id": "model-response-2", "model": "provider/served"}
+    if missing_usage:
+        del second["usage"]
+    else:
+        second["usage"] = {
+            **second["usage"],
+            "completion_tokens_details": {"reasoning_tokens": 0},
+        }
+    trajectory, context, _ = _run_scripted_trajectory(
+        tmp_path, monkeypatch, [first, second]
+    )
+    assert bool(compactions) == compact
+    assert trajectory.schema_version == "ATIF-v1.7"
+    assert [step.step_id for step in trajectory.steps] == list(
+        range(1, len(trajectory.steps) + 1)
+    )
+    assert trajectory.steps[0].source == "system"
+    assert trajectory.steps[1].source == "user"
+    model_steps = [step for step in trajectory.steps if step.source == "agent"]
+    assert len(model_steps) == 2
+    assert [step.llm_call_count for step in model_steps] == [1, 1]
+    assert [step.model_name for step in model_steps] == ["provider/served"] * 2
+    timestamps = [
+        datetime.fromisoformat(step.timestamp) for step in model_steps
+    ]
+    assert all(ts.tzinfo == UTC for ts in timestamps)
+    assert timestamps[0] <= timestamps[1]
+    batch = model_steps[0]
+    assert batch.message == "Reading both values."
+    assert [call.tool_call_id for call in batch.tool_calls] == [
+        "call-a",
+        "call-b",
+    ]
+    assert batch.tool_calls[0].arguments == {"command": "echo alpha"}
+    assert {
+        item.source_call_id: json.loads(item.content)["result"]
+        for item in batch.observation.results
+    } == {"call-a": "call-a", "call-b": "call-b"}
+    assert batch.metrics.prompt_tokens == 40
+    assert batch.metrics.completion_tokens == 9
+    assert batch.metrics.cached_tokens == 25
+    assert batch.metrics.extra == {"reasoning_tokens": 4}
+    assert (model_steps[1].metrics is None) == missing_usage
+    if not missing_usage:
+        assert model_steps[1].metrics.extra == {"reasoning_tokens": 0}
+    assert model_steps[1].tool_calls[0].function_name == "turn_finish"
+    assert model_steps[1].observation.results[0].source_call_id == "finish"
+    assert trajectory.final_metrics.total_prompt_tokens == (
+        40 if missing_usage else 50
+    )
+    assert trajectory.final_metrics.total_completion_tokens == (
+        9 if missing_usage else 14
+    )
+    assert trajectory.final_metrics.total_cached_tokens == 25
+    assert trajectory.final_metrics.total_steps == len(trajectory.steps)
+    assert trajectory.final_metrics.extra == (
+        None if missing_usage else {"reasoning_tokens": 4}
+    )
+    assert context.metadata["llm_calls"] == 2
+    assert (
+        context.n_input_tokens == trajectory.final_metrics.total_prompt_tokens
+    )
+
+
+def test_auto_reroute_keeps_both_responses_and_uses_the_executed_call(
+    tmp_path, monkeypatch
+):
+    from gc_testkit.scripted_model import FINISH
+
+    read = _captured_tool(
+        "read", "fs_read_file", {"path": "demo.txt", "add_line_numbers": False}
+    )
+    # The routed-away and executed calls can reuse an ID across responses.
+    finish_call = FINISH["choices"][0]["message"]["tool_calls"][0]
+    weak = _captured_tool(
+        "finish", "fs_write_file", {"path": "demo.txt", "content": "weak"}
+    )
+    first = _captured_response(
+        "read-response",
+        "strong",
+        [read],
+        {"prompt_tokens": 50, "completion_tokens": 9},
+    )
+    discarded = _captured_response(
+        "weak-response",
+        "weak",
+        [weak],
+        {"prompt_tokens": 60, "completion_tokens": 5},
+    )
+    final = _captured_response(
+        "finish-response",
+        "strong",
+        [finish_call],
+        {"prompt_tokens": 70, "completion_tokens": 11},
+    )
+    trajectory, context, requests = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [first, discarded, final],
+        model="auto",
+        models={"weak": {}, "strong": {}},
+        slots={"light": "weak", "default": "strong"},
+        **{
+            "agent.auto_routing_safe_level": "default",
+            "agent.auto_routing_two_level": {
+                "strong_steps": 1,
+                "weak_steps": 2,
+            },
+        },
+    )
+    assert requests == ["strong", "weak", "strong"]
+    steps = [step for step in trajectory.steps if step.source == "agent"]
+    assert [step.model_name for step in steps] == requests
+    assert [step.metrics.prompt_tokens for step in steps] == [50, 60, 70]
+    assert steps[1].extra["discarded_by_routing"] is True
+    assert steps[1].observation is None
+    assert steps[2].observation.results[0].source_call_id == "finish"
+    assert trajectory.final_metrics.total_prompt_tokens == 180
+    assert context.metadata["llm_calls"] == 3
+
+
+def test_cancel_flushes_tool_results_committed_by_the_stopping_worker(
+    tmp_path, monkeypatch
+):
+    import threading
+
+    from gc_core.execution.run_trace import (
+        bind_trace_root,
+        finish_model_trace,
+        start_model_trace,
+    )
+    from gc_core.processing_responses import _maybe_persist
+    from harbor.models.trajectories import Trajectory
+
+    started, stopped = threading.Event(), threading.Event()
+    state = SimpleNamespace(messages=[])
+
+    class Executor:
+        def __init__(self, ctx):
+            pass
+
+        async def arun(self, messages):
+            with bind_trace_root(state):
+                request = start_model_trace(state)
+                finish_model_trace(
+                    request,
+                    {},
+                    "m",
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "exec_command",
+                            "arguments": '{"command": "echo hello"}',
+                            "call_id": "test-call",
+                        }
+                    ],
+                    "test-response",
+                )
+                started.set()
+                assert await asyncio.to_thread(stopped.wait, 3)
+                await asyncio.sleep(0.02)
+                await _maybe_persist(
+                    None,
+                    [
+                        {
+                            "type": "function_call_output",
+                            "call_id": "test-call",
+                            "output": "completed during cooperative stop",
+                        }
+                    ],
+                    state,
+                )
+
+        def stop_run(self):
+            stopped.set()
+
+        def get_state(self):
+            return state
+
+    async def create_context(*_args, **_kwargs):
+        return SimpleNamespace()
+
+    async def skip_skills_export(*_args):
+        pass
+
+    monkeypatch.setattr(
+        GcCliExternal, "_write_skills_debug", skip_skills_export
+    )
+
+    monkeypatch.setattr(
+        "gc_core.run_context.acreate_run_context", create_context
+    )
+    monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", Executor)
+    adapter = GcCliExternal(
+        logs_dir=tmp_path,
+        model_name="openai/m",
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
+    )
+
+    async def cancel():
+        task = asyncio.create_task(
+            adapter.run("run", object(), AgentContext())
+        )
+        assert await asyncio.to_thread(started.wait, 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel())
+    trace = Trajectory.model_validate_json(
+        (tmp_path / "trajectory.json").read_text()
+    )
+    assert trace.extra["partial"] is True
+    (step,) = trace.steps
+    (result,) = step.observation.results
+    assert result.source_call_id == "test-call"
+    assert result.content == "completed during cooperative stop"
+
+
+@pytest.mark.parametrize("phase", ["queued", "attaching"])
+def test_cancel_before_worker_initialization_cleans_up(
+    tmp_path, monkeypatch, phase
+):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from adapters import gc_cli_external, step_timings
+
+    release = threading.Event()
+    context_starts = []
+    sinks = []
+
+    async def create_context(*_args, **_kwargs):
+        context_starts.append(True)
+        return SimpleNamespace()
+
+    async def skip_skills_export(*_args):
+        pass
+
+    monkeypatch.setattr(
+        "gc_core.run_context.acreate_run_context", create_context
+    )
+    monkeypatch.setattr(
+        "gc_core.agent_executor.AgentExecutor",
+        lambda _ctx: SimpleNamespace(get_state=lambda: None),
+    )
+    monkeypatch.setattr(
+        GcCliExternal, "_write_skills_debug", skip_skills_export
+    )
+    monkeypatch.setattr(gc_cli_external, "_STOP_GRACE_S", 0.05)
+    adapter = GcCliExternal(
+        logs_dir=tmp_path,
+        model_name="openai/m",
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
+    )
+    context = AgentContext()
+
+    async def cancel():
+        loop = asyncio.get_running_loop()
+        ready = asyncio.Event()
+
+        class RecordingTimings(gc_cli_external.StepTimings):
+            def __init__(self, path):
+                super().__init__(path)
+                sinks.append(self)
+
+            def attach(self):
+                if phase == "attaching":
+                    loop.call_soon_threadsafe(ready.set)
+                    assert release.wait(5)
+                super().attach()
+
+        monkeypatch.setattr(gc_cli_external, "StepTimings", RecordingTimings)
+        pool = ThreadPoolExecutor(max_workers=1)
+        loop.set_default_executor(pool)
+        if phase == "queued":
+            pool.submit(release.wait, 5)
+        task = asyncio.create_task(adapter.run("run", object(), context))
+        try:
+            if phase == "queued":
+                # The task has reached its first suspension, behind the occupied worker.
+                await asyncio.sleep(0)
+                assert sinks
+            else:
+                await asyncio.wait_for(ready.wait(), timeout=5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+            pool.shutdown(wait=True)
+
+    asyncio.run(cancel())
+
+    assert context_starts == []
+    assert context.metadata["total_steps"] == 0
+    (sink,) = sinks
+    assert sink._fh is None
+    assert sink not in step_timings._sinks.values()
+    if phase == "queued":
+        assert not (tmp_path / "timings.jsonl").exists()
+
+
+def test_recorder_matches_out_of_order_results_and_ignores_late_events():
+    from datetime import UTC, datetime
+
+    from adapters.atif import TrajectoryRecorder
+    from gc_core.execution.run_trace import CommittedMessages, ModelResponse
+
+    recorded_at = datetime.now(UTC)
+    calls = [
+        {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": "exec_command",
+            "arguments": "{}",
+        }
+        for call_id in ("a", "b", "c")
+    ]
+    recorder = TrajectoryRecorder()
+    recorder.observe(ModelResponse("r", "m", recorded_at, calls, None))
+    outputs = [
+        {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json.dumps(output),
+        }
+        for call_id, output in (
+            ("b", {"stdout": "second", "exit_code": 7, "ok": False}),
+            ("a", {"stdout": "first", "exit_code": 0, "ok": True}),
+            ("c", {"stdout": "third", "exit_code": 7}),
+        )
+    ]
+    recorder.observe(CommittedMessages(outputs, recorded_at))
+    recorder.observe(CommittedMessages(outputs, recorded_at))
+
+    (step,) = recorder.freeze()
+    recorder.observe(
+        CommittedMessages([{**outputs[0], "output": "late"}], recorded_at)
+    )
+    assert {
+        result.source_call_id: json.loads(result.content)
+        for result in step.observation.results
+    } == {
+        "a": {"stdout": "first", "exit_code": 0, "ok": True},
+        "b": {"stdout": "second", "exit_code": 7, "ok": False},
+        "c": {"stdout": "third", "exit_code": 7},
+    }
+    assert len(step.observation.results) == 3
+    assert {
+        result.source_call_id: result.extra
+        for result in step.observation.results
+    } == {
+        "a": {"is_error": False},
+        "b": {"is_error": True},
+        "c": None,
+    }
+
+
+def test_malformed_call_identity_keeps_response_usage_and_valid_observation(
+    tmp_path, monkeypatch
+):
+    from gc_testkit.scripted_model import FINISH
+
+    calls = [
+        _captured_tool(7, "exec_command", {"command": "echo ignored"}),
+        _captured_tool("bad-name", "   ", {}),
+        _captured_tool("valid", "exec_command", {"command": "echo hello"}),
+    ]
+    response = _captured_response(
+        "mixed-batch",
+        "provider/served",
+        calls,
+        {"prompt_tokens": 8, "completion_tokens": 3},
+    )
+    trajectory, context, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [response, FINISH],
+        **{"agent.stop_on_no_tool_response": True},
+    )
+
+    model_steps = [step for step in trajectory.steps if step.source == "agent"]
+    assert len(model_steps) == 2
+    first, final = model_steps
+    assert first.extra["response_id"] == "mixed-batch"
+    assert (first.metrics.prompt_tokens, first.metrics.completion_tokens) == (
+        8,
+        3,
+    )
+    assert [call.tool_call_id for call in first.tool_calls] == ["valid"]
+    assert [item.source_call_id for item in first.observation.results] == [
+        "valid"
+    ]
+    assert final.observation.results[0].source_call_id == "finish"
+    assert (
+        trajectory.final_metrics.total_prompt_tokens
+        == context.n_input_tokens
+        == 18
+    )
+
+
+@pytest.mark.parametrize("leading_invalid", [False, True])
+def test_duplicate_call_id_uses_the_same_call_for_execution_and_trajectory(
+    tmp_path, monkeypatch, leading_invalid
+):
+    from gc_testkit.scripted_model import FINISH
+
+    calls = [
+        _captured_tool("dup", "exec_command", {"command": "echo first"}),
+        _captured_tool("dup", "fs_read_file", {"path": "other.txt"}),
+        _captured_tool("read", "fs_read_file", {"path": "wanted.txt"}),
+    ]
+    if leading_invalid:
+        calls.insert(0, _captured_tool("dup", "   ", {}))
+    response = _captured_response(
+        "repeated-call-id",
+        "provider/served",
+        calls,
+        {"prompt_tokens": 22, "completion_tokens": 3},
+    )
+    trajectory, context, _ = _run_scripted_trajectory(
+        tmp_path, monkeypatch, [response, FINISH]
+    )
+
+    first, _ = [step for step in trajectory.steps if step.source == "agent"]
+    assert {
+        item.source_call_id: json.loads(item.content)["tool_name"]
+        for item in first.observation.results
+    } == {"dup": "exec_command", "read": "fs_read_file"}
+    assert [
+        (call.tool_call_id, call.function_name) for call in first.tool_calls
+    ] == [
+        ("dup", "exec_command"),
+        ("read", "fs_read_file"),
+    ]
+    assert first.metrics.prompt_tokens == 22
+    assert first.metrics.completion_tokens == 3
+    assert (
+        trajectory.final_metrics.total_prompt_tokens == context.n_input_tokens
+    )
+
+
+def test_responses_api_exports_unique_call_ids(tmp_path, monkeypatch):
+    from gc_testkit.scripted_model import FINISH
+
+    calls = [
+        _captured_tool("dup", "exec_command", {"command": "echo first"}),
+        _captured_tool("dup", "fs_read_file", {"path": "other.txt"}),
+        FINISH["choices"][0]["message"]["tool_calls"][0],
+    ]
+    response = {
+        "type": "response.completed",
+        "response": {
+            "id": "response-with-duplicate",
+            "model": "provider/served",
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": f"fc_{index}",
+                    "call_id": call["id"],
+                    "name": call["function"]["name"],
+                    "arguments": call["function"]["arguments"],
+                }
+                for index, call in enumerate(calls)
+            ],
+            "usage": {
+                "input_tokens": 22,
+                "output_tokens": 3,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+        },
+    }
+    trajectory, _, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [response],
+        **{
+            "backend.api_mode": "responses",
+            "backend.completions_url": "http://test/v1/responses",
+        },
+    )
+
+    (step,) = [step for step in trajectory.steps if step.source == "agent"]
+    assert [
+        (call.tool_call_id, call.function_name) for call in step.tool_calls
+    ] == [("dup", "exec_command"), ("finish", "turn_finish")]
+    assert [item.source_call_id for item in step.observation.results] == [
+        "dup",
+        "finish",
+    ]
+    assert (
+        json.loads(step.observation.results[0].content)["tool_name"]
+        == "exec_command"
+    )
+    assert step.metrics.prompt_tokens == 22
+    assert step.metrics.completion_tokens == 3
+    assert step.metrics.extra == {"reasoning_tokens": 0}
+    assert trajectory.final_metrics.extra == {"reasoning_tokens": 0}

@@ -47,6 +47,7 @@ _CACHED_FLAT_KEYS = (
 )
 # Вложенные контейнеры с ``cached_tokens`` внутри
 _CACHED_DETAIL_KEYS = ("prompt_tokens_details", "input_tokens_details")
+_REASONING_DETAIL_KEYS = ("completion_tokens_details", "output_tokens_details")
 
 
 def _coerce_int(value: Any) -> Optional[int]:
@@ -68,8 +69,7 @@ def _pick(raw: dict, keys: Tuple[str, ...]) -> Optional[int]:
     return None
 
 
-def _pick_cached(raw: dict) -> int:
-    """Кэшированные input-токены. 0, если поля нет."""
+def _pick_cached(raw: dict) -> Optional[int]:
     flat = _pick(raw, _CACHED_FLAT_KEYS)
     if flat is not None:
         return flat
@@ -79,7 +79,7 @@ def _pick_cached(raw: dict) -> int:
             nested = _coerce_int(details.get("cached_tokens"))
             if nested is not None:
                 return nested
-    return 0
+    return None
 
 
 def _is_byok(raw: dict) -> bool:
@@ -115,6 +115,28 @@ def prompt_input_tokens(raw: Any) -> Optional[int]:
     return _pick(raw, _INPUT_KEYS)
 
 
+def reported_token_counts(
+    raw: Any,
+) -> tuple[int | None, int | None, int | None]:
+    """Return provider counters in input, output, cached order, preserving absence."""
+    if not isinstance(raw, dict):
+        return None, None, None
+    return _pick(raw, _INPUT_KEYS), _pick(raw, _OUTPUT_KEYS), _pick_cached(raw)
+
+
+def reported_reasoning_tokens(raw: Any) -> int | None:
+    """Return the explicit reasoning count from Chat Completions or Responses."""
+    if not isinstance(raw, dict):
+        return None
+    for key in _REASONING_DETAIL_KEYS:
+        details = raw.get(key)
+        if isinstance(details, dict):
+            value = details.get("reasoning_tokens")
+            if type(value) is int and value >= 0:
+                return value
+    return None
+
+
 def normalize_usage(raw: Any) -> Optional[UsageSample]:
     """Вернуть ``UsageSample`` с токенами и стоимостью или None, если usage не пришёл.
 
@@ -124,12 +146,11 @@ def normalize_usage(raw: Any) -> Optional[UsageSample]:
     """
     if not isinstance(raw, dict) or not raw:
         return None
-    input_tokens = _pick(raw, _INPUT_KEYS)
-    output_tokens = _pick(raw, _OUTPUT_KEYS)
+    input_tokens, output_tokens, cached_tokens = reported_token_counts(raw)
     if input_tokens is None and output_tokens is None:
         return None
     inp = input_tokens or 0
-    cached = min(_pick_cached(raw), inp)  # cached не может превышать input
+    cached = min(cached_tokens or 0, inp)  # cached не может превышать input
     cost = _pick_cost(raw)
     return UsageSample(
         input=inp,
