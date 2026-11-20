@@ -6,9 +6,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from gc_core.execution.environment import utc_now
+
+if TYPE_CHECKING:
+    from gc_core.execution.state import State
 
 _log = logging.getLogger(__name__)
 
@@ -80,6 +83,20 @@ def trace_committed_messages(
 ) -> None:
     if observer is not None and messages:
         _notify(observer, CommittedMessages(messages, utc_now()))
+
+
+def trace_compacted_history(state: "State") -> None:
+    """Publish user context installed by compaction's history replacement."""
+    observer = trace_observer(state)
+    if observer is not None:
+        trace_committed_messages(
+            observer,
+            [
+                message
+                for message in state.messages
+                if message.get("role") == "user"
+            ],
+        )
 
 
 def trace_discarded_response(state: object, response_id: str) -> None:

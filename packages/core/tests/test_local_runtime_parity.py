@@ -9,6 +9,7 @@ accepting snapshots from the implementation under test.
 import hashlib
 import json
 import re
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -51,6 +52,8 @@ REFERENCE = (
 #: - Optional fs_read_file line numbering changes the tool schema in requests.
 #:   In file_roundtrip both reads succeed without the flag and match the
 #:   frozen reference for thread, meta, and state.
+#: - human_boundary uses distinct tool IDs. Its digests were captured on
+#:   master with that fixture change before comparing the runtime of this MR.
 ACCEPTED_TRACE_CHANGES = (
     Path(__file__).parent
     / "fixtures/local_runtime_accepted_trace_changes.json"
@@ -209,7 +212,11 @@ def scenarios():
                     call(
                         "turn_ask_human", {"question": "Какой итог сохранить?"}
                     ),
-                    calc,
+                    call(
+                        "exec_calculator",
+                        {"expression": "3 * 450"},
+                        "calculator-distinct",
+                    ),
                 ),
                 finish("Ответ человека: 1350"),
             ]
@@ -593,6 +600,28 @@ async def test_legacy_routing_runtime_matches_develop(
         )
         expected[field] = value
     assert summary == expected
+
+
+@pytest.mark.parametrize("streaming", [False, True], ids=["json", "sse"])
+async def test_repeated_call_id_is_collapsed_in_the_regular_runtime(
+    streaming, tmp_path, monkeypatch
+):
+    valid_scenarios = scenarios
+
+    def duplicated_id_scenarios():
+        data = valid_scenarios()
+        message = data["human_boundary"]["turns"][0]["choices"][0]["message"]
+        first, second = message["tool_calls"]
+        second["id"] = first["id"]
+        return data
+
+    monkeypatch.setattr(
+        sys.modules[__name__], "scenarios", duplicated_id_scenarios
+    )
+    summary, _ = await run_scenario(
+        "human_boundary", tmp_path, monkeypatch, streaming=streaming
+    )
+    assert summary["recorded_tool_calls"] == summary["tool_calls"] == 2
 
 
 def test_strip_removes_only_listed_keys():

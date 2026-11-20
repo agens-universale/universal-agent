@@ -107,6 +107,7 @@ from gc_core.execution.run_trace import (
     finish_model_trace,
     start_model_trace,
     trace_committed_messages,
+    trace_compacted_history,
     trace_discarded_response,
     trace_observer,
 )
@@ -2987,6 +2988,7 @@ async def _aclose_after_session_compact(
         _closings_after_session_compact(tools_outputs, pending),
         state,
     )
+    trace_compacted_history(state)
     if archive is not None:
         await _release_summary_archive(ctx, archive)
     _log_unstarted_after_session_compact(ctx, pending)
@@ -3879,6 +3881,7 @@ class _AgentLoop:
         )
         if skip_fill:
             self._nudges.skip_fill = True
+        trace_compacted_history(self.state)
 
     async def _apre_backend_compaction(self, messages, mode) -> bool:
         if self.pre_backend_compaction_hook is None:

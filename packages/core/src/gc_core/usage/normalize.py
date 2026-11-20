@@ -56,7 +56,7 @@ def _coerce_int(value: Any) -> Optional[int]:
     if isinstance(value, int):
         return value if value >= 0 else None
     if isinstance(value, float):
-        return int(value) if value >= 0 else None
+        return int(value) if math.isfinite(value) and value >= 0 else None
     return None
 
 

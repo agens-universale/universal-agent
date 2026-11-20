@@ -53,11 +53,14 @@ the step count.
   models and responses accounted for by the transport when no step was published.
   Total reasoning tokens are present in `final_metrics.extra` when every tracked
   model step reports that counter. Root `extra.trial_usage` mirrors the token totals
-  in the Harbor result. Root `model_calls` and `atif_model_calls` inside `extra`
+  in the Harbor result. The totals, `metadata.llm_usage_by_model`, and Harbor's
+  `model_usage` field when available use one snapshot of the trial account.
+  Root `model_calls` and `atif_model_calls` inside `extra`
   compare the accounted calls and the calls represented by published steps.
   `extra.call_statistics.model_calls_without_usage` counts responses for which
   the account received neither a prompt token count nor a completion token count.
-- Capture the trace independently of compaction. Publish the available trace on
+- Capture the trace independently of compaction and record the summary inserted
+  into the model's context. Publish the available trace on
   ordinary completion, error, or cooperative cancellation. Freeze the snapshot
   before writing it and publish the completed JSON atomically. New files follow
   the runner's umask. Replacing a trajectory preserves its existing file mode.
@@ -198,6 +201,21 @@ the reported status, and the discarded Auto response had no executed
 observation. Each artifact's step sums matched its `final_metrics`. Its
 `extra.trial_usage` and accounted call count matched the Harbor result.
 The fourth trial emitted the enriched trajectory with no raw agent log.
+
+## Verification after MR 201 review
+
+The follow-up regression suite passed 891 tests with one Harbor 0.22.0
+capability skip. Harbor 0.24.0 and 0.25.0 passed 43 adapter tests each. Coverage
+includes an auxiliary model's usage, a response arriving after the snapshot,
+the summary sent to the model after compaction, and the regular runtime's
+handling of valid and repeated tool call IDs in JSON and SSE.
+
+On Harbor 0.25.0, the live `log-summary-date-ranges__jDvSbTK` trial received
+reward 1 and passed the trajectory validator with raw agent logging disabled.
+Its seven ATIF model steps accounted for 144,972 prompt and 4,529 completion
+tokens. The eight accounted calls in `extra.trial_usage` and standard
+`result.json` `model_usage` agreed on 158,776 prompt, 4,633 completion,
+and 109,312 cached tokens.
 
 ## Importer decisions
 

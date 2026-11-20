@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from gc_core.execution.constants import NO_TOOL_RESPONSE
 from gc_core.execution.run_trace import observe_run_trace
+from gc_core.usage.account import UsageAccount
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
@@ -54,6 +55,11 @@ try:
     from harbor.agents.capabilities import AgentCapabilities
 except ImportError:  # harbor < 0.24 has no capability gate
     AgentCapabilities = None
+
+try:
+    from harbor.models.agent.context import ModelUsage
+except ImportError:  # Older Harbor contexts have only trial-wide counters.
+    ModelUsage = None
 
 if TYPE_CHECKING:
     from gc_core.settings import LoadedSettings
@@ -557,61 +563,49 @@ class GcCliExternal(BaseAgent):
         )
 
     def _populate_usage(
-        self, context: Any, state: Any
-    ) -> dict[str, Any] | None:
-        """Hand `state.usage` totals to Harbor, which otherwise writes nulls.
-
-        Totals cover every LLM call — main loop, summariser, finish gate, subagents.
-        `n_input_tokens` includes cache on both sides. `cost_usd` is left unset: vllm
-        returns no price, so cost is computed downstream from tokens and the tariff.
-        Best-effort like `_write_trajectory` — runs in a `finally` that may be
-        unwinding a timeout. Returns the totals for the caller's metadata.
-        """
+        self, context: AgentContext | None, state: Any
+    ) -> tuple[dict[str, Any] | None, dict[str, dict[str, int]] | None]:
+        """Report the complete trial and its per-model counts from one snapshot."""
         try:
-            usage = (
-                getattr(state, "usage", None) if state is not None else None
-            )
-            totals = usage.totals() if usage is not None else None
-            if context is None or not totals or not totals["calls"]:
-                return totals
+            usage = getattr(state, "usage", None)
+            if usage is None:
+                return None, None
+            snapshot = UsageAccount.from_meta(usage.to_meta())
+            totals = snapshot.totals()
+            by_model = {
+                name: {
+                    key: bucket[key] for key in ("input", "output", "cached")
+                }
+                for name, bucket in snapshot.by_model.items()
+            } or None
+            if context is None or not totals["calls"]:
+                return totals, by_model
             context.n_input_tokens = totals["input"]
             context.n_output_tokens = totals["output"]
             context.n_cache_tokens = totals["cached"]
+            if (
+                ModelUsage is not None
+                and by_model
+                and context.model_usage is None
+            ):
+                context.model_usage = {
+                    name: ModelUsage(
+                        n_input_tokens=bucket["input"],
+                        n_output_tokens=bucket["output"],
+                        n_cache_tokens=bucket["cached"],
+                    )
+                    for name, bucket in by_model.items()
+                }
             if totals["missing_usage_calls"]:
                 self.logger.warning(
                     "%d of %d LLM calls returned no usage; token totals are short by those",
                     totals["missing_usage_calls"],
                     totals["calls"],
                 )
-            return totals
+            return totals, by_model
         except Exception:
             self.logger.exception("could not report token usage to Harbor")
-            return None
-
-    def _usage_by_model(self, state: Any) -> dict[str, dict[str, int]] | None:
-        """Tokens per provider model from `state.usage.by_model` — AUTO runs two
-        models, and downstream pricing needs the split. No prices here."""
-        # Best-effort like `_populate_usage`: runs in the `finally` metadata build.
-        try:
-            usage = (
-                getattr(state, "usage", None) if state is not None else None
-            )
-            by_model = getattr(usage, "by_model", None) or {}
-            if not by_model:
-                return None
-            return {
-                name: {
-                    "input": int(bucket.get("input", 0) or 0),
-                    "output": int(bucket.get("output", 0) or 0),
-                    "cached": int(bucket.get("cached", 0) or 0),
-                }
-                for name, bucket in by_model.items()
-            }
-        except Exception:
-            self.logger.exception(
-                "could not report token usage by model to Harbor"
-            )
-            return None
+            return None, None
 
     def _trace_session_id(self, state: Any) -> str | None:
         return self._session_id or getattr(state, "state_id", None)
@@ -736,7 +730,7 @@ class GcCliExternal(BaseAgent):
         """
         # A worker can still receive a response after the cancellation grace period.
         steps = trace.freeze()
-        totals = self._populate_usage(context, state)
+        totals, by_model = self._populate_usage(context, state)
         n_steps = self._write_trajectory(
             state, steps, partial=partial, usage_totals=totals
         )
@@ -761,7 +755,7 @@ class GcCliExternal(BaseAgent):
             "llm_calls_without_usage": (
                 totals["missing_usage_calls"] if totals else None
             ),
-            "llm_usage_by_model": self._usage_by_model(state),
+            "llm_usage_by_model": by_model,
         }
 
     def _run_worker(self, timings: StepTimings, run_agent):

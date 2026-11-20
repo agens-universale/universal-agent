@@ -390,11 +390,19 @@ def test_trajectory_reports_trial_usage_without_inflating_step_metrics(
     from gc_core.usage.context import record_usage, usage_scope
 
     usage = UsageAccount()
-    usage.add(CATEGORY_MAIN, input_tokens=12, output_tokens=3, cached_tokens=8)
-    usage.add(CATEGORY_FINISH_GATE, input_tokens=20, output_tokens=2)
+    usage.add(
+        CATEGORY_MAIN,
+        input_tokens=12,
+        output_tokens=3,
+        cached_tokens=8,
+        model="m",
+    )
+    usage.add(
+        CATEGORY_FINISH_GATE, input_tokens=20, output_tokens=2, model="judge"
+    )
     with usage_scope(usage, CATEGORY_FINISH_GATE):
-        record_usage({"prompt_tokens": 5})
-        record_usage(None)
+        record_usage({"prompt_tokens": 5}, model="judge")
+        record_usage(None, model="judge")
     state = SimpleNamespace(state_id="local-run-id", usage=usage)
     trace = TrajectoryRecorder()
     trace.observe(
@@ -454,6 +462,16 @@ def test_trajectory_reports_trial_usage_without_inflating_step_metrics(
         context.n_output_tokens,
         context.n_cache_tokens,
     ) == (37, 5, 8)
+    assert context.metadata["llm_usage_by_model"] == {
+        "m": {"input": 12, "output": 3, "cached": 8},
+        "judge": {"input": 25, "output": 2, "cached": 0},
+    }
+    if "model_usage" in AgentContext.model_fields:
+        assert context.model_usage["m"].n_input_tokens == 12
+        assert context.model_usage["m"].n_cache_tokens == 8
+        assert context.model_usage["judge"].n_input_tokens == 25
+        assert context.model_usage["judge"].n_output_tokens == 2
+        assert context.model_usage["judge"].cost_usd is None
 
 
 def test_partial_trace_freezes_before_the_trial_usage_snapshot(tmp_path):
@@ -477,9 +495,11 @@ def test_partial_trace_freezes_before_the_trial_usage_snapshot(tmp_path):
     )
 
     class RunningUsage(UsageAccount):
-        def totals(self):
-            snapshot = super().totals()
-            self.add(CATEGORY_MAIN, input_tokens=20, output_tokens=3)
+        def to_meta(self):
+            snapshot = super().to_meta()
+            self.add(
+                CATEGORY_MAIN, input_tokens=20, output_tokens=3, model="model"
+            )
             trace.observe(
                 ModelResponse(
                     "late",
@@ -492,7 +512,7 @@ def test_partial_trace_freezes_before_the_trial_usage_snapshot(tmp_path):
             return snapshot
 
     usage = RunningUsage()
-    usage.add(CATEGORY_MAIN, input_tokens=10, output_tokens=2)
+    usage.add(CATEGORY_MAIN, input_tokens=10, output_tokens=2, model="model")
     context = AgentContext()
     adapter = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
     adapter._dump_outcome(
@@ -518,6 +538,10 @@ def test_partial_trace_freezes_before_the_trial_usage_snapshot(tmp_path):
         == context.n_input_tokens
         == 10
     )
+    assert context.metadata["llm_usage_by_model"] == {
+        "model": {"input": 10, "output": 2, "cached": 0},
+    }
+    assert usage.totals()["input"] == 30
 
 
 def test_usage_sums_across_categories():
@@ -553,17 +577,18 @@ def test_cost_is_left_to_the_downstream_tariff():
 def test_no_calls_leaves_counters_unset():
     """Zero tokens would read as 'the run was free'; a timed-out run counted nothing."""
     context = AgentContext()
-    assert _agent()._populate_usage(context, None) is None
+    assert _agent()._populate_usage(context, None) == (None, None)
     assert context.n_input_tokens is None
 
-    totals = _agent()._populate_usage(context, _state_with_usage())
+    totals, by_model = _agent()._populate_usage(context, _state_with_usage())
     assert totals["calls"] == 0
+    assert by_model is None
     assert context.n_input_tokens is None
 
 
 def test_calls_without_usage_are_reported_not_hidden():
     state = _state_with_usage(input_tokens=100, output_tokens=10, missing=3)
-    totals = _agent()._populate_usage(AgentContext(), state)
+    totals, _ = _agent()._populate_usage(AgentContext(), state)
     assert (totals["calls"], totals["missing_usage_calls"]) == (4, 3)
 
 
@@ -575,7 +600,10 @@ def test_reporting_failure_never_breaks_the_run():
         def usage(self):
             raise RuntimeError("state is half-torn-down")
 
-    assert _agent()._populate_usage(AgentContext(), Exploding()) is None
+    assert _agent()._populate_usage(AgentContext(), Exploding()) == (
+        None,
+        None,
+    )
 
 
 def test_usage_by_model_reaches_the_metadata():
@@ -597,18 +625,18 @@ def test_usage_by_model_reaches_the_metadata():
         cached_tokens=10,
         model="vendor/big",
     )
-    by_model = _agent()._usage_by_model(SimpleNamespace(usage=account))
+    _, by_model = _agent()._populate_usage(
+        None, SimpleNamespace(usage=account)
+    )
     assert by_model == {
         "vendor/fast": {"input": 1000, "output": 100, "cached": 0},
         "vendor/big": {"input": 300, "output": 30, "cached": 10},
     }
-    assert _agent()._usage_by_model(None) is None
 
 
-def test_usage_by_model_failure_never_breaks_the_run():
-    """Same finally-path as _populate_usage: a broken bucket yields None, not a raise."""
+def test_incomplete_usage_account_never_breaks_finalization():
     state = SimpleNamespace(usage=SimpleNamespace(by_model={"m": None}))
-    assert _agent()._usage_by_model(state) is None
+    assert _agent()._populate_usage(AgentContext(), state) == (None, None)
 
 
 def _captured_tool(call_id, name, arguments):
@@ -714,25 +742,45 @@ def test_run_exports_each_model_response_with_linked_results(
 ):
     from datetime import UTC, datetime
 
+    from gc_core import processing_responses as loop
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
+    from gc_core.summarize.compaction import apply_summary_state_patch
     from gc_testkit.scripted_model import FINISH
 
     compactions = []
+    summary_text = "Both values were read before compaction."
+    prompts_with_summary = []
+    create_call_data = loop.create_call_data_completions
 
-    async def compact_outputs(self, _messages, mode):
+    def capture_prompt(*args, **kwargs):
+        data = create_call_data(*args, **kwargs)
+        prompts_with_summary.append(
+            any(
+                summary_text in str(message["content"])
+                for message in data["messages"]
+                if message["role"] == "user"
+            )
+        )
+        return data
+
+    async def compact_outputs(self, messages, mode):
         if mode != "function_call_output" or compactions:
             return False
-        original = self._state.messages
-        self._state.messages = [
-            message
-            for message in original
-            if message.get("type")
-            not in {"function_call", "function_call_output"}
-        ]
+        apply_summary_state_patch(
+            state=self._state,
+            raw_summary=summary_text,
+            last_dialog_steps="",
+            summarized_messages_count=len(self._state.messages),
+            can_propose_plan=False,
+        )
+        messages.clear()
         compactions.append(True)
         return True
 
     if compact:
+        monkeypatch.setattr(
+            loop, "create_call_data_completions", capture_prompt
+        )
         monkeypatch.setattr(
             RunSummaryCoordinator,
             "apre_backend_compaction_hook",
@@ -774,6 +822,17 @@ def test_run_exports_each_model_response_with_linked_results(
     assert trajectory.steps[1].source == "user"
     model_steps = [step for step in trajectory.steps if step.source == "agent"]
     assert len(model_steps) == 2
+    if compact:
+        assert prompts_with_summary == [False, True]
+        (summary_step,) = [
+            step for step in trajectory.steps if summary_text in step.message
+        ]
+        assert summary_step.source == "user"
+        assert (
+            model_steps[0].step_id
+            < summary_step.step_id
+            < model_steps[1].step_id
+        )
     assert [step.llm_call_count for step in model_steps] == [1, 1]
     assert [step.model_name for step in model_steps] == ["provider/served"] * 2
     timestamps = [

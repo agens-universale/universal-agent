@@ -90,6 +90,14 @@ def test_normalize_cached_clamped_to_input():
     )  # cached не превышает input
 
 
+def test_normalize_nonfinite_cache_count():
+    assert normalize_usage({"cached_tokens": float("inf")}) is None
+    sample = normalize_usage(
+        {"prompt_tokens": 10, "cached_tokens": float("inf")}
+    )
+    assert (sample.input, sample.cached) == (10, 0)
+
+
 def test_normalize_no_cache_details_zero():
     u = {
         "prompt_tokens": 100,
@@ -517,7 +525,7 @@ def test_compute_cost_with_cache_read():
         CATEGORY_MAIN, 1000, 100, 800, model="deepseek"
     )  # 800 из 1000 input — cached
     report = compute_cost(acc, _PRICING_CACHE, "deepseek")
-    # (1000-800)/1e6*59 + 800/1e6*0.49 + 100/1e6*118
+    # Apply the rates to uncached input, cached input and output separately.
     expected = 200 / 1e6 * 59 + 800 / 1e6 * 0.49 + 100 / 1e6 * 118
     assert abs(report.by_currency["₽"] - expected) < 1e-9
     assert report.total_cached == 800
