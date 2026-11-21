@@ -3,7 +3,7 @@
   "changes": [
     "requests во всех сценариях: в запрос к модели входят служебные наджи и живой блок режима разрешений.",
     "In memory_two_turns, nudges in tool output change thread, meta, and state. Step and call counts are unchanged.",
-    "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, поэтому requests тоже другой.",
+    "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, а уходит с аргументами {}, поэтому requests тоже другой; в ответе на битый вызов — фрагмент полученных аргументов.",
     "Optional fs_read_file line numbering changes request schemas in all scenarios. In file_roundtrip both reads succeed without the flag, restoring the reference thread, meta, and state without changing step or call counts."
   ],
   "scenarios": {
@@ -56,19 +56,19 @@
       "state": "d17cd8055638acb9a56bcfc3807172fed6711f803afa586269551dfe511bc7b7"
     },
     "invalid_json:json": {
-      "requests": "a4b8668d4aa06b116d662cc22db88f5266ec2b094267a28c2a358a31971123bd",
-      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
-      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
-      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "requests": "88c948929a1d4bf9b3ac4467016fb8a204ad5d54e3202c335424e63b478b6cb5",
+      "thread": "14f6a8d87bd78c007f6cecbb9e1be2298cf5954727722a11ede6efd853959570",
+      "meta": "fcef42e1cea1f6644502679488f91fb5805a905ee8b6a586ee80b8c8c1d4c020",
+      "state": "d5b7b1b59b9e7902b0b4669d5ea7418663eb499bbf74b1fd50e250ad566e24d3",
       "tool_calls": 3,
       "recorded_tool_calls": 3,
       "steps": 3
     },
     "invalid_json:sse": {
-      "requests": "9dadf20d4d63ce2c4b02e5e03c851a938edd102a0ce73445f7d59ef122660fe2",
-      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
-      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
-      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "requests": "973145e3d214fbf44073c4acb8f35dbecec9ca63165b49c48c85da11a95f81c2",
+      "thread": "14f6a8d87bd78c007f6cecbb9e1be2298cf5954727722a11ede6efd853959570",
+      "meta": "fcef42e1cea1f6644502679488f91fb5805a905ee8b6a586ee80b8c8c1d4c020",
+      "state": "d5b7b1b59b9e7902b0b4669d5ea7418663eb499bbf74b1fd50e250ad566e24d3",
       "tool_calls": 3,
       "recorded_tool_calls": 3,
       "steps": 3

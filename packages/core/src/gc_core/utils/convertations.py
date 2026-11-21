@@ -29,22 +29,23 @@ def _safe_json_for_log(payload, *, max_chars=_MAX_BACKEND_LOG_CHARS):
     return clip_middle(raw, max_chars)
 
 
-def sanitize_messages_for_chat_completions(
+def sanitize_invalid_tool_calls(
     messages: List[Dict],
     *,
     invalid_tool_call_factory: Optional[Callable[[Dict], Dict]] = None,
+    require_object: bool = False,
 ) -> List[Dict]:
     """
-    Техническая нормализация истории перед chat/completions:
-    function_call с невалидным JSON в arguments заменяется фабрикой,
-    либо пропускается, если фабрика не передана.
+    Техническая нормализация истории: function_call с невалидным JSON в
+    arguments заменяется фабрикой, либо пропускается без фабрики.
+    ``require_object`` — валидными считаются только JSON-объекты.
     """
     sanitized: List[Dict] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
         if message.get("type") != "function_call" or _has_valid_json_arguments(
-            message
+            message, require_object=require_object
         ):
             sanitized.append(message)
             continue
@@ -56,15 +57,17 @@ def sanitize_messages_for_chat_completions(
     return sanitized
 
 
-def _has_valid_json_arguments(message: Dict) -> bool:
+def _has_valid_json_arguments(
+    message: Dict, *, require_object: bool = False
+) -> bool:
     raw_args = message.get("arguments")
     if not isinstance(raw_args, str) or not raw_args.strip():
         return False
     try:
-        json.loads(raw_args)
+        parsed = json.loads(raw_args)
     except Exception:
         return False
-    return True
+    return isinstance(parsed, dict) or not require_object
 
 
 def get_md5_hash(obj):

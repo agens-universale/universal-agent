@@ -1,12 +1,13 @@
 import sys
 import types
 
+import pytest
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_ERROR_MESSAGE,
     build_invalid_tool_call_feedback_message,
 )
 from gc_core.states import State
-from gc_core.utils.convertations import sanitize_messages_for_chat_completions
+from gc_core.utils.convertations import sanitize_invalid_tool_calls
 from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx
@@ -81,7 +82,7 @@ def test_make_technical_feedback_message_wraps_schema_errors_as_error_message():
     assert '<technical type="error_message">' in msg["content"]
 
 
-def test_sanitize_messages_for_chat_completions_replaces_invalid_tool_call():
+def test_sanitize_invalid_tool_calls_replaces_invalid_tool_call():
     messages = [
         {
             "id": "fc_1",
@@ -93,7 +94,7 @@ def test_sanitize_messages_for_chat_completions_replaces_invalid_tool_call():
         }
     ]
 
-    sanitized = sanitize_messages_for_chat_completions(
+    sanitized = sanitize_invalid_tool_calls(
         messages,
         invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
     )
@@ -183,7 +184,10 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
 def test_request_keeps_malformed_tool_call_that_already_has_output(
     monkeypatch,
 ):
-    """Ответ уже записан — вызов с битым JSON уходит парой, без подмены на user."""
+    """Ответ записан — вызов уходит парой, без подмены на user, но с ``{}``.
+
+    Сырой обрезок бэкенд разбирает и отбивает 400 на каждом следующем ходе.
+    """
     captured = {}
 
     def _fake_create_call_headers(_state, _ctx, resolved=None):
@@ -281,7 +285,8 @@ def test_request_keeps_malformed_tool_call_that_already_has_output(
     )
     tool_calls = assistant["tool_calls"]
     assert [call["id"] for call in tool_calls] == ["good", "bad"]
-    assert tool_calls[1]["function"]["arguments"] == broken_arguments
+    assert tool_calls[1]["function"]["arguments"] == "{}"
+    assert state.messages[1]["arguments"] == broken_arguments
     bad_tool = next(
         message
         for message in payload_messages
@@ -301,3 +306,129 @@ def test_request_keeps_malformed_tool_call_that_already_has_output(
         and "error_message" in str(message.get("content"))
         for message in payload_messages
     )
+
+
+def _answered_call_on_the_wire(monkeypatch, api_mode, arguments):
+    """(аргументы записанного вызова в запросе к бэкенду, state)."""
+    captured = {}
+
+    async def _chat(data, *_args, **_kwargs):
+        captured["calls"] = [
+            call["function"]["arguments"]
+            for message in data["messages"]
+            for call in message.get("tool_calls") or []
+        ]
+        return {
+            "id": "chat_1",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "ok"},
+                }
+            ],
+        }
+
+    async def _responses(data, *_args, **_kwargs):
+        captured["calls"] = [
+            item["arguments"]
+            for item in data["input"]
+            if item.get("type") == "function_call"
+        ]
+        return {"id": "resp_1", "output": []}, {}
+
+    monkeypatch.setattr(
+        processing_module,
+        "acreate_call_headers",
+        as_coro(lambda _state, _ctx, resolved=None: {}),
+    )
+    monkeypatch.setattr(
+        "gc_core.request_backend_policy.arequest_backend_chat_completions",
+        _chat,
+    )
+    monkeypatch.setattr(processing_module, "arequest_backend", _responses)
+    history = [
+        {
+            "id": "fc_1",
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "fs_write_file",
+            "arguments": arguments,
+            "status": "completed",
+        },
+        {
+            "id": "out_1",
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": '{"ok": false}',
+        },
+    ]
+    state = State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=2,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.messages = list(history)
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": api_mode,
+            "backend.completions_url": "http://backend.local/v1",
+            "backend.use_retry": False,
+        },
+        logger=None,
+    )
+    run_coro(
+        processing_module._arequest_backend_canonical(
+            [*history, {"role": "user", "content": "next", "id": "m_1"}],
+            state,
+            ctx,
+            resolved=None,
+            set_previous_response_id=False,
+        )
+    )
+    return captured["calls"], state
+
+
+@pytest.mark.parametrize("api_mode", ["chat_completions", "responses"])
+def test_cut_off_arguments_go_as_empty_object(monkeypatch, api_mode):
+    """Responses после промаха кэша шлёт полную историю — та же 400."""
+    calls, state = _answered_call_on_the_wire(monkeypatch, api_mode, '{"a": ')
+    assert calls == ["{}"]
+    assert state.messages[0]["arguments"] == '{"a": '
+
+
+@pytest.mark.parametrize("arguments", ["[]", "null", "5"])
+def test_json_that_is_not_an_object_goes_as_empty_object(
+    monkeypatch, arguments
+):
+    calls, state = _answered_call_on_the_wire(
+        monkeypatch, "chat_completions", arguments
+    )
+    assert calls == ["{}"]
+    assert state.messages[0]["arguments"] == arguments
+
+
+def test_dict_arguments_go_as_their_json(monkeypatch):
+    """Бэкенд отдал аргументы объектом — вызов отработал, данные не терять."""
+    calls, state = _answered_call_on_the_wire(
+        monkeypatch, "chat_completions", {"path": "отчёт.md"}
+    )
+    assert calls == ['{"path": "отчёт.md"}']
+    assert state.messages[0]["arguments"] == {"path": "отчёт.md"}
+
+
+def test_model_batch_keeps_json_that_is_not_an_object():
+    """Строгость — только для запроса к бэкенду; батч модели как прежде."""
+    call = {
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "fs_read_file",
+        "arguments": "[]",
+    }
+    assert sanitize_invalid_tool_calls(
+        [call], invalid_tool_call_factory=lambda _message: None
+    ) == [call]

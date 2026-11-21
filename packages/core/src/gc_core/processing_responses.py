@@ -138,6 +138,9 @@ from gc_core.message_policy.attachments_outbound import (
     request_carries_images,
 )
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.invalid_tool_calls import (
+    outbound_invalid_tool_call,
+)
 from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
@@ -244,7 +247,7 @@ from gc_core.utils.connect_backend import (
 from gc_core.utils.convertations import (
     UnparseableModelResponse,
     output_chat_completion_to_response,
-    sanitize_messages_for_chat_completions,
+    sanitize_invalid_tool_calls,
 )
 from gc_core.utils.format_messages import format_message_responses
 from gc_core.utils.generate_message_id import (
@@ -1581,39 +1584,6 @@ def _no_probe_right() -> bool:
     return False
 
 
-def _function_call_output_id(message) -> str:
-    if not isinstance(message, dict):
-        return ""
-    if message.get("type") != "function_call_output":
-        return ""
-    call_id = message.get("call_id")
-    if isinstance(call_id, str):
-        return call_id
-    return ""
-
-
-def _answered_call_ids(history) -> set[str]:
-    answered: set[str] = set()
-    for batch in history:
-        for message in batch or []:
-            call_id = _function_call_output_id(message)
-            if call_id:
-                answered.add(call_id)
-    return answered
-
-
-def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
-    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
-    answered = _answered_call_ids(history)
-
-    def factory(message: Dict) -> Dict:
-        if message.get("call_id") in answered:
-            return message
-        return build_invalid_tool_call_feedback_message(message)
-
-    return factory
-
-
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1655,6 +1625,14 @@ async def _arequest_backend_canonical_once(
         retry_embedded_choice_errors,
     ) = resolve_network_params(settings, resolved_for_network)
 
+    # Битые вызовы — одним правилом в обоих режимах: responses после промаха
+    # кэша тоже шлёт полную историю, иначе 400 на каждом следующем ходе.
+    state_messages = getattr(state, "messages", []) or []
+    invalid_call = outbound_invalid_tool_call((state_messages, messages))
+    messages = sanitize_invalid_tool_calls(
+        messages, invalid_tool_call_factory=invalid_call, require_object=True
+    )
+
     if backend_mode == "responses":
         return await _arequest_responses_once(
             messages,
@@ -1686,17 +1664,10 @@ async def _arequest_backend_canonical_once(
         if resolved is not None
         else settings.backend.completions_url
     )
-    state_messages = getattr(state, "messages", []) or []
-    keep_answered = _keep_answered_invalid_tool_call(
-        (state_messages, messages)
-    )
-    sanitized_messages = sanitize_messages_for_chat_completions(
-        messages,
-        invalid_tool_call_factory=keep_answered,
-    )
-    sanitized_state_messages = sanitize_messages_for_chat_completions(
+    sanitized_state_messages = sanitize_invalid_tool_calls(
         state_messages,
-        invalid_tool_call_factory=keep_answered,
+        invalid_tool_call_factory=invalid_call,
+        require_object=True,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
@@ -1720,7 +1691,7 @@ async def _arequest_backend_canonical_once(
     send = functools.partial(
         _asend_chat_completions,
         state,
-        sanitized_messages=sanitized_messages,
+        sanitized_messages=messages,
         sanitized_state_messages=sanitized_state_messages,
         read_bytes=_image_bytes_reader(ctx),
         ctx=ctx,
@@ -1755,7 +1726,7 @@ async def _arequest_backend_canonical_once(
         # дедупликацией по id (`create_call_data_completions`). Живость считается по
         # слитой последовательности (повтор по id считается один раз), проекция
         # ложится на оба списка и сохраняет id — дедупликация видит те же ключи.
-        merged_messages=[*sanitized_state_messages, *sanitized_messages],
+        merged_messages=[*sanitized_state_messages, *messages],
         images_config=read_images_config(settings),
         route_key=route_key,
     )
@@ -3704,7 +3675,7 @@ class _AgentLoop:
                 return message
             return build_invalid_tool_call_feedback_message(message)
 
-        messages = sanitize_messages_for_chat_completions(
+        messages = sanitize_invalid_tool_calls(
             messages,
             invalid_tool_call_factory=rejected_tool_call,
         )
@@ -3714,7 +3685,7 @@ class _AgentLoop:
         if _post_sanitize_digest != _pre_sanitize_digest:
             self.run_logger.info(
                 "\n<message_batch_committed>\n"
-                "Санитайз для chat/completions изменил батч относительно сырого "
+                "Санитайз битых вызовов изменил батч относительно сырого "
                 "ответа выше (например, невалидный JSON вызова тула заменён на "
                 "техническое user-сообщение — то же, что уходит в persist треда).\n"
                 "</message_batch_committed>\n"

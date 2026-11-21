@@ -47,7 +47,9 @@ REFERENCE = (
 #: - ``invalid_json``: вызов с битым JSON остаётся в треде и исполняется.
 #:   Вызовов и шагов на один больше; меняются ``thread``, ``meta``, ``state``
 #:   и счётчики. В запросе к модели этот вызов не подменяется служебной
-#:   репликой, если ответ уже записан, поэтому ``requests`` тоже другой.
+#:   репликой, если ответ уже записан, а уходит с аргументами ``{}``,
+#:   поэтому ``requests`` тоже другой; в ответе на битый вызов — фрагмент
+#:   полученных аргументов.
 #: - Optional fs_read_file line numbering changes the tool schema in requests.
 #:   In file_roundtrip both reads succeed without the flag and match the
 #:   frozen reference for thread, meta, and state.
