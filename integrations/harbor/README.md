@@ -170,12 +170,15 @@ selector. The model and routing configuration can be supplied independently.
   with read-only mounts for top-level `.gc`, `.agents` and `AGENTS.md`, and for
   the existing canonical paths declared in `security.protected_paths.extra`.
   In a checkout with a real `.git` directory and `HEAD`, shell commands can
-  update Git metadata while `.git/hooks` is mounted read-only. A `.git` file
-  or incomplete directory is protected in full. Built-in file tools retain
-  their Universal Agent protected-path checks. For a metadata symlink, the
-  mount protects its resolved file or directory. The symlink entry follows the
-  permissions of its parent directory. Empty directories reserve missing top-level
-  paths during the agent phase. Cleanup removes only the directories created
+  update Git metadata while `.git/hooks`, `.git/config`, `.git/config.worktree`
+  and `.git/commondir` are mounted read-only. The configuration and common
+  directory files must be ordinary files with one link when present. A
+  directory-form checkout must keep its common metadata in `.git`.
+  A `.git` file or incomplete directory is protected in full. Built-in file
+  tools retain their Universal Agent protected-path checks. For supported
+  metadata symlinks, the mount protects their resolved targets. The link
+  entries follow the permissions of their parent directories. Placeholders
+  reserve missing protected paths. Cleanup removes only the placeholders created
   by the profile before the verifier starts. Commands and file tools share the
   writable `/tmp` of the trial. Files there survive subsequent calls and are
   visible to a verifier in the same container. Commands have a private PID

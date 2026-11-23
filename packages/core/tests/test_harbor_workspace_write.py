@@ -16,7 +16,6 @@ from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
 from gc_testkit.runtime_probe import probe_stdout
 from gc_testkit.settings import make_settings
 
-
 PROC_DENIED = (
     "bwrap: Can't mount proc on /newroot/proc: Operation not permitted"
 )
@@ -664,9 +663,7 @@ async def test_workspace_drops_all_capabilities():
     assert options[options.index("--cap-drop") + 1] == "ALL"
 
 
-async def test_workspace_lets_git_write_its_repository_but_not_hooks():
-    # Как у GigaCode: add/commit/checkout пишут в .git, а hooks — нет:
-    # переписанный hook исполнился бы при следующей git-операции verifier.
+async def test_workspace_keeps_git_metadata_writable_with_protected_settings():
     env = TrialEnvironment(git_repository=True)
     options = await _prepared_argv(env)
     ro_binds = [
@@ -674,9 +671,11 @@ async def test_workspace_lets_git_write_its_repository_but_not_hooks():
     ]
 
     assert "/work/.git" not in ro_binds
-    assert "/work/.git/hooks" in ro_binds
     assert "/work/.git" in [
         options[i + 1] for i, arg in enumerate(options) if arg == "--bind"
     ]
     reservation = next(c for c, _ in env.calls if "validate_mount_path" in c)
-    assert "/work/.git/hooks" in reservation
+    for entry in ("hooks", "config", "config.worktree", "commondir"):
+        path = f"/work/.git/{entry}"
+        assert path in ro_binds
+        assert path in reservation

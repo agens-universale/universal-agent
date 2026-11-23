@@ -19,10 +19,13 @@ TRUSTED_EXEC_ENV = {
 }
 _PROTECTED_ROOT_ENTRIES = (".gc", ".agents", "AGENTS.md")
 _GIT = ".git"
-# Внутри настоящего репозитория пишутся index и objects (add/commit/checkout),
-# но не hooks: переписанный hook исполнился бы при следующей git-операции
-# вне песочницы — например, в verifier. Так же устроен профиль GigaCode.
-_GIT_HOOKS = ".git/hooks"
+# Pin metadata used by Git during verification and preserve ordinary Git writes.
+_GIT_PROTECTED_ENTRIES = (
+    ".git/hooks",
+    ".git/config",
+    ".git/config.worktree",
+    ".git/commondir",
+)
 _BWRAP = "/usr/bin/bwrap"
 # `--disable-userns` появился в bubblewrap 0.8.0 (Ubuntu 22.04 — 0.6.1).
 _DISABLE_USERNS_SINCE = (0, 8)
@@ -76,6 +79,32 @@ wait "$child"
 report "$?"
 """
 
+_METADATA_FILE_HELPERS = r"""
+metadata_file_value() {
+    [ -n "$git_dir" ] || return 1
+    case "$1" in
+        "$git_dir/config"|"$git_dir/config.worktree") return 0 ;;
+        "$git_dir/commondir") printf '.' ;;
+        *) return 1 ;;
+    esac
+}
+unaliased_regular_file() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c '%h' -- "$1")" = 1 ]
+}
+remove_reserved_path() {
+    local path=$1 record=$2 expected
+    [ -f "$record" ] && [ ! -L "$record" ] &&
+        [ "$(stat -c '%d:%i' -- "$path")" = "$(<"$record")" ] || return 1
+    if expected=$(metadata_file_value "$path"); then
+        unaliased_regular_file "$path" &&
+            [ "$(stat -c '%s' -- "$path")" = "${#expected}" ] &&
+            [ "$(<"$path")" = "$expected" ] && rm -- "$path"
+    else
+        rmdir -- "$path"
+    fi
+}
+"""
+
 _RESERVE_METADATA = r"""
 set -e
 validate_mount_path() {
@@ -89,7 +118,20 @@ for metadata_path in "${extra_paths[@]}"; do
     validate_mount_path "$metadata_path"
 done
 for metadata_path; do
-    if [ -L "$metadata_path" ]; then
+    if metadata_file_value "$metadata_path" >/dev/null; then
+        if [ ! -e "$metadata_path" ] && [ ! -L "$metadata_path" ]; then continue; fi
+        if ! validate_mount_path "$metadata_path" || ! unaliased_regular_file "$metadata_path"; then
+            printf 'Expected a canonical Git metadata file with one link: %s\n' "$metadata_path" >&2
+            exit 1
+        fi
+        if [ "$metadata_path" = "$git_dir/commondir" ]; then
+            common_dir=$(<"$metadata_path")
+            if [ "$common_dir" != . ] && [ "$common_dir" != "$git_dir" ]; then
+                printf 'Harbor workspace-write requires Git metadata in %s\n' "$git_dir" >&2
+                exit 1
+            fi
+        fi
+    elif [ -L "$metadata_path" ]; then
         canonical=$(realpath -e -- "$metadata_path")
         validate_mount_path "$canonical"
         printf '%s\0%s\0' "$metadata_path" "$canonical"
@@ -104,7 +146,8 @@ rollback() {
     if [ "$?" -eq 0 ]; then return; fi
     set +e
     for metadata_path in "${created[@]}"; do
-        rmdir -- "$metadata_path" && rm -f -- "$lease/${metadata_path##*/}"
+        record="$lease/${metadata_path##*/}"
+        remove_reserved_path "$metadata_path" "$record" && rm -f -- "$record"
     done
     rm -f -- "$lease/running"
     rmdir -- "$lease"
@@ -113,7 +156,11 @@ trap rollback EXIT
 trap 'exit 1' HUP INT TERM
 for metadata_path; do
     if [ -e "$metadata_path" ]; then continue; fi
-    mkdir -m 700 -- "$metadata_path"
+    if reserved_value=$(metadata_file_value "$metadata_path"); then
+        (umask 077; set -C; printf '%s' "$reserved_value" > "$metadata_path")
+    else
+        mkdir -m 700 -- "$metadata_path"
+    fi
     created+=("$metadata_path")
     stat -c '%d:%i' -- "$metadata_path" > "$lease/${metadata_path##*/}"
 done
@@ -129,8 +176,7 @@ for metadata_path; do
     record="$lease/${metadata_path##*/}"
     if [ ! -f "$record" ] || [ -L "$record" ]; then continue; fi
     if [ -e "$metadata_path" ] || [ -L "$metadata_path" ]; then
-        if [ "$(stat -c '%d:%i' -- "$metadata_path")" != "$(<"$record")" ] ||
-            ! rmdir -- "$metadata_path"; then
+        if ! remove_reserved_path "$metadata_path" "$record"; then
             printf 'Cannot release Harbor metadata reservation: %s\n' "$metadata_path" >&2
             failed=1
             continue
@@ -275,10 +321,10 @@ class HarborWorkspace:
                 )
 
     def _metadata_paths(self) -> tuple[str, ...]:
-        git = _GIT_HOOKS if self.git_repository else _GIT
+        git = _GIT_PROTECTED_ENTRIES if self.git_repository else (_GIT,)
         return tuple(
             posixpath.join(self.root, entry)
-            for entry in (git, *_PROTECTED_ROOT_ENTRIES)
+            for entry in (*git, *_PROTECTED_ROOT_ENTRIES)
         )
 
     def with_metadata_targets(self, records: str) -> HarborWorkspace:
@@ -306,8 +352,8 @@ class HarborWorkspace:
         return f"rm -f -- {shlex.quote(self.running_file)}"
 
     def reserve_metadata_command(self) -> str:
-        # An empty directory reserves a name without adding an untracked file
-        # or a bogus Git worktree pointer. It lasts only for the agent phase.
+        # Empty directories reserve metadata names. Git needs readable files
+        # for its settings and common directory, so those use file placeholders.
         extra = shlex.join(self.protected)
         return (
             self._metadata_args()
@@ -318,9 +364,14 @@ class HarborWorkspace:
         return self._metadata_args() + _RELEASE_METADATA
 
     def _metadata_args(self) -> str:
+        git_dir = (
+            posixpath.join(self.root, _GIT) if self.git_repository else ""
+        )
         return (
             f"lease={shlex.quote(self.metadata_lease)}\n"
+            f"git_dir={shlex.quote(git_dir)}\n"
             f"set -- {shlex.join(self._metadata_paths())}\n"
+            + _METADATA_FILE_HELPERS
         )
 
     def _writable_mounts(self) -> list[PurePosixPath]:
