@@ -14,6 +14,7 @@
 
 import ast
 import asyncio
+import json
 import sys
 import threading
 from contextvars import ContextVar
@@ -167,7 +168,9 @@ async def test_workspace_verification_requires_worker_shutdown(
                 allow_worker_exit.set()
 
         def get_state(self):
-            return None
+            return SimpleNamespace(
+                messages=[{"role": "user", "content": "Check shutdown"}]
+            )
 
     async def create_context(*_args, **_kwargs):
         return SimpleNamespace(os_backend=backend)
@@ -181,13 +184,14 @@ async def test_workspace_verification_requires_worker_shutdown(
     settings = make_settings({"os_backend": "harbor-workspace"})
     monkeypatch.setattr(agent, "_build_settings", lambda: settings)
     monkeypatch.setattr(agent, "_write_skills_debug", skip_skills_debug)
-    monkeypatch.setattr(agent, "_dump_outcome", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(agent_executor, "AgentExecutor", Worker)
     monkeypatch.setattr(run_context, "acreate_run_context", create_context)
     monkeypatch.setattr(backend, "arelease_workspace", release_workspace)
     monkeypatch.setattr(gc_cli_external, "_STOP_GRACE_S", 0.2, raising=False)
     run = asyncio.create_task(
-        agent.run("Check shutdown", environment, SimpleNamespace())
+        agent.run(
+            "Check shutdown", environment, gc_cli_external.AgentContext()
+        )
     )
     try:
         await asyncio.wait_for(worker_started.wait(), timeout=5)
@@ -198,6 +202,10 @@ async def test_workspace_verification_requires_worker_shutdown(
         with pytest.raises(expected):
             await asyncio.wait_for(run, timeout=5)
         assert cleanup_finished.is_set() == (outcome != "worker-active")
+        trace = json.loads(
+            (tmp_path / "trajectory.json").read_text(encoding="utf-8")
+        )
+        assert trace["extra"]["partial"] is True
     finally:
         allow_worker_exit.set()
         assert await asyncio.to_thread(cleanup_finished.wait, 5)
