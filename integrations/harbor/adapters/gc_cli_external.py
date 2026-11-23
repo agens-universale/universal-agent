@@ -50,6 +50,7 @@ except ImportError:  # harbor < 0.24 has no capability gate
 
 if TYPE_CHECKING:
     from gc_core.agent_executor import AgentExecutor
+    from gc_core.backends.harbor import HarborBackend
     from gc_core.settings import LoadedSettings
 
 # Harbor task transports -> gc-cli transports, 1:1. Harbor normalises `http` to
@@ -798,12 +799,22 @@ class GcCliExternal(BaseAgent):
         executor: "AgentExecutor | None",
         *,
         workspace_write: bool,
+        workspace_backend: "HarborBackend | None",
     ) -> Any:
         with self._cancel_lock:
             self._cancelled = True
         if executor is not None:
             executor.stop_run()
         if workspace_write:
+            if workspace_backend is not None and not worker.done():
+                try:
+                    await workspace_backend.arequest_workspace_stop()
+                except Exception:
+                    # A lost stop reply does not determine the worker outcome.
+                    self.logger.warning(
+                        "Could not send Harbor workspace stop request",
+                        exc_info=True,
+                    )
             return await _wait_for_workspace_shutdown(worker)
         try:
             return await asyncio.wait_for(
@@ -851,6 +862,7 @@ class GcCliExternal(BaseAgent):
         instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
+        workspace_backend = None
         self._evicted_messages: list = []
         # Wall-clock split per step: LLM wait vs tool exec.
         timings = StepTimings(self.logs_dir / "timings.jsonl")
@@ -860,7 +872,7 @@ class GcCliExternal(BaseAgent):
             self._evicted_messages.extend(dropped)
 
         async def _agent_run():
-            nonlocal executor
+            nonlocal executor, workspace_backend
             from gc_core.backends.harbor import HarborBackend
             from gc_core.utils.async_http import aclose_clients
             from gc_core.utils.logging_module import release_run_logger
@@ -873,6 +885,7 @@ class GcCliExternal(BaseAgent):
                     loop=loop,
                     on_messages_evicted=_on_messages_evicted,
                 )
+                workspace_backend = getattr(ctx, "os_backend", None)
                 await self._write_skills_debug(ctx, skill_sources)
                 executor = AgentExecutor(ctx)
                 # Отмену могли попросить, пока шла дискавери (до 120 с): тогда
@@ -889,9 +902,8 @@ class GcCliExternal(BaseAgent):
                 try:
                     # The outer timeout handler can return with the worker
                     # still running. Keep mounts reserved until it stops.
-                    backend = getattr(ctx, "os_backend", None)
-                    if isinstance(backend, HarborBackend):
-                        await backend.arelease_workspace()
+                    if isinstance(workspace_backend, HarborBackend):
+                        await workspace_backend.arelease_workspace()
                 finally:
                     # These resources belong to the worker and must be closed
                     # before its event loop exits, including on cleanup errors.
@@ -927,7 +939,10 @@ class GcCliExternal(BaseAgent):
             state = await (asyncio.shield(fut) if workspace_write else fut)
         except asyncio.CancelledError:
             state = await self._stop_worker(
-                fut, executor, workspace_write=workspace_write
+                fut,
+                executor,
+                workspace_write=workspace_write,
+                workspace_backend=workspace_backend,
             )
             raise
         except TimeoutError as exc:

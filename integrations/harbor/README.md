@@ -169,15 +169,20 @@ selector. The model and routing configuration can be supplied independently.
   container. Its root filesystem is visible read-only. The project is writable,
   with read-only mounts for top-level `.git`, `.gc`, `.agents` and
   `AGENTS.md`, and for the existing canonical paths declared in
-  `security.protected_paths.extra`. Empty directories reserve missing top-level
+  `security.protected_paths.extra`. For an existing metadata symlink, the mount
+  protects its resolved file or directory. The symlink entry follows the
+  permissions of its parent directory. Empty directories reserve missing top-level
   paths during the agent phase. Cleanup removes only the directories created
   by the profile before the verifier starts. Commands and file tools share the
   writable `/tmp` of the trial. Files there survive subsequent calls and are
   visible to a verifier in the same container. Commands have a private PID namespace,
   read-only procfs and a minimal `/dev`. Detached background jobs are unavailable.
-  On agent timeout, the adapter allows up to 30 seconds for the worker to stop
-  and release the reservations. A command or cleanup whose completion cannot be
-  confirmed fails the single-step trial before Harbor 0.22 starts the verifier.
+  Model commands have an in-container deadline. When it expires, their supervisor
+  exits as PID 1 and the kernel stops all processes in the sandbox PID namespace.
+  The tool reports a timeout and any captured output. On agent timeout, the adapter
+  tells the active supervisors to stop, then waits for the worker to release its
+  reservations. A transport failure that leaves completion unconfirmed still fails
+  the single-step trial before Harbor 0.22 starts the verifier.
 - Built-in file tools retain their UAG policy checks. In the External agent,
   the write decorator checks the built-in path classes and the command
   tripwire also checks `security.protected_paths.extra` on literal paths.

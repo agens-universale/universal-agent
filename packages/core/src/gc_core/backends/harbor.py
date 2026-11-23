@@ -25,6 +25,7 @@ from gc_core.backends.harbor_workspace import (
     IMAGE_EXEC_ENV_NAMES,
     TRUSTED_EXEC_ENV,
     HarborWorkspace,
+    WorkspaceCommand,
 )
 from gc_core.backends.posix_shell_fs import (
     CWD_PRIME_TIMEOUT_SEC,
@@ -43,7 +44,7 @@ from gc_core.backends.runtime_probe import (
     RuntimeProbeCache,
 )
 from gc_core.backends.walk_util import FlatWalkMixin
-from gc_core.user_stop import current_user_stop
+from gc_core.user_stop import UserStopInterrupt, current_user_stop
 from gc_core.utils.file_text import encode_text_for_append
 
 _CHECK_WRITE_TARGET = """\
@@ -405,6 +406,8 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 timeout=CWD_PRIME_TIMEOUT_SEC,
             )
             _check_workspace_result(reserved, "metadata reservation")
+            workspace = workspace.with_metadata_targets(reserved.stdout or "")
+            self._workspace = workspace
             result = await self._aexec_impl(
                 workspace.wrap(
                     "test -w . && test -w /tmp && /bin/true || "
@@ -419,6 +422,16 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             raise
         self._workspace_ready = True
         self._discovered_cwd = physical_root
+
+    async def arequest_workspace_stop(self) -> None:
+        """Notify all command supervisors inside this trial."""
+        workspace = self._workspace
+        if workspace is None or not self._workspace_ready:
+            return
+        result = await self._aenvironment_exec(
+            workspace.stop_command(), env=TRUSTED_EXEC_ENV, timeout=5
+        )
+        _check_workspace_result(result, "stop request")
 
     async def arelease_workspace(self) -> None:
         """Release the trial's synthetic mount points after its tools stop."""
@@ -531,13 +544,11 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         return scope(on_output), accumulators
 
     # --- shell ---
-    async def _aexec_watching(self, full, *, timeout):
-        """Дождаться ``env.exec``. Его ``timeout_sec`` и есть срок жизни команды.
+    async def _aexec_watching(self, full, *, timeout, arm_stop=True):
+        """Collect a live Harbor command through a cooperative agent stop.
 
-        Стоп хода посреди этого ожидания команду не снимает и строку не
-        переписывает. Регистрация без записи в лог нужна, чтобы отмена тула
-        не оборвала уже идущий ``env.exec``: жест остаётся здесь, пока команда
-        сама не выйдет.
+        The workspace adapter signals its supervisors separately. Stage cleanup
+        bypasses stop registration so it can run after the tool is stopped.
         """
 
         async def _drive():
@@ -551,7 +562,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 ),
             )
 
-        stop = current_user_stop()
+        stop = current_user_stop() if arm_stop else None
         if stop is None:
             return await _drive()
 
@@ -600,6 +611,32 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             cap,
         )
 
+    def _workspace_command_result(
+        self, res: Any, cap: int, command: WorkspaceCommand | None
+    ) -> ExecResult:
+        if command is None or getattr(res, "timed_out", False):
+            return self._completed_result(res, cap)
+        if res.return_code != 0:
+            self._workspace_exec_unconfirmed = True
+            return self._completed_result(res, cap)
+        try:
+            stdout, status = command.completion(res.stdout or "")
+        except RuntimeError:
+            self._workspace_exec_unconfirmed = True
+            raise
+        if status == "stopped":
+            raise UserStopInterrupt(kind="exec")
+        timed_out = status == "timeout"
+        return bound_exec_result(
+            ExecResult(
+                stdout=stdout,
+                stderr=res.stderr or "",
+                return_code=None if timed_out else int(status),
+                timed_out=timed_out,
+            ),
+            cap,
+        )
+
     async def _aprobe(self, command: str, timeout: int) -> ExecResult:
         """Сырой echo пробы: без повторной пробы и без ``cd``."""
         return await self._aexec_impl(command, timeout=timeout, probe=False)
@@ -615,6 +652,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         exec_init: Optional[str] = None,
         probe: bool = True,
         workspace_channel: Literal["command", "file"] | None = None,
+        cleanup: bool = False,
     ) -> ExecResult:
         """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
@@ -628,12 +666,18 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             workspace_channel is not None
             and self._workspace_protected_paths is not None
         )
+        supervised = None
         if workspace_exec:
-            full = self._require_workspace().wrap(
+            workspace = self._require_workspace()
+            if workspace_channel == "command":
+                supervised = WorkspaceCommand(timeout, workspace.running_file)
+                timeout = supervised.transport_timeout
+            full = workspace.wrap(
                 _workspace_shell_command(command, exec_init),
                 cwd=cwd,
                 env=env,
                 model_command=workspace_channel == "command",
+                supervised=supervised,
             )
         else:
             full = build_harbor_shell_command(
@@ -643,17 +687,21 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         scope, streamed = self._output_capture(cap)
         try:
             with scope:
-                res = await self._aexec_watching(full, timeout=timeout)
+                res = await self._aexec_watching(
+                    full, timeout=timeout, arm_stop=not cleanup
+                )
+        except UserStopInterrupt:
+            # UserStop.arm rejected a command before it could reach Harbor.
+            raise
         except (Exception, asyncio.CancelledError) as exc:
             if workspace_exec:
                 self._workspace_exec_unconfirmed = True
             if not self._is_exec_timeout(exc):
                 raise
             return self._timed_out_result(streamed, cap)
-        result = self._completed_result(res, cap)
-        if workspace_exec and result.timed_out:
+        if workspace_exec and getattr(res, "timed_out", False):
             self._workspace_exec_unconfirmed = True
-        return result
+        return self._workspace_command_result(res, cap, supervised)
 
     @staticmethod
     def _python_command(code: str) -> str:
@@ -681,11 +729,16 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             capture_max_chars=self.walk_output_max_chars,
         )
 
-    async def _afs_write_exec(self, command: str) -> ExecResult:
+    async def _afs_write_exec(
+        self, command: str, *, cleanup: bool = False
+    ) -> ExecResult:
         return await self._aexec_impl(
             command,
+            timeout=CWD_PRIME_TIMEOUT_SEC if cleanup else None,
             capture_max_chars=self.walk_output_max_chars,
+            probe=not cleanup,
             workspace_channel="file",
+            cleanup=cleanup,
         )
 
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
@@ -794,10 +847,23 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 raise self._fs_failure(path, result, what=operation)
         finally:
             if cleanup:
-                with contextlib.suppress(Exception):
-                    await self._afs_write_exec(
-                        variables + _CLEAN_WORKSPACE_WRITE_STAGES
-                    )
+                await self._aclean_workspace_write_stages(variables)
+
+    async def _aclean_workspace_write_stages(self, variables: str) -> None:
+        # A stop can cancel the tool while it is already cleaning up. Keep
+        # waiting for the same remote cleanup before releasing the mounts.
+        task = asyncio.create_task(
+            self._afs_write_exec(
+                variables + _CLEAN_WORKSPACE_WRITE_STAGES, cleanup=True
+            )
+        )
+        try:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(task)
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(task)
+            raise
 
     async def _adownload_bytes(self, path: str) -> bytes:
         await self._runtime_probe.ensure(self._aprobe)

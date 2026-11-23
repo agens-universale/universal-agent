@@ -11,8 +11,21 @@ from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.harbor import _BASHRC_EXEC_INIT, _PUBLISH_WORKSPACE_WRITE
 from gc_core.backends.harbor_workspace import HarborWorkspace
 from gc_core.backends.local import LocalFsBackend
+from gc_core.tools import _acall_under_stop
+from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
 from gc_testkit.runtime_probe import probe_stdout
 from gc_testkit.settings import make_settings
+
+
+def _workspace_completion(command: str, stdout: str, status: str = "0") -> str:
+    argv = shlex.split(command)
+    result = next(
+        arg for arg in argv if arg.startswith("__gc_workspace_result_")
+    )
+    exited = next(
+        arg for arg in argv if arg.startswith("__gc_workspace_exit_")
+    )
+    return f"{stdout}\n{result} {status}\n\n{exited} 0\n"
 
 
 class TrialEnvironment:
@@ -58,6 +71,8 @@ class TrialEnvironment:
             return SimpleNamespace(
                 stdout=self.preflight_error, stderr="", return_code=1
             )
+        if "--as-pid-1" in command:
+            stdout = _workspace_completion(command, stdout)
         return SimpleNamespace(stdout=stdout, stderr="", return_code=0)
 
     async def upload_file(self, source, target):
@@ -141,7 +156,8 @@ async def test_workspace_exec_keeps_image_path_and_applies_env_inside_bwrap():
     command, kwargs = env.calls[-1]
     argv = shlex.split(command)
 
-    assert argv[:2] == ["exec", "/usr/bin/bwrap"]
+    assert argv[:4] == ["exec", "/bin/bash", "-p", "-c"]
+    assert "/usr/bin/bwrap" in argv
     assert argv[argv.index("--chdir") + 1] == "/work/subdir"
     assert argv[argv.index("--bind") :][:6] == [
         "--bind",
@@ -153,9 +169,9 @@ async def test_workspace_exec_keeps_image_path_and_applies_env_inside_bwrap():
     ]
     assert argv[argv.index("--remount-ro") + 1] == "/proc"
     assert argv[-1].find(".bashrc") < argv[-1].find("image-tool; bashrc-tool")
-    assert "/opt/image-bin:/usr/bin:/bin" in argv
-    assert "/opt/image-lib" in argv
-    assert "/work/rc" in argv
+    assert "PATH=/opt/image-bin:/usr/bin:/bin" in argv
+    assert "LD_LIBRARY_PATH=/opt/image-lib" in argv
+    assert "BASH_ENV=/work/rc" in argv
     assert env.calls[0][1]["env"]["BASH_ENV"] == ""
     assert "/work/bin" not in kwargs["env"]["PATH"]
     assert kwargs["env"]["BASH_ENV"] == ""
@@ -200,7 +216,7 @@ async def test_workspace_bashrc_honors_interactive_guard(
     )
     argv = shlex.split(env.calls[-1][0])
     result = subprocess.run(
-        argv[argv.index("--") + 1 :],
+        ["/bin/bash", "-c", argv[-1]],
         env={"PATH": f"{image_bin}:/bin", "HOME": str(tmp_path)},
         cwd=tmp_path,
         capture_output=True,
@@ -321,6 +337,180 @@ async def test_workspace_reports_writability_in_the_write_namespace():
 
     assert await backend.writable("/work/open.txt")
     assert not await backend.writable("/work/locked file")
+
+
+@pytest.mark.parametrize("outcome", ["timeout", "124", "137"])
+async def test_workspace_command_deadline_is_distinct_from_exit_status(
+    outcome,
+):
+    class DeadlineEnvironment(TrialEnvironment):
+        async def exec(self, command, **kwargs):
+            result = await super().exec(command, **kwargs)
+            if "model-command-marker" in command:
+                if kwargs["timeout_sec"] == 2:
+                    raise TimeoutError
+                result.stdout = _workspace_completion(
+                    command, "partial output", outcome
+                )
+            return result
+
+    backend = workspace_backend(DeadlineEnvironment())
+    await backend.aprepare_workspace("/work")
+
+    result = await backend.aexec("echo model-command-marker", timeout=2)
+
+    assert result.stdout == "partial output"
+    assert result.timed_out is (outcome == "timeout")
+    assert result.return_code == (
+        None if outcome == "timeout" else int(outcome)
+    )
+    await backend.arelease_workspace()
+
+
+async def test_workspace_transport_timeout_still_blocks_unconfirmed_cleanup():
+    class ExpiredTransportEnvironment(TrialEnvironment):
+        async def exec(self, command, **kwargs):
+            if "--as-pid-1" in command:
+                raise TimeoutError
+            return await super().exec(command, **kwargs)
+
+    backend = workspace_backend(ExpiredTransportEnvironment())
+    await backend.aprepare_workspace("/work")
+
+    result = await backend.aexec("sleep 20", timeout=2)
+
+    assert result.timed_out
+    with pytest.raises(
+        RuntimeError, match="completion could not be confirmed"
+    ):
+        await backend.arelease_workspace()
+
+
+async def test_workspace_transport_error_cannot_confirm_command_completion():
+    class DisconnectedEnvironment(TrialEnvironment):
+        async def exec(self, command, **kwargs):
+            if "--as-pid-1" in command:
+                return SimpleNamespace(
+                    stdout="partial output",
+                    stderr="Docker connection ended",
+                    return_code=1,
+                )
+            return await super().exec(command, **kwargs)
+
+    backend = workspace_backend(DisconnectedEnvironment())
+    await backend.aprepare_workspace("/work")
+
+    result = await backend.aexec("echo ready", timeout=2)
+
+    assert result.stdout == "partial output"
+    assert result.stderr == "Docker connection ended"
+    with pytest.raises(
+        RuntimeError, match="completion could not be confirmed"
+    ):
+        await backend.arelease_workspace()
+
+
+async def test_workspace_stop_still_cleans_a_staged_file():
+    stop = UserStop()
+
+    class StoppedWriteEnvironment(TrialEnvironment):
+        async def exec(self, command, **kwargs):
+            result = await super().exec(command, **kwargs)
+            if "/usr/bin/base64 -d" in command:
+                stop.request()
+            return result
+
+    env = StoppedWriteEnvironment()
+    backend = workspace_backend(env)
+    await backend.aprepare_workspace("/work")
+
+    with bind_user_stop(stop), pytest.raises(UserStopInterrupt):
+        await backend.write_bytes("/work/file.txt", b"content")
+
+    assert 'in "$fallback" "$adjacent"' in env.calls[-1][0]
+    await backend.arelease_workspace()
+
+
+async def test_workspace_stop_during_stage_cleanup_waits_for_it():
+    stop = UserStop()
+    cleaning = asyncio.Event()
+    finish = asyncio.Event()
+    cleaned = asyncio.Event()
+
+    class StoppedCleanupEnvironment(TrialEnvironment):
+        async def exec(self, command, **kwargs):
+            if 'in "$fallback" "$adjacent"' in command:
+                cleaning.set()
+                await finish.wait()
+                cleaned.set()
+            return await super().exec(command, **kwargs)
+
+    backend = workspace_backend(StoppedCleanupEnvironment())
+    await backend.aprepare_workspace("/work")
+
+    async def write() -> None:
+        await backend.write_bytes("/work/file.txt", b"content")
+
+    with bind_user_stop(stop):
+        tool = asyncio.create_task(
+            _acall_under_stop("fs_write_file", "1", write, None)
+        )
+        await asyncio.wait_for(cleaning.wait(), 5)
+        stop.request()
+        await stop.await_settled(timeout=5)
+        finish.set()
+        with pytest.raises(UserStopInterrupt):
+            await asyncio.wait_for(tool, 5)
+
+    assert cleaned.is_set()
+    await backend.arelease_workspace()
+
+
+async def test_workspace_stop_cleanup_can_run_after_runtime_probe_expires():
+    env = TrialEnvironment()
+    backend = workspace_backend(env)
+    await backend.aprepare_workspace("/work")
+    backend._runtime_probe.ttl_sec = 0
+    stop = UserStop()
+    stop.request()
+
+    with bind_user_stop(stop):
+        result = await backend._afs_write_exec("echo cleanup", cleanup=True)
+
+    assert result.return_code == 0
+    assert shlex.split(env.calls[-1][0])[-1] == "echo cleanup"
+
+
+def test_late_workspace_stop_cannot_repopulate_the_lease(tmp_path):
+    lease = tmp_path / "lease"
+    lease.mkdir()
+    workspace = HarborWorkspace(str(tmp_path / "work"), (), (), str(lease))
+
+    # Release has removed the lease files and is about to remove the directory.
+    subprocess.run(["/bin/bash", "-c", workspace.stop_command()], check=True)
+
+    lease.rmdir()
+    subprocess.run(["/bin/bash", "-c", workspace.stop_command()], check=True)
+
+
+async def test_workspace_protects_the_canonical_target_of_a_metadata_symlink():
+    class SymlinkEnvironment(TrialEnvironment):
+        async def exec(self, command, **kwargs):
+            result = await super().exec(command, **kwargs)
+            if "validate_mount_path" in command:
+                result.stdout = "/work/AGENTS.md\0/work/config/CLAUDE.md\0"
+            return result
+
+    env = SymlinkEnvironment()
+    backend = workspace_backend(env)
+    await backend.aprepare_workspace("/work")
+    await backend.aexec("pwd")
+
+    argv = shlex.split(env.calls[-1][0])
+    target = "/work/config/CLAUDE.md"
+    assert argv[argv.index(target) - 1 :][:3] == ["--ro-bind", target, target]
+    parent = "/work/config"
+    assert argv[argv.index(parent) - 1 :][:3] == ["--bind", parent, parent]
 
 
 async def test_workspace_reserves_missing_metadata_until_trial_cleanup():

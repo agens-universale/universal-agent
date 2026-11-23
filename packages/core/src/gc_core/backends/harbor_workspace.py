@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import posixpath
 import shlex
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 
 _LOADER_ENV_NAMES = ("LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT")
@@ -22,6 +23,49 @@ _PROC_ROOT = "/proc"
 _TMP_ROOT = "/tmp"
 _SPECIAL_DIRS = (_PROC_ROOT, "/sys", "/dev")
 _TRANSPORT_DIRS = ("/bin", "/sbin", "/usr/bin", "/usr/sbin", "/etc", _TMP_ROOT)
+# Let the in-container deadline finish and bwrap reap its namespace before
+# Harbor can time out the transport. Transport failures still fail closed.
+_COMMAND_EXIT_SLACK_S = 5
+
+_REPORT_SANDBOX_EXIT = r"""
+receipt=$1
+shift
+code=0
+"$@" || code=$?
+printf '\n%s %s\n' "$receipt" "$code"
+"""
+
+_SUPERVISE_COMMAND = r"""
+deadline=$1
+running_file=$2
+receipt=$3
+shift 3
+
+# This shell is PID 1. Its exit shuts down the entire sandbox PID namespace,
+# and the outer bwrap waits for it before Harbor reports command completion.
+report() {
+    trap '' USR1 USR2
+    printf '\n%s %s\n' "$receipt" "$1"
+    exit 0
+}
+trap 'report timeout' USR1
+trap 'if [ ! -e "$running_file" ]; then report stopped; fi' USR2
+if [ ! -e "$running_file" ]; then report stopped; fi
+
+if [ "$deadline" -gt 0 ]; then
+    (/usr/bin/sleep "$deadline" && kill -USR1 "$$") >/dev/null 2>&1 &
+fi
+(while [ -e "$running_file" ]; do /usr/bin/sleep 0.1; done
+ kill -USR2 "$$") >/dev/null 2>&1 &
+
+# An asynchronous shell list would otherwise give the model /dev/null as stdin.
+exec 3<&0
+"$@" <&3 3<&- &
+child=$!
+exec 3<&-
+wait "$child"
+report "$?"
+"""
 
 _RESERVE_METADATA = r"""
 set -e
@@ -36,7 +80,11 @@ for metadata_path in "${extra_paths[@]}"; do
     validate_mount_path "$metadata_path"
 done
 for metadata_path; do
-    if [ -e "$metadata_path" ] || [ -L "$metadata_path" ]; then
+    if [ -L "$metadata_path" ]; then
+        canonical=$(realpath -e -- "$metadata_path")
+        validate_mount_path "$canonical"
+        printf '%s\0%s\0' "$metadata_path" "$canonical"
+    elif [ -e "$metadata_path" ]; then
         validate_mount_path "$metadata_path"
     fi
 done
@@ -49,6 +97,7 @@ rollback() {
     for metadata_path in "${created[@]}"; do
         rmdir -- "$metadata_path" && rm -f -- "$lease/${metadata_path##*/}"
     done
+    rm -f -- "$lease/running"
     rmdir -- "$lease"
 }
 trap rollback EXIT
@@ -59,12 +108,14 @@ for metadata_path; do
     created+=("$metadata_path")
     stat -c '%d:%i' -- "$metadata_path" > "$lease/${metadata_path##*/}"
 done
+: > "$lease/running"
 """
 
 _RELEASE_METADATA = r"""
 if [ ! -e "$lease" ] && [ ! -L "$lease" ]; then exit 0; fi
 if [ ! -d "$lease" ] || [ -L "$lease" ]; then exit 1; fi
 failed=0
+rm -f -- "$lease/running" || failed=1
 for metadata_path; do
     record="$lease/${metadata_path##*/}"
     if [ ! -f "$record" ] || [ -L "$record" ]; then continue; fi
@@ -84,11 +135,59 @@ exit "$failed"
 
 
 @dataclass(frozen=True)
+class WorkspaceCommand:
+    timeout: int | None
+    running_file: str
+    receipt: str = field(
+        default_factory=lambda: f"__gc_workspace_result_{uuid.uuid4().hex}"
+    )
+    sandbox_receipt: str = field(
+        default_factory=lambda: f"__gc_workspace_exit_{uuid.uuid4().hex}"
+    )
+
+    @property
+    def transport_timeout(self) -> int | None:
+        if self.timeout and self.timeout > 0:
+            return self.timeout + _COMMAND_EXIT_SLACK_S
+        return self.timeout
+
+    def completion(self, stdout: str) -> tuple[str, str]:
+        stdout, sandbox_status = self._take_receipt(
+            stdout, self.sandbox_receipt
+        )
+        if sandbox_status != "0":
+            return stdout, sandbox_status
+        return self._take_receipt(stdout, self.receipt)
+
+    @staticmethod
+    def _take_receipt(stdout: str, receipt: str) -> tuple[str, str]:
+        before, marker, after = stdout.rpartition(f"\n{receipt} ")
+        status, newline, rest = after.partition("\n")
+        if (
+            not marker
+            or not newline
+            or not (
+                status in ("stopped", "timeout")
+                or (
+                    status.isascii()
+                    and status.isdecimal()
+                    and len(status) <= 3
+                )
+            )
+        ):
+            raise RuntimeError(
+                "Harbor workspace command has no completion receipt"
+            )
+        return before + rest, status
+
+
+@dataclass(frozen=True)
 class HarborWorkspace:
     root: str
     image_env: tuple[tuple[str, str], ...]
     protected: tuple[str, ...]
     metadata_lease: str
+    metadata_targets: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         root = PurePosixPath(self.root)
@@ -101,7 +200,10 @@ class HarborWorkspace:
             or any(root.is_relative_to(path) for path in _SPECIAL_DIRS)
         ):
             raise ValueError(f"Invalid Harbor workspace root: {self.root!r}")
-        for raw in self.protected:
+        for raw in (
+            *self.protected,
+            *(target for _, target in self.metadata_targets),
+        ):
             if not raw.startswith("/") or posixpath.normpath(raw) != raw:
                 raise ValueError(
                     "Harbor workspace-write requires absolute, normalized "
@@ -127,6 +229,30 @@ class HarborWorkspace:
             for entry in _PROTECTED_ROOT_ENTRIES
         )
 
+    def with_metadata_targets(self, records: str) -> HarborWorkspace:
+        if not records:
+            return self
+        fields = records.removesuffix("\0").split("\0")
+        names = fields[::2]
+        if len(fields) % 2 or not set(names).issubset(self._metadata_paths()):
+            raise RuntimeError("Invalid Harbor workspace metadata targets")
+        return replace(
+            self, metadata_targets=tuple(zip(names, fields[1::2], strict=True))
+        )
+
+    def _protected_mounts(self) -> tuple[str, ...]:
+        targets = dict(self.metadata_targets)
+        metadata = (targets.get(path, path) for path in self._metadata_paths())
+        return tuple(dict.fromkeys((*metadata, *self.protected)))
+
+    @property
+    def running_file(self) -> str:
+        return f"{self.metadata_lease}/running"
+
+    def stop_command(self) -> str:
+        # Removing the marker is safe even after the worker releases the lease.
+        return f"rm -f -- {shlex.quote(self.running_file)}"
+
     def reserve_metadata_command(self) -> str:
         # An empty directory reserves a name without adding an untracked file
         # or a bogus Git worktree pointer. It lasts only for the agent phase.
@@ -151,7 +277,7 @@ class HarborWorkspace:
         mounts = set(roots)
         # Pin ancestors as writable mounts so their children remain editable
         # while the directories holding protection cannot be relocated.
-        for path in (self.root, *self.protected):
+        for path in (self.root, *self._protected_mounts()):
             mounts.update(
                 parent
                 for parent in PurePosixPath(path).parents
@@ -168,6 +294,7 @@ class HarborWorkspace:
         cwd: str | None = None,
         env: dict | None = None,
         model_command: bool = False,
+        supervised: WorkspaceCommand | None = None,
     ) -> str:
         argv = [
             _BWRAP,
@@ -190,22 +317,48 @@ class HarborWorkspace:
         for path in self._writable_mounts():
             argv += ["--bind", str(path), str(path)]
         # Later mounts keep protected entries read-only inside the writable root.
-        for path in (
-            *self._metadata_paths(),
-            *self.protected,
-            self.metadata_lease,
-        ):
+        for path in (*self._protected_mounts(), self.metadata_lease):
             argv += ["--ro-bind", path, path]
         child_env = dict(self.image_env) if model_command else {}
         child_env.update(env or {})
-        for name, value in child_env.items():
-            argv += ["--setenv", name, str(value)]
+        payload = [_BASH, "-c", command]
+        if supervised is None:
+            for name, value in child_env.items():
+                argv += ["--setenv", name, str(value)]
+        else:
+            # Keep model-provided startup/loader variables away from PID 1.
+            argv.append("--as-pid-1")
+            payload = [
+                _BASH,
+                "-p",
+                "-c",
+                _SUPERVISE_COMMAND,
+                "bash",
+                str(supervised.timeout or 0),
+                supervised.running_file,
+                supervised.receipt,
+                "/usr/bin/env",
+                "--default-signal=INT,QUIT",
+                "--",
+                *(f"{name}={value}" for name, value in child_env.items()),
+                *payload,
+            ]
         argv += [
             "--chdir",
             posixpath.join(self.root, cwd) if cwd else self.root,
             "--",
-            _BASH,
-            "-c",
-            command,
+            *payload,
         ]
+        if supervised is not None:
+            # A confirmed bwrap failure (for example a missing cwd) is a
+            # command error. A Docker client failure can have the same code.
+            argv = [
+                _BASH,
+                "-p",
+                "-c",
+                _REPORT_SANDBOX_EXIT,
+                "bash",
+                supervised.sandbox_receipt,
+                *argv,
+            ]
         return "exec " + shlex.join(argv)
