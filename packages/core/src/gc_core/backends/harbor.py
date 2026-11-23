@@ -11,6 +11,7 @@ read/list use shell through exec (``PosixShellFsMixin``); здесь тольк�
 import asyncio
 import base64
 import contextlib
+import dataclasses
 import os
 import posixpath
 import re
@@ -26,6 +27,9 @@ from gc_core.backends.harbor_workspace import (
     TRUSTED_EXEC_ENV,
     HarborWorkspace,
     WorkspaceCommand,
+    environment_probe_command,
+    is_proc_mount_denied,
+    parse_environment_probe,
 )
 from gc_core.backends.posix_shell_fs import (
     CWD_PRIME_TIMEOUT_SEC,
@@ -390,11 +394,21 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 "Harbor workspace-write requires /tmp to resolve to /tmp "
                 f"inside the task container, got {temp_root!r}"
             )
+        probe = await self._aenvironment_exec(
+            environment_probe_command(physical_root),
+            env=TRUSTED_EXEC_ENV,
+            timeout=CWD_PRIME_TIMEOUT_SEC,
+        )
+        git_repository, disable_userns = parse_environment_probe(
+            probe.stdout or ""
+        )
         workspace = HarborWorkspace(
             physical_root,
             tuple(zip(IMAGE_EXEC_ENV_NAMES, image_values, strict=True)),
             self._workspace_protected_paths,
             f"/tmp/.gc-workspace-lease-{uuid.uuid4().hex}",
+            git_repository=git_repository,
+            disable_userns=disable_userns,
         )
         # Remember the lease before exec. The reservation can finish even
         # when the transport loses its reply.
@@ -408,13 +422,14 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             _check_workspace_result(reserved, "metadata reservation")
             workspace = workspace.with_metadata_targets(reserved.stdout or "")
             self._workspace = workspace
-            result = await self._aexec_impl(
-                workspace.wrap(
-                    "test -w . && test -w /tmp && /bin/true || "
-                    "{ printf '%s\\n' 'workspace or /tmp is not writable' >&2; exit 1; }"
-                ),
-                timeout=CWD_PRIME_TIMEOUT_SEC,
-            )
+            result = await self._apreflight(workspace)
+            if result.return_code != 0 and is_proc_mount_denied(
+                f"{result.stderr or ''}\n{result.stdout or ''}"
+            ):
+                # Повтор только фиксированной пробы, не команды модели.
+                workspace = dataclasses.replace(workspace, private_proc=False)
+                self._workspace = workspace
+                result = await self._apreflight(workspace)
             _check_workspace_result(result, "preflight")
         except (Exception, asyncio.CancelledError):
             with contextlib.suppress(Exception):
@@ -432,6 +447,15 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             workspace.stop_command(), env=TRUSTED_EXEC_ENV, timeout=5
         )
         _check_workspace_result(result, "stop request")
+
+    async def _apreflight(self, workspace: HarborWorkspace) -> Any:
+        return await self._aexec_impl(
+            workspace.wrap(
+                "test -w . && test -w /tmp && /bin/true || "
+                "{ printf '%s\\n' 'workspace or /tmp is not writable' >&2; exit 1; }"
+            ),
+            timeout=CWD_PRIME_TIMEOUT_SEC,
+        )
 
     async def arelease_workspace(self) -> None:
         """Release the trial's synthetic mount points after its tools stop."""

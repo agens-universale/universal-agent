@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 import shlex
 import uuid
 from dataclasses import dataclass, field, replace
@@ -16,8 +17,16 @@ TRUSTED_EXEC_ENV = {
     "ENV": "",
     **dict.fromkeys(_LOADER_ENV_NAMES, ""),
 }
-_PROTECTED_ROOT_ENTRIES = (".git", ".gc", ".agents", "AGENTS.md")
+_PROTECTED_ROOT_ENTRIES = (".gc", ".agents", "AGENTS.md")
+_GIT = ".git"
+# Внутри настоящего репозитория пишутся index и objects (add/commit/checkout),
+# но не hooks: переписанный hook исполнился бы при следующей git-операции
+# вне песочницы — например, в verifier. Так же устроен профиль GigaCode.
+_GIT_HOOKS = ".git/hooks"
 _BWRAP = "/usr/bin/bwrap"
+# `--disable-userns` появился в bubblewrap 0.8.0 (Ubuntu 22.04 — 0.6.1).
+_DISABLE_USERNS_SINCE = (0, 8)
+_BWRAP_VERSION = re.compile(r"bubblewrap (\d+)\.(\d+)")
 _BASH = "/bin/bash"
 _PROC_ROOT = "/proc"
 _TMP_ROOT = "/tmp"
@@ -134,6 +143,43 @@ exit "$failed"
 """
 
 
+def environment_probe_command(root: str) -> str:
+    """Что нужно знать о контейнере до первого вызова bwrap.
+
+    Строка ``git=dir`` — в корне настоящий репозиторий (каталог ``.git``
+    с ``HEAD``, не символьная ссылка); затем вывод ``bwrap --version``.
+    """
+    git = shlex.quote(posixpath.join(root, _GIT))
+    return (
+        f"if [ -d {git} ] && [ ! -L {git} ] && [ -f {git}/HEAD ]; "
+        "then echo git=dir; else echo git=none; fi\n"
+        f"{_BWRAP} --version 2>&1 || true\n"
+    )
+
+
+def parse_environment_probe(stdout: str) -> tuple[bool, bool]:
+    """``(git_repository, disable_userns)`` из вывода пробы.
+
+    Версию не распознали — флаг остаётся: отказ старого bwrap виден на
+    preflight, а молча ослаблять запуск по догадке нельзя.
+    """
+    lines = (stdout or "").splitlines()
+    git_repository = "git=dir" in lines
+    match = _BWRAP_VERSION.search(stdout or "")
+    disable_userns = (
+        match is None
+        or (int(match[1]), int(match[2])) >= _DISABLE_USERNS_SINCE
+    )
+    return git_repository, disable_userns
+
+
+def is_proc_mount_denied(detail: str) -> bool:
+    """Отказ bwrap смонтировать procfs (Docker без systempaths=unconfined)."""
+    return "Can't mount proc" in detail and (
+        "Operation not permitted" in detail or "Permission denied" in detail
+    )
+
+
 @dataclass(frozen=True)
 class WorkspaceCommand:
     timeout: int | None
@@ -188,6 +234,11 @@ class HarborWorkspace:
     protected: tuple[str, ...]
     metadata_lease: str
     metadata_targets: tuple[tuple[str, str], ...] = ()
+    git_repository: bool = False
+    disable_userns: bool = True
+    # False — procfs смонтировать нельзя: пустой tmpfs на /proc, как у
+    # GigaCode. Не работают `ps` и `/proc/self`, зато трайл не падает.
+    private_proc: bool = True
 
     def __post_init__(self) -> None:
         root = PurePosixPath(self.root)
@@ -224,9 +275,10 @@ class HarborWorkspace:
                 )
 
     def _metadata_paths(self) -> tuple[str, ...]:
+        git = _GIT_HOOKS if self.git_repository else _GIT
         return tuple(
             posixpath.join(self.root, entry)
-            for entry in _PROTECTED_ROOT_ENTRIES
+            for entry in (git, *_PROTECTED_ROOT_ENTRIES)
         )
 
     def with_metadata_targets(self, records: str) -> HarborWorkspace:
@@ -301,13 +353,15 @@ class HarborWorkspace:
             "--unshare-all",
             "--unshare-user",
             "--share-net",
-            "--disable-userns",
+            *(["--disable-userns"] if self.disable_userns else []),
             "--die-with-parent",
             "--new-session",
+            "--cap-drop",
+            "ALL",
             "--ro-bind",
             "/",
             "/",
-            "--proc",
+            "--proc" if self.private_proc else "--tmpfs",
             _PROC_ROOT,
             "--remount-ro",
             _PROC_ROOT,

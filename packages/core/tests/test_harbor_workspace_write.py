@@ -17,6 +17,11 @@ from gc_testkit.runtime_probe import probe_stdout
 from gc_testkit.settings import make_settings
 
 
+PROC_DENIED = (
+    "bwrap: Can't mount proc on /newroot/proc: Operation not permitted"
+)
+
+
 def _workspace_completion(command: str, stdout: str, status: str = "0") -> str:
     argv = shlex.split(command)
     result = next(
@@ -29,9 +34,20 @@ def _workspace_completion(command: str, stdout: str, status: str = "0") -> str:
 
 
 class TrialEnvironment:
-    def __init__(self, *, preflight_error="", temp_root="/tmp"):
+    def __init__(
+        self,
+        *,
+        preflight_error="",
+        temp_root="/tmp",
+        bwrap_version="bubblewrap 0.12.0",
+        git_repository=False,
+        proc_denied=False,
+    ):
         self.preflight_error = preflight_error
         self.temp_root = temp_root
+        self.bwrap_version = bwrap_version
+        self.git_repository = git_repository
+        self.proc_denied = proc_denied
         self.calls = []
         self.uploads = []
         self.scoped_env = {}
@@ -67,9 +83,18 @@ class TrialEnvironment:
                 and "locked file" in shlex.split(command)[-1]
             )
             stdout = "0\n" if protected else "1\n"
+        if "bwrap --version" in command:
+            stdout = (
+                f"git={'dir' if self.git_repository else 'none'}\n"
+                f"{self.bwrap_version}\n"
+            )
         if "/bin/true" in command and self.preflight_error:
             return SimpleNamespace(
                 stdout=self.preflight_error, stderr="", return_code=1
+            )
+        if self.proc_denied and "--proc /proc" in command:
+            return SimpleNamespace(
+                stdout="", stderr=PROC_DENIED, return_code=1
             )
         if "--as-pid-1" in command:
             stdout = _workspace_completion(command, stdout)
@@ -584,3 +609,72 @@ async def test_workspace_rejects_a_tmp_alias_to_the_container_root():
     backend = workspace_backend(TrialEnvironment(temp_root="/"))
     with pytest.raises(RuntimeError, match="/tmp"):
         await backend.aprepare_workspace("/work")
+
+
+def _bwrap_options(argv):
+    """Опции bwrap до разделителя ``--`` (дальше — сама команда)."""
+    return argv[: argv.index("--")]
+
+
+async def _prepared_argv(env):
+    backend = workspace_backend(env)
+    await backend.aprepare_workspace("/work")
+    await backend.aexec("pwd")
+    return _bwrap_options(shlex.split(env.calls[-1][0]))
+
+
+async def test_workspace_falls_back_to_private_tmpfs_when_procfs_is_denied():
+    # Docker без systempaths=unconfined не даёт смонтировать procfs: как у
+    # GigaCode, вместо отказа трайла — пустой tmpfs на /proc.
+    env = TrialEnvironment(proc_denied=True)
+    options = await _prepared_argv(env)
+
+    assert options[options.index("/proc") - 1] == "--tmpfs"
+    assert "--proc" not in options
+
+
+async def test_workspace_keeps_private_procfs_when_it_can_be_mounted():
+    options = await _prepared_argv(TrialEnvironment())
+
+    assert options[options.index("/proc") - 1] == "--proc"
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        ("bubblewrap 0.6.1", False),
+        ("bubblewrap 0.7.0", False),
+        ("bubblewrap 0.8.0", True),
+        ("bubblewrap 0.11.2", True),
+    ],
+)
+async def test_workspace_passes_disable_userns_only_when_bwrap_supports_it(
+    version, expected
+):
+    options = await _prepared_argv(TrialEnvironment(bwrap_version=version))
+
+    assert ("--disable-userns" in options) is expected
+
+
+async def test_workspace_drops_all_capabilities():
+    options = await _prepared_argv(TrialEnvironment())
+
+    assert options[options.index("--cap-drop") + 1] == "ALL"
+
+
+async def test_workspace_lets_git_write_its_repository_but_not_hooks():
+    # Как у GigaCode: add/commit/checkout пишут в .git, а hooks — нет:
+    # переписанный hook исполнился бы при следующей git-операции verifier.
+    env = TrialEnvironment(git_repository=True)
+    options = await _prepared_argv(env)
+    ro_binds = [
+        options[i + 1] for i, arg in enumerate(options) if arg == "--ro-bind"
+    ]
+
+    assert "/work/.git" not in ro_binds
+    assert "/work/.git/hooks" in ro_binds
+    assert "/work/.git" in [
+        options[i + 1] for i, arg in enumerate(options) if arg == "--bind"
+    ]
+    reservation = next(c for c, _ in env.calls if "validate_mount_path" in c)
+    assert "/work/.git/hooks" in reservation
