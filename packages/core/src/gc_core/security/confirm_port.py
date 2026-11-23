@@ -11,6 +11,7 @@ from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
 from gc_core.execution.ports import port
 from gc_core.execution.turn_clock import human_wait
 from gc_core.message_policy.permission_denials import (
+    UNATTENDED_GUIDANCE,
     declined_error,
     session_denied_error,
     timed_out_error,
@@ -172,6 +173,18 @@ def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
     if outcome == CONFIRM_OUTCOME_SESSION_DENIED:
         return session_denied_error(**fields)
     return declined_error(**fields)
+
+
+def deny_guidance(ctx: Any, default: str | None = None) -> str | None:
+    """Инструкция модели после безусловного запрета защиты (без вопроса).
+
+    С человеком — ``default`` гарда (обычно «доложи и спроси»). Без него
+    спрашивать некого: тот же текст, что после вопроса в запуске без
+    человека (`UNATTENDED_GUIDANCE`) — продолжать задачу без действия.
+    """
+    if confirm_available(ctx):
+        return default
+    return UNATTENDED_GUIDANCE
 
 
 def guard_refusal(ctx: Any, error_type: str, **fields: Any) -> dict:

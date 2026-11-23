@@ -21,6 +21,7 @@ from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.execution.ports import port
 from gc_core.security.confirm_port import (
     confirmation_step,
+    deny_guidance,
     request_confirm,
 )
 from gc_core.security.dual_wrapper import dual_wrap
@@ -423,6 +424,10 @@ def _operational_read_block(
         "operation": "read",
         "message": "Operational .gc is read-protected.",
     }
+    # Без человека — инструкция «продолжай без этого действия».
+    guidance = deny_guidance(context.ctx)
+    if guidance:
+        err["guidance"] = guidance
     audit_policy_decision(
         context,
         tool_name=_tool_name(func, args),

@@ -18,7 +18,9 @@ from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_testkit.helpers.tool_ctx import local_ctx, with_local_ctx
 
 
-def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
+def _ctx(
+    tmp_path, *, protection_enabled=True, command_moderation=False, human=False
+):
     cfg = {
         "launch_root": str(tmp_path),
         "security.write_guard": {"enabled": False},
@@ -29,7 +31,9 @@ def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
         cfg["security.protected_paths"] = {"enabled": False}
     if command_moderation:
         cfg["command_moderation"] = {"enabled": True, "mode": "deny"}
-    return local_ctx(cfg, is_tui=False, tui_confirm=None, logger=None)
+    # human=True — в запуске есть кому ответить (TUI); без человека отказ
+    # велит продолжать задачу (test_unattended_refusals).
+    return local_ctx(cfg, is_tui=human, tui_confirm=None, logger=None)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +259,9 @@ def test_blocked_envelope_form_is_the_same_in_both_branches(
         "gc_core.security.confirm_port.request_confirm", lambda **k: False
     )
     asked = json.loads(
-        tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path))
+        tool(
+            command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path, human=True)
+        )
     )["error"]
 
     monkeypatch.setattr(
@@ -264,7 +270,9 @@ def test_blocked_envelope_form_is_the_same_in_both_branches(
         lambda cmd, cwd, extra=None, media=(): "deny",
     )
     denied = json.loads(
-        tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path))
+        tool(
+            command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path, human=True)
+        )
     )["error"]
 
     assert set(asked) == set(denied) == {"type", "reason", "guidance"}
