@@ -15,11 +15,13 @@ defaults, so the guarantee is stated in typed terms:
 Layering under test: schema defaults < bench defaults < profile overrides < runtime.
 """
 
+import asyncio
 import sys
 from copy import deepcopy
 
 import pytest
 import yaml
+from gc_core.backends.factory import parse_os_backend_kind, resolve_os_backend
 from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import LoadedSettings
@@ -164,6 +166,37 @@ def test_bench_defaults_win_over_schema_defaults():
 def test_profile_can_override_runtime_os_backend():
     """`os_backend` is a runtime fact, not a setting: it goes to RuntimeEnv."""
     assert _loaded({"os_backend": "local"}).runtime.os_backend == "local"
+
+
+async def test_workspace_job_selects_harbor_workspace_with_one_value():
+    job_path = HARBOR / "profiles" / "workspace_write.job.yaml"
+    job = yaml.safe_load(job_path.read_text(encoding="utf-8"))
+    config = job["agents"][0]["kwargs"]["gc_cli_config"]
+
+    assert config["os_backend"] == "harbor-workspace"
+    loaded = _loaded(config)
+    assert parse_os_backend_kind(loaded) == "harbor"
+    backend = resolve_os_backend(
+        loaded, environment=object(), loop=asyncio.get_running_loop()
+    )
+    assert not backend.supports_background
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"os_backend.kind": "harbor-workspace"},
+        {"os_backend.harbor_workspace_write": True},
+    ],
+)
+async def test_workspace_settings_use_the_adapters_harbor_transport(overrides):
+    loaded = _loaded(overrides)
+    backend = resolve_os_backend(
+        loaded, environment=object(), loop=asyncio.get_running_loop()
+    )
+
+    assert parse_os_backend_kind(loaded) == "harbor"
+    assert not backend.supports_background
 
 
 def test_bench_does_not_set_generation_kwargs_without_profile():

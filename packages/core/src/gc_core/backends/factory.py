@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, get_args
 
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
@@ -23,10 +23,12 @@ from gc_core.backends.sandbox import (
     sandbox_auto_workdir,
 )
 from gc_core.config_modules.env_vars import gc_paths
+from gc_core.config_modules.os_backend import OsBackendKind
 from gc_core.execution_workspace import launch_root_from_config
 from gc_core.settings import runtime_of, settings_of
 
-_SUPPORTED = frozenset({"local", "harbor", "docker", "ssh", "exec", "sandbox"})
+_SUPPORTED = frozenset(get_args(OsBackendKind))
+_HARBOR_WORKSPACE = "harbor-workspace"
 
 
 def os_backend_section(settings: Any) -> dict:
@@ -37,10 +39,16 @@ def os_backend_section(settings: Any) -> dict:
     ``settings`` — всё, что принимают ``settings_of``/``runtime_of``.
     """
     section = settings_of(settings).os_backend.model_dump()
+    configured_kind = section["kind"]
     override = runtime_of(settings).os_backend
     if isinstance(override, str) and override.strip():
         section["kind"] = override.strip().lower()
     section["kind"] = str(section.get("kind") or "local").strip().lower()
+    # The adapter's default runtime selection of Harbor still uses the
+    # workspace policy when it was requested in the typed settings.
+    section["harbor_workspace_write"] = section["harbor_workspace_write"] or (
+        _HARBOR_WORKSPACE in (configured_kind, section["kind"])
+    )
     return section
 
 
@@ -75,14 +83,16 @@ def ssh_control_dir() -> Path:
 
 
 def parse_os_backend_kind(settings: Any) -> str:
-    """Нормализованный ``kind`` секции ``os_backend`` (с переопределением
-    ``RuntimeEnv.os_backend``)."""
-    kind = os_backend_section(settings)["kind"]
-    if kind not in _SUPPORTED:
+    """Return the transport kind after applying the runtime selection."""
+    return _transport_kind(os_backend_section(settings)["kind"])
+
+
+def _transport_kind(selector: str) -> str:
+    if selector not in _SUPPORTED:
         raise ValueError(
-            f"unsupported os_backend: {kind!r} (expected one of {sorted(_SUPPORTED)})"
+            f"unsupported os_backend: {selector!r} (expected one of {sorted(_SUPPORTED)})"
         )
-    return kind
+    return "harbor" if selector == _HARBOR_WORKSPACE else selector
 
 
 def resolve_os_backend(
@@ -98,13 +108,21 @@ def resolve_os_backend(
     ``harbor`` requires ``environment`` and ``loop``. ``settings`` — anything
     ``settings_of``/``runtime_of`` accept (context, ``LoadedSettings``).
     """
-    if override is not None:
+    config = settings_of(settings)
+    section = os_backend_section(settings)
+    workspace_write = section["harbor_workspace_write"]
+    if override is not None and not workspace_write:
         return override
 
-    agent = settings_of(settings).agent
+    agent = config.agent
     # Нормализацию (None → дефолт, нечисло и < 0 — ошибка) делает схема.
     cap = agent.exec_output_capture_max_chars
-    kind = parse_os_backend_kind(settings)
+    kind = _transport_kind(section["kind"])
+    if workspace_write and (kind != "harbor" or override is not None):
+        raise ValueError(
+            "harbor-workspace requires the Harbor backend "
+            "without an explicit backend override"
+        )
     if kind == "local":
         return LocalFsBackend(exec_output_capture_max_chars=cap)
 
@@ -124,9 +142,13 @@ def resolve_os_backend(
             ),
             exec_init=(agent.harbor_exec_init or "").strip() or None,
             runtime_probe_ttl_sec=agent.runtime_probe_ttl_sec,
+            workspace_protected_paths=(
+                tuple(config.security.protected_paths.extra)
+                if workspace_write
+                else None
+            ),
         )
 
-    section = os_backend_section(settings)
     if kind in ("docker", "ssh", "exec"):
         return RemoteShellBackend(
             _remote_argv_prefix(kind, section),

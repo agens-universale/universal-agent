@@ -1,5 +1,6 @@
 from typing import Optional
 
+import pytest
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     build_execution_workspace,
@@ -23,9 +24,17 @@ class FakeSandboxBackend:
         return self._cwd
 
     async def exists(self, path: str) -> bool:
-        if path.endswith("/.git"):
-            return self._git
-        return path in self._tree
+        return (
+            path in self._tree
+            or (path.endswith("/.git") and self._git)
+            or await self.is_file(path)
+        )
+
+    async def is_file(self, path: str) -> bool:
+        if path.endswith("/.git/HEAD") and self._git:
+            return True
+        parent, _, name = path.rpartition("/")
+        return (name, False) in self._tree.get(parent, [])
 
     async def is_dir(self, path: str) -> bool:
         return path in self._tree
@@ -89,6 +98,23 @@ async def test_no_git_dir_reports_false():
     assert data["projectDir"] == "/app"
     assert data["isGitProject"] == "false"
     assert data["projectDirListing"] == ""
+
+
+@pytest.mark.parametrize(
+    ("tree", "expected"),
+    [
+        ({"/app": [(".git", True)], "/app/.git": []}, "false"),
+        ({"/app": [(".git", False)]}, "true"),
+    ],
+    ids=["reserved-directory", "worktree-marker"],
+)
+async def test_git_status_distinguishes_mountpoint_from_worktree(
+    tree, expected
+):
+    backend = FakeSandboxBackend(cwd="/app", tree=tree, git=False)
+    data = await get_project_data(workspace=_ws(backend))
+
+    assert data["isGitProject"] == expected
 
 
 async def test_local_path_unchanged_when_workspace_is_none(

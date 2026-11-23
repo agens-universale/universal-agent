@@ -9,6 +9,7 @@ read/list use shell through exec (``PosixShellFsMixin``); здесь тольк�
 """
 
 import asyncio
+import base64
 import contextlib
 import os
 import posixpath
@@ -17,10 +18,18 @@ import shlex
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, ContextManager, Optional
+from typing import Any, ContextManager, Literal, Optional
 
 from gc_core.backends.capture import BoundedStreamAccumulator
-from gc_core.backends.posix_shell_fs import PosixShellFsMixin
+from gc_core.backends.harbor_workspace import (
+    IMAGE_EXEC_ENV_NAMES,
+    TRUSTED_EXEC_ENV,
+    HarborWorkspace,
+)
+from gc_core.backends.posix_shell_fs import (
+    CWD_PRIME_TIMEOUT_SEC,
+    PosixShellFsMixin,
+)
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
     WALK_OUTPUT_MAX_CHARS,
@@ -54,11 +63,17 @@ check_target() {
 check_target || exit 1
 """
 
-_PREPARE_WRITE = (
+_SELECT_WRITE_STAGE = (
     _CHECK_WRITE_TARGET
     + """\
 if [ ! -d "$parent" ]; then mkdir -p -- "$parent" || exit 1; fi
 if [ -w "$parent" ]; then stage=$adjacent; else stage=$fallback; fi
+"""
+)
+
+_PREPARE_WRITE = (
+    _SELECT_WRITE_STAGE
+    + """\
 mkdir -m 700 -- "$stage" || exit 1
 printf '%s\\n' "$stage"
 """
@@ -67,27 +82,36 @@ printf '%s\\n' "$stage"
 _CLEAN_WRITE_STAGE = (
     'rm -f -- "$stage/payload" "$stage/candidate"; rmdir -- "$stage"'
 )
+_WRITE_STAGE_TRAP = f"trap '{_CLEAN_WRITE_STAGE}' EXIT\n"
+_CLEAN_WORKSPACE_WRITE_STAGES = (
+    'for stage in "$fallback" "$adjacent"; do\n'
+    '    if [ -d "$stage" ] && [ ! -L "$stage" ]; then\n'
+    f"        {_CLEAN_WRITE_STAGE}\n"
+    "    fi\n"
+    "done\n"
+)
+# The encoded chunk and wrapper must fit in one exec argument.
+_WORKSPACE_WRITE_CHUNK_BYTES = 32 * 1024
 
 _PUBLISH_WRITE = (
-    f"trap '{_CLEAN_WRITE_STAGE}' EXIT\n"
-    + _CHECK_WRITE_TARGET
+    _CHECK_WRITE_TARGET
     + """\
 if [ "$operation" = append ]; then
-    cat < "$stage/payload" >> "$target"
+    cat < "$payload" >> "$target"
     exit $?
 fi
 overwrite_in_place() {
     # Rename requires directory access and a candidate with matching ownership.
     # A permitted write to the existing inode preserves both owner and mode.
     [ ! -L "$target" ] && [ -f "$target" ] || return 1
-    cat < "$stage/payload" > "$target"
+    cat < "$payload" > "$target"
 }
 if [ "$stage" != "$adjacent" ]; then
     overwrite_in_place
     exit $?
 fi
 candidate=$stage/candidate
-cat < "$stage/payload" > "$candidate" || exit 1
+cat < "$payload" > "$candidate" || exit 1
 if [ ! -L "$target" ] && [ -f "$target" ]; then
     metadata=$(stat -c '%u:%g %a' -- "$target") || exit 1
     set -f
@@ -95,8 +119,11 @@ if [ ! -L "$target" ] && [ -f "$target" ]; then
     if [ "$#" -ne 2 ]; then echo 'invalid stat response' >&2; exit 1; fi
     candidate_owner=$(stat -c '%u:%g' -- "$candidate") || exit 1
     if [ "$candidate_owner" != "$1" ] && ! chown "$1" "$candidate"; then
-        uid=$(id -u) || exit 1
-        [ "$uid" != 0 ] || exit 1
+        # UID 0 in the sandbox cannot assign owners outside its ID mapping.
+        if [ "$workspace_write" = 0 ]; then
+            uid=$(id -u) || exit 1
+            [ "$uid" != 0 ] || exit 1
+        fi
         overwrite_in_place
         exit $?
     fi
@@ -104,6 +131,16 @@ if [ ! -L "$target" ] && [ -f "$target" ]; then
 fi
 mv -fT -- "$candidate" "$target"
 """
+)
+
+_PUBLISH_WORKSPACE_WRITE = (
+    "workspace_write=1\n"
+    + _SELECT_WRITE_STAGE
+    + 'if [ "$stage" = "$adjacent" ]; then\n'
+    + '    mkdir -m 700 -- "$stage" || exit 1\n'
+    + _WRITE_STAGE_TRAP
+    + "fi\n"
+    + _PUBLISH_WRITE
 )
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
@@ -259,6 +296,28 @@ def build_harbor_shell_command(
     return body
 
 
+def _workspace_shell_command(command: str, exec_init: str | None) -> str:
+    if exec_init != "bashrc":
+        return build_harbor_shell_command(command, exec_init=exec_init)
+    # Source guarded bashrc files interactively, with job-control diagnostics
+    # suppressed. Restore stderr before running the ordinary non-login shell.
+    init = (
+        _BASHRC_EXEC_INIT
+        + f"exec /bin/bash -c {shlex.quote(command)} bash 2>&3 3>&-\n"
+    )
+    argv = ["/bin/bash", "--noprofile", "--norc", "-ic", init]
+    return "exec " + shlex.join(argv) + " 3>&2 2>/dev/null"
+
+
+def _check_workspace_result(result: Any, action: str) -> None:
+    if result.return_code != 0:
+        # Docker may merge stderr into stdout.
+        detail = (result.stderr or result.stdout or "").strip()[:500]
+        raise RuntimeError(
+            f"Harbor workspace-write {action} failed: {detail or 'no diagnostic'}"
+        )
+
+
 class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
     is_sandbox = True
     # Файлы живут в контейнере: `exists()` это `test -e` по сети, `read()` —
@@ -280,17 +339,130 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
         exec_init: Optional[str] = None,
         runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC,
+        workspace_protected_paths: tuple[str, ...] | None = None,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
         self._runtime_probe = RuntimeProbeCache(runtime_probe_ttl_sec)
+        self._workspace_protected_paths = workspace_protected_paths
+        self._workspace: HarborWorkspace | None = None
+        self._workspace_ready = False
+        self._workspace_exec_unconfirmed = False
+        if workspace_protected_paths is not None:
+            # Detached processes cannot outlive the bubblewrap PID namespace.
+            self.supports_background = False
         # Инициализация окружения для канала МОДЕЛИ (`aexec`): None — сырой
         # shell, "bashrc" — встроенный bootstrap, иначе свой префикс.
         self.exec_init = exec_init
         # WORKDIR контейнера, узнанный `aprime_default_cwd`; до того — None.
         self._discovered_cwd: Optional[str] = None
+
+    async def aprepare_workspace(self, root: str) -> None:
+        """Resolve the mounts and model environment before any tool executes."""
+        if self._workspace_protected_paths is None:
+            return
+        if self._workspace is not None:
+            raise RuntimeError(
+                "Harbor workspace-write already has a reservation"
+            )
+        image_env_args = " ".join(
+            f'"${{{name}-}}"' for name in IMAGE_EXEC_ENV_NAMES
+        )
+        result = await self._aenvironment_exec(
+            f"cd -- {shlex.quote(root)} && "
+            r"""printf '%s\0' "$(pwd -P)" "$(cd -- /tmp && pwd -P)" """
+            + image_env_args,
+            env={"BASH_ENV": "", "ENV": ""},
+            timeout=CWD_PRIME_TIMEOUT_SEC,
+        )
+        fields = (result.stdout or "").removesuffix("\0").split("\0")
+        if (
+            result.return_code != 0
+            or len(fields) != len(IMAGE_EXEC_ENV_NAMES) + 2
+        ):
+            raise RuntimeError(f"Cannot resolve Harbor workspace: {root!r}")
+        physical_root, temp_root, *image_values = fields
+        if temp_root != "/tmp":
+            raise RuntimeError(
+                "Harbor workspace-write requires /tmp to resolve to /tmp "
+                f"inside the task container, got {temp_root!r}"
+            )
+        workspace = HarborWorkspace(
+            physical_root,
+            tuple(zip(IMAGE_EXEC_ENV_NAMES, image_values, strict=True)),
+            self._workspace_protected_paths,
+            f"/tmp/.gc-workspace-lease-{uuid.uuid4().hex}",
+        )
+        # Remember the lease before exec. The reservation can finish even
+        # when the transport loses its reply.
+        self._workspace = workspace
+        try:
+            reserved = await self._aenvironment_exec(
+                workspace.reserve_metadata_command(),
+                env=TRUSTED_EXEC_ENV,
+                timeout=CWD_PRIME_TIMEOUT_SEC,
+            )
+            _check_workspace_result(reserved, "metadata reservation")
+            result = await self._aexec_impl(
+                workspace.wrap(
+                    "test -w . && test -w /tmp && /bin/true || "
+                    "{ printf '%s\\n' 'workspace or /tmp is not writable' >&2; exit 1; }"
+                ),
+                timeout=CWD_PRIME_TIMEOUT_SEC,
+            )
+            _check_workspace_result(result, "preflight")
+        except (Exception, asyncio.CancelledError):
+            with contextlib.suppress(Exception):
+                await self.arelease_workspace()
+            raise
+        self._workspace_ready = True
+        self._discovered_cwd = physical_root
+
+    async def arelease_workspace(self) -> None:
+        """Release the trial's synthetic mount points after its tools stop."""
+        self._workspace_ready = False
+        if self._workspace is None:
+            return
+        if self._workspace_exec_unconfirmed:
+            # A transport timeout can outlive the remote process. Keep its
+            # mounts reserved until the trial environment is torn down.
+            raise RuntimeError(
+                "Harbor workspace command completion could not be confirmed"
+            )
+        result = await self._aenvironment_exec(
+            self._workspace.release_metadata_command(),
+            env=TRUSTED_EXEC_ENV,
+            timeout=CWD_PRIME_TIMEOUT_SEC,
+        )
+        _check_workspace_result(result, "metadata cleanup")
+        self._workspace = None
+
+    def _require_workspace(self) -> HarborWorkspace:
+        if self._workspace is None or not self._workspace_ready:
+            raise RuntimeError("Harbor workspace-write is not initialized")
+        return self._workspace
+
+    async def _aenvironment_exec(
+        self,
+        command: str,
+        *,
+        timeout: int | None,
+        env: dict[str, str] | None = None,
+    ) -> Any:
+        async def _exec():
+            if env is None:
+                return await self._env.exec(command, timeout_sec=timeout)
+            # Harbor applies phase-scoped env after per-command env. Scope
+            # these overrides around the call on the environment's loop.
+            scope = getattr(self._env, "scoped_exec_env", None)
+            with scope(env) if scope else contextlib.nullcontext():
+                return await self._env.exec(
+                    command, timeout_sec=timeout, env=env
+                )
+
+        return await self._aawait(_exec())
 
     async def _aawait(self, coro):
         """То же из асинхронного кода — не занимая ни поток, ни event loop.
@@ -369,8 +541,14 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         """
 
         async def _drive():
-            return await self._aawait(
-                self._env.exec(full, timeout_sec=timeout)
+            return await self._aenvironment_exec(
+                full,
+                timeout=timeout,
+                env=(
+                    TRUSTED_EXEC_ENV
+                    if self._workspace_protected_paths is not None
+                    else None
+                ),
             )
 
         stop = current_user_stop()
@@ -436,6 +614,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         capture_max_chars: Optional[int] = None,
         exec_init: Optional[str] = None,
         probe: bool = True,
+        workspace_channel: Literal["command", "file"] | None = None,
     ) -> ExecResult:
         """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
@@ -445,19 +624,36 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         """
         if probe:
             await self._runtime_probe.ensure(self._aprobe)
-        full = build_harbor_shell_command(
-            command, cwd=cwd, env=env, exec_init=exec_init
+        workspace_exec = (
+            workspace_channel is not None
+            and self._workspace_protected_paths is not None
         )
+        if workspace_exec:
+            full = self._require_workspace().wrap(
+                _workspace_shell_command(command, exec_init),
+                cwd=cwd,
+                env=env,
+                model_command=workspace_channel == "command",
+            )
+        else:
+            full = build_harbor_shell_command(
+                command, cwd=cwd, env=env, exec_init=exec_init
+            )
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
         try:
             with scope:
                 res = await self._aexec_watching(full, timeout=timeout)
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
+            if workspace_exec:
+                self._workspace_exec_unconfirmed = True
             if not self._is_exec_timeout(exc):
                 raise
             return self._timed_out_result(streamed, cap)
-        return self._completed_result(res, cap)
+        result = self._completed_result(res, cap)
+        if workspace_exec and result.timed_out:
+            self._workspace_exec_unconfirmed = True
+        return result
 
     @staticmethod
     def _python_command(code: str) -> str:
@@ -485,6 +681,13 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             capture_max_chars=self.walk_output_max_chars,
         )
 
+    async def _afs_write_exec(self, command: str) -> ExecResult:
+        return await self._aexec_impl(
+            command,
+            capture_max_chars=self.walk_output_max_chars,
+            workspace_channel="file",
+        )
+
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
         await self._awrite_payload(data, path, operation="write")
 
@@ -502,6 +705,10 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         stage_name = f".gc-write-{uuid.uuid4().hex}"
         adjacent = posixpath.join(parent, stage_name)
         fallback = posixpath.join("/tmp", stage_name)
+        if self._workspace_protected_paths is not None:
+            fallback = posixpath.join(
+                self._require_workspace().root, f"{stage_name}-upload"
+            )
         variables = (
             f"target={shlex.quote(path)}\n"
             f"parent={shlex.quote(parent)}\n"
@@ -509,6 +716,11 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             f"fallback={shlex.quote(fallback)}\n"
             f"operation={operation}\n"
         )
+        if self._workspace_protected_paths is not None:
+            await self._awrite_workspace_payload(
+                path, operation, data, fallback, variables
+            )
+            return
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload = Path(tmp_dir) / "payload"
             payload.write_bytes(data)
@@ -528,7 +740,12 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                     )
                 )
                 result = await self._afs_exec(
-                    variables + stage_var + _PUBLISH_WRITE
+                    variables
+                    + stage_var
+                    + 'payload="$stage/payload"\n'
+                    + "workspace_write=0\n"
+                    + _WRITE_STAGE_TRAP
+                    + _PUBLISH_WRITE
                 )
                 if result.return_code != 0:
                     raise self._fs_failure(path, result, what=operation)
@@ -537,6 +754,50 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 with contextlib.suppress(Exception):
                     await self._afs_exec(stage_var + _CLEAN_WRITE_STAGE)
                 raise
+
+    async def _awrite_workspace_payload(
+        self,
+        path: str,
+        operation: str,
+        data: bytes,
+        stage: str,
+        variables: str,
+    ) -> None:
+        # Harbor Docker can fall back from cp to an unwrapped root-side tar.
+        # Keep staging and publication inside bwrap for every transfer.
+        quoted_stage = shlex.quote(stage)
+        payload = shlex.quote(posixpath.join(stage, "payload"))
+        cleanup = True
+        try:
+            prepared = await self._afs_write_exec(
+                f"mkdir -m 700 -- {quoted_stage}"
+            )
+            # A lost reply can leave a directory behind. A definite mkdir
+            # failure does not give this operation ownership of the path.
+            cleanup = prepared.return_code in (None, 0)
+            if prepared.return_code != 0:
+                raise self._fs_failure(path, prepared, what=operation)
+            for start in range(
+                0, max(1, len(data)), _WORKSPACE_WRITE_CHUNK_BYTES
+            ):
+                chunk = data[start : start + _WORKSPACE_WRITE_CHUNK_BYTES]
+                encoded = shlex.quote(base64.b64encode(chunk).decode("ascii"))
+                uploaded = await self._afs_write_exec(
+                    f"printf '%s' {encoded} | /usr/bin/base64 -d >> {payload}"
+                )
+                if uploaded.return_code != 0:
+                    raise self._fs_failure(path, uploaded, what=operation)
+            result = await self._afs_write_exec(
+                variables + f"payload={payload}\n" + _PUBLISH_WORKSPACE_WRITE
+            )
+            if result.return_code != 0:
+                raise self._fs_failure(path, result, what=operation)
+        finally:
+            if cleanup:
+                with contextlib.suppress(Exception):
+                    await self._afs_write_exec(
+                        variables + _CLEAN_WORKSPACE_WRITE_STAGES
+                    )
 
     async def _adownload_bytes(self, path: str) -> bytes:
         await self._runtime_probe.ensure(self._aprobe)
@@ -580,6 +841,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             env=env,
             capture_max_chars=capture_max_chars,
             exec_init=self.exec_init,
+            workspace_channel="command",
         )
 
     async def aexec_raw(
@@ -591,13 +853,14 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        """POSIX без профиля: помощники ФС, grep, пробы, MCP."""
+        """POSIX tool execution without the optional shell initialization."""
         return await self._aexec_impl(
             command,
             cwd=cwd,
             timeout=timeout,
             env=env,
             capture_max_chars=capture_max_chars,
+            workspace_channel="command",
         )
 
     async def aexec_argv(
@@ -618,6 +881,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             timeout=timeout,
             env=env,
             capture_max_chars=capture_max_chars,
+            workspace_channel="command",
         )
 
     async def arun_python(
@@ -635,4 +899,5 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             timeout=timeout,
             env=env,
             capture_max_chars=capture_max_chars,
+            workspace_channel="command",
         )

@@ -758,6 +758,7 @@ NOT_IN_MATRIX = {
     # контейнера или хоста. Покрытие: os_backends/test_os_backend_factory.py,
     # test_remote_shell_backend.py, test_sandbox_backend.py.
     "os_backend.kind": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.harbor_workspace_write": "Legacy Harbor profile selector; covered by test_harbor_adapter_config_schema_parity and test_harbor_workspace_write",
     "os_backend.cwd": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.env": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.docker.name": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
@@ -883,6 +884,8 @@ NOT_IN_MATRIX = {
     # исполнения. Асинхронность на них не завязана.
     "agent.walk_output_max_chars": "потолок обхода бэкенда; сценарий не обходит ФС",
     "agent.harbor_exec_init": "только Harbor: префикс канала модели в песочнице; сценарии матрицы локальные, покрыт test_harbor_backend",
+    "agent.stop_on_no_tool_response": "Covered by test_executor_turn_outcome and test_harbor_adapter_bundled_paths",
+    "agent.text_answer_mode": "Covered by test_executor_turn_outcome and test_harbor_adapter_bundled_paths",
     "chat_completions.llm.subagent_role_max_tokens": "потолок запроса роли субагента",
     "project_memory.compaction_max_tokens": "потолок компакции проектной памяти",
     # Задаёт сам харнесс: подмена сломала бы маршрутизацию ScriptedBackend.
@@ -914,10 +917,6 @@ NOT_IN_MATRIX = {
     "acp.todo_reminder_steps": "только ACP",
     "acp.confirm_timeout_sec": "только ACP: ожидание session/request_permission",
     "tui.finish_gate_mode": "только TUI",
-    "todo.reminder_steps": (
-        "напоминание чеклиста; матрица гоняет CLI и этот лист не "
-        "переключает. Канал Responses пишет его в runtime"
-    ),
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",
     "tui.bang_shell.max_output_bytes": "только TUI",
@@ -996,7 +995,6 @@ NOT_IN_MATRIX = {
     # --- читатель был скрыт в помощниках config_modules (KNOWN_UNREAD по ошибке)
     "mcp.meta.recommended_mcp_manifest": "путь манифеста для gc-cli -a/install, не ход агента; покрытие — mcp/test_manifest_versions",
     "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
-    "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
     "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
     "tui.show_reasoning": "не ход агента: только показ рассуждений в живой ленте TUI; покрытие — tui/test_trace_thoughts",

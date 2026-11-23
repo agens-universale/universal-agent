@@ -22,6 +22,7 @@ import os
 import re
 import shlex
 import threading
+from contextvars import copy_context
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -48,6 +49,7 @@ except ImportError:  # harbor < 0.24 has no capability gate
     AgentCapabilities = None
 
 if TYPE_CHECKING:
+    from gc_core.agent_executor import AgentExecutor
     from gc_core.settings import LoadedSettings
 
 # Harbor task transports -> gc-cli transports, 1:1. Harbor normalises `http` to
@@ -75,6 +77,23 @@ _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # Ключ настроек каталога скиллов в overrides агента.
 _SKILLS_PATH_KEY = "paths.skills_data_path"
+_STOP_GRACE_S = 30
+
+
+async def _wait_for_workspace_shutdown(worker: asyncio.Future) -> Any:
+    task = asyncio.current_task()
+    cancellations = task.cancelling() if task is not None else 0
+    try:
+        return await asyncio.wait_for(asyncio.shield(worker), _STOP_GRACE_S)
+    except (Exception, asyncio.CancelledError) as exc:
+        if task is not None and task.cancelling() > cancellations:
+            raise
+        # Harbor single-step trials score AgentTimeoutError, even with a
+        # shared workspace. An unconfirmed shutdown is a trial failure.
+        raise RuntimeError(
+            "Harbor workspace did not shut down cleanly before verification"
+        ) from exc
+
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -773,6 +792,30 @@ class GcCliExternal(BaseAgent):
             "llm_usage_by_model": self._usage_by_model(state),
         }
 
+    async def _stop_worker(
+        self,
+        worker: asyncio.Future,
+        executor: "AgentExecutor | None",
+        *,
+        workspace_write: bool,
+    ) -> Any:
+        with self._cancel_lock:
+            self._cancelled = True
+        if executor is not None:
+            executor.stop_run()
+        if workspace_write:
+            return await _wait_for_workspace_shutdown(worker)
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(worker), timeout=_STOP_GRACE_S
+            )
+        except TimeoutError:
+            self.logger.warning(
+                "gc-cli worker thread still running after stop_run(); "
+                "abandoning it and dumping best-effort partial state"
+            )
+            return None
+
     async def run(
         self,
         instruction: str,
@@ -780,6 +823,7 @@ class GcCliExternal(BaseAgent):
         context: AgentContext,
     ) -> None:
         from gc_core.agent_executor import AgentExecutor
+        from gc_core.backends.factory import os_backend_section
         from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
@@ -801,6 +845,9 @@ class GcCliExternal(BaseAgent):
                 environment, container_skills
             )
         settings = self._apply_injected_skills(settings, container_skills)
+        workspace_write = os_backend_section(settings)[
+            "harbor_workspace_write"
+        ]
         instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
@@ -814,6 +861,7 @@ class GcCliExternal(BaseAgent):
 
         async def _agent_run():
             nonlocal executor
+            from gc_core.backends.harbor import HarborBackend
             from gc_core.utils.async_http import aclose_clients
             from gc_core.utils.logging_module import release_run_logger
 
@@ -838,18 +886,23 @@ class GcCliExternal(BaseAgent):
                 await executor.arun([instruction])
                 return executor.get_state()
             finally:
-                # Пул httpx этого loop закрываем ЗДЕСЬ: `asyncio.run` ниже
-                # убьёт loop, а реестр клиентов ключуется по нему. Без этого
-                # клиент трайла жил до сборщика и всплывал «Event loop is
-                # closed» в чужом месте.
-                #
-                # Логгер трайла — туда же: Harbor ведёт много трайлов в одном
-                # процессе, а `logging` держит каждый логгер до конца процесса
-                # вместе с открытым файлом.
-                release_run_logger(getattr(ctx, "logger", None))
-                await aclose_clients()
+                try:
+                    # The outer timeout handler can return with the worker
+                    # still running. Keep mounts reserved until it stops.
+                    backend = getattr(ctx, "os_backend", None)
+                    if isinstance(backend, HarborBackend):
+                        await backend.arelease_workspace()
+                finally:
+                    # These resources belong to the worker and must be closed
+                    # before its event loop exits, including on cleanup errors.
+                    release_run_logger(getattr(ctx, "logger", None))
+                    await aclose_clients()
 
         def _run_loop():
+            with self._cancel_lock:
+                cancelled = self._cancelled
+            if cancelled:
+                return None
             timings.attach()  # sink routing is per thread — bind inside the worker
             return asyncio.run(_agent_run())
 
@@ -868,21 +921,20 @@ class GcCliExternal(BaseAgent):
         # отменить, поэтому на таймауте зовём `stop_run()` (кооперативный флаг,
         # который проверяет цикл) и даём потоку время выйти.
         state = None
-        fut = loop.run_in_executor(None, _run_loop)
+        # Harbor's task-phase environment is scoped to a ContextVar.
+        fut = loop.run_in_executor(None, copy_context().run, _run_loop)
         try:
-            state = await fut
+            state = await (asyncio.shield(fut) if workspace_write else fut)
         except asyncio.CancelledError:
-            with self._cancel_lock:
-                self._cancelled = True
-            if executor is not None:
-                executor.stop_run()
-            try:
-                state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
-            except TimeoutError:
-                self.logger.warning(
-                    "gc-cli worker thread still running after stop_run(); "
-                    "abandoning it and dumping best-effort partial state"
-                )
+            state = await self._stop_worker(
+                fut, executor, workspace_write=workspace_write
+            )
+            raise
+        except TimeoutError as exc:
+            if workspace_write:
+                raise RuntimeError(
+                    "Harbor workspace worker timed out before clean shutdown"
+                ) from exc
             raise
         finally:
             # On a Harbor agent timeout (CancelledError) or a backend error the worker

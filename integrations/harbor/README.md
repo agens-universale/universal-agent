@@ -138,6 +138,93 @@ agent_kwargs:
   обычно вкл); `chat_completions.auxiliary_llm.completion_kwargs` — summary / finish-gate /
   judges (thinking обычно выкл).
 
+## Workspace-write profile
+
+[workspace_write.job.yaml](profiles/workspace_write.job.yaml) is a native Harbor
+job config. Run it from the repository root with Python 3.12 and the Harbor
+version in `uv.lock` (0.22.0 at the time of writing). Set `agents[0].model_name`
+in the YAML to the model served by the endpoint.
+
+```bash
+uv sync --locked --python 3.12
+export GC_CLI_BACKEND_URL=http://127.0.0.1:8000/v1/chat/completions
+PYTHONPATH="$PWD/integrations/harbor" uv run --locked --python 3.12 harbor run \
+  -c integrations/harbor/profiles/workspace_write.job.yaml \
+  --path "$TASK_DIR" --jobs-dir "$JOBS_DIR"
+```
+
+For Fleet, use the YAML's `import_path` and copy `kwargs.gc_cli_config` into
+`agent_kwargs.gc_cli_config`. The single setting `os_backend: harbor-workspace`
+selects Harbor with the workspace-write policy. Other Harbor jobs default to
+`os_backend: harbor`. Build the runner with a revision that includes the new
+selector. The model and routing configuration can be supplied independently.
+
+- The task image needs Bash, GNU coreutils and a user-namespace build of
+  bubblewrap at `/usr/bin/bwrap` with `--disable-userns` support. The Linux
+  container policy must permit the required namespaces and a private procfs
+  mount. Harbor's effective workdir must be a writable project directory.
+  The container needs a writable `/tmp` directory that resolves to itself.
+  Startup probes the actual mounts and aborts the trial on failure.
+- Shell, Python, and tool-provided argv execute inside bubblewrap in the trial
+  container. Its root filesystem is visible read-only. The project is writable,
+  with read-only mounts for top-level `.git`, `.gc`, `.agents`, `.codex` and
+  `AGENTS.md`, and for the existing canonical paths declared in
+  `security.protected_paths.extra`. Empty directories reserve missing top-level
+  paths during the agent phase. Cleanup removes only the directories created
+  by the profile before the verifier starts. Commands and file tools share the
+  writable `/tmp` of the trial. Files there survive subsequent calls and are
+  visible to a verifier in the same container. Commands have a private PID namespace,
+  read-only procfs and a minimal `/dev`. Detached background jobs are unavailable.
+  On agent timeout, the adapter allows up to 30 seconds for the worker to stop
+  and release the reservations. A command or cleanup whose completion cannot be
+  confirmed fails the single-step trial before Harbor 0.22 starts the verifier.
+- Built-in file tools retain their UAG policy checks. In the External agent,
+  the write decorator checks the built-in path classes and the command
+  tripwire also checks `security.protected_paths.extra` on literal paths.
+  Both routes enforce the configured extra paths as read-only mounts.
+  The adapter defaults disable `read_guard`, `write_guard` and `url_policy`,
+  with `command_moderation.mode: allow`. File writes stage the payload in a
+  per-operation project directory and publish it under the same bubblewrap
+  mounts. Built-in reads use the task filesystem via Harbor.
+- The profile uses the container PATH, including Harbor's agent-phase environment.
+  `exec_command` sources `/etc/profile` and the image user's `.bashrc`
+  interactively inside bubblewrap, then runs the command with the resulting
+  exported environment. The executable, its interpreter and its libraries must
+  be visible. Invoke a project virtualenv
+  as `./.venv/bin/python`, or add its bin directory to PATH. Profile scripts
+  that require writing to a read-only location need a writable cache or tmp
+  directory. The adapter applies the image PATH and dynamic loader variables
+  inside model command launches. For images that use `BASH_ENV`, source the
+  initializer via `agent.harbor_exec_init` to run it inside the workspace
+  sandbox. Task images and their startup environment are trusted inputs.
+  Read-only mounts still allow reads and access to visible service sockets,
+  so trial images must follow the benchmark's mount policy.
+- Bubblewrap shares the task's network namespace. In Harbor 0.22, task phase
+  policy such as `[agent].network_mode = "no-network"` governs access from the
+  container. The Docker egress sidecar controls traffic to outside destinations
+  while allowing local traffic in that namespace. The example removes
+  `exec_fetch_url`, which otherwise defaults to runner-side HTTP. Optional MCP
+  servers and the model endpoint have their own execution locations and
+  connectivity.
+
+The local smoke run used Harbor 0.22.0, Docker Engine 28.4.0 and a Debian 13
+ARM64 task image with bubblewrap 0.12.0. Default Docker seccomp prevented user
+namespace creation. Dropping seccomp alone exposed a second failure mounting
+procfs. The disposable smoke task used this `environment/docker-compose.yaml`
+override with no host mounts or additional capabilities for `main`.
+
+```yaml
+services:
+  main:
+    security_opt:
+      - seccomp=unconfined
+      - systempaths=unconfined
+```
+
+The job profile leaves the runtime's controls in place. Run the startup probe
+and workspace checks for each benchmark image and container policy before
+using it for a comparison.
+
 ## Замечания
 
 - **Бэкенд-URL хост-сайд** (`127.0.0.1`), не `host.docker.internal` — цикл бежит на хосте,
