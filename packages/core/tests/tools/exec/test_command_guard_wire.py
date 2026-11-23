@@ -49,7 +49,7 @@ def test_execute_command_rm_rf_gc_denied(tmp_path, monkeypatch):
 
     executed = []
 
-    def fake_subprocess_run(*a, **kw):
+    def fake_subprocess_run(*_args, **_kwargs):
         executed.append(True)
         raise AssertionError(
             "subprocess must not be called for protected command"
@@ -73,7 +73,6 @@ def test_execute_command_rm_rf_gc_relative_denied(tmp_path, monkeypatch):
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    executed = []
     monkeypatch.setattr(
         "subprocess.run",
         lambda *a, **kw: (_ for _ in ()).throw(

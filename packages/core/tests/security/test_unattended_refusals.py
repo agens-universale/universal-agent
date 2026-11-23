@@ -10,13 +10,12 @@
 import json
 
 import pytest
-from gc_testkit.settings import fake_ctx
-
 from gc_core.message_policy.permission_denials import UNATTENDED_GUIDANCE
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.security.read_guard import enforce_read_guard
+from gc_testkit.settings import fake_ctx
 
 
 class _Logger:
@@ -30,18 +29,18 @@ class _Logger:
 
 
 @enforce_write_guard(path_arg="path")
-def _write(path: str, ctx=None) -> str:
-    return "written"
+def _write(path: str, **_kwargs) -> str:
+    raise AssertionError(f"Guard allowed the write to {path}")
 
 
 @enforce_read_guard(path_arg="path")
-def _read(path: str, ctx=None) -> str:
-    return "read"
+def _read(path: str, **_kwargs) -> str:
+    raise AssertionError(f"Guard allowed the read of {path}")
 
 
 @enforce_command_guard(payload_arg="command", tool_name="exec_command")
-def _command(command: str, ctx=None, cwd=None) -> str:
-    return "executed"
+def _command(command: str, **_kwargs) -> str:
+    raise AssertionError(f"Guard allowed the command {command}")
 
 
 @pytest.fixture
