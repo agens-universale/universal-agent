@@ -1,0 +1,21 @@
+# Native Harbor job configuration. Set model_name for your endpoint.
+n_concurrent_trials: 1
+environment:
+  type: docker
+  force_build: true
+agents:
+  - import_path: adapters.gc_cli_external:GcCliExternal
+    model_name: openai/qwen_next_vanilla
+    kwargs:
+      gc_cli_config:
+        os_backend: harbor-workspace
+        agent:
+          harbor_exec_init: bashrc
+          use_server_subagents: false
+          use_local_subagents: false
+          stop_tools: [turn_ask_human, project_memory, fs_view_image, exec_fetch_url]
+        security:
+          protected_paths:
+            enabled: true
+            # Add existing, canonical absolute paths in the task container here.
+            extra: []

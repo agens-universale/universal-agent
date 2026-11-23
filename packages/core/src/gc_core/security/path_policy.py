@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterable, Mapping
 from gc_core.execution.ports import port
 from gc_core.security.confirm_port import (
     confirmation_step,
+    deny_guidance,
     guard_refusal,
     refuse_in_place,
 )
@@ -277,6 +278,10 @@ def _protected_write_block(
             "path": candidate_path,
             "reason": "Path is protected (operational .gc / config).",
         }
+        # Без человека — инструкция «продолжай без этого действия».
+        _guidance = deny_guidance(context.ctx)
+        if _guidance:
+            _err["guidance"] = _guidance
         audit_policy_decision(
             context,
             tool_name=_tool_name(func, args),

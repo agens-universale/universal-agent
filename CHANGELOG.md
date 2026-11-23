@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added — Harbor workspace-write
+
+- Opt-in bubblewrap isolation in the Harbor trial container, with a shared
+  writable project and trial temporary directory, and read-only protected
+  mounts for shell and file writes.
+
 ### Breaking — Temporal на контракте хранилища тредов v2
 
 - Под Temporal ядро пишет тред через контракт `ThreadStore` v2, как локально: хранилище воркера — любое v2 (`FileThreadStore` из `gc_core.threads.file_store`, `SQLiteThreadStore` из `gc_stores.sqlite`, `PostgresThreadStore`, своё — проверка `gc_testkit.thread_store_conformance_v2`). Activities треда — `universal_agent.thread.{get,read_stream,read_archive,resolve_alias,commit,append_side,claim,release,delete}` вместо `load`/`commit`/`read_trace`.

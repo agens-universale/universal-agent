@@ -6,12 +6,12 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
+from gc_core.backends.protocol import FsBackend
 from gc_core.backends.runtime_probe import (
     _RUNTIME_PROBE_TIMEOUT_SEC,
     RuntimeUnavailable,
 )
 from gc_testkit.runtime_probe import probe_stdout
-from gc_core.backends.protocol import FsBackend
 from gc_testkit.settings import make_settings
 
 
@@ -150,7 +150,7 @@ async def test_is_file_reads_shell_answer_and_raises_when_backend_is_down(
         ),
     }
 
-    async def exec_answer(command, **kw):
+    async def exec_answer(command, **_kw):
         hit = probe_stdout(command)
         if hit is not None:
             return FakeExecResult(stdout=hit, return_code=0)
@@ -184,7 +184,7 @@ async def test_is_dir_reads_shell_answer_and_raises_when_backend_is_down(
         ),
     }
 
-    async def exec_answer(command, **kw):
+    async def exec_answer(command, **_kw):
         hit = probe_stdout(command)
         if hit is not None:
             return FakeExecResult(stdout=hit, return_code=0)
@@ -218,7 +218,7 @@ async def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     env = FakeEnv()
     huge = "X" * 1000
 
-    async def big_exec(command, **kw):
+    async def big_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -240,7 +240,7 @@ async def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
     env = FakeEnv()
     huge = "X" * 1000
 
-    async def big_exec(command, **kw):
+    async def big_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -295,7 +295,8 @@ async def test_append_uploads_only_the_new_chunk(loop_in_thread):
 
     assert env.uploaded_bytes == [b"more"]
     assert len(env.calls) == 2
-    assert 'cat < "$stage/payload" >> "$target"' in env.calls[1]
+    assert 'payload="$stage/payload"' in env.calls[1]
+    assert 'cat < "$payload" >> "$target"' in env.calls[1]
 
 
 async def test_exec_env_prefix_quoting(loop_in_thread):
@@ -575,7 +576,7 @@ async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
 
 
 def _make_exec_returning(env, stdout, return_code=0):
-    async def fake_exec(command, **kw):
+    async def fake_exec(command, **_kw):
         hit = probe_stdout(command)
         if hit is not None:
             return FakeExecResult(stdout=hit, return_code=0)
@@ -588,7 +589,7 @@ def _make_exec_returning(env, stdout, return_code=0):
 async def test_exec_propagates_timed_out_from_environment(loop_in_thread):
     env = FakeEnv()
 
-    async def timed_exec(command, **kw):
+    async def timed_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -611,7 +612,7 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     env = FakeEnv()
     raw = b"hel"
 
-    async def head_exec(command, **kw):
+    async def head_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -647,7 +648,7 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
     encoded = base64.b64encode(raw).decode("ascii")
     assert len(encoded) > DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
-    async def head_exec(command, **kw):
+    async def head_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -663,7 +664,7 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
     )
     assert sample == raw
 
-    async def huge_tool(command, **kw):
+    async def huge_tool(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -682,7 +683,7 @@ async def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
     raw = b"B" * 200
     encoded = base64.b64encode(raw).decode("ascii")
 
-    async def head_exec(command, **kw):
+    async def head_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -704,7 +705,7 @@ async def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     # High bytes + NUL — would break under encode("utf-8") of a text stdout.
     raw = bytes([0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2, 0x00, 0xFF])
 
-    async def head_exec(command, **kw):
+    async def head_exec(command, **_kw):
         probed = _probe_result(command)
         if probed is not None:
             return probed
@@ -936,7 +937,7 @@ async def test_probe_runs_before_the_command_and_does_not_cd(loop_in_thread):
     env = FakeEnv()
     recorded = []
 
-    async def exec_record(command, **kw):
+    async def exec_record(command, **_kw):
         recorded.append(command)
         probed = _probe_result(command)
         if probed is not None:
@@ -959,7 +960,7 @@ async def test_successful_probe_is_reused_until_ttl(
     env = FakeEnv()
     recorded = []
 
-    async def exec_record(command, **kw):
+    async def exec_record(command, **_kw):
         recorded.append(command)
         probed = _probe_result(command)
         if probed is not None:
@@ -984,7 +985,7 @@ async def test_failed_probe_does_not_run_the_command(loop_in_thread):
     env = FakeEnv()
     recorded = []
 
-    async def exec_dead(command, **kw):
+    async def exec_dead(command, **_kw):
         recorded.append(command)
         return FakeExecResult(stderr="permission denied\n", return_code=1)
 
@@ -1020,7 +1021,7 @@ async def test_short_command_timeout_does_not_shrink_the_probe(loop_in_thread):
 async def test_probe_timeout_is_runtime_unavailable(loop_in_thread):
     env = FakeEnv()
 
-    async def exec_slow(command, **kw):
+    async def exec_slow(_command, **_kw):
         return FakeExecResult(return_code=None, timed_out=True)
 
     env.exec = exec_slow

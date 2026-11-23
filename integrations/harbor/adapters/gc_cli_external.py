@@ -22,6 +22,7 @@ import os
 import re
 import shlex
 import threading
+from contextvars import copy_context
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,6 +63,8 @@ except ImportError:  # Older Harbor contexts have only trial-wide counters.
     ModelUsage = None
 
 if TYPE_CHECKING:
+    from gc_core.agent_executor import AgentExecutor
+    from gc_core.backends.harbor import HarborBackend
     from gc_core.settings import LoadedSettings
 
 # Harbor task transports -> gc-cli transports, 1:1. Harbor normalises `http` to
@@ -90,6 +93,22 @@ DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # Ключ настроек каталога скиллов в overrides агента.
 _SKILLS_PATH_KEY = "paths.skills_data_path"
 _STOP_GRACE_S = 30
+
+
+async def _wait_for_workspace_shutdown(worker: asyncio.Future) -> Any:
+    task = asyncio.current_task()
+    cancellations = task.cancelling() if task is not None else 0
+    try:
+        return await asyncio.wait_for(asyncio.shield(worker), _STOP_GRACE_S)
+    except (Exception, asyncio.CancelledError) as exc:
+        if task is not None and task.cancelling() > cancellations:
+            raise
+        # Harbor single-step trials score AgentTimeoutError, even with a
+        # shared workspace. An unconfirmed shutdown is a trial failure.
+        raise RuntimeError(
+            "Harbor workspace did not shut down cleanly before verification"
+        ) from exc
+
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -758,6 +777,39 @@ class GcCliExternal(BaseAgent):
             "llm_usage_by_model": by_model,
         }
 
+    async def _stop_worker(
+        self,
+        worker: asyncio.Future,
+        executor: "AgentExecutor | None",
+        *,
+        workspace_write: bool,
+        workspace_backend: "HarborBackend | None",
+    ) -> Any:
+        if executor is not None:
+            executor.stop_run()
+        if workspace_write:
+            if workspace_backend is not None and not worker.done():
+                try:
+                    await workspace_backend.arequest_workspace_stop()
+                except Exception:
+                    # A lost stop reply does not determine the worker outcome.
+                    self.logger.warning(
+                        "Could not send Harbor workspace stop request",
+                        exc_info=True,
+                    )
+            return await _wait_for_workspace_shutdown(worker)
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(worker), timeout=_STOP_GRACE_S
+            )
+        except Exception:
+            self.logger.warning(
+                "gc-cli worker did not finish cleanly after stop_run(); "
+                "writing the available trajectory",
+                exc_info=True,
+            )
+            return None
+
     def _run_worker(self, timings: StepTimings, run_agent):
         with self._cancel_lock:
             if self._cancelled:
@@ -780,6 +832,7 @@ class GcCliExternal(BaseAgent):
         context: AgentContext,
     ) -> None:
         from gc_core.agent_executor import AgentExecutor
+        from gc_core.backends.factory import os_backend_section
         from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
@@ -801,15 +854,20 @@ class GcCliExternal(BaseAgent):
                 environment, container_skills
             )
         settings = self._apply_injected_skills(settings, container_skills)
+        workspace_write = os_backend_section(settings)[
+            "harbor_workspace_write"
+        ]
         instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
+        workspace_backend = None
         trace = TrajectoryRecorder()
         # Wall-clock split per step: LLM wait vs tool exec.
         timings = StepTimings(self.logs_dir / "timings.jsonl")
 
         async def _agent_run():
-            nonlocal executor
+            nonlocal executor, workspace_backend
+            from gc_core.backends.harbor import HarborBackend
             from gc_core.utils.async_http import aclose_clients
             from gc_core.utils.logging_module import release_run_logger
 
@@ -820,6 +878,7 @@ class GcCliExternal(BaseAgent):
                     environment=environment,
                     loop=loop,
                 )
+                workspace_backend = getattr(ctx, "os_backend", None)
                 await self._write_skills_debug(ctx, skill_sources)
                 executor = AgentExecutor(ctx)
                 # Отмену могли попросить, пока шла дискавери (до 120 с): тогда
@@ -834,16 +893,16 @@ class GcCliExternal(BaseAgent):
                     await executor.arun([instruction])
                 return executor.get_state()
             finally:
-                # Пул httpx этого loop закрываем ЗДЕСЬ: `asyncio.run` ниже
-                # убьёт loop, а реестр клиентов ключуется по нему. Без этого
-                # клиент трайла жил до сборщика и всплывал «Event loop is
-                # closed» в чужом месте.
-                #
-                # Логгер трайла — туда же: Harbor ведёт много трайлов в одном
-                # процессе, а `logging` держит каждый логгер до конца процесса
-                # вместе с открытым файлом.
-                release_run_logger(getattr(ctx, "logger", None))
-                await aclose_clients()
+                try:
+                    # The outer timeout handler can return with the worker
+                    # still running. Keep mounts reserved until it stops.
+                    if isinstance(workspace_backend, HarborBackend):
+                        await workspace_backend.arelease_workspace()
+                finally:
+                    # These resources belong to the worker and must be closed
+                    # before its event loop exits, including on cleanup errors.
+                    release_run_logger(getattr(ctx, "logger", None))
+                    await aclose_clients()
 
         # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
         # на loop Harbor.
@@ -861,7 +920,10 @@ class GcCliExternal(BaseAgent):
         # который проверяет цикл) и даём потоку время выйти.
         state = None
         partial = True
-        fut = loop.run_in_executor(None, self._run_worker, timings, _agent_run)
+        # Harbor's task-phase environment is scoped to a ContextVar.
+        fut = loop.run_in_executor(
+            None, copy_context().run, self._run_worker, timings, _agent_run
+        )
         try:
             # Keep the worker future available during cooperative cancellation.
             state = await asyncio.shield(fut)
@@ -869,18 +931,18 @@ class GcCliExternal(BaseAgent):
         except asyncio.CancelledError:
             with self._cancel_lock:
                 self._cancelled = True
-            if executor is not None:
-                executor.stop_run()
-            try:
-                state = await asyncio.wait_for(
-                    asyncio.shield(fut), timeout=_STOP_GRACE_S
-                )
-            except Exception:
-                self.logger.warning(
-                    "gc-cli worker did not finish cleanly after stop_run(); "
-                    "writing the available trajectory",
-                    exc_info=True,
-                )
+            state = await self._stop_worker(
+                fut,
+                executor,
+                workspace_write=workspace_write,
+                workspace_backend=workspace_backend,
+            )
+            raise
+        except TimeoutError as exc:
+            if workspace_write:
+                raise RuntimeError(
+                    "Harbor workspace worker timed out before clean shutdown"
+                ) from exc
             raise
         finally:
             if state is None and executor is not None:

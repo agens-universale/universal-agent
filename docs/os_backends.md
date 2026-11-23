@@ -4,7 +4,7 @@
 
 Куда уходят файловые и shell-тулы агента. Схема полей — в [configuration.md](configuration.md#секция-os_backend--где-живут-файлы-и-команды-тулов); поведение `sandbox` — в [rootbox.md](rootbox.md). Здесь — готовые блоки для копирования в `config.yml` или `<repo>/.gc/config.yml`.
 
-`kind`: `local` (дефолт) | `harbor` (только Harbor-адаптер) | `docker` | `ssh` | `exec` | `sandbox`.
+`kind`: `local` (дефолт) | `harbor`, `harbor-workspace` (только Harbor-адаптер) | `docker` | `ssh` | `exec` | `sandbox`.
 
 Голая строка эквивалентна объекту с `kind`:
 
@@ -172,13 +172,16 @@ os_backend:
 
 ---
 
-## `harbor`
+## `harbor` / `harbor-workspace`
 
 Только из Harbor-адаптера бенчей. Вручную в обычном `config.yml` не ставить — адаптер выставляет сам. См. [integrations/harbor/README.md](../integrations/harbor/README.md).
 
 ```yaml
 os_backend: harbor
 ```
+
+In `gc_cli_config`, set `os_backend: harbor-workspace` to select the
+workspace-write policy for a Harbor trial.
 
 ---
 
