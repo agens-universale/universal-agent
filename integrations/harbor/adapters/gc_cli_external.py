@@ -26,19 +26,28 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gc_core.execution.constants import NO_TOOL_RESPONSE
+from gc_core.execution.run_trace import observe_run_trace
+from gc_core.usage.account import UsageAccount
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import (
     Agent,
-    FinalMetrics,
     Observation,
     ObservationResult,
     Step,
     Trajectory,
 )
-from harbor.utils.trajectory_utils import format_trajectory_json
 
+from adapters.atif import (
+    TrajectoryRecorder,
+    final_metrics,
+    trial_usage_extra,
+    write_trajectory,
+)
+from adapters.atif import (
+    stringify_content as _stringify_content,
+)
 from adapters.gc_cli_config import build_gc_cli_settings, profile_value
 from adapters.step_timings import StepTimings
 
@@ -46,6 +55,11 @@ try:
     from harbor.agents.capabilities import AgentCapabilities
 except ImportError:  # harbor < 0.24 has no capability gate
     AgentCapabilities = None
+
+try:
+    from harbor.models.agent.context import ModelUsage
+except ImportError:  # Older Harbor contexts have only trial-wide counters.
+    ModelUsage = None
 
 if TYPE_CHECKING:
     from gc_core.settings import LoadedSettings
@@ -75,6 +89,7 @@ _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # Ключ настроек каталога скиллов в overrides агента.
 _SKILLS_PATH_KEY = "paths.skills_data_path"
+_STOP_GRACE_S = 30
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -105,23 +120,6 @@ if not _PROMPTS_DIR.is_dir():  # editable/local: fall back to repo
     _base = _assets if (_assets / "prompts").is_dir() else _repo_root
     _PROMPTS_DIR = _base / "prompts"
     _SKILLS_DIR = _base / "skills"
-
-
-def _stringify_content(content: Any) -> str:
-    """Flatten an OpenAI chat `content` (str | list[part] | None) to plain text."""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for p in content:
-            if isinstance(p, dict):
-                parts.append(p.get("text") or p.get("content") or "")
-            else:
-                parts.append(str(p))
-        return "\n".join(x for x in parts if x)
-    return str(content)
 
 
 def _classify_message(m: dict, attach_observation) -> "tuple[str, str] | None":
@@ -565,106 +563,91 @@ class GcCliExternal(BaseAgent):
         )
 
     def _populate_usage(
-        self, context: Any, state: Any
-    ) -> dict[str, Any] | None:
-        """Hand `state.usage` totals to Harbor, which otherwise writes nulls.
-
-        Totals cover every LLM call — main loop, summariser, finish gate, subagents.
-        `n_input_tokens` includes cache on both sides. `cost_usd` is left unset: vllm
-        returns no price, so cost is computed downstream from tokens and the tariff.
-        Best-effort like `_write_trajectory` — runs in a `finally` that may be
-        unwinding a timeout. Returns the totals for the caller's metadata.
-        """
+        self, context: AgentContext | None, state: Any
+    ) -> tuple[dict[str, Any] | None, dict[str, dict[str, int]] | None]:
+        """Report the complete trial and its per-model counts from one snapshot."""
         try:
-            usage = (
-                getattr(state, "usage", None) if state is not None else None
-            )
-            totals = usage.totals() if usage is not None else None
-            if not totals or not totals["calls"]:
-                return totals
+            usage = getattr(state, "usage", None)
+            if usage is None:
+                return None, None
+            snapshot = UsageAccount.from_meta(usage.to_meta())
+            totals = snapshot.totals()
+            by_model = {
+                name: {
+                    key: bucket[key] for key in ("input", "output", "cached")
+                }
+                for name, bucket in snapshot.by_model.items()
+            } or None
+            if context is None or not totals["calls"]:
+                return totals, by_model
             context.n_input_tokens = totals["input"]
             context.n_output_tokens = totals["output"]
             context.n_cache_tokens = totals["cached"]
+            if (
+                ModelUsage is not None
+                and by_model
+                and context.model_usage is None
+            ):
+                context.model_usage = {
+                    name: ModelUsage(
+                        n_input_tokens=bucket["input"],
+                        n_output_tokens=bucket["output"],
+                        n_cache_tokens=bucket["cached"],
+                    )
+                    for name, bucket in by_model.items()
+                }
             if totals["missing_usage_calls"]:
                 self.logger.warning(
                     "%d of %d LLM calls returned no usage; token totals are short by those",
                     totals["missing_usage_calls"],
                     totals["calls"],
                 )
-            return totals
+            return totals, by_model
         except Exception:
             self.logger.exception("could not report token usage to Harbor")
-            return None
+            return None, None
 
-    def _usage_by_model(self, state: Any) -> dict[str, dict[str, int]] | None:
-        """Tokens per provider model from `state.usage.by_model` — AUTO runs two
-        models, and downstream pricing needs the split. No prices here."""
-        # Best-effort like `_populate_usage`: runs in the `finally` metadata build.
+    def _trace_session_id(self, state: Any) -> str | None:
+        return self._session_id or getattr(state, "state_id", None)
+
+    def _write_trajectory(
+        self,
+        state: Any,
+        steps: list[Step] | None = None,
+        *,
+        partial: bool = False,
+        usage_totals: dict[str, Any] | None = None,
+    ) -> int:
+        """Write the trial trace, with a state fallback before capture starts."""
         try:
-            usage = (
-                getattr(state, "usage", None) if state is not None else None
-            )
-            by_model = getattr(usage, "by_model", None) or {}
-            if not by_model:
-                return None
-            return {
-                name: {
-                    "input": int(bucket.get("input", 0) or 0),
-                    "output": int(bucket.get("output", 0) or 0),
-                    "cached": int(bucket.get("cached", 0) or 0),
-                }
-                for name, bucket in by_model.items()
-            }
-        except Exception:
-            self.logger.exception(
-                "could not report token usage by model to Harbor"
-            )
-            return None
-
-    def _write_trajectory(self, state: Any) -> int:
-        """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.
-
-        Writes to ``self.logs_dir`` (harbor's agent_dir), which the trial syncs back
-        to the results `agent/` folder. Best-effort: a failure here never fails the run.
-        Returns the number of steps written (0 if nothing was dumped).
-        """
-        try:
-            archived = list(getattr(self, "_evicted_messages", None) or [])
-            current = (
-                list(getattr(state, "messages", None) or [])
-                if state is not None
-                else []
-            )
-            # Full trajectory: compaction-evicted steps (via callback) + compacted tail.
-            messages = archived + current
-            steps = _messages_to_steps(messages)
+            if not steps:
+                current = list(getattr(state, "messages", None) or [])
+                steps = _messages_to_steps(current)
             if not steps:
                 return 0
+            extra = {"partial": True} if partial else {}
+            if getattr(state, "terminal_outcome", None) == NO_TOOL_RESPONSE:
+                extra["terminal_outcome"] = NO_TOOL_RESPONSE
+            if usage_totals and usage_totals["calls"]:
+                extra.update(trial_usage_extra(steps, usage_totals))
             trajectory = Trajectory(
-                session_id=self._session_id,
+                schema_version="ATIF-v1.7",
+                session_id=self._trace_session_id(state),
                 agent=Agent(
                     name=self.name(),
                     version=self.version() or "unknown",
                     model_name=self._model,
                 ),
                 steps=steps,
-                final_metrics=FinalMetrics(total_steps=len(steps)),
-                extra=(
-                    {"terminal_outcome": NO_TOOL_RESPONSE}
-                    if getattr(state, "terminal_outcome", None)
-                    == NO_TOOL_RESPONSE
-                    else None
-                ),
+                final_metrics=final_metrics(steps),
+                extra=extra or None,
             )
             path = self.logs_dir / "trajectory.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(format_trajectory_json(trajectory.to_json_dict()))
-            self.logger.debug(f"ATIF trajectory dumped to {path}")
+            write_trajectory(path, trajectory)
+            self.logger.debug("ATIF trajectory dumped to %s", path)
             return len(steps)
         except Exception:
-            self.logger.error(
-                "Failed to write ATIF trajectory.json", exc_info=True
-            )
+            self.logger.exception("Failed to write ATIF trajectory.json")
             return 0
 
     @staticmethod
@@ -736,16 +719,21 @@ class GcCliExternal(BaseAgent):
             updates[f"mcp.servers.{name}"] = server
         return settings.with_overrides(updates, layer="harbor")
 
-    def _dump_outcome(self, state, *, executor, timings, context) -> None:
+    def _dump_outcome(
+        self, state, trace, *, timings, context, partial
+    ) -> None:
         """Сбросить траекторию, тайминги и счётчики токенов — что бы ни случилось.
 
         Вынесено из `run` целиком: у хвоста своя логика восстановления на
         оборванном прогоне, и вместе с телом `run` он давал сложность выше
         порога (Sonar S3776).
         """
-        if state is None and executor is not None:
-            state = executor.get_state()
-        n_steps = self._write_trajectory(state)
+        # A worker can still receive a response after the cancellation grace period.
+        steps = trace.freeze()
+        totals, by_model = self._populate_usage(context, state)
+        n_steps = self._write_trajectory(
+            state, steps, partial=partial, usage_totals=totals
+        )
         # On a timeout the worker is abandoned mid-call: these are the totals
         # reached so far, and timings.jsonl names the call still running.
         timing_summary = timings.summary()
@@ -754,14 +742,11 @@ class GcCliExternal(BaseAgent):
 
         # Populate AgentContext so the run isn't a black box: token counters the
         # same way every other Harbor agent reports them, plus metadata for triage.
-        if context is None:
-            return
-        totals = self._populate_usage(context, state)
-        if context.metadata is not None:
+        if context is None or context.metadata is not None:
             return
         context.metadata = {
             "agent": self.name(),
-            "session_id": self._session_id,
+            "session_id": self._trace_session_id(state),
             "total_steps": n_steps,
             "timings": timing_summary,
             # A zero token count means "no calls"; a missing one means "not
@@ -770,8 +755,23 @@ class GcCliExternal(BaseAgent):
             "llm_calls_without_usage": (
                 totals["missing_usage_calls"] if totals else None
             ),
-            "llm_usage_by_model": self._usage_by_model(state),
+            "llm_usage_by_model": by_model,
         }
+
+    def _run_worker(self, timings: StepTimings, run_agent):
+        with self._cancel_lock:
+            if self._cancelled:
+                return None
+
+        # Attaching imports the core on first use. Keep it outside the lock
+        # so cancellation on Harbor's event loop can proceed during setup.
+        timings.attach()
+        with self._cancel_lock:
+            cancelled = self._cancelled
+        if cancelled:
+            timings.close()
+            return None
+        return asyncio.run(run_agent())
 
     async def run(
         self,
@@ -804,13 +804,9 @@ class GcCliExternal(BaseAgent):
         instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
-        self._evicted_messages: list = []
+        trace = TrajectoryRecorder()
         # Wall-clock split per step: LLM wait vs tool exec.
         timings = StepTimings(self.logs_dir / "timings.jsonl")
-
-        def _on_messages_evicted(dropped: list) -> None:
-            # Host-side archive for ATIF dump; core State does not retain these.
-            self._evicted_messages.extend(dropped)
 
         async def _agent_run():
             nonlocal executor
@@ -823,7 +819,6 @@ class GcCliExternal(BaseAgent):
                     settings,
                     environment=environment,
                     loop=loop,
-                    on_messages_evicted=_on_messages_evicted,
                 )
                 await self._write_skills_debug(ctx, skill_sources)
                 executor = AgentExecutor(ctx)
@@ -835,7 +830,8 @@ class GcCliExternal(BaseAgent):
                 with self._cancel_lock:
                     if self._cancelled:
                         return executor.get_state()
-                await executor.arun([instruction])
+                with observe_run_trace(trace.observe):
+                    await executor.arun([instruction])
                 return executor.get_state()
             finally:
                 # Пул httpx этого loop закрываем ЗДЕСЬ: `asyncio.run` ниже
@@ -848,10 +844,6 @@ class GcCliExternal(BaseAgent):
                 # вместе с открытым файлом.
                 release_run_logger(getattr(ctx, "logger", None))
                 await aclose_clients()
-
-        def _run_loop():
-            timings.attach()  # sink routing is per thread — bind inside the worker
-            return asyncio.run(_agent_run())
 
         # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
         # на loop Harbor.
@@ -868,32 +860,31 @@ class GcCliExternal(BaseAgent):
         # отменить, поэтому на таймауте зовём `stop_run()` (кооперативный флаг,
         # который проверяет цикл) и даём потоку время выйти.
         state = None
-        fut = loop.run_in_executor(None, _run_loop)
+        partial = True
+        fut = loop.run_in_executor(None, self._run_worker, timings, _agent_run)
         try:
-            state = await fut
+            # Keep the worker future available during cooperative cancellation.
+            state = await asyncio.shield(fut)
+            partial = False
         except asyncio.CancelledError:
             with self._cancel_lock:
                 self._cancelled = True
             if executor is not None:
                 executor.stop_run()
             try:
-                state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
-            except TimeoutError:
+                state = await asyncio.wait_for(
+                    asyncio.shield(fut), timeout=_STOP_GRACE_S
+                )
+            except Exception:
                 self.logger.warning(
-                    "gc-cli worker thread still running after stop_run(); "
-                    "abandoning it and dumping best-effort partial state"
+                    "gc-cli worker did not finish cleanly after stop_run(); "
+                    "writing the available trajectory",
+                    exc_info=True,
                 )
             raise
         finally:
-            # On a Harbor agent timeout (CancelledError) or a backend error the worker
-            # thread may be abandoned before _run_loop returns, so `state` stays None.
-            # Recover whatever the executor reached (get_state() is lock-guarded) and
-            # still dump a partial ATIF trajectory — otherwise timed-out/errored runs
-            # are a black hole with no trace to debug. The original exception re-raises
-            # after this block.
-            # ponytail: best-effort only — if stop_run() didn't unblock the thread in
-            # time, the thread is still orphaned; raise the grace timeout if this needs
-            # a harder kill later.
+            if state is None and executor is not None:
+                state = executor.get_state()
             self._dump_outcome(
-                state, executor=executor, timings=timings, context=context
+                state, trace, timings=timings, context=context, partial=partial
             )

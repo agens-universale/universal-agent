@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any, Dict, Optional
 
 # Категории вызовов LLM.
@@ -200,6 +201,10 @@ def _empty_bucket() -> Dict[str, Any]:
     return bucket
 
 
+# Harbor can snapshot usage from another thread while the run is still active.
+_usage_lock = RLock()
+
+
 class UsageAccount:
     def __init__(
         self,
@@ -267,43 +272,45 @@ class UsageAccount:
         неизвестна» и будет разрешена при показе по текущему конфигу.
         ``model`` — модель вызова из тела запроса; не передана → в разбивку по
         моделям вызов не попадает."""
-        bucket = self._bucket(category)
         inp = max(0, int(input_tokens or 0))
         out = max(0, int(output_tokens or 0))
         cached = min(max(0, int(cached_tokens or 0)), inp)
-        buckets = [bucket]
-        if model:
-            buckets.append(self._category_model_bucket(category, model))
-        for target in buckets:
-            target["input"] += inp
-            target["output"] += out
-            target["cached"] += cached
-            target["calls"] += 1
+        with _usage_lock:
+            bucket = self._bucket(category)
+            buckets = [bucket]
+            if model:
+                buckets.append(self._category_model_bucket(category, model))
+            for target in buckets:
+                target["input"] += inp
+                target["output"] += out
+                target["cached"] += cached
+                target["calls"] += 1
+                if billed:
+                    target["billed_calls"] += 1
+                    target["billed_input"] += inp
+                    target["billed_output"] += out
+                    target["billed_cached"] += cached
+            if model:
+                model_bucket = self._model_bucket(model)
+                model_bucket["input"] += inp
+                model_bucket["output"] += out
+                model_bucket["cached"] += cached
+                model_bucket["calls"] += 1
             if billed:
-                target["billed_calls"] += 1
-                target["billed_input"] += inp
-                target["billed_output"] += out
-                target["billed_cached"] += cached
-        if model:
-            model_bucket = self._model_bucket(model)
-            model_bucket["input"] += inp
-            model_bucket["output"] += out
-            model_bucket["cached"] += cached
-            model_bucket["calls"] += 1
-        if billed:
-            key = currency if currency is not None else LEGACY_CURRENCY
-            money = bucket[MONEY_FIELD]
-            money[key] = money.get(key, 0.0) + float(cost or 0.0)
+                key = currency if currency is not None else LEGACY_CURRENCY
+                money = bucket[MONEY_FIELD]
+                money[key] = money.get(key, 0.0) + float(cost or 0.0)
 
     def add_missing(self, category: str, model: Optional[str] = None) -> None:
         """Вызов был, но провайдер не вернул usage: токены не считаем."""
-        buckets = [self._bucket(category)]
-        if model:
-            buckets.append(self._model_bucket(model))
-            buckets.append(self._category_model_bucket(category, model))
-        for bucket in buckets:
-            bucket["calls"] += 1
-            bucket["missing_usage_calls"] += 1
+        with _usage_lock:
+            buckets = [self._bucket(category)]
+            if model:
+                buckets.append(self._model_bucket(model))
+                buckets.append(self._category_model_bucket(category, model))
+            for bucket in buckets:
+                bucket["calls"] += 1
+                bucket["missing_usage_calls"] += 1
 
     def merge(
         self, other: UsageAccount, as_category: Optional[str] = None
@@ -313,19 +320,22 @@ class UsageAccount:
         Модели не сворачиваются: токены ребёнка ушли в реальную модель."""
         if not isinstance(other, UsageAccount):
             return
-        for category, bucket in other.by_category.items():
-            target = as_category or category
-            dst = self._bucket(target)
-            _add_fields(dst, bucket, _FIELDS)
-            _add_money(dst[MONEY_FIELD], bucket.get(MONEY_FIELD))
-            for model, model_bucket in (bucket.get("by_model") or {}).items():
-                _add_fields(
-                    self._category_model_bucket(target, model),
-                    model_bucket,
-                    _FIELDS,
-                )
-        for model, bucket in other.by_model.items():
-            _add_fields(self._model_bucket(model), bucket, _MODEL_FIELDS)
+        with _usage_lock:
+            for category, bucket in other.by_category.items():
+                target = as_category or category
+                dst = self._bucket(target)
+                _add_fields(dst, bucket, _FIELDS)
+                _add_money(dst[MONEY_FIELD], bucket.get(MONEY_FIELD))
+                for model, model_bucket in (
+                    bucket.get("by_model") or {}
+                ).items():
+                    _add_fields(
+                        self._category_model_bucket(target, model),
+                        model_bucket,
+                        _FIELDS,
+                    )
+            for model, bucket in other.by_model.items():
+                _add_fields(self._model_bucket(model), bucket, _MODEL_FIELDS)
 
     def delta_from(self, baseline: UsageAccount) -> UsageAccount:
         """Новый аккаунт = self − baseline (по полям, не ниже 0).
@@ -363,23 +373,25 @@ class UsageAccount:
         return self.totals()["calls"] == 0
 
     def to_meta(self) -> Dict[str, Any]:
-        out: Dict[str, Dict[str, Any]] = {}
-        for category, bucket in self.by_category.items():
-            # Копия обязана быть глубокой: словарь валют мутируемый, иначе
-            # накопитель продолжит менять уже сериализованный снимок.
-            copy = dict(bucket)
-            copy[MONEY_FIELD] = dict(bucket.get(MONEY_FIELD) or {})
-            if bucket.get("by_model"):
-                copy["by_model"] = {
-                    model: dict(values)
-                    for model, values in bucket["by_model"].items()
+        with _usage_lock:
+            out: Dict[str, Dict[str, Any]] = {}
+            for category, bucket in self.by_category.items():
+                # Копия обязана быть глубокой: словарь валют мутируемый, иначе
+                # накопитель продолжит менять уже сериализованный снимок.
+                copy = dict(bucket)
+                copy[MONEY_FIELD] = dict(bucket.get(MONEY_FIELD) or {})
+                if bucket.get("by_model"):
+                    copy["by_model"] = {
+                        model: dict(values)
+                        for model, values in bucket["by_model"].items()
+                    }
+                out[category] = copy
+            meta: Dict[str, Any] = {"by_category": out}
+            if self.by_model:
+                meta["by_model"] = {
+                    model: dict(bucket)
+                    for model, bucket in self.by_model.items()
                 }
-            out[category] = copy
-        meta: Dict[str, Any] = {"by_category": out}
-        if self.by_model:
-            meta["by_model"] = {
-                model: dict(bucket) for model, bucket in self.by_model.items()
-            }
         return meta
 
     def to_compact_meta(self) -> Dict[str, Any]:

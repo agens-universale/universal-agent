@@ -19,12 +19,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 _install_lock = threading.Lock()
+_sinks_lock = threading.Lock()
 _installed = False
 _sinks: dict[int, "StepTimings"] = {}
 
 
 def _sink() -> "StepTimings | None":
-    return _sinks.get(threading.get_ident())
+    with _sinks_lock:
+        return _sinks.get(threading.get_ident())
 
 
 def _install_once() -> None:
@@ -94,12 +96,15 @@ class StepTimings:
         with self._lock:
             self._fh = fh
         self._t0 = time.monotonic()
-        _sinks[threading.get_ident()] = self
+        with _sinks_lock:
+            _sinks[threading.get_ident()] = self
 
     def close(self) -> None:
-        for tid, sink in list(_sinks.items()):
-            if sink is self:
-                del _sinks[tid]
+        # Cancellation can close the sink from both the runner and the worker.
+        with _sinks_lock:
+            for tid, sink in list(_sinks.items()):
+                if sink is self:
+                    del _sinks[tid]
         with self._lock:
             fh, self._fh = self._fh, None
         if fh is not None:
