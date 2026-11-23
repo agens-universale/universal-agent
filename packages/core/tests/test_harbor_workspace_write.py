@@ -329,13 +329,15 @@ async def test_workspace_reserves_missing_metadata_until_trial_cleanup():
     await backend.aprepare_workspace("/work")
     await backend.aexec("pwd")
     argv = shlex.split(env.calls[-1][0])
-    for entry in (".git", ".gc", ".agents", ".codex", "AGENTS.md"):
+    for entry in (".git", ".gc", ".agents", "AGENTS.md"):
         path = f"/work/{entry}"
         assert argv[argv.index(path) - 1 :][:3] == ["--ro-bind", path, path]
+    assert "/work/.codex" not in argv
 
     await backend.arelease_workspace()
     cleanup = env.calls[-1][0]
     reservation = next(c for c, _ in env.calls if "validate_mount_path" in c)
+    assert "/work/.codex" not in reservation
     lease_assignment = reservation.splitlines()[0]
     assert cleanup.splitlines()[0] == lease_assignment
     lease = lease_assignment.removeprefix("lease=")
@@ -367,6 +369,7 @@ async def test_lost_reservation_reply_still_cleans_the_trial_lease():
     ("root", "protected", "binds"),
     [
         ("/work", "/work/src/private.txt", ["/tmp", "/work", "/work/src"]),
+        ("/work", "/work/.codex", ["/tmp", "/work"]),
         (
             "/tmp/task/work",
             "/tmp/task/locked",

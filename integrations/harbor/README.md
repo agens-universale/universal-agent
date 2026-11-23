@@ -167,7 +167,7 @@ selector. The model and routing configuration can be supplied independently.
   Startup probes the actual mounts and aborts the trial on failure.
 - Shell, Python, and tool-provided argv execute inside bubblewrap in the trial
   container. Its root filesystem is visible read-only. The project is writable,
-  with read-only mounts for top-level `.git`, `.gc`, `.agents`, `.codex` and
+  with read-only mounts for top-level `.git`, `.gc`, `.agents` and
   `AGENTS.md`, and for the existing canonical paths declared in
   `security.protected_paths.extra`. Empty directories reserve missing top-level
   paths during the agent phase. Cleanup removes only the directories created

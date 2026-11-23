@@ -15,7 +15,7 @@ TRUSTED_EXEC_ENV = {
     "ENV": "",
     **dict.fromkeys(_LOADER_ENV_NAMES, ""),
 }
-_PROTECTED_ROOT_ENTRIES = (".git", ".gc", ".agents", ".codex", "AGENTS.md")
+_PROTECTED_ROOT_ENTRIES = (".git", ".gc", ".agents", "AGENTS.md")
 _BWRAP = "/usr/bin/bwrap"
 _BASH = "/bin/bash"
 _PROC_ROOT = "/proc"
