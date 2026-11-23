@@ -7,6 +7,7 @@ from stat import S_IMODE
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from gc_core.execution.finish_reason import nonempty_reasoning_text
 from gc_core.execution.message_keys import has_tool_call_identity
 from gc_core.execution.progress import parse_tool_result_status
 from gc_core.execution.run_trace import (
@@ -85,18 +86,32 @@ def _step_metrics(usage: Any) -> Metrics | None:
     )
 
 
-def _model_step(
-    event: ModelResponse, step_id: int, *, timestamp: str | None = None
-) -> Step:
+def _model_text(event: ModelResponse) -> tuple[str, str | None]:
     replies = [m for m in event.messages if m.get("role") == "assistant"]
     text = "\n".join(
         part for m in replies if (part := stringify_content(m.get("content")))
     )
-    reasoning = "\n".join(
+    choices = (event.backend_payload or {}).get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        message = choices[0].get("message")
+        if (reasoning := nonempty_reasoning_text(message)) is not None:
+            provider_text = stringify_content(message.get("content"))
+            # A reasoning-only reply can be wrapped in <think> for the history.
+            return (
+                text if provider_text.strip() else provider_text
+            ), reasoning
+    canonical_reasoning = "\n".join(
         item
         for m in replies
         if isinstance(item := m.get("reasoning_content"), str)
     )
+    return text, canonical_reasoning or None
+
+
+def _model_step(
+    event: ModelResponse, step_id: int, *, timestamp: str | None = None
+) -> Step:
+    text, reasoning = _model_text(event)
     calls = [
         _tool_call(m)
         for m in event.messages
@@ -108,7 +123,7 @@ def _model_step(
         timestamp=timestamp or event.started_at.isoformat(),
         model_name=event.model_name,
         message=text,
-        reasoning_content=reasoning or None,
+        reasoning_content=reasoning,
         tool_calls=calls or None,
         metrics=_step_metrics(event.usage),
         llm_call_count=1,

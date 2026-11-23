@@ -674,10 +674,10 @@ def _run_scripted_trajectory(tmp_path, monkeypatch, responses, **overrides):
     from harbor.models.trajectories import Trajectory
 
     replies = iter(responses)
-    requested_models = []
+    requests = []
 
     def respond(request):
-        requested_models.append(json.loads(request.content)["model"])
+        requests.append(json.loads(request.content))
         return httpx.Response(200, json=next(replies))
 
     monkeypatch.setattr(
@@ -731,7 +731,7 @@ def _run_scripted_trajectory(tmp_path, monkeypatch, responses, **overrides):
     trajectory = Trajectory.model_validate_json(
         (tmp_path / "trajectory.json").read_text()
     )
-    return trajectory, context, requested_models
+    return trajectory, context, requests
 
 
 def test_finish_gate_response_has_its_own_model_step(tmp_path, monkeypatch):
@@ -854,6 +854,41 @@ def test_model_response_with_empty_choices_is_exported_once(
         == context.metadata["llm_calls"]
         == 1
     )
+
+
+@pytest.mark.parametrize("with_tool", [False, True])
+@pytest.mark.parametrize("reasoning_key", ["reasoning_content", "reasoning"])
+def test_export_keeps_provider_reasoning_with_history_stripping(
+    tmp_path, monkeypatch, with_tool, reasoning_key
+):
+    from gc_testkit.scripted_model import FINISH
+
+    finish = FINISH["choices"][0]["message"]["tool_calls"]
+    response = _captured_response(
+        "reasoned-response",
+        "provider/served",
+        finish if with_tool else [],
+        {"completion_tokens_details": {"reasoning_tokens": 3}},
+        message="Done." if with_tool else None,
+    )
+    choice = response["choices"][0]
+    choice["finish_reason"] = "tool_calls" if with_tool else "stop"
+    choice["message"][reasoning_key] = " Inspect what remains.\n"
+
+    trajectory, _, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [response],
+        **{
+            "agent.stop_on_no_tool_response": True,
+            "strip_tags_projection.strip_think": True,
+        },
+    )
+
+    (step,) = [step for step in trajectory.steps if step.source == "agent"]
+    assert step.reasoning_content == " Inspect what remains.\n"
+    assert step.message == ("Done." if with_tool else "")
+    assert step.metrics.extra == {"reasoning_tokens": 3}
 
 
 @pytest.mark.parametrize(
@@ -1098,9 +1133,10 @@ def test_auto_reroute_keeps_both_responses_and_uses_the_executed_call(
             },
         },
     )
-    assert requests == ["strong", "weak", "strong"]
+    models = [request["model"] for request in requests]
+    assert models == ["strong", "weak", "strong"]
     steps = [step for step in trajectory.steps if step.source == "agent"]
-    assert [step.model_name for step in steps] == requests
+    assert [step.model_name for step in steps] == models
     assert [step.metrics.prompt_tokens for step in steps] == [50, 60, 70]
     assert steps[1].extra["discarded_by_routing"] is True
     assert steps[1].observation is None
@@ -1451,19 +1487,27 @@ def test_duplicate_call_id_uses_the_same_call_for_execution_and_trajectory(
         {"prompt_tokens": 22, "completion_tokens": 3},
     )
     trajectory, context, _ = _run_scripted_trajectory(
-        tmp_path, monkeypatch, [response, FINISH]
+        tmp_path,
+        monkeypatch,
+        [response, FINISH],
+        **{"agent.stop_on_no_tool_response": True},
     )
 
     first, _ = [step for step in trajectory.steps if step.source == "agent"]
+    ids = [call.tool_call_id for call in first.tool_calls]
+    assert len(set(ids)) == 3
     assert {
         item.source_call_id: json.loads(item.content)["tool_name"]
         for item in first.observation.results
-    } == {"dup": "exec_command", "read": "fs_read_file"}
-    assert [
-        (call.tool_call_id, call.function_name) for call in first.tool_calls
-    ] == [
-        ("dup", "exec_command"),
-        ("read", "fs_read_file"),
+    } == {
+        ids[0]: "exec_command",
+        ids[1]: "fs_read_file",
+        "read": "fs_read_file",
+    }
+    assert [call.arguments for call in first.tool_calls] == [
+        {"command": "echo first"},
+        {"path": "other.txt"},
+        {"path": "wanted.txt"},
     ]
     assert first.metrics.prompt_tokens == 22
     assert first.metrics.completion_tokens == 3
@@ -1472,54 +1516,102 @@ def test_duplicate_call_id_uses_the_same_call_for_execution_and_trajectory(
     )
 
 
-def test_responses_api_exports_unique_call_ids(tmp_path, monkeypatch):
+def test_repaired_call_ids_stay_distinct_when_a_response_id_is_reused(
+    tmp_path, monkeypatch
+):
+    from gc_testkit.scripted_model import FINISH
+
+    def response_for(command):
+        return _captured_response(
+            "reused-response-id",
+            "provider/served",
+            [
+                _captured_tool("dup", "fs_read_file", {"path": "demo.txt"}),
+                _captured_tool("dup", "exec_command", {"command": command}),
+            ],
+            {"prompt_tokens": 22, "completion_tokens": 3},
+        )
+
+    trajectory, _, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [response_for("echo one"), response_for("echo two"), FINISH],
+    )
+
+    first, second, _ = [
+        step for step in trajectory.steps if step.source == "agent"
+    ]
+    repaired_first = first.tool_calls[1].tool_call_id
+    repaired_second = second.tool_calls[1].tool_call_id
+    assert repaired_first != repaired_second
+    assert [result.source_call_id for result in first.observation.results] == [
+        "dup",
+        repaired_first,
+    ]
+    assert [
+        result.source_call_id for result in second.observation.results
+    ] == [
+        "dup",
+        repaired_second,
+    ]
+
+
+def test_responses_api_replays_repaired_tool_call_pairs(tmp_path, monkeypatch):
     from gc_testkit.scripted_model import FINISH
 
     calls = [
         _captured_tool("dup", "exec_command", {"command": "echo first"}),
         _captured_tool("dup", "fs_read_file", {"path": "other.txt"}),
-        FINISH["choices"][0]["message"]["tool_calls"][0],
     ]
-    response = {
-        "type": "response.completed",
-        "response": {
-            "id": "response-with-duplicate",
-            "model": "provider/served",
-            "output": [
-                {
-                    "type": "function_call",
-                    "id": f"fc_{index}",
-                    "call_id": call["id"],
-                    "name": call["function"]["name"],
-                    "arguments": call["function"]["arguments"],
-                }
-                for index, call in enumerate(calls)
-            ],
-            "usage": {
-                "input_tokens": 22,
-                "output_tokens": 3,
-                "output_tokens_details": {"reasoning_tokens": 0},
+
+    def completed(response_id, tool_calls):
+        return {
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "model": "provider/served",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": f"fc_{response_id}_{index}",
+                        "call_id": call["id"],
+                        "name": call["function"]["name"],
+                        "arguments": call["function"]["arguments"],
+                    }
+                    for index, call in enumerate(tool_calls)
+                ],
+                "usage": {
+                    "input_tokens": 22,
+                    "output_tokens": 3,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
             },
-        },
-    }
-    trajectory, _, _ = _run_scripted_trajectory(
+        }
+
+    trajectory, _, requests = _run_scripted_trajectory(
         tmp_path,
         monkeypatch,
-        [response],
+        [
+            completed("response-with-duplicate", calls),
+            completed(
+                "response-with-finish",
+                FINISH["choices"][0]["message"]["tool_calls"],
+            ),
+        ],
         **{
             "backend.api_mode": "responses",
             "backend.completions_url": "http://test/v1/responses",
         },
     )
 
-    (step,) = [step for step in trajectory.steps if step.source == "agent"]
-    assert [
-        (call.tool_call_id, call.function_name) for call in step.tool_calls
-    ] == [("dup", "exec_command"), ("finish", "turn_finish")]
-    assert [item.source_call_id for item in step.observation.results] == [
-        "dup",
-        "finish",
+    step, final = [step for step in trajectory.steps if step.source == "agent"]
+    ids = [call.tool_call_id for call in step.tool_calls]
+    assert len(set(ids)) == 2
+    assert [call.function_name for call in step.tool_calls] == [
+        "exec_command",
+        "fs_read_file",
     ]
+    assert [item.source_call_id for item in step.observation.results] == ids
     assert (
         json.loads(step.observation.results[0].content)["tool_name"]
         == "exec_command"
@@ -1527,4 +1619,13 @@ def test_responses_api_exports_unique_call_ids(tmp_path, monkeypatch):
     assert step.metrics.prompt_tokens == 22
     assert step.metrics.completion_tokens == 3
     assert step.metrics.extra == {"reasoning_tokens": 0}
+    assert final.observation.results[0].source_call_id == "finish"
     assert trajectory.final_metrics.extra == {"reasoning_tokens": 0}
+
+    assert requests[1]["previous_response_id"] is None
+    for kind in ("function_call", "function_call_output"):
+        assert [
+            message["call_id"]
+            for message in requests[1]["input"]
+            if message.get("type") == kind
+        ] == ids

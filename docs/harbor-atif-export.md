@@ -32,6 +32,10 @@ the step count.
 - Enrich the existing step for a canonical root response with assistant text,
   reasoning, and tool calls. Auxiliary and local subagent steps carry telemetry.
   Responses with missing usage still get a step.
+- For the main Chat Completions response, write provider `reasoning_content` or
+  `reasoning` to the ATIF reasoning field. `strip_think` controls the agent's
+  history projection. A response with only provider reasoning has no answer
+  text in ATIF.
 - Retain both canonical responses when Auto reroutes a turn. Mark the first
   response as discarded in `Step.extra` before awaiting the replacement request.
   Proposed tool calls on a discarded step are retained with an empty observation
@@ -40,8 +44,10 @@ the step count.
   name, canonical tool call ID, and JSON object arguments. If a provider emits
   malformed arguments for an identifiable call, preserve that text in the call's
   extension field so the agent's validation result remains inspectable. If a
-  response repeats a call ID, keep its first identifiable call for execution and
-  export. A later response can reuse the ID.
+  response repeats a call ID, assign distinct IDs to subsequent occurrences
+  before routing, execution, and export. Tool results use the repaired IDs.
+  The Responses API continuation replays the call and result pairs from the
+  available conversation history after a repair.
 - Attach each committed model-facing tool result to its originating step using
   `observation.results[].source_call_id`. Keep the output as delivered to the model
   history, including error, timeout, and truncation details. A result retained
