@@ -10,11 +10,13 @@ from typing import Any
 from gc_core.execution.message_keys import has_tool_call_identity
 from gc_core.execution.progress import parse_tool_result_status
 from gc_core.execution.run_trace import (
+    BackendResponse,
     CommittedMessages,
     DiscardedResponse,
     ModelResponse,
     TraceEvent,
 )
+from gc_core.usage.account import CATEGORY_MAIN
 from gc_core.usage.normalize import (
     reported_reasoning_tokens,
     reported_token_counts,
@@ -83,7 +85,9 @@ def _step_metrics(usage: Any) -> Metrics | None:
     )
 
 
-def _model_step(event: ModelResponse, step_id: int) -> Step:
+def _model_step(
+    event: ModelResponse, step_id: int, *, timestamp: str | None = None
+) -> Step:
     replies = [m for m in event.messages if m.get("role") == "assistant"]
     text = "\n".join(
         part for m in replies if (part := stringify_content(m.get("content")))
@@ -101,14 +105,17 @@ def _model_step(event: ModelResponse, step_id: int) -> Step:
     return Step(
         step_id=step_id,
         source="agent",
-        timestamp=event.started_at.isoformat(),
+        timestamp=timestamp or event.started_at.isoformat(),
         model_name=event.model_name,
         message=text,
         reasoning_content=reasoning or None,
         tool_calls=calls or None,
         metrics=_step_metrics(event.usage),
         llm_call_count=1,
-        extra={"response_id": event.response_id},
+        extra={
+            "response_id": event.response_id,
+            "usage_category": CATEGORY_MAIN,
+        },
     )
 
 
@@ -122,23 +129,64 @@ class TrajectoryRecorder:
         self._message_ids: set[str] = set()
         self._calls: dict[str, Step] = {}
         self._responses: dict[str, Step] = {}
+        self._pending_model_step: tuple[dict[str, Any], int] | None = None
 
     def observe(self, event: TraceEvent) -> None:
         with self._lock:
             if self._frozen:
                 return
-            if isinstance(event, ModelResponse):
-                step = _model_step(event, len(self._steps) + 1)
-                self._steps.append(step)
-                self._responses[event.response_id] = step
-                for call in step.tool_calls or []:
-                    self._calls[call.tool_call_id] = step
+            if isinstance(event, BackendResponse):
+                self._record_backend_step(event)
+            elif isinstance(event, ModelResponse):
+                self._record_model_step(event)
             elif isinstance(event, CommittedMessages):
                 timestamp = event.timestamp.isoformat()
                 for message in event.messages:
                     self._commit(message, timestamp)
             elif isinstance(event, DiscardedResponse):
                 self._discard(event.response_id)
+
+    def _record_backend_step(self, event: BackendResponse) -> None:
+        extra = {"usage_category": event.usage_category}
+        if response_id := event.payload.get("id"):
+            extra["response_id"] = str(response_id)
+        if event.is_subagent:
+            extra["agent_scope"] = "subagent"
+            if event.subagent_id is not None:
+                extra["subagent_id"] = event.subagent_id
+        index = len(self._steps)
+        self._steps.append(
+            Step(
+                step_id=index + 1,
+                source="agent",
+                timestamp=event.started_at.isoformat(),
+                model_name=event.model_name,
+                message="",
+                metrics=_step_metrics(event.payload.get("usage")),
+                llm_call_count=1,
+                extra=extra,
+            )
+        )
+        # The root loop awaits its model calls in order. Keep the latest
+        # candidate by identity because providers can reuse response IDs.
+        if event.usage_category == CATEGORY_MAIN and not event.is_subagent:
+            self._pending_model_step = (event.payload, index)
+
+    def _record_model_step(self, event: ModelResponse) -> None:
+        pending, self._pending_model_step = self._pending_model_step, None
+        if pending is not None and pending[0] is event.backend_payload:
+            index = pending[1]
+            backend_step = self._steps[index]
+            step = _model_step(
+                event, backend_step.step_id, timestamp=backend_step.timestamp
+            )
+            self._steps[index] = step
+        else:
+            step = _model_step(event, len(self._steps) + 1)
+            self._steps.append(step)
+        self._responses[event.response_id] = step
+        for call in step.tool_calls or []:
+            self._calls[call.tool_call_id] = step
 
     def _commit(self, message: dict[str, Any], timestamp: str) -> None:
         if message.get("type") == "function_call_output":
@@ -195,6 +243,7 @@ class TrajectoryRecorder:
     def freeze(self) -> list[Step]:
         with self._lock:
             self._frozen = True
+            self._pending_model_step = None
             return list(self._steps)
 
 

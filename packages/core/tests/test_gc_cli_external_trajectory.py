@@ -734,6 +734,128 @@ def _run_scripted_trajectory(tmp_path, monkeypatch, responses, **overrides):
     return trajectory, context, requested_models
 
 
+def test_finish_gate_response_has_its_own_model_step(tmp_path, monkeypatch):
+    from gc_testkit.scripted_model import FINISH
+    from parity_harness import judge_accept
+
+    finish = {**FINISH, "model": "provider/main"}
+    judge = {
+        **judge_accept(),
+        "id": "judge-response",
+        "model": "provider/judge",
+    }
+    trajectory, context, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [finish, judge],
+        **{"agent.strict_turn_finish_validation": True},
+    )
+
+    main, gate = [step for step in trajectory.steps if step.source == "agent"]
+    assert main.tool_calls[0].function_name == "turn_finish"
+    assert main.observation.results[0].source_call_id == "finish"
+    assert gate.extra["usage_category"] == "finish_gate"
+    assert gate.extra["response_id"] == "judge-response"
+    assert gate.model_name == "provider/judge"
+    assert gate.timestamp is not None and gate.timestamp >= main.timestamp
+    assert gate.llm_call_count == 1
+    assert gate.metrics.prompt_tokens == judge["usage"]["prompt_tokens"]
+    assert (
+        gate.metrics.completion_tokens == judge["usage"]["completion_tokens"]
+    )
+    assert (
+        trajectory.final_metrics.total_prompt_tokens == context.n_input_tokens
+    )
+    assert (
+        trajectory.extra["atif_model_calls"]
+        == context.metadata["llm_calls"]
+        == 2
+    )
+    assert trajectory.extra["atif_model_calls_match"] is True
+
+
+def test_subagent_response_has_its_own_model_step(tmp_path, monkeypatch):
+    from gc_testkit.scripted_model import FINISH
+
+    delegation = _captured_tool(
+        "delegate",
+        "subagent_code_generator",
+        {"task": "Summarize the assignment.", "reason": "Check delegation."},
+    )
+    first = _captured_response(
+        "root-before-child",
+        "provider/main",
+        [delegation],
+        {"prompt_tokens": 20, "completion_tokens": 7},
+    )
+    child = {**FINISH, "id": "child-response", "model": "provider/child"}
+    last = {**FINISH, "id": "root-after-child", "model": "provider/main"}
+    trajectory, context, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [first, child, last],
+        **{"agent.use_local_subagents": True},
+    )
+
+    start, delegated, finish = [
+        step for step in trajectory.steps if step.source == "agent"
+    ]
+    assert start.observation.results[0].source_call_id == "delegate"
+    assert delegated.extra["response_id"] == "child-response"
+    assert delegated.extra["agent_scope"] == "subagent"
+    assert delegated.extra["subagent_id"]
+    assert delegated.extra["usage_category"] == "main"
+    assert delegated.model_name == "provider/child"
+    assert start.timestamp <= delegated.timestamp <= finish.timestamp
+    assert delegated.llm_call_count == 1
+    assert delegated.metrics.prompt_tokens == 10
+    assert delegated.metrics.completion_tokens == 5
+    assert finish.extra["response_id"] == "root-after-child"
+    assert (
+        trajectory.final_metrics.total_prompt_tokens
+        == context.n_input_tokens
+        == 40
+    )
+    assert (
+        trajectory.final_metrics.total_completion_tokens
+        == context.n_output_tokens
+        == 17
+    )
+    assert (
+        trajectory.extra["atif_model_calls"]
+        == context.metadata["llm_calls"]
+        == 3
+    )
+    assert trajectory.extra["atif_model_calls_match"] is True
+
+
+def test_model_response_with_empty_choices_is_exported_once(
+    tmp_path, monkeypatch
+):
+    response = {
+        "id": "empty-choices",
+        "model": "provider/main",
+        "choices": [],
+        "usage": {"prompt_tokens": 9, "completion_tokens": 0},
+    }
+    trajectory, context, _ = _run_scripted_trajectory(
+        tmp_path,
+        monkeypatch,
+        [response],
+        **{"agent.stop_on_no_tool_response": True},
+    )
+
+    (step,) = [step for step in trajectory.steps if step.source == "agent"]
+    assert step.extra["response_id"] == "empty-choices"
+    assert step.metrics.prompt_tokens == context.n_input_tokens == 9
+    assert step.metrics.completion_tokens == 0
+    assert (
+        trajectory.extra["atif_model_calls"]
+        == context.metadata["llm_calls"]
+        == 1
+    )
+
+
 @pytest.mark.parametrize(
     "missing_usage, compact", [(False, False), (True, False), (False, True)]
 )
@@ -745,6 +867,7 @@ def test_run_exports_each_model_response_with_linked_results(
     from gc_core import processing_responses as loop
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
     from gc_core.summarize.compaction import apply_summary_state_patch
+    from gc_core.summarize.llm import arequest_summary_text
     from gc_testkit.scripted_model import FINISH
 
     compactions = []
@@ -766,9 +889,16 @@ def test_run_exports_each_model_response_with_linked_results(
     async def compact_outputs(self, messages, mode):
         if mode != "function_call_output" or compactions:
             return False
+        result = await arequest_summary_text(
+            ctx=self._ctx,
+            state=self._state,
+            messages=[{"role": "user", "content": "Summarize the two reads."}],
+            request_label="summary_compress",
+            consumer="summary",
+        )
         apply_summary_state_patch(
             state=self._state,
-            raw_summary=summary_text,
+            raw_summary=result,
             last_dialog_steps="",
             summarized_messages_count=len(self._state.messages),
             can_propose_plan=False,
@@ -810,8 +940,24 @@ def test_run_exports_each_model_response_with_linked_results(
             **second["usage"],
             "completion_tokens_details": {"reasoning_tokens": 0},
         }
+    replies = [first]
+    if compact:
+        replies.append(
+            _captured_response(
+                "summary-response",
+                "provider/summary",
+                [],
+                {
+                    "prompt_tokens": 14,
+                    "completion_tokens": 4,
+                    "completion_tokens_details": {"reasoning_tokens": 2},
+                },
+                message=summary_text,
+            )
+        )
+    replies.append(second)
     trajectory, context, _ = _run_scripted_trajectory(
-        tmp_path, monkeypatch, [first, second]
+        tmp_path, monkeypatch, replies
     )
     assert bool(compactions) == compact
     assert trajectory.schema_version == "ATIF-v1.7"
@@ -820,16 +966,37 @@ def test_run_exports_each_model_response_with_linked_results(
     )
     assert trajectory.steps[0].source == "system"
     assert trajectory.steps[1].source == "user"
-    model_steps = [step for step in trajectory.steps if step.source == "agent"]
+    model_steps = [
+        step
+        for step in trajectory.steps
+        if step.source == "agent" and step.extra["usage_category"] == "main"
+    ]
     assert len(model_steps) == 2
     if compact:
         assert prompts_with_summary == [False, True]
+        (summary_call,) = [
+            step
+            for step in trajectory.steps
+            if step.source == "agent"
+            and step.extra["usage_category"] == "summary"
+        ]
+        assert summary_call.extra["response_id"] == "summary-response"
+        assert summary_call.model_name == "provider/summary"
+        assert summary_call.llm_call_count == 1
+        assert summary_call.metrics.prompt_tokens == 14
+        assert summary_call.metrics.completion_tokens == 4
+        assert (
+            model_steps[0].timestamp
+            <= summary_call.timestamp
+            <= model_steps[1].timestamp
+        )
         (summary_step,) = [
             step for step in trajectory.steps if summary_text in step.message
         ]
         assert summary_step.source == "user"
         assert (
             model_steps[0].step_id
+            < summary_call.step_id
             < summary_step.step_id
             < model_steps[1].step_id
         )
@@ -860,18 +1027,26 @@ def test_run_exports_each_model_response_with_linked_results(
         assert model_steps[1].metrics.extra == {"reasoning_tokens": 0}
     assert model_steps[1].tool_calls[0].function_name == "turn_finish"
     assert model_steps[1].observation.results[0].source_call_id == "finish"
-    assert trajectory.final_metrics.total_prompt_tokens == (
-        40 if missing_usage else 50
-    )
-    assert trajectory.final_metrics.total_completion_tokens == (
-        9 if missing_usage else 14
+    expected_prompt = 40 if missing_usage else 50
+    expected_completion = 9 if missing_usage else 14
+    if compact:
+        expected_prompt += 14
+        expected_completion += 4
+    assert trajectory.final_metrics.total_prompt_tokens == expected_prompt
+    assert (
+        trajectory.final_metrics.total_completion_tokens == expected_completion
     )
     assert trajectory.final_metrics.total_cached_tokens == 25
     assert trajectory.final_metrics.total_steps == len(trajectory.steps)
     assert trajectory.final_metrics.extra == (
-        None if missing_usage else {"reasoning_tokens": 4}
+        None if missing_usage else {"reasoning_tokens": 6 if compact else 4}
     )
-    assert context.metadata["llm_calls"] == 2
+    assert (
+        trajectory.extra["atif_model_calls"]
+        == context.metadata["llm_calls"]
+        == 2 + compact
+    )
+    assert trajectory.extra["atif_model_calls_match"] is True
     assert (
         context.n_input_tokens == trajectory.final_metrics.total_prompt_tokens
     )
@@ -1118,6 +1293,43 @@ def test_cancel_before_worker_initialization_cleans_up(
     assert sink not in step_timings._sinks.values()
     if phase == "queued":
         assert not (tmp_path / "timings.jsonl").exists()
+
+
+def test_recorder_keeps_attempt_timestamps_when_enriching_retried_response():
+    from datetime import UTC, datetime, timedelta
+
+    from adapters.atif import TrajectoryRecorder
+    from gc_core.execution.run_trace import BackendResponse, ModelResponse
+
+    started_at = datetime(2026, 11, 23, tzinfo=UTC)
+    first_attempt = started_at + timedelta(seconds=1)
+    second_attempt = started_at + timedelta(seconds=4)
+    recorder = TrajectoryRecorder()
+    first = {"id": "reused-id", "usage": {"prompt_tokens": 6}}
+    second = {"id": "reused-id", "usage": {"prompt_tokens": 12}}
+    recorder.observe(
+        BackendResponse(first, "m", first_attempt, "main", False, None)
+    )
+    recorder.observe(
+        BackendResponse(second, "m", second_attempt, "main", False, None)
+    )
+    recorder.observe(
+        ModelResponse(
+            "reused-id",
+            "m",
+            started_at,
+            [{"role": "assistant", "content": "Done"}],
+            second["usage"],
+            backend_payload=second,
+        )
+    )
+
+    original, retried = recorder.freeze()
+    assert original.timestamp == first_attempt.isoformat()
+    assert original.metrics.prompt_tokens == 6
+    assert retried.timestamp == second_attempt.isoformat()
+    assert retried.message == "Done"
+    assert retried.metrics.prompt_tokens == 12
 
 
 def test_recorder_matches_out_of_order_results_and_ignores_late_events():

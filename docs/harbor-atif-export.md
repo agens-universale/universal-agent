@@ -7,7 +7,7 @@ reference artifacts. Acceptance with the scoring team's importer is pending.
 
 | Meeting time | Request | Acceptance evidence |
 | --- | --- | --- |
-| 24:17–25:10 | Inspect timestamps, prompt and completion usage, and the number of model calls in a UAG trial. | Each recorded main model response carries its UTC timestamp, model name, call count, and available provider usage. |
+| 24:17–25:10 | Inspect timestamps, prompt and completion usage, and the number of model calls in a UAG trial. | Each accounted model response carries its UTC timestamp, model name, call count, and available provider usage. |
 | 27:23–30:39 | Keep the telemetry needed for scoring in the standard Harbor artifact. The team also discussed exporting native thread logs for debugging. | The trial contains `agent/trajectory.json` and the Harbor reader can import it. A tool invocation and its output can be joined by ID. |
 | 31:45–32:04 | Check the final shape against a reference supplied by the scoring team. | Review the draft against the reference and import a UAG artifact with the scoring team's configured reader. |
 | 23:35–23:52 | Run UAG as a Harbor External Agent with single-model and Auto profiles. | Live single-model and Auto trials verify production of the enriched artifact and usage attribution across a reroute. |
@@ -17,20 +17,25 @@ message history. It represented function calls as text and assigned observations
 without call IDs. The Harbor result carried run-wide usage, and ATIF carried
 the step count.
 
-## First-pass contract
+## Export contract
 
 - Use ATIF-v1.7 and write `trajectory.json` in the agent log directory. Harbor
   publishes it as `agent/trajectory.json`. Use the runner-provided session
   identifier when supplied, otherwise use the root agent state's run identifier.
 - Emit ordered system and user messages and one `source: "agent"` step for each
-  canonical response of the main model. Use sequential step IDs. Each model step
-  carries `llm_call_count: 1`, a UTC ISO 8601 timestamp marking the start of the
-  logical request, and the reported model name, with the requested ID as a fallback.
-  Keep assistant text and reasoning in their corresponding ATIF fields.
+  model response recorded by the transport, with sequential step IDs. Each model
+  step carries `llm_call_count: 1`, the start of its request attempt in UTC ISO
+  8601, and the reported model name, with the requested ID as a fallback.
+  `extra.usage_category` identifies the accounting category, such as `main`,
+  `finish_gate`, or `summary`. Local subagent steps appear in the same file with
+  `extra.agent_scope: "subagent"` and `extra.subagent_id`.
+- Enrich the existing step for a canonical root response with assistant text,
+  reasoning, and tool calls. Auxiliary and local subagent steps carry telemetry.
+  Responses with missing usage still get a step.
 - Retain both canonical responses when Auto reroutes a turn. Mark the first
   response as discarded in `Step.extra` before awaiting the replacement request.
   Proposed tool calls on a discarded step are retained with an empty observation
-  set. The model step sequence counts canonical responses.
+  set.
 - Represent calls as `tool_calls` on the originating response, with the function
   name, canonical tool call ID, and JSON object arguments. If a provider emits
   malformed arguments for an identifiable call, preserve that text in the call's
@@ -49,8 +54,8 @@ the step count.
   preserve its reported value. The provider measures a model request as a whole.
   A tokenizer can separately estimate the size of a tool's output.
 - Sum the reported step usage in `final_metrics` and include `total_steps`. Preserve
-  the current all-run usage accounting in the Harbor result, including auxiliary
-  models and responses accounted for by the transport when no step was published.
+  the all-run usage accounting in the Harbor result. In a completed trial with
+  fully reported usage, the step sums can be reconciled with the trial account.
   Total reasoning tokens are present in `final_metrics.extra` when every tracked
   model step reports that counter. Root `extra.trial_usage` mirrors the token totals
   in the Harbor result. The totals, `metadata.llm_usage_by_model`, and Harbor's
@@ -67,27 +72,28 @@ the step count.
 
 ## Implementation
 
-Bind a trace observer to the Harbor adapter's root agent execution. Capture
-canonical responses at the model request boundary, where request time, model,
-response messages and provider usage are available together. Route model-facing
-tool output through the loop's message commit boundary. Track calls by ID in
-the adapter. The adapter owns ATIF projection and file writing.
+Bind a trace observer to the Harbor adapter's agent execution. Capture responses
+where the transport records usage for Chat Completions and Responses API calls.
+Update the matching step when the root loop converts that payload into canonical
+messages. Use payload identity so distinct attempts can share a response ID.
+Route model-facing tool output through the loop's message commit boundary and
+track calls by ID. The adapter owns ATIF projection and file writing.
 
-Recordings are scoped to a trial and the root loop. Thread persistence and the
-existing all-run accounting continue through their regular paths. Finalization
-uses the adapter's existing cleanup path.
+Model recordings are scoped to a trial, and commits of messages and tool results
+are scoped to its root loop. Thread persistence and all-run accounting continue
+through their regular paths. Finalization uses the adapter's cleanup path.
 
 ## Verification
 
 1. Drive the real adapter with scripted model responses and fake task I/O.
    Check one response with multiple calls, reversed result order, actual usage
    values, timestamp and model identity, repeated message commits, missing
-   usage, Auto discard, and a partial trace on cancellation. Exercise actual
-   model and tool boundaries when the behavior crosses the exporter boundary.
+   usage, Auto discard, auxiliary and subagent responses, and cancellation.
+   Check that a retried response retains the start time of its own attempt.
 2. Validate a live artifact using `harbor.utils.trajectory_validator`. Check
    that every observation resolves to a call on its own step. Recompute usage
    from the published steps and reconcile it against the Harbor trial result
-   for a single-model smoke with no auxiliary usage.
+   for a single-model smoke with the finish gate enabled.
 3. Run a local Harbor trial with Docker, the repository's `GcCliExternal` adapter,
    a synthetic two-file task and a real DeepSeek completion through Sber
    OpenRouter. Read authentication via the existing environment reference.
@@ -136,10 +142,8 @@ exactly. The remaining result was the final `turn_finish` observation.
 
 Harbor counted 13 model responses. The thirteenth was the finish-gate
 request, with 22,946 prompt and 140 completion tokens. Adding it to the ATIF
-totals gives exactly the Harbor trial totals. The literal every-request
-interpretation requires telemetry for this call and any other responses
-accounted for by the transport outside the canonical main steps. Their
-representation remains an open importer decision.
+totals gives exactly the Harbor trial totals. This trial predates per-response
+export for auxiliary model calls.
 
 An integration regression test reproduced a mixed model response with an
 integer tool ID and a valid call. The exporter now applies the same
@@ -217,12 +221,26 @@ tokens. The eight accounted calls in `extra.trial_usage` and standard
 `result.json` `model_usage` agreed on 158,776 prompt, 4,633 completion,
 and 109,312 cached tokens.
 
+## Verification of per-response telemetry
+
+The focused suite passed 1,880 tests with two skips. Harbor 0.24.0 and 0.25.0
+each passed 47 adapter tests. The scripted adapter tests exercise the finish
+gate, the summary request and its later inclusion in the root context, and a
+local subagent's response. A regression test checks distinct timestamps when
+two attempts reuse a provider response ID.
+
+The live Harbor 0.25.0 trial `log-summary-date-ranges__zLnn8gi` used DeepSeek
+through the Sber OpenRouter proxy with raw agent logging disabled. It returned
+reward 1 and passed the trajectory validator. The nine model steps include
+eight root responses and one `finish_gate` response. The step totals agree
+with `extra.trial_usage` and `result.json` `model_usage` on 191,072 prompt,
+4,154 completion, and 148,992 cached tokens. All ten tool observations link
+to their respective calls.
+
 ## Importer decisions
 
 - The target Harbor and importer versions, required timestamp convention, and
   the handling of discarded Auto responses.
-- The preferred coverage for auxiliary calls and retry accounting. ATIF step
-  totals and whole-trial usage have different coverage in the draft.
 - Whether a result should additionally include output before model-facing
   truncation or a reference to a separately retained raw stream.
 - Whether the scoring reader expects a tokenizer-derived tool-output size or

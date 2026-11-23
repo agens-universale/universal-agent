@@ -1,4 +1,4 @@
-"""Optional in-process observation of a root agent run."""
+"""Optional in-process observation of a trial's model calls and root steps."""
 
 import logging
 from collections.abc import Callable, Iterator
@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from gc_core.execution.environment import utc_now
+from gc_core.usage.account import CATEGORY_UNCATEGORIZED
+from gc_core.usage.context import current_usage_context
 
 if TYPE_CHECKING:
     from gc_core.execution.state import State
@@ -23,6 +25,17 @@ class ModelResponse:
     started_at: datetime
     messages: list[dict[str, Any]]
     usage: Any
+    backend_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class BackendResponse:
+    payload: dict[str, Any]
+    model_name: str | None
+    started_at: datetime
+    usage_category: str
+    is_subagent: bool
+    subagent_id: str | None
 
 
 @dataclass(frozen=True)
@@ -36,35 +49,43 @@ class DiscardedResponse:
     response_id: str
 
 
-TraceEvent = ModelResponse | CommittedMessages | DiscardedResponse
+TraceEvent = (
+    BackendResponse | ModelResponse | CommittedMessages | DiscardedResponse
+)
 TraceObserver = Callable[[TraceEvent], None]
 _observer = ContextVar[TraceObserver | None](
     "run_trace_observer", default=None
 )
 _root = ContextVar[object | None]("run_trace_root", default=None)
+_active_state = ContextVar[object | None]("run_trace_state", default=None)
 
 
 @contextmanager
 def observe_run_trace(observer: TraceObserver) -> Iterator[None]:
     observer_token = _observer.set(observer)
     root_token = _root.set(None)
+    state_token = _active_state.set(None)
     try:
         yield
     finally:
+        _active_state.reset(state_token)
         _root.reset(root_token)
         _observer.reset(observer_token)
 
 
 @contextmanager
 def bind_trace_root(state: object) -> Iterator[None]:
-    if _observer.get() is None or _root.get() is not None:
+    if _observer.get() is None:
         yield
         return
-    token = _root.set(state)
+    root = _root.get()
+    root_token = _root.set(state if root is None else root)
+    state_token = _active_state.set(state)
     try:
         yield
     finally:
-        _root.reset(token)
+        _active_state.reset(state_token)
+        _root.reset(root_token)
 
 
 def trace_observer(state: object) -> TraceObserver | None:
@@ -76,6 +97,39 @@ def _notify(observer: TraceObserver, event: TraceEvent) -> None:
         observer(event)
     except Exception:
         _log.exception("Run trace observer failed")
+
+
+def start_backend_trace() -> datetime | None:
+    return utc_now() if _observer.get() is not None else None
+
+
+def trace_backend_response(
+    started_at: datetime | None,
+    response: dict[str, Any],
+    requested_model: str | None,
+) -> None:
+    observer = _observer.get()
+    if observer is None or started_at is None:
+        return
+    usage_context = current_usage_context()
+    state = _active_state.get()
+    is_subagent = state is not None and state is not _root.get()
+    model = response.get("model") or requested_model
+    _notify(
+        observer,
+        BackendResponse(
+            payload=response,
+            model_name=str(model) if model else None,
+            started_at=started_at,
+            usage_category=usage_context.category
+            if usage_context
+            else CATEGORY_UNCATEGORIZED,
+            is_subagent=is_subagent,
+            subagent_id=getattr(state, "state_id", None)
+            if is_subagent
+            else None,
+        ),
+    )
 
 
 def trace_committed_messages(
@@ -129,6 +183,7 @@ def finish_model_trace(
             trace.started_at,
             messages,
             response.get("usage"),
+            backend_payload=response,
         ),
     )
 
