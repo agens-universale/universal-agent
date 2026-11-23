@@ -12,6 +12,7 @@ import asyncio
 import base64
 import contextlib
 import dataclasses
+import logging
 import os
 import posixpath
 import re
@@ -402,6 +403,14 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         git_repository, disable_userns = parse_environment_probe(
             probe.stdout or ""
         )
+        if not disable_userns:
+            # Read-only монтирования держатся и без флага: вложенный userns
+            # не снимает запертые родителем mount'ы. Но защита слабее — видно.
+            logging.getLogger(__name__).warning(
+                "harbor_workspace_userns_allowed: bubblewrap в контейнере "
+                "старше 0.8, запуск без --disable-userns",
+                extra={"event": "harbor_workspace_userns_allowed"},
+            )
         workspace = HarborWorkspace(
             physical_root,
             tuple(zip(IMAGE_EXEC_ENV_NAMES, image_values, strict=True)),
