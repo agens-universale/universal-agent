@@ -435,8 +435,17 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             if result.return_code != 0 and is_proc_mount_denied(
                 f"{result.stderr or ''}\n{result.stdout or ''}"
             ):
-                # Повтор только фиксированной пробы, не команды модели.
-                workspace = dataclasses.replace(workspace, private_proc=False)
+                # Retry the fixed startup probe in the compatibility mode.
+                # Restricted containers can also deny the sysctl write used
+                # by --disable-userns.
+                logging.getLogger(__name__).warning(
+                    "harbor_workspace_proc_fallback: procfs не монтируется, "
+                    "в песочнице пустой /proc и нет --disable-userns",
+                    extra={"event": "harbor_workspace_proc_fallback"},
+                )
+                workspace = dataclasses.replace(
+                    workspace, private_proc=False, disable_userns=False
+                )
                 self._workspace = workspace
                 result = await self._apreflight(workspace)
             _check_workspace_result(result, "preflight")

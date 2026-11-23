@@ -160,23 +160,30 @@ selects Harbor with the workspace-write policy. Other Harbor jobs default to
 selector. The model and routing configuration can be supplied independently.
 
 - The task image needs Bash, GNU coreutils and a user-namespace build of
-  bubblewrap at `/usr/bin/bwrap` with `--disable-userns` support. The Linux
-  container policy must permit the required namespaces and a private procfs
-  mount. Harbor's effective workdir must be a writable project directory.
+  bubblewrap at `/usr/bin/bwrap`. The Linux container policy must permit
+  the required namespaces. Harbor's effective workdir must be a writable
+  project directory.
   The container needs a writable `/tmp` directory that resolves to itself.
   Startup probes the actual mounts and aborts the trial on failure.
 - Shell, Python, and tool-provided argv execute inside bubblewrap in the trial
   container. Its root filesystem is visible read-only. The project is writable,
-  with read-only mounts for top-level `.git`, `.gc`, `.agents` and
-  `AGENTS.md`, and for the existing canonical paths declared in
-  `security.protected_paths.extra`. For an existing metadata symlink, the mount
-  protects its resolved file or directory. The symlink entry follows the
+  with read-only mounts for top-level `.gc`, `.agents` and `AGENTS.md`, and for
+  the existing canonical paths declared in `security.protected_paths.extra`.
+  In a checkout with a real `.git` directory and `HEAD`, shell commands can
+  update Git metadata while `.git/hooks` is mounted read-only. A `.git` file
+  or incomplete directory is protected in full. Built-in file tools retain
+  their Universal Agent protected-path checks. For a metadata symlink, the
+  mount protects its resolved file or directory. The symlink entry follows the
   permissions of its parent directory. Empty directories reserve missing top-level
   paths during the agent phase. Cleanup removes only the directories created
   by the profile before the verifier starts. Commands and file tools share the
   writable `/tmp` of the trial. Files there survive subsequent calls and are
-  visible to a verifier in the same container. Commands have a private PID namespace,
-  read-only procfs and a minimal `/dev`. Detached background jobs are unavailable.
+  visible to a verifier in the same container. Commands have a private PID
+  namespace, dropped capabilities and a minimal `/dev`. If the container
+  denies the private procfs mount, startup retries with an empty read-only
+  `/proc`, where tools such as `ps` cannot inspect processes. The adapter logs
+  when it omits `--disable-userns` for that fallback or for bubblewrap before
+  0.8. Detached background jobs are unavailable.
   Model commands have an in-container deadline. When it expires, their supervisor
   exits as PID 1 and the kernel stops all processes in the sandbox PID namespace.
   The tool reports a timeout and any captured output. On agent timeout, the adapter

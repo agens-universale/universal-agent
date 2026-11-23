@@ -631,6 +631,8 @@ async def test_workspace_falls_back_to_private_tmpfs_when_procfs_is_denied():
 
     assert options[options.index("/proc") - 1] == "--tmpfs"
     assert "--proc" not in options
+    # The fallback also covers containers with read-only user namespace sysctls.
+    assert "--disable-userns" not in options
 
 
 async def test_workspace_keeps_private_procfs_when_it_can_be_mounted():
