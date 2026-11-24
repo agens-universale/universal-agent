@@ -282,9 +282,8 @@ async def avalidate_final_report_vs_user_intent(
     ``consumer`` — canonical id этого судейского вызова (спека §5.1). По умолчанию
     ``"finish_gate"``; ``text_answer_judge`` переиспользует эту же воронку под своим id.
     """
-    args = _normalize_handoff_in_finish_args(
-        _parse_finish_handoff_args(finish_handoff_arguments)
-    )
+    source_args = _parse_finish_handoff_args(finish_handoff_arguments)
+    args = _normalize_handoff_in_finish_args(source_args)
     active_user_requests = [
         str(x) for x in current_user_requests if isinstance(x, str)
     ]
@@ -316,6 +315,18 @@ async def avalidate_final_report_vs_user_intent(
         else _to_text(finish_handoff_arguments),
         "agent_kind": "subagent" if is_subagent else "main",
     }
+    if (
+        consumer == "finish_gate"
+        and isinstance(source_args.get("handoff"), str)
+        and isinstance(args.get("handoff"), dict)
+    ):
+        payload["finish_handoff_normalization"] = (
+            "The current turn_finish.handoff arrived as a JSON-encoded string. "
+            "Compare the contents of the decoded object at "
+            "finish_handoff_arguments.handoff with the trace and user request. "
+            "Earlier finish-gate refusals describe earlier calls. "
+            "Use the type recorded here for the current argument."
+        )
 
     raw = await _arequest_finish_gate_once(
         ctx=ctx,
