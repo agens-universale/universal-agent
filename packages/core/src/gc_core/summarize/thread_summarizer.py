@@ -37,9 +37,8 @@ from gc_core.summarize.summary_xml_extraction import (
 )
 from gc_core.summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
-    parse_memory_deltas,
+    parse_memory_deltas_with_repair,
     resolve_persistent_state_block,
-    should_attempt_memory_deltas_repair,
 )
 from gc_core.utils.llm_chat_client import shorten_for_log
 
@@ -404,40 +403,15 @@ class _BatchRun:
 
 
 async def _arun_patch_step(
-    ctx: Any, state: Any, llm_result: Any, max_tokens: int | None
+    llm_result: memory_suggestions.MemoryPatchLlmResult,
 ) -> tuple:
-    """Разбор дельт WM с одной попыткой починки формата.
-
-    Шаг в шаг повторяет ``working_memory_gateway.parse_memory_deltas_with_repair``
-    (те же ветки, тот же порядок, тот же кортеж). Позвать его самого
-    нельзя: он ждёт синхронный ``repair_fn``, а починка теперь корутина —
-    синхронный колбэк на loop её не дождётся.
-    """
-    raw_output = llm_result.raw_response
-    deltas, touched = parse_memory_deltas(raw_output, full_replace=True)
-    repair_attempted = False
-    raw_used = str(raw_output or "")
-    if should_attempt_memory_deltas_repair(
-        raw_output,
-        deltas,
-        min_chars_for_repair=100,
-    ):
-        # Починка формата дельт вторым вызовом LLM. Асинхронна, потому что зовёт LLM.
-        repaired_raw = (
-            await memory_suggestions.arequest_memory_deltas_format_repair(
-                ctx=ctx,
-                state=state,
-                raw_output=str(raw_output or ""),
-                max_tokens=max_tokens,
-                full_replace=True,
-            )
+    """Parse the patch with an optional local format repair."""
+    deltas, touched, repair_attempted, raw_used = (
+        parse_memory_deltas_with_repair(
+            llm_result.raw_response, full_replace=True
         )
-        raw_used = str(repaired_raw or "")
-        deltas, touched = parse_memory_deltas(raw_used, full_replace=True)
-        repair_attempted = True
-    repair_success = repair_attempted and (
-        bool(touched) or not deltas.is_empty()
     )
+    repair_success = repair_attempted and bool(touched)
     return deltas, touched, repair_attempted, repair_success, raw_used
 
 
@@ -472,7 +446,6 @@ async def _arun_single_batch_memory_patch(
     text: str,
     full_history_text: str,
     persistent_state_block: str,
-    max_tokens: int | None,
     trace: Dict[str, Any],
     logger: Any,
 ) -> tuple:
@@ -490,7 +463,7 @@ async def _arun_single_batch_memory_patch(
         replace_repair,
         replace_repair_ok,
         replace_raw,
-    ) = await _arun_patch_step(ctx, state, replace_result, max_tokens)
+    ) = await _arun_patch_step(replace_result)
     trace["memory_patch"] = {
         "executed": True,
         "mode": "full_replace_all_registers",
@@ -712,7 +685,6 @@ async def asummarize_dialog_via_chat_completions(
             text=text,
             full_history_text=full_history_text,
             persistent_state_block=persistent_state_block,
-            max_tokens=max_tokens,
             trace=trace,
             logger=logger,
         )

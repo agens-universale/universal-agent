@@ -427,9 +427,7 @@ def test_memory_patch_applies_markdown_literal_without_format_repair():
     )
     result = types.SimpleNamespace(raw_response=raw)
 
-    deltas, touched, repaired, _, _ = run_coro(
-        _arun_patch_step(None, None, result, None)
-    )
+    deltas, touched, repaired, _, _ = run_coro(_arun_patch_step(result))
     updated = apply_summary_memory_patch(
         WorkingMemorySnapshot(knowledge="old fact"),
         deltas,
@@ -1006,11 +1004,10 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
     assert calls["n"] == 2
 
 
-def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
+def test_memory_patch_replace_repairs_unclosed_register_locally(
     monkeypatch,
 ):
     history = _flatten_turns([_make_turn("u1", "a1")])
-    llm_calls = {"repair": 0}
 
     async def _fake_summary(**_kwargs):
         return _valid_summary("single-batch")
@@ -1018,12 +1015,8 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
     async def _fake_replace(**_kwargs):
         return types.SimpleNamespace(
             request_messages=[{"role": "user", "content": "memory-step"}],
-            raw_response=("narrative output without xml tags " + ("x" * 150)),
+            raw_response="<goal>Index the files.\n<knowledge>Count: 3</knowledge>",
         )
-
-    async def _fake_repair(**_kwargs):
-        llm_calls["repair"] += 1
-        return "<goal>repaired memory body</goal>"
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.aload_summary_prompt",
@@ -1035,11 +1028,6 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         _fake_replace,
     )
-    monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.arequest_memory_deltas_format_repair",
-        _fake_repair,
-    )
-
     result = run_coro(
         asummarize_dialog_via_chat_completions(
             ctx=_ctx(trigger_chars=999999),
@@ -1047,7 +1035,7 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
             full_history_messages=history,
         )
     )
-    assert result["memory_replace_deltas"].goal == "repaired memory body"
+    assert result["memory_replace_deltas"].goal == "Index the files."
     assert (
         result["trace"]["memory_patch"]["replace"]["format_repair_attempted"]
         is True
@@ -1056,4 +1044,3 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
         result["trace"]["memory_patch"]["replace"]["format_repair_success"]
         is True
     )
-    assert llm_calls["repair"] == 1

@@ -788,42 +788,58 @@ def test_render_session_memory_for_summary_message_skips_empty_registers():
     assert rendered.strip().endswith("</session_memory>")
 
 
-def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():
-    raw = "x" * 120
-    deltas = WorkingMemoryDeltas()
-    assert (
-        should_attempt_memory_deltas_repair(
-            raw, deltas, min_chars_for_repair=100
-        )
-        is True
-    )
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("x" * 120, False),
+        ("Notes " * 30 + "\n<goal></goal>", False),
+        ("<state>Index the files.\n<knowledge>Count: 3</knowledge>", True),
+    ],
+)
+def test_should_attempt_memory_deltas_repair_only_for_a_recoverable_draft(
+    raw, expected
+):
+    deltas, _ = parse_memory_deltas(raw)
+    assert should_attempt_memory_deltas_repair(raw, deltas) is expected
 
 
-def test_should_not_attempt_memory_deltas_repair_when_short_or_parsed():
-    assert (
-        should_attempt_memory_deltas_repair(
-            "short", WorkingMemoryDeltas(), min_chars_for_repair=100
-        )
-        is False
-    )
-    assert (
-        should_attempt_memory_deltas_repair(
-            "x" * 120,
-            WorkingMemoryDeltas(goal="parsed"),
-            min_chars_for_repair=100,
-        )
-        is False
-    )
-
-
-def test_parse_memory_deltas_with_repair_invokes_callback_once():
-    raw = "narrative text without tags " + ("x" * 120)
-    calls = {"count": 0}
+@pytest.mark.parametrize(
+    ("replacement", "accepted"),
+    [
+        (
+            "<state>Index the files.</state><knowledge>Count: 3</knowledge>",
+            True,
+        ),
+        (
+            "<goal>Index the files.</goal><knowledge>Count: 3</knowledge>",
+            False,
+        ),
+        (
+            "<state>Index the files.</state><knowledge>Count: 3</knowledge>"
+            "<constraints></constraints>",
+            False,
+        ),
+        ("<state>Index the files.</state>", False),
+        (
+            "<state>Count: 3</state><knowledge>Index the files.</knowledge>",
+            False,
+        ),
+        (
+            "<state>Index the files!</state><knowledge>Count: 3</knowledge>",
+            False,
+        ),
+    ],
+    ids=["exact", "move", "added-clear", "lost", "swap", "rewrite"],
+)
+def test_repair_callback_preserves_exact_registers_and_values(
+    replacement, accepted
+):
+    raw = "<state>  Index the files.  \n<knowledge>Count: 3</knowledge>"
+    calls = []
 
     def _repair(text: str) -> str:
-        calls["count"] += 1
-        assert text == raw
-        return "<goal>recovered goal</goal>"
+        calls.append(text)
+        return replacement
 
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
         raw,
@@ -832,10 +848,16 @@ def test_parse_memory_deltas_with_repair_invokes_callback_once():
     )
 
     assert attempted is True
-    assert repaired_raw == "<goal>recovered goal</goal>"
-    assert deltas == WorkingMemoryDeltas(goal="recovered goal")
-    assert present == frozenset({"goal"})
-    assert calls["count"] == 1
+    assert repaired_raw == replacement
+    assert calls == [raw]
+    if accepted:
+        assert deltas == WorkingMemoryDeltas(
+            state="Index the files.", knowledge="Count: 3"
+        )
+        assert present == frozenset({"state", "knowledge"})
+    else:
+        assert deltas.is_empty()
+        assert not present
 
 
 def test_build_memory_deltas_format_repair_messages_lists_register_tags():
