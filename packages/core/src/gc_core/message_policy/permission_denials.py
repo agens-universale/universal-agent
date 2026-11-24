@@ -111,6 +111,20 @@ UNATTENDED_TYPE = "confirmation_unavailable"
 UNATTENDED_REASON = (
     "Needs the user's confirmation, and there is no one to ask in this run."
 )
+#: Инструкция модели после отказа в запуске без человека (Harbor, сервер,
+#: A2A) — и после вопроса, и после запрета защиты. «Спроси пользователя»
+#: здесь некому исполнить: послушная модель бросала задачу на первом же
+#: `cat AGENTS.md` в составе команды. Запрет повтора и обхода — прежний;
+#: меняется только то, что делать после отказа.
+UNATTENDED_GUIDANCE = (
+    "There is no user in this run to confirm or lift this block, so the "
+    "action was not performed. Do NOT retry the same call on your own, and "
+    "do NOT reach the same result another way (a different tool, a rewritten "
+    "or split-up request). Continue the task without this action: if the "
+    "call also did other work, do that work again without touching the "
+    "blocked path or action. In your final report, mention what was "
+    "skipped. " + RETRY_ON_REQUEST
+)
 
 TIMED_OUT_TYPE = "confirmation_timed_out"
 #: На вопрос не ответили: истекло время, вопрос отменён или клиент не умеет
@@ -134,7 +148,12 @@ def declined_error(**fields: Any) -> dict:
 
 def unattended_error(**fields: Any) -> dict:
     """Тело отказа: подтверждение нужно, но человека в запуске нет."""
-    return mode_denied_error(UNATTENDED_TYPE, UNATTENDED_REASON, **fields)
+    return mode_denied_error(
+        UNATTENDED_TYPE,
+        UNATTENDED_REASON,
+        guidance=UNATTENDED_GUIDANCE,
+        **fields,
+    )
 
 
 def timed_out_error(**fields: Any) -> dict:

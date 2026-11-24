@@ -13,11 +13,19 @@
 """
 
 import ast
+import asyncio
+import json
 import sys
 import threading
+from contextvars import ContextVar
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+from gc_core import run_context
+from gc_core.backends.harbor import HarborBackend
 from gc_testkit.paths import HARBOR
+from gc_testkit.settings import make_settings
 
 ADAPTER = HARBOR / "adapters" / "gc_cli_external.py"
 
@@ -86,6 +94,121 @@ def test_cancellation_is_recorded_before_the_executor_exists():
     assert "_cancel_lock" in src, (
         "флаг без лока: ставит его loop Harbor, читает рабочий поток агента"
     )
+
+
+async def test_agent_worker_preserves_harbor_phase_context(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("harbor")
+    monkeypatch.syspath_prepend(str(HARBOR))
+    from adapters.gc_cli_external import GcCliExternal
+
+    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/test")
+    monkeypatch.setattr(agent, "_build_settings", lambda: None)
+    monkeypatch.setattr(
+        agent, "_apply_injected_skills", lambda settings, _: settings
+    )
+    monkeypatch.setattr(agent, "_dump_outcome", lambda *args, **kwargs: None)
+    phase_path = ContextVar("phase_path", default=None)
+    observed = []
+
+    async def stop_at_context(*_args, **_kwargs):
+        observed.append(phase_path.get())
+        raise RuntimeError("Stop after context construction")
+
+    monkeypatch.setattr(run_context, "acreate_run_context", stop_at_context)
+    token = phase_path.set("/opt/trial-bin:/usr/bin")
+    try:
+        with pytest.raises(
+            RuntimeError, match="Stop after context construction"
+        ):
+            await agent.run(
+                "Test phase environment", SimpleNamespace(), SimpleNamespace()
+            )
+    finally:
+        phase_path.reset(token)
+
+    assert observed == ["/opt/trial-bin:/usr/bin"]
+
+
+@pytest.mark.parametrize(
+    "outcome", ["closed", "worker-active", "cleanup-failed"]
+)
+async def test_workspace_verification_requires_worker_shutdown(
+    outcome, tmp_path, monkeypatch
+):
+    pytest.importorskip("harbor")
+    monkeypatch.syspath_prepend(str(HARBOR))
+    from adapters import gc_cli_external
+    from gc_core import agent_executor
+
+    worker_started = asyncio.Event()
+    allow_worker_exit = threading.Event()
+    cleanup_finished = threading.Event()
+    trial_loop = asyncio.get_running_loop()
+    environment = SimpleNamespace()
+    backend = HarborBackend(environment, trial_loop)
+
+    async def release_workspace():
+        cleanup_finished.set()
+        if outcome == "cleanup-failed":
+            raise TimeoutError("Cleanup did not confirm removal")
+
+    class Worker:
+        def __init__(self, _ctx):
+            pass
+
+        async def arun(self, _instructions):
+            trial_loop.call_soon_threadsafe(worker_started.set)
+            if not allow_worker_exit.wait(timeout=5):
+                raise RuntimeError("Test did not release the agent worker")
+
+        def stop_run(self):
+            if outcome != "worker-active":
+                allow_worker_exit.set()
+
+        def get_state(self):
+            return SimpleNamespace(
+                messages=[{"role": "user", "content": "Check shutdown"}]
+            )
+
+    async def create_context(*_args, **_kwargs):
+        return SimpleNamespace(os_backend=backend)
+
+    async def skip_skills_debug(*_args):
+        pass
+
+    agent = gc_cli_external.GcCliExternal(
+        logs_dir=tmp_path, model_name="openai/test"
+    )
+    settings = make_settings({"os_backend": "harbor-workspace"})
+    monkeypatch.setattr(agent, "_build_settings", lambda: settings)
+    monkeypatch.setattr(agent, "_write_skills_debug", skip_skills_debug)
+    monkeypatch.setattr(agent_executor, "AgentExecutor", Worker)
+    monkeypatch.setattr(run_context, "acreate_run_context", create_context)
+    monkeypatch.setattr(backend, "arelease_workspace", release_workspace)
+    monkeypatch.setattr(gc_cli_external, "_STOP_GRACE_S", 0.2, raising=False)
+    run = asyncio.create_task(
+        agent.run(
+            "Check shutdown", environment, gc_cli_external.AgentContext()
+        )
+    )
+    try:
+        await asyncio.wait_for(worker_started.wait(), timeout=5)
+        run.cancel()
+        expected = (
+            asyncio.CancelledError if outcome == "closed" else RuntimeError
+        )
+        with pytest.raises(expected):
+            await asyncio.wait_for(run, timeout=5)
+        assert cleanup_finished.is_set() == (outcome != "worker-active")
+        trace = json.loads(
+            (tmp_path / "trajectory.json").read_text(encoding="utf-8")
+        )
+        assert trace["extra"]["partial"] is True
+    finally:
+        allow_worker_exit.set()
+        assert await asyncio.to_thread(cleanup_finished.wait, 5)
 
 
 def test_step_timings_reads_the_handle_under_the_lock():

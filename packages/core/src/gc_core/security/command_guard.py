@@ -18,7 +18,11 @@ from gc_core.security.command_moderation import (
     NO_WORKAROUND_NOTICE,
     effective_command_cwd,
 )
-from gc_core.security.confirm_port import confirmation_step, guard_refusal
+from gc_core.security.confirm_port import (
+    confirmation_step,
+    deny_guidance,
+    guard_refusal,
+)
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.media_roots import media_roots
@@ -310,8 +314,9 @@ def _command_guard_flow(
         "reason": "Command targets a protected path (.gc / config).",
         # Тот же класс обхода, что и у судьи: заблокированную команду
         # модель переписывает в эквивалент. Запрет — одной формулировкой
-        # с модерацией (NO_WORKAROUND_NOTICE).
-        "guidance": NO_WORKAROUND_NOTICE,
+        # с модерацией (NO_WORKAROUND_NOTICE). Без человека — «продолжай
+        # без этого действия»: доложить и спросить некому.
+        "guidance": deny_guidance(ctx_obj, NO_WORKAROUND_NOTICE),
     }
     return _blocked_command_result(
         self_obj, effective_tool_name, err, args, kwargs
