@@ -13,7 +13,7 @@ from gc_core.usage.account import CATEGORY_UNCATEGORIZED
 from gc_core.usage.context import current_usage_context
 
 if TYPE_CHECKING:
-    from gc_core.execution.state import State
+    from gc_core.states import State
 
 _log = logging.getLogger(__name__)
 

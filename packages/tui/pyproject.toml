@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-tui"
-version = "0.6.0"
+version = "0.6.1"
 description = "GigaCode Universal Agent — Textual-фронтенд (gc-ua)"
 requires-python = ">=3.11"
 dependencies = [
 
-    "gc-core==0.6.0",
-    "gc-mcp==0.6.0",
+    "gc-core==0.6.1",
+    "gc-mcp==0.6.1",
     # Патчи совместимости с Textual проверены только на 8.2.8 (gc_tui опирается
     # на его приватные модули); переход на новую версию — отдельная задача.
     "textual>=8.2.8,<8.3",
