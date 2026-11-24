@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from gc_core.backends.protocol import FsBackend
 from gc_core.execution_workspace import (
     build_execution_workspace,
     host_os_label,
@@ -250,6 +251,16 @@ def _coerce_workspace(
     return build_execution_workspace(LocalFsBackend(), settings)
 
 
+async def _git_project_status(backend: FsBackend, project_dir: str) -> str:
+    git_entry = backend.join(project_dir, ".git")
+    # Worktrees use a Git file. A normal repository has HEAD in its .git
+    # directory, unlike an empty mount point reserved by the sandbox.
+    has_metadata = await backend.is_file(git_entry) or await backend.is_file(
+        backend.join(git_entry, "HEAD")
+    )
+    return "true" if has_metadata else "false"
+
+
 async def get_project_data(
     settings: Any = None,
     workspace: Optional[Any] = None,
@@ -282,9 +293,7 @@ async def get_project_data(
     project_dir = ws.root
     be = ws.backend
     current_date = datetime.now().strftime("%Y-%m-%d")
-    is_git_project = (
-        "true" if await be.exists(be.join(project_dir, ".git")) else "false"
-    )
+    is_git_project = await _git_project_status(be, project_dir)
     try:
         project_dir_listing = await get_listing_from_backend(be, project_dir)
     except OSError:
@@ -307,11 +316,7 @@ async def get_project_data(
     if not os.path.isdir(project_dir):
         project_dir = os.path.abspath(os.getcwd())
         root_writable = "true" if _dir_writable_probe(project_dir) else "false"
-        is_git_project = (
-            "true"
-            if os.path.exists(os.path.join(project_dir, ".git"))
-            else "false"
-        )
+        is_git_project = await _git_project_status(be, project_dir)
         try:
             project_dir_listing = await get_listing(project_dir)
         except OSError:

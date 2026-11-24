@@ -10,6 +10,14 @@ def make_message_key(message: Dict[str, Any]) -> str:
     return f"payload:{payload}"
 
 
+def has_tool_call_identity(message: dict[str, Any]) -> bool:
+    """A canonical tool call can be matched only with a name and a call ID."""
+    return all(
+        isinstance(value, str) and value.strip()
+        for value in (message.get("call_id"), message.get("name"))
+    )
+
+
 def companion_message_id(msg_id: str) -> str:
     """``id`` технического спутника реплики (подвал ``@path``).
 

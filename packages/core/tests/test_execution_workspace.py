@@ -44,6 +44,9 @@ class SandboxBackend:
     async def exists(self, path: str) -> bool:
         return False
 
+    async def is_file(self, path: str) -> bool:
+        return False
+
     async def listdir(self, path: str):
         return []
 

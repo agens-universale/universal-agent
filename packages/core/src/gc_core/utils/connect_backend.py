@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from copy import deepcopy
+from datetime import datetime
 from functools import partial
 from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
@@ -17,6 +18,10 @@ from gc_core.config_modules.backend import (
 )
 from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.execution.contracts import ModelRequestStopped
+from gc_core.execution.run_trace import (
+    start_backend_trace,
+    trace_backend_response,
+)
 from gc_core.message_policy.chat_completions import (
     prepare_chat_completion_messages_for_api,
 )
@@ -328,7 +333,18 @@ def _stream_finish_reason(result: dict) -> Any:
     return top or None
 
 
-def _log_backend_response(logger, api_mode: str, response: Any) -> None:
+def _record_backend_response(
+    logger,
+    api_mode: str,
+    response: Any,
+    *,
+    url: str,
+    requested_model: str | None,
+    started_at: datetime | None,
+) -> None:
+    if isinstance(response, dict):
+        record_usage(response.get("usage"), url, requested_model)
+        trace_backend_response(started_at, response, requested_model)
     if logger is None:
         return
     logger.debug(
@@ -733,6 +749,7 @@ async def _arequest_backend_responses_once(
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 
     data["stream"] = True
+    started_at = start_backend_trace()
     if logger is not None:
         logger.debug(
             "backend_request",
@@ -782,9 +799,14 @@ async def _arequest_backend_responses_once(
         )
 
     response_obj = result["response"]
-    if isinstance(response_obj, dict):
-        record_usage(response_obj.get("usage"), url, data.get("model"))
-    _log_backend_response(logger, "responses", response_obj)
+    _record_backend_response(
+        logger,
+        "responses",
+        response_obj,
+        url=url,
+        requested_model=data.get("model"),
+        started_at=started_at,
+    )
     return response_obj, r_headers
 
 
@@ -820,6 +842,7 @@ async def _astream_chat_completions(
     # запросу — иначе финального usage-чанка нет и токены основного цикла
     # (он всегда стримится) не учитываются.
     stream_data["stream_options"] = {"include_usage": True}
+    started_at = start_backend_trace()
     _log_backend_request(logger, "chat_completions", url, stream_data)
 
     async def _read(r):
@@ -859,9 +882,14 @@ async def _astream_chat_completions(
                 "Backend returned empty stream response (no content, tool_calls, finish_reason, or error)",
                 status_code=None,
             )
-        if isinstance(assembled, dict):
-            record_usage(assembled.get("usage"), url, data.get("model"))
-        _log_backend_response(logger, "chat_completions", assembled)
+        _record_backend_response(
+            logger,
+            "chat_completions",
+            assembled,
+            url=url,
+            requested_model=data.get("model"),
+            started_at=started_at,
+        )
         return assembled
 
     return await _aopen_model_stream(
@@ -1044,6 +1072,7 @@ async def _arequest_backend_chat_completions_once(
             on_delta=on_delta,
         )
 
+    started_at = start_backend_trace()
     _log_backend_request(logger, "chat_completions", url, data)
 
     async def _post():
@@ -1076,9 +1105,14 @@ async def _arequest_backend_chat_completions_once(
         logger=logger,
         assemble_sse=_assemble_sse_completion,
     )
-    if isinstance(payload, dict):
-        record_usage(payload.get("usage"), url, data.get("model"))
-    _log_backend_response(logger, "chat_completions", payload)
+    _record_backend_response(
+        logger,
+        "chat_completions",
+        payload,
+        url=url,
+        requested_model=data.get("model"),
+        started_at=started_at,
+    )
     return payload
 
 
