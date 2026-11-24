@@ -1,0 +1,86 @@
+# Зеркало на GitHub: https://github.com/agens-universale/universal-agent
+# повторяет master, теги и релизы этого репозитория.
+#
+# GitHub приводится к состоянию GitVerse принудительно: откат master, удаление
+# тега или релиза здесь повторяются там, а всё, чего здесь нет (в том числе
+# коммиты, сделанные прямо в GitHub), на GitHub затирается.
+#
+# Секреты репозитория:
+#   GH_MIRROR_TOKEN — fine-grained токен GitHub, Contents: Read and write
+#                     на целевой репозиторий;
+#   GV_MIRROR_TOKEN — токен GitVerse с правом чтения репозитория: без него
+#                     API GitVerse не отдаёт список релизов.
+name: mirror
+on:
+  push:
+    branches: [master]
+    tags: ['*']
+  delete:
+  release:
+
+jobs:
+  github:
+    runs-on: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync master and tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Локальные теги — ровно те, что есть в GitVerse: от них зависит,
+          # какие теги --prune удалит на GitHub.
+          git fetch --force --prune --prune-tags origin '+refs/tags/*:refs/tags/*' '+refs/heads/master:refs/remotes/origin/master'
+          git remote add target "https://x-access-token:${GH_TOKEN}@github.com/agens-universale/universal-agent.git"
+          git push --force target refs/remotes/origin/master:refs/heads/master
+          git push --force --prune target 'refs/tags/*:refs/tags/*'
+
+      - name: Sync releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          GV_TOKEN: ${{ secrets.GV_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          GH_API=https://api.github.com/repos/agens-universale/universal-agent
+          GV_API=https://api.gitverse.ru/repos/gigacode-ai/universal-agent
+          gh() { curl -sS --fail-with-body -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          gv() { curl -sS --fail-with-body -H "Authorization: Bearer ${GV_TOKEN}" -H "Accept: application/vnd.gitverse.object+json;version=1" "$@"; }
+          # Все страницы списка релизов одним JSON-массивом, без черновиков.
+          releases() {
+            local page=1 all='[]' chunk
+            while :; do
+              chunk=$("$1" "$2/releases?per_page=$3&page=${page}")
+              all=$(jq -n --argjson a "${all}" --argjson b "${chunk}" '$a + $b')
+              [ "$(jq length <<<"${chunk}")" -lt "$3" ] && break
+              page=$((page + 1))
+            done
+            jq '[.[] | select(.draft != true)]' <<<"${all}"
+          }
+          src=$(releases gv "${GV_API}" 50)
+          dst=$(releases gh "${GH_API}" 100)
+          # Лишние на GitHub — удалить.
+          jq -r --argjson src "${src}" '.[] | select(.tag_name as $t | $src | all(.tag_name != $t)) | "\(.id) \(.tag_name)"' <<<"${dst}" |
+            while read -r id tag; do
+              echo "delete release ${tag}"
+              gh -X DELETE "${GH_API}/releases/${id}"
+            done
+          # Недостающие — создать, изменившиеся — обновить.
+          jq -c '.[] | {tag_name, name, body: (.body // ""), prerelease: (.prerelease // false)}' <<<"${src}" |
+            while read -r rel; do
+              tag=$(jq -r .tag_name <<<"${rel}")
+              cur=$(jq -c --arg t "${tag}" '[.[] | select(.tag_name == $t)][0] // empty' <<<"${dst}")
+              if [ -z "${cur}" ]; then
+                echo "create release ${tag}"
+                # Параллельный запуск мог создать релиз раньше — тогда достаточно, что он есть.
+                gh -X POST -d "${rel}" "${GH_API}/releases" >/dev/null || gh "${GH_API}/releases/tags/${tag}" >/dev/null
+              elif [ "$(jq -c '{name, body: (.body // ""), prerelease}' <<<"${cur}")" != "$(jq -c '{name, body, prerelease}' <<<"${rel}")" ]; then
+                echo "update release ${tag}"
+                gh -X PATCH -d "${rel}" "${GH_API}/releases/$(jq .id <<<"${cur}")" >/dev/null
+              fi
+            done
+          echo "releases in sync"
