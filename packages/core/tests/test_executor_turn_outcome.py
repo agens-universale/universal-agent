@@ -385,7 +385,7 @@ async def test_bad_tools_return_one_paired_result_each(tmp_path, monkeypatch):
         next(c for c in sent_calls if c["id"] == "json")["function"][
             "arguments"
         ]
-        == calls["json"][1]
+        == "{}"
     )
     results = [m for m in request if m["role"] == "tool"]
     assert [m["tool_call_id"] for m in results] == list(calls)
