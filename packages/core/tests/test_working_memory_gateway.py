@@ -12,7 +12,6 @@ from gc_core.summarize.working_memory_gateway import (
     apply_memory_patch,
     apply_replace_deltas,
     apply_summary_memory_patch,
-    build_memory_deltas_format_repair_messages,
     coerce_working_memory_deltas,
     extract_register_bodies,
     parse_memory_deltas,
@@ -21,7 +20,6 @@ from gc_core.summarize.working_memory_gateway import (
     render_persistent_state_for_prompt,
     render_session_memory_for_summary_message,
     resolve_persistent_state_block,
-    should_attempt_memory_deltas_repair,
 )
 
 
@@ -796,76 +794,25 @@ def test_render_session_memory_for_summary_message_skips_empty_registers():
         ("<state>Index the files.\n<knowledge>Count: 3</knowledge>", True),
     ],
 )
-def test_should_attempt_memory_deltas_repair_only_for_a_recoverable_draft(
-    raw, expected
-):
-    deltas, _ = parse_memory_deltas(raw)
-    assert should_attempt_memory_deltas_repair(raw, deltas) is expected
+def test_only_recovers_eligible_drafts(raw, expected):
+    _, _, attempted, _ = parse_memory_deltas_with_repair(raw)
+    assert attempted is expected
 
 
-@pytest.mark.parametrize(
-    ("replacement", "accepted"),
-    [
-        (
-            "<state>Index the files.</state><knowledge>Count: 3</knowledge>",
-            True,
-        ),
-        (
-            "<goal>Index the files.</goal><knowledge>Count: 3</knowledge>",
-            False,
-        ),
-        (
-            "<state>Index the files.</state><knowledge>Count: 3</knowledge>"
-            "<constraints></constraints>",
-            False,
-        ),
-        ("<state>Index the files.</state>", False),
-        (
-            "<state>Count: 3</state><knowledge>Index the files.</knowledge>",
-            False,
-        ),
-        (
-            "<state>Index the files!</state><knowledge>Count: 3</knowledge>",
-            False,
-        ),
-    ],
-    ids=["exact", "move", "added-clear", "lost", "swap", "rewrite"],
-)
-def test_repair_callback_preserves_exact_registers_and_values(
-    replacement, accepted
-):
+def test_local_repair_preserves_exact_registers_and_values():
     raw = "<state>  Index the files.  \n<knowledge>Count: 3</knowledge>"
-    calls = []
-
-    def _repair(text: str) -> str:
-        calls.append(text)
-        return replacement
-
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
-        raw,
-        repair_fn=_repair,
-        min_chars_for_repair=100,
+        raw
     )
 
     assert attempted is True
-    assert repaired_raw == replacement
-    assert calls == [raw]
-    if accepted:
-        assert deltas == WorkingMemoryDeltas(
-            state="Index the files.", knowledge="Count: 3"
-        )
-        assert present == frozenset({"state", "knowledge"})
-    else:
-        assert deltas.is_empty()
-        assert not present
-
-
-def test_build_memory_deltas_format_repair_messages_lists_register_tags():
-    messages = build_memory_deltas_format_repair_messages("free text")
-    assert messages[0]["role"] == "system"
-    assert "<goal>" in messages[0]["content"]
-    assert "<knowledge>" in messages[0]["content"]
-    assert "free text" in messages[1]["content"]
+    assert repaired_raw == (
+        "<state>  Index the files.  </state>\n<knowledge>Count: 3</knowledge>"
+    )
+    assert deltas == WorkingMemoryDeltas(
+        state="Index the files.", knowledge="Count: 3"
+    )
+    assert present == frozenset({"state", "knowledge"})
 
 
 def test_resolve_persistent_state_block_uses_explicit_block():
@@ -885,22 +832,13 @@ def test_resolve_persistent_state_block_reads_from_state_when_none():
     assert "from state" in resolved
 
 
-def test_parse_memory_deltas_with_repair_skips_callback_when_not_needed():
+def test_parse_memory_deltas_with_repair_returns_balanced_patch_unchanged():
     raw = "<state>ok</state>"
-    calls = {"count": 0}
-
-    def _repair(_text: str) -> str:
-        calls["count"] += 1
-        return "<goal>unexpected</goal>"
-
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
-        raw,
-        repair_fn=_repair,
-        min_chars_for_repair=100,
+        raw
     )
 
     assert attempted is False
     assert repaired_raw == raw
     assert deltas == WorkingMemoryDeltas(state="ok")
     assert present == frozenset({"state"})
-    assert calls["count"] == 0

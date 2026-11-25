@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Mapping
+from typing import Any, Dict, Mapping
 
 REGISTER_GOAL = "goal"
 REGISTER_CONSTRAINTS = "constraints"
@@ -104,26 +104,6 @@ def render_memory_patch_registers_for_prompt() -> str:
         f"{rules}\n"
         "- Empty tag body clears that register — rare during active work.\n"
         "- No verbose tool logs. No facts unsupported by the inputs."
-    )
-
-
-def render_memory_deltas_format_repair_system_prompt(
-    *, full_replace: bool = False
-) -> str:
-    register_tags = ", ".join(
-        f"<{name}>...</{name}>" for name in REGISTER_ORDER
-    )
-    n = len(REGISTER_ORDER)
-    replace_hint = (
-        f"Use all {n} register tags when the source covers a full memory rebuild; "
-        "keep empty tags when the source meant to clear a register (empty body means clear)."
-    )
-    del full_replace  # all gateway registers use replace semantics
-    return (
-        "You are a strict formatter. Convert input text into session memory register tags only. "
-        f"Use zero or more of: {register_tags}. "
-        "Do not add new facts. Preserve meaning. "
-        f"{replace_hint}"
     )
 
 
@@ -231,11 +211,6 @@ def read_snapshot_from_state(state: Any) -> WorkingMemorySnapshot:
     return _snapshot_from_mapping(getattr(shared, "working_memory", None))
 
 
-MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL = (
-    "working_memory_deltas_format_repair"
-)
-
-
 def render_persistent_state_for_prompt(
     snapshot: WorkingMemorySnapshot,
     session_todo: Any = None,
@@ -275,21 +250,6 @@ def resolve_persistent_state_block(
         read_snapshot_from_state(state),
         session_todo=read_session_todo_from_state(state),
     )
-
-
-def build_memory_deltas_format_repair_messages(
-    raw_output: str,
-    *,
-    full_replace: bool = False,
-) -> List[Dict[str, str]]:
-    system_prompt = render_memory_deltas_format_repair_system_prompt(
-        full_replace=full_replace
-    )
-    user_prompt = f"<raw_memory_step_output>\n{raw_output or ''!s}\n</raw_memory_step_output>\n"
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
 
 
 def _register_uses_replace_semantics(
@@ -823,29 +783,12 @@ def _recover_register_draft(text: str) -> str:
     return repaired if extract_register_bodies(repaired) == values else ""
 
 
-def should_attempt_memory_deltas_repair(
-    raw_output: str,
-    deltas: WorkingMemoryDeltas,
-    *,
-    min_chars_for_repair: int = 100,
-) -> bool:
-    """Check whether an unsuccessful direct parse has a recoverable draft."""
-    del min_chars_for_repair  # Keep the legacy keyword for callers.
-    if not isinstance(deltas, WorkingMemoryDeltas) or not deltas.is_empty():
-        return False
-    _, touched = parse_memory_deltas(raw_output)
-    return not touched and bool(_recover_register_draft(str(raw_output or "")))
-
-
 def parse_memory_deltas_with_repair(
     raw_output: str,
     *,
-    repair_fn: Callable[[str], str] | None = None,
-    min_chars_for_repair: int = 100,
     full_replace: bool = False,
 ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, str]:
     """Parse directly or recover structure without changing register values."""
-    del min_chars_for_repair  # Keep the legacy keyword for callers.
     raw = str(raw_output or "")
     direct, touched = parse_memory_deltas(raw, full_replace=full_replace)
     if touched:
@@ -856,12 +799,6 @@ def parse_memory_deltas_with_repair(
     expected, expected_touched = parse_memory_deltas(
         repaired, full_replace=full_replace
     )
-    if repair_fn is not None:
-        formatted = str(repair_fn(raw) or "")
-        actual = parse_memory_deltas(formatted, full_replace=full_replace)
-        if actual != (expected, expected_touched):
-            return direct, touched, True, formatted
-        repaired = formatted
     return expected, expected_touched, True, repaired
 
 
@@ -1001,7 +938,6 @@ def render_session_memory_for_summary_message(
 
 
 __all__ = [
-    "MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL",
     "REGISTER_MERGE_MODES",
     "REGISTER_ORDER",
     "SUMMARY_PATCH_REPLACE_REGISTERS",
@@ -1011,7 +947,6 @@ __all__ = [
     "apply_memory_patch",
     "apply_replace_deltas",
     "apply_summary_memory_patch",
-    "build_memory_deltas_format_repair_messages",
     "coerce_working_memory_deltas",
     "extract_register_bodies",
     "parse_memory_deltas",
@@ -1020,5 +955,4 @@ __all__ = [
     "render_persistent_state_for_prompt",
     "render_session_memory_for_summary_message",
     "resolve_persistent_state_block",
-    "should_attempt_memory_deltas_repair",
 ]
