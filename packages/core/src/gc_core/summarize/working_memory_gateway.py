@@ -378,7 +378,7 @@ _SHELL_HEREDOC = re.compile(
     + r".*?^(?P<terminator>(?(strip_tabs)\t*)(?P=label))(?=\r?$)",
     re.DOTALL | re.MULTILINE,
 )
-_LEADING_HEREDOC = re.compile(_SHELL_HEREDOC_HEAD)
+_SHELL_HEREDOC_OPENING = re.compile(_SHELL_HEREDOC_HEAD, re.MULTILINE)
 _HEREDOC_COMMANDS = frozenset(
     {"bash", "cat", "dash", "echo", "ksh", "printf", "sh", "tee", "zsh"}
 )
@@ -522,6 +522,20 @@ def _has_shell_heredoc_context(heredoc: re.Match[str]) -> bool:
     )
 
 
+def _unterminated_heredoc_span(
+    text: str, literal_spans: list[tuple[int, int]]
+) -> tuple[int, int] | None:
+    for opening in _SHELL_HEREDOC_OPENING.finditer(text):
+        start = opening.start()
+        if (
+            not _is_literal(start, literal_spans)
+            and _has_shell_heredoc_context(opening)
+            and _SHELL_HEREDOC.match(text, start) is None
+        ):
+            return start, len(text)
+    return None
+
+
 def _heredoc_ends_inside_register(
     text: str, heredoc: re.Match[str], literal_spans: list[tuple[int, int]]
 ) -> bool:
@@ -558,7 +572,7 @@ def _command_and_quote_spans(
             spans.append(match.span())
 
     # A missing terminator cannot resolve an ambiguous shift expression.
-    leading = _LEADING_HEREDOC.match(text)
+    leading = _SHELL_HEREDOC_OPENING.match(text)
     if (
         leading is not None
         and _has_shell_heredoc_context(leading)
@@ -569,12 +583,12 @@ def _command_and_quote_spans(
 
 
 def _register_literal_spans(
-    text: str, *, include_draft_fences: bool = False
+    text: str, *, for_draft: bool = False
 ) -> list[tuple[int, int]]:
     code_matches = list(_MARKDOWN_CODE_SPAN.finditer(text))
     code_spans = [match.span() for match in code_matches]
     draft_fences = []
-    if include_draft_fences:
+    if for_draft:
         draft_fences = [
             match.span()
             for match in _DRAFT_FENCE.finditer(text)
@@ -582,7 +596,7 @@ def _register_literal_spans(
                 start < match.start() < end for start, end in code_spans
             )
         ]
-    return (
+    spans = (
         _command_and_quote_spans(text, code_spans + draft_fences)
         + draft_fences
         + [
@@ -593,6 +607,9 @@ def _register_literal_spans(
             or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
         ]
     )
+    if for_draft and (unterminated := _unterminated_heredoc_span(text, spans)):
+        spans.append(unterminated)
+    return spans
 
 
 def _extract_balanced_registers(s: str) -> dict[str, str]:
@@ -732,12 +749,16 @@ def _final_register_draft(text: str) -> str:
 def _missing_close_position(
     draft: str, body_start: int, next_tag: re.Match[str], value: str
 ) -> int | None:
-    # A missing close is recoverable only after a complete inline value,
-    # followed by whitespace and another register at the start of a line.
-    inline = draft[body_start : next_tag.start()].partition("\n")[0]
+    # A complete inline value may be followed by a register on a new line.
+    # Keep indentation of a Markdown code block outside this recovery path.
+    body = draft[body_start : next_tag.start()]
+    inline = body.partition("\n")[0]
+    _, newline, indent = body.rpartition("\n")
     if (
         next_tag.group(1)
-        or draft[next_tag.start() - 1] != "\n"
+        or not newline
+        or len(indent) > 3
+        or indent.strip(" ")
         or not value
         or inline.strip() != value
         or value.endswith(":")
@@ -771,7 +792,7 @@ def _valid_draft_trailer(text: str) -> bool:
 def _recover_register_draft(text: str) -> str:
     """Close only unambiguous register bodies in the final raw draft."""
     draft = _final_register_draft(text)
-    spans = _register_literal_spans(draft, include_draft_fences=True)
+    spans = _register_literal_spans(draft, for_draft=True)
     values: dict[str, str] = {}
     missing_closes: list[tuple[int, str]] = []
     cursor = end = 0

@@ -204,6 +204,37 @@ async def test_compaction_keeps_constraints_in_sent_message(
             },
         ),
         (
+            "<goal>Save receipts.\n<knowledge>\ncat <<'EOF'\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\ncat <<'EOF'\n"
+            "</knowledge>\nEOF\n</knowledge>\n<state>Done.</state>",
+            {
+                "goal": "Save receipts.",
+                "knowledge": "cat <<'EOF'\n</knowledge>\nEOF",
+                "state": "Done.",
+            },
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\n```bash\ncat <<'EOF'\n"
+            "```\n</knowledge>\n<state>Done.</state>",
+            {
+                "goal": "Save receipts.",
+                "knowledge": "```bash\ncat <<'EOF'\n```",
+                "state": "Done.",
+            },
+        ),
+        (
+            "<goal>Save receipts.\n  <state>Receipts collected.</state>",
+            {"goal": "Save receipts.", "state": "Receipts collected."},
+        ),
+        (
+            "<goal>Save receipts.\n\n    <state>Example only.</state>",
+            {},
+        ),
+        (
             "<state>cat <<'EOF'\n<goal>"
             + "command output " * 10
             + "</goal>\n<constraints></constraints>",
@@ -343,6 +374,11 @@ async def test_compaction_keeps_constraints_in_sent_message(
         "heredoc-terminator-in-separate-register",
         "register-delimiter-in-heredoc-body",
         "unclosed-final-draft",
+        "draft-unclosed-heredoc",
+        "draft-closed-heredoc",
+        "draft-fenced-heredoc-fragment",
+        "draft-indented-register",
+        "draft-indented-code-block",
         "heredoc",
         "quotation",
         "quoted-think-delimiter-in-command",
