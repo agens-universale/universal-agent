@@ -226,29 +226,17 @@ async def test_compaction_keeps_constraints_in_sent_message(
         (
             "<goal>Save receipts.\n<knowledge>cat <<'EOF' > notes.txt\n"
             "Inventory.\nEOF\n</knowledge>\n<state>Done.</state>",
-            {
-                "goal": "Save receipts.",
-                "knowledge": "cat <<'EOF' > notes.txt\nInventory.\nEOF",
-                "state": "Done.",
-            },
+            {},
         ),
         (
             "<goal>Save receipts.\n<knowledge>\ncat <<'EOF'\n"
             "</knowledge>\nEOF\n</knowledge>\n<state>Done.</state>",
-            {
-                "goal": "Save receipts.",
-                "knowledge": "cat <<'EOF'\n</knowledge>\nEOF",
-                "state": "Done.",
-            },
+            {},
         ),
         (
             "<goal>Save receipts.\n<knowledge>\n```bash\ncat <<'EOF'\n"
             "```\n</knowledge>\n<state>Done.</state>",
-            {
-                "goal": "Save receipts.",
-                "knowledge": "```bash\ncat <<'EOF'\n```",
-                "state": "Done.",
-            },
+            {},
         ),
         (
             "<goal>Save receipts.\n  <state>Receipts collected.</state>",
@@ -420,6 +408,27 @@ async def test_compaction_keeps_constraints_in_sent_message(
             "</knowledge>\n<state>quoted`\n</state>",
             {},
         ),
+        (
+            "<goal>Save receipts.\n<state>\n"
+            "git commit -m \"$(cat <<'EOF'\n"
+            "</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\nx=$(cat <<'B'\n"
+            "</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\ncat <<A; cat <<B\n"
+            "first body\nA\n</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\npython3 - <<B;\n"
+            "</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
     ],
     ids=[
         "prose",
@@ -488,6 +497,10 @@ async def test_compaction_keeps_constraints_in_sent_message(
         "draft-heredoc-without-line-end",
         "draft-tab-indented-fence-marker",
         "draft-inline-code-crosses-registers",
+        "draft-heredoc-in-command-substitution",
+        "draft-heredoc-in-assignment",
+        "draft-second-heredoc",
+        "draft-python-heredoc",
     ],
 )
 async def test_compaction_applies_only_intended_memory_updates(

@@ -383,14 +383,6 @@ _SHELL_HEREDOC = re.compile(
     re.DOTALL | re.MULTILINE,
 )
 _SHELL_HEREDOC_OPENING = re.compile(_SHELL_HEREDOC_HEAD, re.MULTILINE)
-_DRAFT_HEREDOC_HEAD = (
-    rf"(?:^|<(?:{'|'.join(REGISTER_ORDER)})>){_SHELL_HEREDOC_START}"
-    r"(?=[ \t<>|;&\r\n]|\Z)[^\r\n]*(?:\r?\n|\Z)"
-)
-_DRAFT_HEREDOC_OPENING = re.compile(_DRAFT_HEREDOC_HEAD, re.MULTILINE)
-_DRAFT_HEREDOC = re.compile(
-    _DRAFT_HEREDOC_HEAD + _SHELL_HEREDOC_BODY, re.DOTALL | re.MULTILINE
-)
 _HEREDOC_COMMANDS = frozenset(
     {"bash", "cat", "dash", "echo", "ksh", "printf", "sh", "tee", "zsh"}
 )
@@ -534,20 +526,6 @@ def _has_shell_heredoc_context(heredoc: re.Match[str]) -> bool:
     )
 
 
-def _add_draft_heredoc_spans(text: str, spans: list[tuple[int, int]]) -> None:
-    for opening in _DRAFT_HEREDOC_OPENING.finditer(text):
-        start = opening.start("command")
-        if _is_literal(start, spans) or not _has_shell_heredoc_context(
-            opening
-        ):
-            continue
-        closing = _DRAFT_HEREDOC.match(text, opening.start())
-        if closing is None:
-            spans.append((start, len(text)))
-            return
-        spans.append((start, closing.end()))
-
-
 def _heredoc_ends_inside_register(
     text: str, heredoc: re.Match[str], literal_spans: list[tuple[int, int]]
 ) -> bool:
@@ -611,7 +589,7 @@ def _register_literal_spans(
         draft_code.extend(
             match.span() for match in _DRAFT_INDENTED_CODE.finditer(text)
         )
-    spans = (
+    return (
         _command_and_quote_spans(text, code_spans + draft_code)
         + draft_code
         + [
@@ -623,9 +601,6 @@ def _register_literal_spans(
             or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
         ]
     )
-    if for_draft:
-        _add_draft_heredoc_spans(text, spans)
-    return spans
 
 
 def _extract_balanced_registers(s: str) -> dict[str, str]:
@@ -743,7 +718,11 @@ def parse_memory_deltas(
 
 def _draft_at(text: str, start: int) -> str:
     line_start = text.rfind("\n", 0, start) + 1
-    return "" if _DRAFT_INDENTED_CODE.match(text, line_start) else text[start:]
+    if _DRAFT_INDENTED_CODE.match(text, line_start):
+        return ""
+    draft = text[start:]
+    # A heredoc opener can make subsequent register boundaries ambiguous.
+    return "" if "<<" in draft else draft
 
 
 def _final_register_draft(text: str) -> str:
