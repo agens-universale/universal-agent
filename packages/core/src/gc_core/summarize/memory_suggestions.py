@@ -10,10 +10,6 @@ from gc_core.execution.resources import (
 )
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.prompt_loading import aload_memory_patch_prompt
-from gc_core.summarize.working_memory_gateway import (
-    MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
-    build_memory_deltas_format_repair_messages,
-)
 
 
 @dataclass
@@ -45,7 +41,7 @@ async def _arequest_patch(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    # Dirty logged inside arequest_summary_text / aux choke; return is projected.
+    # The draft parser needs the original indentation to identify code boundaries.
     projected = await arequest_summary_text(
         ctx=ctx,
         state=state,
@@ -53,6 +49,7 @@ async def _arequest_patch(
         request_label=request_label,
         consumer="summary",
         logger=logger,
+        strip_outer_whitespace=False,
     )
     return MemoryPatchLlmResult(
         request_messages=request_messages,
@@ -101,29 +98,4 @@ async def arequest_patch_replace(
         system_prompt=system,
         user_prompt=user_prompt,
         request_label="working_memory_patch_replace_after_summary",
-    )
-
-
-async def arequest_memory_deltas_format_repair(
-    *,
-    ctx: Any,
-    state: Any,
-    raw_output: str,
-    max_tokens: int | None = None,
-    full_replace: bool = False,
-) -> str:
-    """LLM transport: переформатировать сырой ответ memory-step в register-теги.
-
-    Основная реализация починки формата; синхронное имя оставлено шимом.
-    """
-    request_messages = build_memory_deltas_format_repair_messages(
-        raw_output, full_replace=full_replace
-    )
-    return await arequest_summary_text(
-        ctx=ctx,
-        state=state,
-        messages=request_messages,
-        request_label=MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
-        consumer="summary",
-        max_tokens=max_tokens,
     )

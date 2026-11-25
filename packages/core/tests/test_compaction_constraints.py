@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import assemble_summary_xml
+from gc_core.summarize.working_memory_gateway import (
+    WorkingMemorySnapshot,
+    render_session_memory_for_summary_message,
+)
+from gc_core.utils import llm_chat_client
 from gc_testkit.paths import REPO
 from gc_testkit.settings import fake_ctx
 
@@ -34,7 +39,6 @@ SAVED_PATCH_RESPONSE = """The three edits were applied, but there's a remaining 
 @pytest.mark.parametrize(
     (
         "patch_response",
-        "repair_response",
         "expected_memory",
         "in_summary",
         "active_constraint",
@@ -42,13 +46,11 @@ SAVED_PATCH_RESPONSE = """The three edits were applied, but there's a remaining 
     [
         (
             SAVED_PATCH_RESPONSE,
-            SAVED_PATCH_RESPONSE,
             "",
             True,
             "Keep the results sheet and the exact column order.",
         ),
         (
-            SAVED_PATCH_RESPONSE,
             "<state>Verify the workbook rows.</state>",
             "",
             True,
@@ -56,14 +58,12 @@ SAVED_PATCH_RESPONSE = """The three edits were applied, but there's a remaining 
         ),
         (
             "<constraints>Keep the results sheet and the exact column order.</constraints>",
-            "",
             "Keep the results sheet and the exact column order.",
             False,
             "Keep the results sheet and the exact column order.",
         ),
         (
             "<constraints>Never edit files in output/tmp/</constraints>",
-            "",
             "Never edit files in output/tmp/",
             True,
             "Never edit files in output/",
@@ -79,7 +79,6 @@ SAVED_PATCH_RESPONSE = """The three edits were applied, but there's a remaining 
 async def test_compaction_keeps_constraints_in_sent_message(
     monkeypatch,
     patch_response,
-    repair_response,
     expected_memory,
     in_summary,
     active_constraint,
@@ -120,21 +119,12 @@ async def test_compaction_keeps_constraints_in_sent_message(
     async def patch_response_from_llm(**_kwargs):
         return patch_response
 
-    async def repair_response_from_llm(**_kwargs):
-        return repair_response
-
     monkeypatch.setattr(
         thread_summarizer, "arequest_summary_text", summary_response
     )
     monkeypatch.setattr(
         memory_suggestions, "arequest_summary_text", patch_response_from_llm
     )
-    monkeypatch.setattr(
-        memory_suggestions,
-        "arequest_memory_deltas_format_repair",
-        repair_response_from_llm,
-    )
-
     await arun_summary_compaction(
         ctx=ctx, state=state, trigger_reason="test", is_cli_mode=False
     )
@@ -145,3 +135,438 @@ async def test_compaction_keeps_constraints_in_sent_message(
         f"<active_constraints>{active_constraint}</active_constraints>" in sent
     ) is in_summary
     assert state.shared.working_memory["constraints"] == expected_memory
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("patch", "updates"),
+    [
+        ("I should inspect the input and decide what to do next. " * 3, {}),
+        ("cat <<'EOF'\n<goal>shell data</goal>\nEOF", {}),
+        ("cat <<EOF\n<state></state>", {}),
+        ("bash <<EOF\n<state></state>", {}),
+        ("/bin/bash -s <<EOF\n<state></state>", {}),
+        ("tee <<EOF\n<state></state>", {}),
+        ('printf "%s" <<EOF\n<state></state>', {}),
+        ("producer <<-EOF\n<state></state>", {}),
+        ("cat <<EOF\n    EOF\n<state></state>\nEOF", {}),
+        ("cat <<-EOF\n    EOF\n<state></state>\n\tEOF", {}),
+        (
+            "cat <<'EOF'\n<state></state>\nEOF\n<goal>Ship reports</goal>",
+            {"goal": "Ship reports"},
+        ),
+        (
+            "producer <<EOF\n<state></state>\nEOF\n<goal>Ship reports</goal>",
+            {"goal": "Ship reports"},
+        ),
+        ('The shell prints "<goal>example</goal>".', {}),
+        (
+            "mask << SHIFT\n<goal>Save the shift result</goal>",
+            {"goal": "Save the shift result"},
+        ),
+        (
+            "mask << SHIFT\n<goal>Save the shift result</goal>\n<state>\nSHIFT\n</state>",
+            {"goal": "Save the shift result", "state": "SHIFT"},
+        ),
+        (
+            "<state>\nflags = mask << shift\n</state>\n<goal>new</goal>",
+            {"state": "flags = mask << shift", "goal": "new"},
+        ),
+        (
+            "<knowledge>\n```bash\ncat <<EOF\n```\n</knowledge>\n<goal>new</goal>\nEOF",
+            {"knowledge": "```bash\ncat <<EOF\n```", "goal": "new"},
+        ),
+        (
+            "<goal>new</goal>\n<knowledge>\ncat <<EOF\nAn incomplete sketch.\n</knowledge>",
+            {"knowledge": "cat <<EOF\nAn incomplete sketch.", "goal": "new"},
+        ),
+        (
+            "<knowledge>\nCommand fragment:\ncat <<EOF\n</knowledge>\n<state>\nEOF\n</state>",
+            {"knowledge": "Command fragment:\ncat <<EOF", "state": "EOF"},
+        ),
+        (
+            "<knowledge>\ncat <<EOF\n</knowledge>\nEOF\n</knowledge><state>Done</state>",
+            {"knowledge": "cat <<EOF\n</knowledge>\nEOF", "state": "Done"},
+        ),
+        (
+            "Let me inspect the files.\n</think>\n"
+            "<goal>  Index the reports.  \n\n"
+            "<constraints>  Keep the  existing files.  \n\n"
+            "<state>\n</state>\n\n"
+            '<knowledge>\n- The index is called "archive".\n- It has 3 rows.\n'
+            "</knowledge>\n\n</summary>\n\n"
+            "The user can find the index in the project folder.",
+            {
+                "goal": "Index the reports.",
+                "constraints": "Keep the  existing files.",
+                "state": "",
+                "knowledge": '- The index is called "archive".\n- It has 3 rows.',
+            },
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\ncat <<'EOF'\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>cat <<'EOF'\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\ncat <<'EOF' > notes.txt\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge> cat <<'EOF'>notes.txt\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>cat <<'EOF' > notes.txt\n"
+            "Inventory.\nEOF\n</knowledge>\n<state>Done.</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\ncat <<'EOF'\n"
+            "</knowledge>\nEOF\n</knowledge>\n<state>Done.</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\n```bash\ncat <<'EOF'\n"
+            "```\n</knowledge>\n<state>Done.</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n  <state>Receipts collected.</state>",
+            {"goal": "Save receipts.", "state": "Receipts collected."},
+        ),
+        (
+            "<goal>Save receipts.\n\n    <state>Example only.</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.</knowledge>\n"
+            "\n  <state></state>",
+            {"goal": "Save receipts.", "knowledge": "Inventory.", "state": ""},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.</knowledge>\n"
+            "\n    <state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.</knowledge>\n"
+            "\n\t<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.\n"
+            "\n    </knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "The draft is ready.\n</think>\n\n"
+            "    <goal>Save receipts.\n<state></state>",
+            {},
+        ),
+        (
+            "<state>cat <<'EOF'\n<goal>"
+            + "command output " * 10
+            + "</goal>\n<constraints></constraints>",
+            {},
+        ),
+        (
+            '"<state>'
+            + "quoted example " * 10
+            + '\n<knowledge>example only</knowledge>"',
+            {},
+        ),
+        (
+            'printf "%s" "\n</think>\n<goal>demo\n<state></state>\n'
+            '</summary>\n"',
+            {},
+        ),
+        (
+            "Here is an example from the manual.\n</think>\n"
+            "<goal>demo\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>demo\n<state></state>\n</summary>\nDo not use this example.",
+            {},
+        ),
+        (
+            "<goal>demo\n<state>\n<unknown>unfinished\n</state>",
+            {},
+        ),
+        (
+            '<goal>demo\n<state>\n<constraints src="plan">Keep originals\n</state>',
+            {},
+        ),
+        (
+            "<goal>demo\n<state>\n<next-step>unfinished\n</state>",
+            {},
+        ),
+        (
+            "<goal>Save the receipts.\n<state>\nStatus: <next-step>unfinished\n</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge><!-- sample\n</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge><![CDATA[\n</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge><?draft\n</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<!-- sample\n</think>\n<goal>Save receipts.\n<state></state>",
+            {},
+        ),
+        (
+            "<![CDATA[\n</think>\n<goal>Save receipts.\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Keep `<!--` and `<![CDATA[` literal.</knowledge>",
+            {
+                "goal": "Save receipts.",
+                "knowledge": "Keep `<!--` and `<![CDATA[` literal.",
+            },
+        ),
+        (
+            "<goal>Keep the index.\n<state></state>\n"
+            '<knowledge>\n`<next-step src="plan">` is a literal.\n</knowledge>',
+            {
+                "goal": "Keep the index.",
+                "state": "",
+                "knowledge": '`<next-step src="plan">` is a literal.',
+            },
+        ),
+        (
+            "<goal>Keep the index.\n<state></state>\n"
+            '<knowledge>\n~~~text\n<next-step src="plan">\n~~~\n</knowledge>',
+            {
+                "goal": "Keep the index.",
+                "state": "",
+                "knowledge": '~~~text\n<next-step src="plan">\n~~~',
+            },
+        ),
+        (
+            "~~~text\n</think>\n<goal>demo\n<state></state>\n</summary>\n~~~",
+            {},
+        ),
+        (
+            "<goal>Save the receipts.\n<state>\n~~~text\n</state>\n</summary>\n~~~",
+            {},
+        ),
+        ("<goal>Save the receipts.\n<state>\n~~~text\n</state>", {}),
+        ("<goal>Save the receipts.\n<state>\n```text\n</state>", {}),
+        (
+            "<goal>Save the receipts.\n<state></state>\n</summary>\n~~~",
+            {},
+        ),
+        (
+            "```xml\n<state>"
+            + "draft one " * 14
+            + "\n<knowledge>first</knowledge>\n```\n"
+            "```xml\n<state>draft two\n<knowledge>second</knowledge>\n```",
+            {},
+        ),
+        ("<state>" + "incomplete " * 12 + "\n<goal>cut off", {}),
+        ("Updated registers. " * 8 + "\n<state></state>", {"state": ""}),
+        (
+            "Updated registers. "
+            * 8
+            + "\n<goal></goal><constraints></constraints>"
+            "<state></state><knowledge></knowledge>",
+            dict.fromkeys(("goal", "constraints", "state", "knowledge"), ""),
+        ),
+        ("    <goal>Save receipts.\n<state></state>", {}),
+        (
+            "<think>Think.</think>\n\n    <goal>Save receipts.\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>cat <<'EOF' > notes.txt"
+            "</knowledge><state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\n~~~text\nsample\n\t~~~\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Use `literal\n"
+            "</knowledge>\n<state>quoted`\n</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\n"
+            "git commit -m \"$(cat <<'EOF'\n"
+            "</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\nx=$(cat <<'B'\n"
+            "</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\ncat <<A; cat <<B\n"
+            "first body\nA\n</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<state>\npython3 - <<B;\n"
+            "</state>\n<knowledge>shell data</knowledge>",
+            {},
+        ),
+    ],
+    ids=[
+        "prose",
+        "complete-xml-in-heredoc",
+        "unclosed-heredoc-prefix",
+        "unclosed-bash-heredoc",
+        "unclosed-bash-path-heredoc",
+        "unclosed-tee-heredoc",
+        "unclosed-printf-heredoc",
+        "unclosed-strip-tabs-heredoc",
+        "indented-heredoc-label-is-data",
+        "strip-tabs-heredoc",
+        "heredoc-before-valid-patch",
+        "bare-heredoc-terminator-before-valid-patch",
+        "complete-xml-in-quotes",
+        "bit-shift-before-valid-patch",
+        "bit-shift-with-label-in-register",
+        "bit-shift-as-register-value",
+        "fenced-heredoc-syntax-in-register",
+        "unclosed-heredoc-syntax-in-register",
+        "heredoc-terminator-in-separate-register",
+        "register-delimiter-in-heredoc-body",
+        "unclosed-final-draft",
+        "draft-unclosed-heredoc",
+        "draft-inline-unclosed-heredoc",
+        "draft-redirected-unclosed-heredoc",
+        "draft-inline-redirected-unclosed-heredoc",
+        "draft-inline-redirected-closed-heredoc",
+        "draft-closed-heredoc",
+        "draft-fenced-heredoc-fragment",
+        "draft-indented-register",
+        "draft-indented-code-block",
+        "draft-indented-register-after-balanced-field",
+        "draft-code-opening-after-balanced-field",
+        "draft-tab-code-opening-after-balanced-field",
+        "draft-code-closing-tag",
+        "draft-code-opening-after-think",
+        "heredoc",
+        "quotation",
+        "quoted-think-delimiter-in-command",
+        "example-before-think-delimiter",
+        "example-in-postscript",
+        "unknown-structural-tag",
+        "attribute-in-structural-tag",
+        "hyphen-in-structural-tag",
+        "hyphen-in-tag-with-caption",
+        "xml-comment-before-register-close",
+        "xml-cdata-before-register-close",
+        "xml-processing-instruction-before-register-close",
+        "xml-comment-before-think-boundary",
+        "xml-cdata-before-think-boundary",
+        "xml-delimiters-in-code-spans",
+        "literal-tag-with-attribute-and-hyphen",
+        "tilde-fenced-literal-tag",
+        "tilde-fenced-think-delimiter",
+        "register-close-in-tilde-fence",
+        "register-close-in-unclosed-tilde-fence",
+        "register-close-in-unclosed-backtick-fence",
+        "fence-marker-in-postscript",
+        "competing-drafts",
+        "truncation",
+        "clear-one",
+        "clear-all",
+        "draft-indented-first-line",
+        "draft-indented-first-line-after-think",
+        "draft-heredoc-without-line-end",
+        "draft-tab-indented-fence-marker",
+        "draft-inline-code-crosses-registers",
+        "draft-heredoc-in-command-substitution",
+        "draft-heredoc-in-assignment",
+        "draft-second-heredoc",
+        "draft-python-heredoc",
+    ],
+)
+async def test_compaction_applies_only_intended_memory_updates(
+    monkeypatch, patch, updates
+):
+    old = WorkingMemorySnapshot(
+        goal="Old goal",
+        constraints="Old constraint",
+        state="Old state",
+        knowledge="Old knowledge",
+    ).to_dict()
+    history = [
+        {"role": "system", "content": "System message."},
+        {"role": "user", "content": "Prepare the archive."},
+        {"role": "assistant", "content": "I opened the index."},
+    ]
+    state = types.SimpleNamespace(
+        default_model="test-model",
+        thread_id="memory-repair",
+        state_id="memory-repair",
+        x_target=None,
+        shared=types.SimpleNamespace(working_memory=old.copy()),
+        messages=history.copy(),
+    )
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "https://model.test/v1/chat/completions",
+            "summary.incremental_batch_chars": 100000,
+        },
+        logger=None,
+        auxiliary_llm=types.SimpleNamespace(max_tokens=8192),
+    )
+    labels = []
+
+    async def completion(*, request_label, **_kwargs):
+        labels.append(request_label)
+        content = {
+            "summary_batch_1": SUMMARY,
+            "working_memory_patch_replace_after_summary": patch,
+            "working_memory_deltas_format_repair": (
+                "<goal>Old state</goal><constraints></constraints>"
+            ),
+        }[request_label]
+        return {"choices": [{"message": {"content": content}}]}, {}
+
+    monkeypatch.setattr(
+        llm_chat_client, "arequest_chat_completions_with_policy", completion
+    )
+    await arun_summary_compaction(
+        ctx=ctx, state=state, trigger_reason="test", is_cli_mode=False
+    )
+
+    expected = old | updates
+    assert state.shared.working_memory == expected
+    assert labels == [
+        "summary_batch_1",
+        "working_memory_patch_replace_after_summary",
+    ]
+    assert state.messages[0] == history[0]
+    sent = state.messages[-1]["content"]
+    assert "I opened the index." in sent
+    assert "Keep the results sheet and the exact column order." in sent
+    assert (
+        render_session_memory_for_summary_message(
+            WorkingMemorySnapshot(**expected)
+        )
+        in sent
+    )

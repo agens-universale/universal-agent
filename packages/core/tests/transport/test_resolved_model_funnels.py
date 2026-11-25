@@ -617,22 +617,6 @@ def test_memory_patch_replace_declares_own_consumer(monkeypatch):
     router.resolve.assert_called_once_with("summary")
 
 
-def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.memory_suggestions import (
-        arequest_memory_deltas_format_repair,
-    )
-
-    _patch_llm_transport(monkeypatch, "<goal>repaired</goal>")
-    ctx, router = _router_ctx()
-    out = run_coro(
-        arequest_memory_deltas_format_repair(
-            ctx=ctx, state=_state(), raw_output="broken"
-        )
-    )
-    assert out == "<goal>repaired</goal>"
-    router.resolve.assert_called_once_with("summary")
-
-
 def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
     """summarize_dialog_via_chat_completions — тяжёлый оркестратор; проверяем факт
     объявления consumer="summary" напрямую на вызове request_summary_text (тот же

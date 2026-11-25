@@ -12,7 +12,6 @@ from gc_core.summarize.working_memory_gateway import (
     apply_memory_patch,
     apply_replace_deltas,
     apply_summary_memory_patch,
-    build_memory_deltas_format_repair_messages,
     coerce_working_memory_deltas,
     extract_register_bodies,
     parse_memory_deltas,
@@ -21,7 +20,6 @@ from gc_core.summarize.working_memory_gateway import (
     render_persistent_state_for_prompt,
     render_session_memory_for_summary_message,
     resolve_persistent_state_block,
-    should_attempt_memory_deltas_repair,
 )
 
 
@@ -788,62 +786,33 @@ def test_render_session_memory_for_summary_message_skips_empty_registers():
     assert rendered.strip().endswith("</session_memory>")
 
 
-def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():
-    raw = "x" * 120
-    deltas = WorkingMemoryDeltas()
-    assert (
-        should_attempt_memory_deltas_repair(
-            raw, deltas, min_chars_for_repair=100
-        )
-        is True
-    )
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("x" * 120, False),
+        ("Notes " * 30 + "\n<goal></goal>", False),
+        ("<state>Index the files.\n<knowledge>Count: 3</knowledge>", True),
+    ],
+)
+def test_only_recovers_eligible_drafts(raw, expected):
+    _, _, attempted, _ = parse_memory_deltas_with_repair(raw)
+    assert attempted is expected
 
 
-def test_should_not_attempt_memory_deltas_repair_when_short_or_parsed():
-    assert (
-        should_attempt_memory_deltas_repair(
-            "short", WorkingMemoryDeltas(), min_chars_for_repair=100
-        )
-        is False
-    )
-    assert (
-        should_attempt_memory_deltas_repair(
-            "x" * 120,
-            WorkingMemoryDeltas(goal="parsed"),
-            min_chars_for_repair=100,
-        )
-        is False
-    )
-
-
-def test_parse_memory_deltas_with_repair_invokes_callback_once():
-    raw = "narrative text without tags " + ("x" * 120)
-    calls = {"count": 0}
-
-    def _repair(text: str) -> str:
-        calls["count"] += 1
-        assert text == raw
-        return "<goal>recovered goal</goal>"
-
+def test_local_repair_preserves_exact_registers_and_values():
+    raw = "<state>  Index the files.  \n<knowledge>Count: 3</knowledge>"
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
-        raw,
-        repair_fn=_repair,
-        min_chars_for_repair=100,
+        raw
     )
 
     assert attempted is True
-    assert repaired_raw == "<goal>recovered goal</goal>"
-    assert deltas == WorkingMemoryDeltas(goal="recovered goal")
-    assert present == frozenset({"goal"})
-    assert calls["count"] == 1
-
-
-def test_build_memory_deltas_format_repair_messages_lists_register_tags():
-    messages = build_memory_deltas_format_repair_messages("free text")
-    assert messages[0]["role"] == "system"
-    assert "<goal>" in messages[0]["content"]
-    assert "<knowledge>" in messages[0]["content"]
-    assert "free text" in messages[1]["content"]
+    assert repaired_raw == (
+        "<state>  Index the files.  </state>\n<knowledge>Count: 3</knowledge>"
+    )
+    assert deltas == WorkingMemoryDeltas(
+        state="Index the files.", knowledge="Count: 3"
+    )
+    assert present == frozenset({"state", "knowledge"})
 
 
 def test_resolve_persistent_state_block_uses_explicit_block():
@@ -863,22 +832,13 @@ def test_resolve_persistent_state_block_reads_from_state_when_none():
     assert "from state" in resolved
 
 
-def test_parse_memory_deltas_with_repair_skips_callback_when_not_needed():
+def test_parse_memory_deltas_with_repair_returns_balanced_patch_unchanged():
     raw = "<state>ok</state>"
-    calls = {"count": 0}
-
-    def _repair(_text: str) -> str:
-        calls["count"] += 1
-        return "<goal>unexpected</goal>"
-
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
-        raw,
-        repair_fn=_repair,
-        min_chars_for_repair=100,
+        raw
     )
 
     assert attempted is False
     assert repaired_raw == raw
     assert deltas == WorkingMemoryDeltas(state="ok")
     assert present == frozenset({"state"})
-    assert calls["count"] == 0

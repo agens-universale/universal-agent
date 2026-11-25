@@ -51,6 +51,7 @@ async def arequest_auxiliary_completion_text(
     logger: Any | None = None,
     log_prompt: bool = True,
     isolated_timeout_sec: float | None = None,
+    strip_outer_whitespace: bool = True,
 ) -> str:
     """Aux LLM: log dirty response, return ``for_model``-projected text.
 
@@ -74,6 +75,7 @@ async def arequest_auxiliary_completion_text(
         consumer=consumer,
         payload_overrides=payload_overrides,
         isolated_timeout_sec=isolated_timeout_sec,
+        strip_outer_whitespace=strip_outer_whitespace,
     )
     if log_prompt:
         active_logger = (
@@ -86,7 +88,12 @@ async def arequest_auxiliary_completion_text(
             output_text=raw,
         )
     tags = projection_tags_from_config(ctx)
-    return project_text_for_model(raw, tags=tags, strip_think=True)
+    return project_text_for_model(
+        raw,
+        tags=tags,
+        strip_think=True,
+        strip_outer_whitespace=strip_outer_whitespace,
+    )
 
 
 async def arequest_summary_text(
@@ -99,6 +106,7 @@ async def arequest_summary_text(
     max_tokens: int | None = None,
     payload_overrides: Optional[Dict[str, Any]] = None,
     logger: Any | None = None,
+    strip_outer_whitespace: bool = True,
 ) -> str:
     """Summary/intent-scope aux call: dirty logged, projected text returned.
 
@@ -123,6 +131,7 @@ async def arequest_summary_text(
         consumer=consumer,
         payload_overrides=payload_overrides,
         logger=logger,
+        strip_outer_whitespace=strip_outer_whitespace,
     )
 
 
