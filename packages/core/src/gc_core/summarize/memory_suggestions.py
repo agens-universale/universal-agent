@@ -41,7 +41,7 @@ async def _arequest_patch(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    # Dirty logged inside arequest_summary_text / aux choke; return is projected.
+    # The draft parser needs the original indentation to identify code boundaries.
     projected = await arequest_summary_text(
         ctx=ctx,
         state=state,
@@ -49,6 +49,7 @@ async def _arequest_patch(
         request_label=request_label,
         consumer="summary",
         logger=logger,
+        strip_outer_whitespace=False,
     )
     return MemoryPatchLlmResult(
         request_messages=request_messages,

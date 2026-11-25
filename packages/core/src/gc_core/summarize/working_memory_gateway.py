@@ -330,11 +330,12 @@ _PATCH_FENCE = re.compile(
     re.DOTALL | re.MULTILINE,
 )
 _DRAFT_FENCE = re.compile(
-    r"^[ \t]{0,3}(?P<fence>(?P<marker>[`~])(?P=marker){2,})"
+    r"^ {0,3}(?P<fence>(?P<marker>[`~])(?P=marker){2,})"
     r"(?!(?P=marker))[^\n]*(?:\n|\Z)"
-    r".*?(?:^[ \t]{0,3}(?P=fence)(?P=marker)*[ \t]*\r?$|\Z)",
+    r".*?(?:^ {0,3}(?P=fence)(?P=marker)*[ \t]*\r?$|\Z)",
     re.DOTALL | re.MULTILINE,
 )
+_DRAFT_INDENTED_CODE = re.compile(r"^(?: {4}| {0,3}\t)[^\r\n]*", re.MULTILINE)
 _EXAMPLE_CUE = re.compile(
     r"\b(?:example|for instance|do not use|пример|для иллюстрации формата)\b|\be\.g\.",
     re.I,
@@ -367,18 +368,29 @@ _QUOTED_REGISTER_BLOCK = re.compile(
     rf"""(?:(?!(?P=quote)).)*?</(?:{"|".join(REGISTER_ORDER)})>\s*(?P=quote)""",
     re.DOTALL,
 )
-_SHELL_HEREDOC_HEAD = (
-    r"""^[ \t]*(?P<command>[\w./-]+)"""
+_SHELL_HEREDOC_START = (
+    r"""[ \t]*(?P<command>[\w./-]+)"""
     r"""(?:[ \t]+(?:[\w./%-]+|"[^"\r\n]*"|'[^'\r\n]*'))*[ \t]*"""
     r"""<<(?P<strip_tabs>-)?[ \t]*(?P<quote>["']?)"""
-    r"(?P<label>[A-Za-z_]\w*)(?P=quote)[ \t]*\r?\n"
+    r"(?P<label>[A-Za-z_]\w*)(?P=quote)"
+)
+_SHELL_HEREDOC_HEAD = rf"^{_SHELL_HEREDOC_START}[ \t]*\r?\n"
+_SHELL_HEREDOC_BODY = (
+    r".*?^(?P<terminator>(?(strip_tabs)\t*)(?P=label))(?=\r?$)"
 )
 _SHELL_HEREDOC = re.compile(
-    _SHELL_HEREDOC_HEAD
-    + r".*?^(?P<terminator>(?(strip_tabs)\t*)(?P=label))(?=\r?$)",
+    _SHELL_HEREDOC_HEAD + _SHELL_HEREDOC_BODY,
     re.DOTALL | re.MULTILINE,
 )
 _SHELL_HEREDOC_OPENING = re.compile(_SHELL_HEREDOC_HEAD, re.MULTILINE)
+_DRAFT_HEREDOC_HEAD = (
+    rf"(?:^|<(?:{'|'.join(REGISTER_ORDER)})>){_SHELL_HEREDOC_START}"
+    r"(?=[ \t<>|;&\r\n]|\Z)[^\r\n]*(?:\r?\n|\Z)"
+)
+_DRAFT_HEREDOC_OPENING = re.compile(_DRAFT_HEREDOC_HEAD, re.MULTILINE)
+_DRAFT_HEREDOC = re.compile(
+    _DRAFT_HEREDOC_HEAD + _SHELL_HEREDOC_BODY, re.DOTALL | re.MULTILINE
+)
 _HEREDOC_COMMANDS = frozenset(
     {"bash", "cat", "dash", "echo", "ksh", "printf", "sh", "tee", "zsh"}
 )
@@ -522,18 +534,18 @@ def _has_shell_heredoc_context(heredoc: re.Match[str]) -> bool:
     )
 
 
-def _unterminated_heredoc_span(
-    text: str, literal_spans: list[tuple[int, int]]
-) -> tuple[int, int] | None:
-    for opening in _SHELL_HEREDOC_OPENING.finditer(text):
-        start = opening.start()
-        if (
-            not _is_literal(start, literal_spans)
-            and _has_shell_heredoc_context(opening)
-            and _SHELL_HEREDOC.match(text, start) is None
+def _add_draft_heredoc_spans(text: str, spans: list[tuple[int, int]]) -> None:
+    for opening in _DRAFT_HEREDOC_OPENING.finditer(text):
+        start = opening.start("command")
+        if _is_literal(start, spans) or not _has_shell_heredoc_context(
+            opening
         ):
-            return start, len(text)
-    return None
+            continue
+        closing = _DRAFT_HEREDOC.match(text, opening.start())
+        if closing is None:
+            spans.append((start, len(text)))
+            return
+        spans.append((start, closing.end()))
 
 
 def _heredoc_ends_inside_register(
@@ -587,28 +599,32 @@ def _register_literal_spans(
 ) -> list[tuple[int, int]]:
     code_matches = list(_MARKDOWN_CODE_SPAN.finditer(text))
     code_spans = [match.span() for match in code_matches]
-    draft_fences = []
+    draft_code = []
     if for_draft:
-        draft_fences = [
+        draft_code = [
             match.span()
             for match in _DRAFT_FENCE.finditer(text)
             if not any(
                 start < match.start() < end for start, end in code_spans
             )
         ]
+        draft_code.extend(
+            match.span() for match in _DRAFT_INDENTED_CODE.finditer(text)
+        )
     spans = (
-        _command_and_quote_spans(text, code_spans + draft_fences)
-        + draft_fences
+        _command_and_quote_spans(text, code_spans + draft_code)
+        + draft_code
         + [
             match.span()
             for match in code_matches
-            if len(match.group(1)) >= 3
+            if for_draft
+            or len(match.group(1)) >= 3
             or _REGISTER_BOUNDARY_IN_SPAN.search(match.group()) is None
             or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
         ]
     )
-    if for_draft and (unterminated := _unterminated_heredoc_span(text, spans)):
-        spans.append(unterminated)
+    if for_draft:
+        _add_draft_heredoc_spans(text, spans)
     return spans
 
 
@@ -725,14 +741,20 @@ def parse_memory_deltas(
     return _deltas_from_mapping(deltas), frozenset(present)
 
 
+def _draft_at(text: str, start: int) -> str:
+    line_start = text.rfind("\n", 0, start) + 1
+    return "" if _DRAFT_INDENTED_CODE.match(text, line_start) else text[start:]
+
+
 def _final_register_draft(text: str) -> str:
-    if _register_opening(text, 0) is not None:
-        return text
-    boundaries = list(_THINK_PATCH_BOUNDARY.finditer(text))
+    start = len(text) - len(text.lstrip())
+    if _register_opening(text, start) is not None:
+        return _draft_at(text, start)
+    boundaries = list(_THINK_PATCH_BOUNDARY.finditer(text, start))
     if len(boundaries) != 1:
         return ""
     boundary = boundaries[0]
-    prefix = text[: boundary.start()]
+    prefix = text[start : boundary.start()]
     # Only a standalone delimiter after plain reasoning can anchor a draft.
     if (
         not prefix.endswith("\n")
@@ -743,21 +765,19 @@ def _final_register_draft(text: str) -> str:
         or _FENCED_EXAMPLE_CAPTION.search(prefix)
     ):
         return ""
-    return text[boundary.end() :]
+    return _draft_at(text, boundary.end())
 
 
 def _missing_close_position(
     draft: str, body_start: int, next_tag: re.Match[str], value: str
 ) -> int | None:
     # A complete inline value may be followed by a register on a new line.
-    # Keep indentation of a Markdown code block outside this recovery path.
     body = draft[body_start : next_tag.start()]
     inline = body.partition("\n")[0]
     _, newline, indent = body.rpartition("\n")
     if (
         next_tag.group(1)
         or not newline
-        or len(indent) > 3
         or indent.strip(" ")
         or not value
         or inline.strip() != value
@@ -835,9 +855,7 @@ def should_attempt_memory_deltas_repair(
     if not isinstance(deltas, WorkingMemoryDeltas) or not deltas.is_empty():
         return False
     _, touched = parse_memory_deltas(raw_output)
-    return not touched and bool(
-        _recover_register_draft(str(raw_output or "").strip())
-    )
+    return not touched and bool(_recover_register_draft(str(raw_output or "")))
 
 
 def parse_memory_deltas_with_repair(
@@ -853,7 +871,7 @@ def parse_memory_deltas_with_repair(
     direct, touched = parse_memory_deltas(raw, full_replace=full_replace)
     if touched:
         return direct, touched, False, raw
-    repaired = _recover_register_draft(raw.strip())
+    repaired = _recover_register_draft(raw)
     if not repaired:
         return direct, touched, False, raw
     expected, expected_touched = parse_memory_deltas(

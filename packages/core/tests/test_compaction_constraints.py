@@ -4,13 +4,13 @@ import types
 from pathlib import Path
 
 import pytest
-from gc_core.summarize import llm
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import assemble_summary_xml
 from gc_core.summarize.working_memory_gateway import (
     WorkingMemorySnapshot,
     render_session_memory_for_summary_message,
 )
+from gc_core.utils import llm_chat_client
 from gc_testkit.paths import REPO
 from gc_testkit.settings import fake_ctx
 
@@ -209,6 +209,30 @@ async def test_compaction_keeps_constraints_in_sent_message(
             {},
         ),
         (
+            "<goal>Save receipts.\n<knowledge>cat <<'EOF'\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\ncat <<'EOF' > notes.txt\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge> cat <<'EOF'>notes.txt\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>cat <<'EOF' > notes.txt\n"
+            "Inventory.\nEOF\n</knowledge>\n<state>Done.</state>",
+            {
+                "goal": "Save receipts.",
+                "knowledge": "cat <<'EOF' > notes.txt\nInventory.\nEOF",
+                "state": "Done.",
+            },
+        ),
+        (
             "<goal>Save receipts.\n<knowledge>\ncat <<'EOF'\n"
             "</knowledge>\nEOF\n</knowledge>\n<state>Done.</state>",
             {
@@ -232,6 +256,31 @@ async def test_compaction_keeps_constraints_in_sent_message(
         ),
         (
             "<goal>Save receipts.\n\n    <state>Example only.</state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.</knowledge>\n"
+            "\n  <state></state>",
+            {"goal": "Save receipts.", "knowledge": "Inventory.", "state": ""},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.</knowledge>\n"
+            "\n    <state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.</knowledge>\n"
+            "\n\t<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Inventory.\n"
+            "\n    </knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "The draft is ready.\n</think>\n\n"
+            "    <goal>Save receipts.\n<state></state>",
             {},
         ),
         (
@@ -351,6 +400,26 @@ async def test_compaction_keeps_constraints_in_sent_message(
             "<state></state><knowledge></knowledge>",
             dict.fromkeys(("goal", "constraints", "state", "knowledge"), ""),
         ),
+        ("    <goal>Save receipts.\n<state></state>", {}),
+        (
+            "<think>Think.</think>\n\n    <goal>Save receipts.\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>cat <<'EOF' > notes.txt"
+            "</knowledge><state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>\n~~~text\nsample\n\t~~~\n"
+            "</knowledge>\n<state></state>",
+            {},
+        ),
+        (
+            "<goal>Save receipts.\n<knowledge>Use `literal\n"
+            "</knowledge>\n<state>quoted`\n</state>",
+            {},
+        ),
     ],
     ids=[
         "prose",
@@ -375,10 +444,19 @@ async def test_compaction_keeps_constraints_in_sent_message(
         "register-delimiter-in-heredoc-body",
         "unclosed-final-draft",
         "draft-unclosed-heredoc",
+        "draft-inline-unclosed-heredoc",
+        "draft-redirected-unclosed-heredoc",
+        "draft-inline-redirected-unclosed-heredoc",
+        "draft-inline-redirected-closed-heredoc",
         "draft-closed-heredoc",
         "draft-fenced-heredoc-fragment",
         "draft-indented-register",
         "draft-indented-code-block",
+        "draft-indented-register-after-balanced-field",
+        "draft-code-opening-after-balanced-field",
+        "draft-tab-code-opening-after-balanced-field",
+        "draft-code-closing-tag",
+        "draft-code-opening-after-think",
         "heredoc",
         "quotation",
         "quoted-think-delimiter-in-command",
@@ -405,6 +483,11 @@ async def test_compaction_keeps_constraints_in_sent_message(
         "truncation",
         "clear-one",
         "clear-all",
+        "draft-indented-first-line",
+        "draft-indented-first-line-after-think",
+        "draft-heredoc-without-line-end",
+        "draft-tab-indented-fence-marker",
+        "draft-inline-code-crosses-registers",
     ],
 )
 async def test_compaction_applies_only_intended_memory_updates(
@@ -424,11 +507,17 @@ async def test_compaction_applies_only_intended_memory_updates(
     state = types.SimpleNamespace(
         default_model="test-model",
         thread_id="memory-repair",
+        state_id="memory-repair",
+        x_target=None,
         shared=types.SimpleNamespace(working_memory=old.copy()),
         messages=history.copy(),
     )
     ctx = fake_ctx(
-        {"summary.incremental_batch_chars": 100000},
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "https://model.test/v1/chat/completions",
+            "summary.incremental_batch_chars": 100000,
+        },
         logger=None,
         auxiliary_llm=types.SimpleNamespace(max_tokens=8192),
     )
@@ -436,15 +525,18 @@ async def test_compaction_applies_only_intended_memory_updates(
 
     async def completion(*, request_label, **_kwargs):
         labels.append(request_label)
-        return {
+        content = {
             "summary_batch_1": SUMMARY,
             "working_memory_patch_replace_after_summary": patch,
             "working_memory_deltas_format_repair": (
                 "<goal>Old state</goal><constraints></constraints>"
             ),
         }[request_label]
+        return {"choices": [{"message": {"content": content}}]}, {}
 
-    monkeypatch.setattr(llm, "arequest_chat_completion_text", completion)
+    monkeypatch.setattr(
+        llm_chat_client, "arequest_chat_completions_with_policy", completion
+    )
     await arun_summary_compaction(
         ctx=ctx, state=state, trigger_reason="test", is_cli_mode=False
     )

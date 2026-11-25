@@ -65,6 +65,7 @@ class LocalOperations:
                     request_label=request.request_label,
                     payload_overrides=request.payload_overrides,
                     isolated_timeout_sec=request.isolated_timeout_sec,
+                    strip_outer_whitespace=request.strip_outer_whitespace,
                 )
                 result.text = outcome.text
                 result.finish_reason = outcome.finish_reason
