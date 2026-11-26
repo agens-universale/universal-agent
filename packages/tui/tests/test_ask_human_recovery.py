@@ -600,7 +600,7 @@ async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
         scr = app.screen
         _mount_zombie_banner(scr)
         await pilot.pause()
-        scr._task_events.append(
+        scr._feed_history.append_event(
             TraceEvent(
                 no=1,
                 event_ts_utc_iso="2026-06-20T00:00:00+00:00",
@@ -613,7 +613,7 @@ async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
                 tool_name="ask_human",
             )
         )
-        scr._task_events.append(
+        scr._feed_history.append_event(
             TraceEvent(
                 no=2,
                 event_ts_utc_iso="2026-06-20T00:00:00+00:00",

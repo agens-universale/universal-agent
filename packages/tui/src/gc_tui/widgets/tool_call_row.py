@@ -6,6 +6,11 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 слот следствий `└` (ConsequenceSlot.trace-consequence) на +2 от глифа: текст
 ошибки и пометки вызова (спека P3 §3); пустой — скрыт.
 
+Свёрнутая строка — четыре виджета (строка, `Horizontal`, глиф, подпись):
+в гигантском ходе их сотни, и каждый лишний — работа компоновщику. Поэтому
+слот следствий создаётся с первым следствием, а кнопка ❐ — только у строки
+правки, которой есть что копировать.
+
 Статус-глиф живёт в prefix-Static (●/○/•/‖), content-Static несёт
 `Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
 Первая строка всегда в одну строку: подпись и ❐ не режутся, объект
@@ -186,9 +191,10 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
                 Static(classes="trace-prefix")  — статус-глиф ●/○/•
                 Static(classes="trace-content line-tool")  — подпись,
                     объект, хвост
-                _CopyButton(classes="block-copy trace-action")  — ❐, видна
-                    у строки правки
-            ConsequenceSlot(classes="trace-consequence")  — строки `└`
+                _CopyButton(classes="block-copy trace-action")  — ❐, только
+                    у строки правки (`set_edit_counts`)
+            ConsequenceSlot(classes="trace-consequence")  — строки `└`,
+                с первым следствием
 
     Цветовые зоны через rich.Text:
     - prefix: статус-глиф — RUN (пульс) / OK / ERR / DIM.
@@ -289,9 +295,11 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         )
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
-        self._consequence_slot = ConsequenceSlot(
-            level, classes="trace-consequence"
-        )
+        # Колонки первой строки — для ❐, смонтированной после сборки.
+        self._line_box: Optional[Horizontal] = None
+        # Слот следствий — по первой нужде (`_slot`).
+        self._consequence_level = level
+        self._consequence_slot: Optional[ConsequenceSlot] = None
         # Следствия вызова сверх ошибки (пометки) — тела строк `└`.
         self._consequences: list[Text] = []
         # Правка вызова: (+N, −M) и что копирует ❐; None — не правка.
@@ -342,7 +350,8 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self.block_key: Optional[tuple[str, str]] = None
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
+        with Horizontal() as line_box:
+            self._line_box = line_box
             self._prefix_static = Static(
                 self._render_prefix(), classes="trace-prefix", markup=False
             )
@@ -363,14 +372,31 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
                 )
                 yield self._think_target
                 yield self._think_tail
-            yield _CopyButton(
-                copy_glyph(), classes="block-copy trace-action", markup=False
-            )
+            if self._copy_text:
+                yield self._copy_button()
         if self._ran is not None:
             yield self._ran
         if self._think_body is not None:
             yield self._think_body
-        yield self._consequence_slot
+        if self._consequence_slot is not None:
+            yield self._consequence_slot
+
+    @staticmethod
+    def _copy_button() -> _CopyButton:
+        return _CopyButton(
+            copy_glyph(), classes="block-copy trace-action", markup=False
+        )
+
+    def _slot(self) -> ConsequenceSlot:
+        """Слот следствий — по первой нужде; строка уже собрана — он
+        встаёт последним, под частями `Ran` и текстом `Think`."""
+        if self._consequence_slot is None:
+            self._consequence_slot = ConsequenceSlot(
+                self._consequence_level, classes="trace-consequence"
+            )
+            if self._content_static is not None:
+                self.mount(self._consequence_slot)
+        return self._consequence_slot
 
     def on_mount(self) -> None:
         self._sync_pulse()
@@ -453,7 +479,9 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         # `└` члена — под началом его текста (колонка 4), как `└` одиночной
         # строки под её текстом (колонка 2).
         depth = 1 if mode == "member" else 0
-        self._consequence_slot.set_level(self._level + depth)
+        self._consequence_level = self._level + depth
+        if self._consequence_slot is not None:
+            self._consequence_slot.set_level(self._consequence_level)
         self._sync_pulse()
         self._update()
 
@@ -553,7 +581,8 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
             self._update_content()
         bodies = self._consequence_bodies()
         self.set_class(bool(bodies), "has-consequence")
-        self._consequence_slot.set_bodies(bodies)
+        if bodies or self._consequence_slot is not None:
+            self._slot().set_bodies(bodies)
 
     def _update_content(self) -> None:
         """Первая строка: одним Static, а у `Think` — тремя (подпись,
@@ -615,7 +644,10 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         `copy_text` — что кладёт в буфер ❐: весь дифф правки, как и двойной
         клик по телу блока под строкой; пусто — ❐ нет, счётчики есть."""
         self._edit_counts = (add, removed)
+        had = bool(self._copy_text)
         self._copy_text = copy_text
+        if copy_text and not had and self._line_box is not None:
+            self._line_box.mount(self._copy_button())
         self.set_class(bool(copy_text), "edited")
         self._update()
 

@@ -184,6 +184,35 @@ class TurnLine(ClickModelMixin, Static):
         self._open = not self.expanded
         self._update()
 
+    def respawn(self) -> TurnLine:
+        """Копия строки без записи итога для памяти эфемерного: исход,
+        сводка, причина и её разворот."""
+        line = TurnLine(
+            self.text,
+            opened_by=self.opened_by,
+            word=self._word,
+            plan=self._plan,
+            recorded=self._recorded,
+        )
+        line._summary, line._error = self._summary, self._error
+        line._open = self._open
+        line.set_class(self.is_fresh, TURN_LINE_LATEST)
+        return line
+
+    # Протокол вида (память эфемерного): причина развёрнута — у строки
+    # записи итога (ход — по реплике, открывшей его).
+    def view_key(self) -> str:
+        if not self._recorded or not self.opened_by:
+            return ""
+        return f"turn-line:{self.opened_by}"
+
+    def view_state(self) -> bool:
+        return self._open
+
+    def restore_view(self, flag: bool) -> None:
+        self._open = flag
+        self._update()
+
     def hold(self) -> None:
         self.add_class(TURN_LINE_HELD)
         self._sync_body()

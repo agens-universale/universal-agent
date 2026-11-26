@@ -77,7 +77,7 @@ def _attached(tmp_path) -> tuple[_Thread, FileTaskStore, TaskCursor]:
     thread = _Thread(tmp_path)
     thread.append(_msg("m1"), _msg("m2"), _msg("m3"))
     store = FileTaskStore(thread.dir, system=_SYS)
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
     thread.append(_msg("m4"))
     return thread, store, cur
 
@@ -147,7 +147,7 @@ def test_plain_tick_keeps_archives_and_resets_wait(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_msg("m1"))
     store = FileTaskStore(thread.dir, system=_SYS)
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
     cur = replace(cur, archives=1, wait_ticks=3)
     thread.append(_msg("m2"))
 
@@ -186,7 +186,7 @@ def test_archive_tail_from_zero_drops_leading_summary(tmp_path):
     thread, store, _ = _attached(tmp_path)
     thread.compact("S1")
     thread.append(_msg("m4"))
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
     thread.compact("S2")
 
     tail = store.tail_events(_TID, _at_seq(cur, 0))
@@ -218,7 +218,7 @@ def test_new_history_without_summary_resets(tmp_path):
 def test_thread_deleted_resets(tmp_path):
     thread, store, _ = _attached(tmp_path)
     thread.compact("S1")
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
     thread.delete()
     thread.append(_msg("n1"))
 
@@ -261,11 +261,12 @@ def test_attach_during_compaction_reads_consistent_cursor(
         return await tail(self, key, streams, cursor)
 
     monkeypatch.setattr(Threads, "tail", _compact_first)
-    records, cur = store.read_all_events(_TID)
+    segments, cur = store.read_history(_TID)
     monkeypatch.setattr(Threads, "tail", tail)
     after = store.tail_events(_TID, cur)
 
-    assert _ids(records) == ["sum_S"]
+    assert [seg["index"] for seg in segments] == [0, 1]
+    assert segments[-1]["messages"] == []
     assert cur.archives == 1
     assert after.stream_reset is False and after.compaction is None
 
@@ -274,7 +275,7 @@ def test_plain_tick_does_not_read_archives(tmp_path, monkeypatch):
     thread = _Thread(tmp_path)
     thread.append(_msg("m1"))
     store = FileTaskStore(thread.dir, system=_SYS)
-    _, cur = store.read_all_events(_TID)
+    _, cur = store.read_history(_TID)
 
     def _boom(*_args, **_kwargs):
         raise AssertionError("archive read on a plain tick")

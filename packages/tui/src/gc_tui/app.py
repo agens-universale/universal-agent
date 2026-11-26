@@ -50,7 +50,7 @@ from textual.binding import Binding
 from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
-from gc_tui.screens.main import TraceScreen
+from gc_tui.screens.main import TraceScreen, trace_screen_of
 from gc_tui.services.agent_loop import AgentLoop, thread_has_running_loop
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
@@ -1225,6 +1225,13 @@ class TuiApp(App):
         if override_name is None or override_name == (base_name or ""):
             return snap.settings
         return self._profile_remerge_settings(override_name, snap)
+
+    def session_base_settings_for(self, overrides: dict) -> LoadedSettings:
+        """База сессии с набором переопределений `overrides` — без
+        применения к окну: входы модели истории сессии, которую ещё только
+        открывают (загрузка в фоне идёт до входа в неё)."""
+        snap = self._config_snapshot()._replace(overrides=dict(overrides))
+        return self._session_base_settings(snap)
 
     def _profile_remerge_settings(
         self, name: str, snap: Optional[_ConfigSnapshot] = None
@@ -2570,8 +2577,7 @@ class TuiApp(App):
 
     def _main_screen(self):
         """Базовый (главный) экран — низ стека; None если это не TraceScreen."""
-        base = self.screen_stack[0] if self.screen_stack else None
-        return base if isinstance(base, TraceScreen) else None
+        return trace_screen_of(self)
 
     def _can_open_tool(self) -> bool:
         """config/diff открываются с главного экрана И с экрана уведомлений. Сами

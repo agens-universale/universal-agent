@@ -387,11 +387,18 @@ async def test_copy_answers_match_what_trace_mounts(
     tmp_path, monkeypatch, make_segments
 ):
     from gc_tui.app import TuiApp
-    from gc_tui.services import trace_render
+    from gc_tui.services import history_render, trace_render
 
     built: list = []
-    for name in ("build_agent_widgets", "build_block_widgets"):
-        orig = getattr(trace_render, name)
+    # Законченные ходы рисует отрисовщик кусков истории, незаконченный —
+    # живой путь: билдеры — у обоих.
+    for module, name in (
+        (trace_render, "build_agent_widgets"),
+        (trace_render, "build_block_widgets"),
+        (history_render, "build_agent_widgets"),
+        (history_render, "build_block_widgets"),
+    ):
+        orig = getattr(module, name)
 
         def wrap(*a, _orig=orig, _name=name, **kw):
             widgets = _orig(*a, **kw)
@@ -402,7 +409,7 @@ async def test_copy_answers_match_what_trace_mounts(
                 built.append(widgets)
             return widgets
 
-        monkeypatch.setattr(trace_render, name, wrap)
+        monkeypatch.setattr(module, name, wrap)
 
     segs = make_segments()
     app = TuiApp(

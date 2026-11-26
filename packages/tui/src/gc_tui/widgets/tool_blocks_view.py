@@ -362,6 +362,42 @@ class ToolBlocksView:
             head = self._widgets.get(self.model.first_call(block) or "")
         return head
 
+    # --- снятие хода (память эфемерного, окно ленты) -----------------------
+
+    def holds(self, widgets: set) -> bool:
+        """Среди виджетов уровня есть один из ``widgets``."""
+        return any(w in widgets for w in self._widgets.values())
+
+    def view_state(self, widgets: set) -> dict[str, bool]:
+        """Снимок вида блоков, чьи строки среди снятых ``widgets``:
+        раскрытие и «дифф показан телом» (тело вернётся и тогда, когда по
+        возрасту хода дифф был бы компактным)."""
+        calls = {k for k, w in self._widgets.items() if w in widgets}
+        state = {
+            self._view_key(key): flag
+            for key, flag in self.model.view_state(calls).items()
+        }
+        for key, edit in self._edits.items():
+            if key in calls and edit.record is not None and not edit.compact:
+                state[diff_view_key(key)] = True
+        return state
+
+    def restore_view(self, view: Callable[[str], Optional[bool]]) -> None:
+        """Раскрытие из снимка вида (`view_state`)."""
+        decisions = self.model.restore_view(lambda k: view(self._view_key(k)))
+        self.apply(decisions)
+
+    def _view_key(self, key: str) -> str:
+        """Окно субагента — ключом его уровня (call_id родителя)."""
+        return f"window:{self.level}" if key == "window" else key
+
+    def forget(self, widgets: set) -> None:
+        """Снятые с ленты ``widgets`` уровень больше не держит; модель
+        блоков (текст, без виджетов) остаётся."""
+        for key in [k for k, w in self._widgets.items() if w in widgets]:
+            del self._widgets[key]
+        self._issued -= widgets
+
     def turn_ended(self, *, stopped: bool, settled: bool = False) -> None:
         """Запись итога хода; ``stopped`` — ход остановлен пользователем.
         ``settled`` — поток хода давно вышел (превью, уровень, домонтированный
@@ -466,8 +502,9 @@ class ToolBlocksView:
             target.focus()
 
     def _set_header(self, d: SetHeader) -> None:
-        header = self._widgets[d.block]
-        assert isinstance(header, ToolCallRow)
+        header = self._widgets.get(d.block)
+        if not isinstance(header, ToolCallRow):
+            return  # заголовок снят с ленты вместе с ходом
         header.set_header(d.word, glyph=d.glyph, tail=parts_text(d.tail))
 
     def _set_phrase(self, d: SetPhrase) -> None:
@@ -547,6 +584,11 @@ class ToolBlocksView:
             )
 
 
+def diff_view_key(call_id: str) -> str:
+    """Ключ снимка вида «дифф вызова показан телом»."""
+    return f"diff:{call_id}"
+
+
 def _last_call(model: ToolBlocks, block: str) -> Callable[[], Optional[str]]:
     return lambda: model.last_call(block)
 
@@ -580,10 +622,13 @@ class BlockViews(dict[str, ToolBlocksView]):
         super().clear()
         self._stopped.clear()
 
-    def note_turn(self, *, stopped: bool) -> None:
-        """Запись итога хода — до `turn_ended` уровней."""
+    def note_turn(
+        self, *, stopped: bool, views: Iterable[ToolBlocksView] | None = None
+    ) -> None:
+        """Запись итога хода — до `turn_ended` уровней (``views`` — только
+        эти, по умолчанию все)."""
         if stopped:
-            for view in self.values():
+            for view in self.values() if views is None else views:
                 self._stopped.update(view.model.turn_calls())
 
     def settle_levels(self) -> None:
@@ -613,9 +658,15 @@ class BlockViews(dict[str, ToolBlocksView]):
 
 
 def end_turn(
-    views: BlockViews, timers: CallTimers, outcome: Any, *, settled: bool
+    views: BlockViews,
+    timers: CallTimers,
+    outcome: Any,
+    *,
+    settled: bool,
+    levels: Optional[Sequence[ToolBlocksView]] = None,
 ) -> None:
-    """Запись итога хода — моделям всех уровней: время вызовов хода
+    """Запись итога хода — моделям всех уровней (``levels`` — только
+    этим: уровням шагов хода в куске истории): время вызовов хода
     (`outcome.calls`) — застывшим таймерам; остановка пользователем
     ставит `○` блокам этого хода. Одно правило для живой ленты и превью;
     ``settled`` — у превью: поток хода давно вышел (`turn_ended`)."""
@@ -624,8 +675,9 @@ def end_turn(
     calls = outcome.calls or {}
     timers.update(calls)
     stopped = kind_of(outcome)[0] == "cancelled"
-    views.note_turn(stopped=stopped)
-    for view in list(views.values()):
+    chosen = list(views.values()) if levels is None else list(levels)
+    views.note_turn(stopped=stopped, views=chosen)
+    for view in chosen:
         view.timers_updated(calls)
         view.turn_ended(stopped=stopped, settled=settled)
 
@@ -655,8 +707,9 @@ def nested_tail(
 class PreviewBlocks:
     """Блоки превью `/sessions` (спека P4 §9.7, §9.10а): исполнители
     уровней, реестр застывших таймеров и журнал правок треда (только
-    чтение) — общие для `render_segments_readonly` и
-    `merge_nested_readonly`."""
+    чтение) — общие для отрисовщика кусков истории (`render_steps`; виды
+    ходов — его `ChunkRefs.block_views`) и узла вложенного трейса
+    (`nested_trace`)."""
 
     views: BlockViews = field(default_factory=BlockViews)
     timers: CallTimers = field(default_factory=CallTimers)

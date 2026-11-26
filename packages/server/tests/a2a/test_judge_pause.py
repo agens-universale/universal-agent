@@ -41,7 +41,10 @@ async def test_a_peer_message_lifts_the_judge_pause(monkeypatch, tmp_path):
         ),
     )
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
     seen = {}
 
     async def _loop(messages, state, ctx, **kw):

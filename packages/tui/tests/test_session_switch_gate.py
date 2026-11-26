@@ -14,6 +14,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.screens.confirm import ConfirmScreen
 from gc_tui.screens.sessions import SessionsScreen
+from open_support import settle
 
 _A = "gate0000000000000000000000000000a"
 _B = "gate0000000000000000000000000000b"
@@ -98,7 +99,14 @@ async def _pick_b(pilot, tmp_path):
     )
     await pilot.pause()
     pilot.app.screen._resume_thread(_B)
-    await pilot.pause()
+    await settle(pilot)
+
+
+async def _answer(pilot, key):
+    """Ответ на вопрос о стопе; переход из списка — после фоновой
+    загрузки сессии."""
+    await pilot.press(key)
+    await settle(pilot)
 
 
 def _new(scr):
@@ -158,7 +166,7 @@ async def test_stop_switches_at_once_while_old_worker_lingers(tmp_path, path):
     async with _app(tmp_path).run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
         await _switch(pilot, tmp_path, path)
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         assert runner.stops == 1
         assert runner.is_running()  # поток дорабатывает в фоне
@@ -202,7 +210,7 @@ async def test_late_events_of_stopped_run_stay_out_of_new_thread(tmp_path):
         app._stream_pump = pump
         app._subagent_progress_sink = QueueSubagentProgressSink()
         await _pick_b(pilot, tmp_path)
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         assert scr._active_task_id == _B
         # поток A дорабатывает: дельты стрима, прогресс, итог предохранителя
@@ -230,7 +238,7 @@ async def test_resume_from_preview_goes_through_gate(tmp_path):
         sessions._resume_thread(_B)
         await pilot.pause()
         assert _dialog(pilot) is not None
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         scr._poll_active()
         await pilot.pause()
@@ -255,7 +263,7 @@ async def test_stop_and_switch_clears_question_of_old_run(tmp_path):
         )
         _new(scr)
         await pilot.pause()
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         scr._poll_active()
         await pilot.pause()
@@ -270,7 +278,7 @@ async def test_stop_and_switch_clears_confirm_of_old_run(tmp_path):
         scr, runner = await _run_in_a(pilot)
         scr._confirm_active = True
         await _pick_b(pilot, tmp_path)
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         scr._poll_active()
         await pilot.pause()
@@ -316,7 +324,7 @@ async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
     async with app.run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
         await _pick_b(pilot, tmp_path)
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         scr._poll_active()
         await pilot.pause()
@@ -358,7 +366,7 @@ async def test_stop_then_busy_target_says_busy(tmp_path):
         assert try_acquire(str(tmp_path), "cli", _B, "other-tui")
         scr.request_thread_switch(_B)
         await pilot.pause()
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         assert scr._active_task_id == _A
         assert BUSY_MESSAGE in notes
@@ -374,7 +382,7 @@ async def test_late_trip_of_stopped_run_stays_out_of_window_breaker(tmp_path):
         scr, runner = await _run_in_a(pilot, slow=True)
         old = app._circuit_breaker  # его держит исполнитель хода A
         await _pick_b(pilot, tmp_path)
-        await pilot.press("y")
+        await _answer(pilot, "y")
         await pilot.pause()
         assert scr._active_task_id == _B
         old.trip("m-a", "поздний сбой")

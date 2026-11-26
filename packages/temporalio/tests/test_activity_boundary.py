@@ -163,3 +163,21 @@ async def test_unanswered_mcp_call_is_outcome_unknown_with_its_text(
 
     assert isinstance(restored, ToolOutcomeUnknown)
     assert str(restored) == str(error)
+
+
+async def test_context_close_follows_mode_helper(tmp_path, monkeypatch):
+    """Закрытие контекста хода без своего ``close`` у провайдера убирает
+    MCP по контексту хода: сборка мусора — по режиму и сборке рантайма
+    (``collect_run_garbage``), не голым ``gc.collect`` на общем worker."""
+    import gc_core.agent_executor as ae
+
+    native, ctx = activities(tmp_path)
+    ctx.mcp_session_owner = "owner-1"
+    seen = {}
+
+    async def close(_owner_reset, *, ctx=None):
+        seen["ctx"] = ctx
+
+    monkeypatch.setattr(ae, "_aclose_mcp_and_release", close)
+    assert await native._close(None, ctx) is True
+    assert seen["ctx"] is ctx

@@ -8,7 +8,6 @@ State создаётся заново при каждом run(). Возвращ�
 
 import asyncio
 import contextlib
-import gc
 import logging
 import threading
 from copy import copy as _shallow_copy_msg
@@ -22,6 +21,7 @@ from gc_core.attachments.store import (
     awith_committed_attachments,
 )
 from gc_core.auto_routing import state_ops
+from gc_core.config_modules.gc import collect_run_garbage
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
@@ -180,7 +180,9 @@ async def _aappend_trace_id_to_meta(
                 pass
 
 
-async def _aclose_mcp_and_release(owner_reset: Any) -> None:
+async def _aclose_mcp_and_release(
+    owner_reset: Any, *, ctx: Any = None
+) -> None:
     """Уборка после прогона: stdio-сессии, stream-сессии, владение.
 
     Только для контекста без порта `mcp_cleanup`. С потребителем сервиса MCP
@@ -215,13 +217,24 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
         cancelled = cancelled or exc
     except Exception:
         pass
-    # C2: после закрытия MCP/stdio — подбираем циклический мусор
-    # (pipes, ClientSession, loop buffers).
-    gc.collect()
-    # Владение снимаем последним: всё выше его требует.
-    reset_owner(owner_reset)
+    _collect_and_release(owner_reset, ctx)
     if cancelled is not None:
         raise cancelled
+
+
+def _collect_and_release(owner_reset: Any, ctx: Any) -> None:
+    """Конец уборки хода — одно правило для обеих уборок (локальной и
+    потребителя MCP): C2 по режиму контекста (pipes, ClientSession, loop
+    buffers), затем снятие владения — последним и при сбое сборки: сбой
+    сборки не отменяет ни готовый ответ хода, ни отмену."""
+    try:
+        collect_run_garbage(ctx)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "run_garbage_collect_failed", exc_info=True
+        )
+    finally:
+        reset_owner(owner_reset)
 
 
 def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
@@ -1517,7 +1530,7 @@ class AgentExecutor:
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
             if cleanup is None:
-                await _aclose_mcp_and_release(owner_reset)
+                await _aclose_mcp_and_release(owner_reset, ctx=self._ctx)
             else:
                 try:
                     await cleanup()
@@ -1528,7 +1541,9 @@ class AgentExecutor:
                     if logger is not None:
                         logger.warning("mcp_cleanup_failed", exc_info=True)
                 finally:
-                    reset_owner(owner_reset)
+                    # C2 и снятие владения — как у локальной уборки, и при
+                    # сбое или отмене уборки потребителя.
+                    _collect_and_release(owner_reset, self._ctx)
         except asyncio.CancelledError as exc:
             # arun persists accounting for a completed loop before re-raising.
             return exc

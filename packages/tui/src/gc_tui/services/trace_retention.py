@@ -184,7 +184,9 @@ def nested_call_parent_id(records, call_id: str) -> str | None:
 
 
 def filter_sidecar_to_parents(records, allowed_parent_ids: set[str]) -> list:
-    """Оставить sidecar-записи parent'ов из окна. Полный список не кэшировать."""
+    """Оставить sidecar-записи parent'ов из окна. Полный список держит
+    только кеш `FileTaskStore.read_subagent_trace` — одна запись, трасса
+    открытой сессии до смены файла; копии отфильтрованного не хранить."""
     kept = []
     for rec in records:
         if not isinstance(rec, dict):

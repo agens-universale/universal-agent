@@ -30,6 +30,14 @@ PENDING_NOTE = "модель переключится на ближайшем ш
 _AUTO = "auto"
 
 
+def mark_model(choice: str, alias: str | None) -> str:
+    """Модель смены для сравнения: у `auto` — сам выбор, иначе модель,
+    в которую выбор резолвится (`alias`), а её нет — сам выбор."""
+    if choice == _AUTO:
+        return _AUTO
+    return alias or choice
+
+
 class ModelMark(ConsequenceTraceRow):
     """Строка смены модели; `pending` — выбор ещё ждёт ближайшего шага.
 
@@ -67,9 +75,7 @@ class ModelMark(ConsequenceTraceRow):
     def model(self) -> str:
         """Модель отметки для сравнения смен: у `auto` — сам выбор, иначе
         модель, в которую выбор резолвится."""
-        if self._choice == _AUTO:
-            return _AUTO
-        return self._alias or self._choice
+        return mark_model(self._choice, self._alias)
 
     def set_choice(self, choice: str, alias: str | None) -> None:
         """Новый выбор той же отметки: строка заменяется на месте."""
@@ -95,8 +101,7 @@ class ModelMark(ConsequenceTraceRow):
         self.set_content(self._line(self.size.width))
         if self.is_mounted:
             self.query_one(".trace-prefix", Static).update(self._prefix)
-        self._consequences = self._notes()
-        self._consequence_slot.set_bodies(self._consequences)
+        self._set_consequences(self._notes())
 
     def _sign(self, name_style: str) -> Text:
         # `auto` — сам выбор, а не модель, которую он взял на этот шаг.

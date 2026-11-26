@@ -13,12 +13,10 @@ import asyncio
 import json
 import os
 import time
-from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context
-from gc_core.tools.connect_mcp import consumer as consumer_module
 from gc_core.tools.connect_mcp import (
     consumer_connections as connections_module,
 )
@@ -463,17 +461,11 @@ async def test_closing_consumer_turn_end_does_nothing(
     await _ensure(consumer, settings)
     [pid] = launches(control)
     drops: list = []
-    collects: list = []
 
     async def adrop(entry) -> None:
         drops.append(entry)
 
     monkeypatch.setattr(connections_of(consumer), "adrop", adrop)
-    monkeypatch.setattr(
-        consumer_module,
-        "gc",
-        SimpleNamespace(collect=lambda: collects.append(1)),
-    )
     # Окно закрытия: ``aclose`` потребителя или сервиса уже отказал в
     # работе (флаг ставится первым), а сессии ещё не закрыты — их закроет
     # он сам.
@@ -485,7 +477,6 @@ async def test_closing_consumer_turn_end_does_nothing(
     await _end_turn(consumer)
 
     assert drops == []
-    assert collects == []
     assert alive(pid)
 
 

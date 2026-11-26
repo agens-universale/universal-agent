@@ -332,7 +332,7 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
             call_id="c1",
             tool_name="exec_command",
         )
-        scr._task_events = [call_ev]
+        scr._feed_history.append_event(call_ev)
         row = ToolCallRow(
             call_id="c1",
             label="exec_command",
@@ -389,7 +389,8 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._task_events = _tool_call_events()
+        for ev in _tool_call_events():
+            scr._feed_history.append_event(ev)
         row = ToolCallRow(call_id="c1", label="exec_command", target="curl")
         await scr.query_one("#trace").mount(row)
         row.set_result(summary="ok", outcome="ok")
@@ -435,7 +436,8 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._task_events = _tool_call_events()
+        for ev in _tool_call_events():
+            scr._feed_history.append_event(ev)
         row = ToolCallRow(call_id="c1", label="exec_command", target="curl")
         await scr.query_one("#trace").mount(row)
         row.set_result(summary="ok", outcome="ok")
@@ -471,7 +473,7 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._task_events = [
+        scr._feed_history.append_event(
             TraceEvent(
                 no=5,
                 event_ts_utc_iso="t",
@@ -480,7 +482,7 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
                 summary="ответ",
                 full_payload={"text": "ответ"},
             )
-        ]
+        )
         row = TraceRow(
             prefix="● ", content="ответ", kind_class="line-agent", event_no=5
         )

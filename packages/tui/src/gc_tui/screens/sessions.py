@@ -26,7 +26,14 @@ from gc_tui.palette import (
     OK,
     RUN_COLOR,
 )
+from gc_tui.screens.main import trace_screen_of
 from gc_tui.services.git_info import current_branch
+from gc_tui.services.history_loader import (
+    HistoryLoader,
+    LoadedHistory,
+    history_inputs_for,
+)
+from gc_tui.services.history_model import HistoryInputs
 from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.relative_time import format_relative_local
 from gc_tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
@@ -36,6 +43,7 @@ from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.turn_outcome import outcome_of, settled_status
 from gc_tui.services.usage_meter import format_nonzero_cost
+from gc_tui.widgets.open_indicator import OpenIndicator
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _ACT_SELECT_ALL = "выделить всё"
@@ -43,6 +51,11 @@ _ACT_SELECT_ALL = "выделить всё"
 
 _PAGE_SIZE = 25
 _PATH_MAXLEN = 48
+
+# Что открывается из списка (§3.3): сессия (Enter) или превью (Ctrl+P).
+_SESSION = "session"
+_PREVIEW = "preview"
+_OPEN_LABELS = {_SESSION: "открываю сессию", _PREVIEW: "открываю превью"}
 
 _FOOTER = (
     "↑↓/Home/End · PgUp/PgDn страница · Enter открыть · Ctrl+P превью"
@@ -130,6 +143,11 @@ class SessionsScreen(Screen):
         self._page: int = 0
         self._branch_filter: str = "all"  # "all" | "current"
         self._current_branch: Optional[str] = None
+        # Открытие из списка (§3.3): (тред, что открываем) и индикатор у
+        # его карточки. Загрузчик — на экране: мост в UI — приложение.
+        self._loader: Optional[HistoryLoader] = None
+        self._opening: Optional[tuple[str, str]] = None
+        self._indicator: Optional[OpenIndicator] = None
 
     # ---- compose / mount ---------------------------------------------
 
@@ -149,6 +167,7 @@ class SessionsScreen(Screen):
                 yield Static("", id="sessions-footer-right", markup=False)
 
     def on_mount(self) -> None:
+        self._loader = HistoryLoader(self._store, self.app.call_later)
         self._current_branch = current_branch(str(Path.cwd()))
         # Ctrl+B осмыслен только в git-проекте — иначе не показываем эту подсказку.
         footer = _FOOTER if self._current_branch else _FOOTER_NOGIT
@@ -170,6 +189,9 @@ class SessionsScreen(Screen):
 
     def on_screen_resume(self) -> None:
         self._refresh_notices_footer()
+
+    def on_unmount(self) -> None:
+        self._cancel_open()
 
     # ---- data ---------------------------------------------------------
 
@@ -260,10 +282,15 @@ class SessionsScreen(Screen):
             task.status, live=self.app.session_run_is_live(task.thread_id)
         )
 
-    def _title_line(self, task, *, selected: bool) -> Text:
+    def _title_line(
+        self, task, *, selected: bool, opening: Optional[Text] = None
+    ) -> Text:
         title = self._title_of(task)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append(title, style=BRIGHT if selected else INK)
+        if opening is not None:
+            t.append(" ")
+            t.append_text(opening)
         return t
 
     def _session_cost_label(self, task) -> Optional[str]:
@@ -318,10 +345,15 @@ class SessionsScreen(Screen):
             t.append(truncate_path_left(ppath, _PATH_MAXLEN), style=DEEP_DIM)
         return t
 
-    def _card_text(self, task, *, selected: bool) -> Text:
-        """Карточка сессии: заголовок + опциональный подзаголовок + мета."""
+    def _card_text(
+        self, task, *, selected: bool, opening: Optional[Text] = None
+    ) -> Text:
+        """Карточка сессии: заголовок (у открываемой — индикатор после
+        него) + опциональный подзаголовок + мета."""
         t = Text(no_wrap=True, overflow="ellipsis")
-        t.append_text(self._title_line(task, selected=selected))
+        t.append_text(
+            self._title_line(task, selected=selected, opening=opening)
+        )
         subtitle = task_subtitle(task.tui_meta or {})
         if subtitle:
             t.append("\n")
@@ -371,6 +403,7 @@ class SessionsScreen(Screen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "sessions-filter":
             return
+        self._cancel_open()
         new = event.value.strip()
         if new == self._filter:
             return  # эффективный фильтр не изменился (напр. одиночный/ведущий пробел)
@@ -393,7 +426,15 @@ class SessionsScreen(Screen):
     # Локальный маппинг (не тащим diff-модуль).
     _RENAME_KEYS = frozenset({"ctrl+r", "ctrl+R", "ctrl+к", "ctrl+К"})
 
+    # Клавиши, которые меняют выбор или уводят из списка: идущее открытие
+    # сначала отменяется (§3.3). Enter, Ctrl+P и Esc решают сами.
+    _CANCEL_KEYS = frozenset(
+        {"up", "down", "home", "end", "pageup", "pagedown"}
+    ) | frozenset({"ctrl+b", "delete", "ctrl+d"})
+
     def on_key(self, event: events.Key) -> None:
+        if event.key in self._CANCEL_KEYS or event.key in self._RENAME_KEYS:
+            self._cancel_open()
         # R10: Ctrl+R и алиасы раскладки → переименование (до навигации).
         if event.key in self._RENAME_KEYS:
             self._rename_selected()
@@ -438,7 +479,11 @@ class SessionsScreen(Screen):
             self._open_mass_delete()
             event.stop()
         elif event.key == "escape":
-            self.app.pop_screen()
+            # Идёт открытие — Esc его отменяет, список остаётся.
+            if self._opening is not None:
+                self._cancel_open()
+            else:
+                self.app.pop_screen()
             event.stop()
 
     def _selected_task(self):
@@ -459,19 +504,102 @@ class SessionsScreen(Screen):
     # ---- actions -------------------------------------------------------
 
     def _resume_thread(self, thread_id: str) -> None:
+        """Enter: сессия грузится в фоне, список ждёт с индикатором у
+        карточки; идёт ход — сначала вопрос о его стопе (§3.3)."""
+        if self._opening == (thread_id, _SESSION):
+            return  # повторный Enter на той же сессии
+        self._cancel_open()
         if self._session_is_busy(thread_id):
             self.app.notify(BUSY_MESSAGE, severity="warning")
             return
-        self.app.pop_screen()
-        from gc_tui.screens.main import TraceScreen
-
-        scr = self.app.screen
-        if isinstance(scr, TraceScreen):
-            # Через вход смены треда: идёт ход — «остановить и перейти».
-            # acquire(B) → release(A) → attach внутри attach_active_task
-            scr.request_thread_switch(thread_id)
-        else:
+        main = trace_screen_of(self.app)
+        if main is None:
+            self.app.pop_screen()
             self.app.tui_state.active_task_id = thread_id
+            return
+        main.confirm_switch(
+            thread_id, lambda: self._open_session(main, thread_id)
+        )
+
+    def _open_session(self, main, thread_id: str) -> None:
+        """Путь 1: модель — со входами целевой сессии и её отозванными
+        репликами; готово — переход."""
+        self._start_open(
+            thread_id,
+            _SESSION,
+            history_inputs_for(self.app, thread_id),
+            withdrawn=main.withdrawn_in(thread_id),
+            on_ready=lambda loaded: self._open_loaded_session(
+                thread_id, loaded
+            ),
+        )
+
+    def _open_loaded_session(
+        self, thread_id: str, loaded: LoadedHistory
+    ) -> None:
+        """Сессия готова: замок — до стопа хода и закрытия списка; занята —
+        список остаётся, ход идёт. Иначе список закрывается, экран сессии
+        получает готовую модель."""
+        self._stop_indicator()
+        main = trace_screen_of(self.app)
+        if not main.claim_session(thread_id):
+            return
+        self.app.pop_screen()
+        main.switch_to_history(thread_id, loaded.model, loaded.cursor)
+
+    def _start_open(
+        self,
+        thread_id: str,
+        kind: str,
+        inputs: HistoryInputs,
+        *,
+        on_ready,
+        withdrawn: set[str] | frozenset = frozenset(),
+    ) -> None:
+        self._opening = (thread_id, kind)
+        if self._selected_card() is not None:
+            self._indicator = OpenIndicator(
+                _OPEN_LABELS[kind], host=self, paint=self._paint_opening
+            )
+        self._loader.start(
+            thread_id,
+            inputs,
+            withdrawn=withdrawn,
+            on_ready=on_ready,
+            on_error=self._open_failed,
+        )
+
+    def _open_failed(self, exc: Exception) -> None:
+        """Сбой загрузки (битый файл треда): индикатор снят, список
+        остаётся."""
+        self._stop_indicator()
+        self.app.notify(f"Не удалось открыть: {exc}", severity="error")
+
+    def _paint_opening(self, frame) -> None:
+        """Кадр индикатора — в карточку выбранной сессии, какой она стоит
+        сейчас: список мог перерисоваться (смена выбора отменяет
+        открытие)."""
+        card, task = self._selected_card(), self._selected_task()
+        if card is not None and task is not None:
+            card.update(self._card_text(task, selected=True, opening=frame))
+
+    def _selected_card(self) -> Optional[Static]:
+        cards = self.query("#sessions-list .card.selected")
+        return cards.first(Static) if cards else None
+
+    def _stop_indicator(self) -> None:
+        self._opening = None
+        if self._indicator is not None:
+            self._indicator.stop()
+            self._indicator = None
+
+    def _cancel_open(self) -> None:
+        """Отменить открытие: загрузка дорабатывает в фоне, результат
+        выбрасывается; идущий ход не трогается."""
+        if self._opening is None:
+            return
+        self._loader.cancel()
+        self._stop_indicator()
 
     def _delete_selected(self) -> None:
         task = self._selected_task()
@@ -579,22 +707,43 @@ class SessionsScreen(Screen):
         return settings_of(self.app.effective_settings()).slots.model_dump()
 
     def _preview_selected(self) -> None:
+        """Ctrl+P (путь 2): модель превью — со входами базы — строится в
+        фоне; превью открывается готовым."""
         task = self._selected_task()
         if task is None:
             return
         tid = task.thread_id
-        segments = self._store.read_segments(tid)
+        if self._opening == (tid, _PREVIEW):
+            return
+        self._cancel_open()
+        settings = self.app.base_settings().settings
+        inputs = HistoryInputs(
+            root=self._project_path(),
+            injected_fields=tuple(sorted(settings.agent.inject_tool_fields)),
+        )
+        self._start_open(
+            tid,
+            _PREVIEW,
+            inputs,
+            on_ready=lambda loaded: self._show_preview(tid, loaded),
+        )
+
+    def _show_preview(self, tid: str, loaded: LoadedHistory) -> None:
+        self._stop_indicator()
         subagent_records = self._store.read_subagent_trace(tid)
         record = self._store.get_record(tid)
         from gc_tui.screens.preview import PreviewScreen
 
-        def _on_result(resume: bool) -> None:
-            if resume:
-                self._resume_thread(tid)
+        def _on_result(session: Optional[LoadedHistory]) -> None:
+            # Превью уже взяло замок и построило модель сессии (путь 3).
+            if session is not None:
+                self._open_loaded_session(tid, session)
 
         self.app.push_screen(
             PreviewScreen(
-                segments=segments,
+                segments=loaded.segments,
+                cursor=loaded.cursor,
+                model=loaded.model,
                 thread_id=tid,
                 project_path=self._project_path(),
                 subagent_records=subagent_records,

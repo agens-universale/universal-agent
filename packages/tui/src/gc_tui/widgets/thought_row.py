@@ -176,6 +176,19 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         self._settled = True
         self._set(self._text, self._seconds, False)
 
+    def respawn(self) -> ThoughtRow:
+        """Копия законченной строки для памяти эфемерного — с текстом,
+        временем и раскрытием."""
+        row = ThoughtRow(
+            text=self._text,
+            live=False,
+            attempt=self._attempt,
+            seconds=self._seconds,
+        )
+        row._settled = True
+        row.set_class(self.expanded, "-expanded")
+        return row
+
     def toggle(self) -> None:
         """Раскрыть / свернуть мысль целиком под строкой."""
         if not self.expanded:

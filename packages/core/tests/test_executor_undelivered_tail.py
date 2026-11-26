@@ -36,7 +36,10 @@ async def _executor(monkeypatch, tmp_path, seen: list, on_teardown):
     from gc_core.run_context import acreate_run_context
 
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
 
     async def _loop(messages, state, ctx, **kw):
         seen.append(
@@ -46,9 +49,9 @@ async def _executor(monkeypatch, tmp_path, seen: list, on_teardown):
 
     original_teardown = ae._aclose_mcp_and_release
 
-    async def _teardown(owner_reset):
+    async def _teardown(owner_reset, **kw):
         on_teardown()
-        await original_teardown(owner_reset)
+        await original_teardown(owner_reset, **kw)
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", _teardown)

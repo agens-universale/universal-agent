@@ -25,12 +25,13 @@ import re
 import shutil
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from gc_core.thread_store_journal import (
+    _CONTROL_FILE,
     _STORE_DIR,
     _control,
     _control_path,
@@ -786,6 +787,30 @@ class FileThreadStore(ThreadStore):
 
     # --- чтение --------------------------------------------------------------------
 
+    def files_stamp(
+        self, key: ThreadKey, streams: Sequence[str] = ()
+    ) -> tuple:
+        """Отпечаток файлов треда: размер, время записи (нс) и inode meta,
+        истории, трассы субагентов, журнала правок, ``control.json`` (и
+        старого, без system в имени), файлов потоков ``streams`` и каталога
+        тредов
+        (появление и удаление архивов). Из них `get_thread` собирает запись,
+        а `read_stream` читает потоки: тот же отпечаток — та же запись и те
+        же записи потоков. Читатель, который опрашивает тред (TUI на каждом
+        тике), по нему не перечитывает meta. Файла нет — его место ``None``."""
+        system, thread = key.system, key.thread
+        paths = [
+            layout.meta_file(self._dir, system, thread),
+            layout.history_file(self._dir, system, thread),
+            layout.subagent_trace_path(self._dir, system, thread),
+            layout.edits_journal_path(self._dir, system, thread),
+            self._base(key) / _CONTROL_FILE,
+            _physical_control_path(self._dir, thread) / _CONTROL_FILE,
+            self._dir,
+        ]
+        paths += [self._stream_file(key, s) for s in streams if s != _HISTORY]
+        return tuple(map(_file_stamp, paths))
+
     async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
         with self._read_scope(key):
             _control_doc, v2 = self._load(key)
@@ -1344,6 +1369,17 @@ def _abandoned(base: Path, cutoff: float) -> bool:
 
 #: С какого окна с конца файла список ищет последнюю запись (растёт ×4).
 _TAIL_PROBE = 8 * 1024
+
+
+def _file_stamp(path: str | Path) -> tuple[int, int, int] | None:
+    """Размер, время записи (нс) и inode; файла нет — None. Inode ловит
+    перезапись тем же размером в тот же такт времени записи: meta и
+    ``control.json`` пишутся атомарной заменой — новым файлом."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns, st.st_ino
 
 
 def _last_seq(path: str | Path, stream: str) -> int:

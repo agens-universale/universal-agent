@@ -359,7 +359,9 @@ async def test_thread_switch_with_live_watch_sticks_to_new_bottom(tmp_path):
         assert scr._stick_bottom is False
         scr.attach_active_task("sw2", is_resume=True)
         await pilot.pause(0.4)
-        assert "b1" in scr._rendered_ids  # история треда прочитана
+        assert (
+            "b1" in scr._feed_history.rendered_ids
+        )  # история треда прочитана
         assert trace.max_scroll_y > 0
         assert scr._stick_bottom is True
         assert trace.scroll_offset.y == trace.max_scroll_y

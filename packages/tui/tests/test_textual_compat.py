@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from contextlib import asynccontextmanager
+import functools
 import json
 from pathlib import Path
 
@@ -30,6 +32,21 @@ from gc_tui.textual_compat import (
 
 
 @pytest.fixture(autouse=True)
+def _fresh_version_check():
+    """Проверка версии запоминает ответ: сброс до и после каждого теста."""
+    check = textual_compat.textual_is_patched_version
+    check.cache_clear()
+    yield
+    check.cache_clear()
+
+
+def _other_version(monkeypatch) -> None:
+    """Иная версия Textual — с той же минуты, и для запомненной проверки."""
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    textual_compat.textual_is_patched_version.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _pilot_mouse_deltas(monkeypatch):
     """Пилот шлёт движения мыши без сдвига, терминал — со сдвигом от
     прошлой точки: без него не отличить вертикальное движение от
@@ -48,6 +65,27 @@ def _pilot_mouse_deltas(monkeypatch):
         return out
 
     monkeypatch.setattr(pilot, "_get_mouse_message_arguments", with_deltas)
+
+
+def test_version_check_reads_version_once(monkeypatch):
+    """Модуль Textual на каждое обращение к `__version__` разбирает
+    METADATA пакета; проверка зовётся на каждую строку ленты — версия
+    читается один раз."""
+    import importlib.metadata
+
+    reads = []
+    real = importlib.metadata.version
+
+    def version(name):
+        reads.append(name)
+        return real(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    if "__version__" in vars(textual):
+        monkeypatch.delattr(textual, "__version__")
+    assert textual_compat.textual_is_patched_version() is True
+    assert textual_compat.textual_is_patched_version() is True
+    assert len(reads) <= 1
 
 
 def test_textual_version_guard():
@@ -123,13 +161,18 @@ def test_apply_is_idempotent():
 
 
 def test_other_version_not_patched(monkeypatch, caplog):
+    from textual._styles_cache import StylesCache
+
     original = property(_upstream_pointer_start_offset)
     monkeypatch.setattr(
         selection.SelectStart, "pointer_start_offset", original
     )
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    inner_outer = _upstream_inner_outer()
+    monkeypatch.setattr(StylesCache, "get_inner_outer", inner_outer)
+    _other_version(monkeypatch)
     assert apply_textual_patches() is False
     assert selection.SelectStart.pointer_start_offset is original
+    assert StylesCache.get_inner_outer is inner_outer
     assert "пересмотреть" in caplog.text
 
 
@@ -145,7 +188,7 @@ def test_other_version_without_private_module_imports(monkeypatch):
         monkeypatch.setattr(gc_tui, name, getattr(gc_tui, name))
         monkeypatch.delitem(sys.modules, f"gc_tui.{name}")
     monkeypatch.setitem(sys.modules, "textual._auto_scroll", None)
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     importlib.import_module("gc_tui.app")
     fresh = importlib.import_module("gc_tui.textual_compat")
     assert fresh.apply_textual_patches() is False
@@ -182,7 +225,7 @@ async def test_anchored_scroll_not_negative():
 async def test_other_version_anchored_scroll_is_plain_anchor(monkeypatch):
     """На чужой версии Textual поправки якоря не ставятся: лента ведёт
     себя как обычный якорь Textual (здесь — его прокрутка в минус)."""
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert await _anchored_scroll_y() < 0
 
 
@@ -191,7 +234,7 @@ def test_other_version_scroll_skips_private_anchor_state(monkeypatch):
     его может не быть, и тогда падала бы каждая прокрутка ленты."""
     from textual.widget import Widget
 
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     scroll = textual_compat.AnchoredScroll()
     del scroll._anchored, scroll._anchor_released
 
@@ -254,7 +297,7 @@ async def test_anchor_layout_repaints_scrollbar_after_stale_frame():
 @pytest.mark.asyncio
 async def test_other_version_anchored_arrange_is_plain(monkeypatch):
     """На чужой версии раскладка якорную прокрутку не считает."""
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert await _tall_anchor_y() == 0
 
 
@@ -280,7 +323,7 @@ async def test_watch_selecting_reports_start_and_end():
 
 @pytest.mark.asyncio
 async def test_other_version_watch_selecting_off(monkeypatch):
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert await _selecting_seen() == (False, [])
 
 
@@ -362,7 +405,7 @@ async def test_drag_below_scrolls_to_end_and_stops():
 async def test_other_version_no_drag_below(monkeypatch):
     app = _BelowScreenApp()
     async with app.run_test(size=(40, 30)) as pilot:
-        monkeypatch.setattr(textual, "__version__", "9.0.0")
+        _other_version(monkeypatch)
         await pilot.mouse_down("#t", offset=(2, 2))
         await pilot.hover("#t", offset=(5, 10))
         await pilot.hover("#f", offset=(2, 1))
@@ -523,11 +566,169 @@ async def test_paint_after_mount_releases_on_timeout(monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(textual_compat, "mounted", never)
-    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.05)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.15)
     app = _Host()
     async with app.run_test() as pilot:
         _, held = await _in_app(pilot, lambda: _mount_and_hold(app))
         assert (held, await _released(pilot)) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_hold_at_series_end_task_still_waits_mount(monkeypatch):
+    """Остаток серии почти ноль: удержания нет, а задача кончается только
+    монтажом — продолжение после монтажа (кусок окна ленты встаёт по
+    новой раскладке) не зависит от срока удержания."""
+    real = textual_compat.mounted
+    mounted: list[bool] = []
+
+    async def slow(parent, widgets):
+        await asyncio.sleep(0.3)
+        await real(parent, widgets)
+        mounted.append(True)
+
+    monkeypatch.setattr(textual_compat, "mounted", slow)
+    app = _Host()
+
+    def hold_at_series_end():
+        row = Static("row")
+        app.query_one("#host").mount(row)
+        series = textual_compat._HOLD_SERIES.setdefault(
+            app, textual_compat._HoldSeries()
+        )
+        series.count += 1  # серия идёт: держит другой кусок
+        series.until = asyncio.get_running_loop().time() + 0.01
+        task = textual_compat.paint_after_mount(row)
+        task.add_done_callback(lambda _t: done.append(bool(mounted)))
+        return app._batch_count
+
+    done: list[bool] = []
+    async with app.run_test() as pilot:
+        held = await _in_app(pilot, hold_at_series_end)
+        await wait_until(pilot, lambda: bool(done), "задача кончилась")
+        assert (held, done) == (0, [True])
+
+
+@pytest.mark.asyncio
+async def test_hold_expires_before_mount_task_waits_mount(monkeypatch):
+    """Главная ветка: удержание заведено, его срок истёк раньше монтажа —
+    экран отпущен, а задача (и settle куска за ней) кончается только
+    монтажом."""
+    real = textual_compat.mounted
+    mounted: list[bool] = []
+
+    async def slow(parent, widgets):
+        await asyncio.sleep(0.6)
+        await real(parent, widgets)
+        mounted.append(True)
+
+    monkeypatch.setattr(textual_compat, "mounted", slow)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.2)
+    app = _Host()
+    done: list[bool] = []
+
+    def hold() -> int:
+        _row, held = _mount_and_hold(app)
+        task = next(iter(textual_compat._PAINT_HOLDS))
+        task.add_done_callback(lambda _t: done.append(bool(mounted)))
+        return held
+
+    async with app.run_test() as pilot:
+        held = await _in_app(pilot, hold)
+        await wait_until(pilot, lambda: app._batch_count == 0, "отпущено")
+        assert (held, done) == (1, [])
+        await wait_until(pilot, lambda: bool(done), "задача кончилась")
+        assert done == [True]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_paint_holds_let_a_frame_through(monkeypatch):
+    """Удержания подряд внахлёст (непрерывный подъём ленты) не держат
+    экран дольше потолка: иначе кадра нет, а `Screen._dirty_widgets`
+    копит каждый перерисованный виджет, в том числе снятые, с их
+    отрисовкой."""
+
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.2)
+    app = _Host()
+    async with app.run_test() as pilot:
+        counts = []
+        for _ in range(16):
+            counts.append(app._batch_count)
+            await _in_app(pilot, lambda: _mount_and_hold(app))
+            await asyncio.sleep(0.05)
+        assert 0 in counts[1:]
+        await _released(pilot)
+
+
+@pytest.mark.asyncio
+async def test_back_to_back_paint_holds_let_a_frame_through(monkeypatch):
+    """Новое удержание сразу по отпусканию прежнего (кусок за куском при
+    подъёме) ждёт кадра: иначе серии смыкаются и экран не рисует."""
+    from textual.screen import Screen
+
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    frames: list[int] = []
+    refresh = Screen._compositor_refresh
+
+    def counted(self) -> None:
+        frames.append(1)
+        refresh(self)
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.1)
+    app = _Host()
+    async with app.run_test() as pilot:
+        going = [True]
+
+        def next_hold(_task=None) -> None:
+            if not going[0]:
+                return
+            row = Static("row")
+            app.query_one("#host").mount(row)
+            textual_compat.paint_after_mount(row).add_done_callback(next_hold)
+
+        await _in_app(pilot, next_hold)
+        await asyncio.sleep(0.15)
+        monkeypatch.setattr(Screen, "_compositor_refresh", counted)
+        await asyncio.sleep(0.5)
+        going[0] = False
+        assert frames
+        await _released(pilot)
+
+
+@pytest.mark.asyncio
+async def test_lost_frame_callback_does_not_disable_holds(monkeypatch):
+    """Сигнал кадра после серии потерялся (его принял снятый экран) —
+    удержания возвращаются по сроку, а не выключаются навсегда."""
+
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_MOUNT_WAIT_LIMIT", 0.3)
+    # Потолок серии — с запасом над остатком без удержания
+    # (`_PAINT_HOLD_MIN`): равный ему остаток `until - now` в float бывает
+    # чуть меньше, и первое удержание не ставится вовсе.
+    limit = textual_compat._PAINT_HOLD_MIN * 1.5
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", limit)
+    app = _Host()
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "call_after_refresh", lambda *_a: True)
+        _, held = await _in_app(pilot, lambda: _mount_and_hold(app))
+        await _released(pilot)
+        # Срок возврата удержаний (потолок серии от потери сигнала) прошёл.
+        await asyncio.sleep(limit + 0.1)
+        _, again = await _in_app(pilot, lambda: _mount_and_hold(app))
+        assert (held, again) == (1, 1)
+        await _released(pilot)
 
 
 @pytest.mark.asyncio
@@ -620,7 +821,7 @@ async def test_other_version_trace_screen_keeps_stock_auto_scroll(
         return stock(self, *args, **kwargs)
 
     monkeypatch.setattr(Screen, "_check_auto_scroll", recorded)
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     async with _trace_app(tmp_path, "sel4").run_test(size=(80, 24)) as pilot:
         scr = await _tall_trace(pilot, "sel4")
         assert scr._check_auto_scroll.__func__ is recorded
@@ -764,5 +965,154 @@ def test_static_markup_reads_flag():
 
 
 def test_other_version_static_markup_is_on(monkeypatch):
-    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    _other_version(monkeypatch)
     assert textual_compat.static_markup(Static(markup=False)) is True
+
+
+# ---- удержание первой видимой строки (спека шага 2 окна, §5.3) ----------
+
+
+class _Held(App):
+    """Отлистанная якорная лента: строки, зависящие от ширины."""
+
+    CSS = "#a {height: 10; width: 60;} Static {height: auto;}"
+
+    def compose(self):
+        with textual_compat.AnchoredScroll(id="a"):
+            for i in range(60):
+                text = f"line {i} " + "слово " * (i % 7)
+                yield Static(text, id=f"l{i}")
+
+
+async def _scrolled_held(pilot, y: int):
+    scroll = pilot.app.query_one("#a")
+    await pilot.pause()
+    scroll.scroll_to(y=y, animate=False)
+    await pilot.pause()
+    held = scroll.first_visible()
+    scroll.hold_first_visible(held)
+    return scroll, held, held.region.y
+
+
+@asynccontextmanager
+async def _prepend_and_layout(app, scroll, *, width: int | None = None):
+    """Домонтировать сверху под удержанием отрисовки и разложить экран,
+    как компоновщик перед кадром, — без `pilot.pause()`."""
+    news = [Static(f"new {i} " + "x " * i) for i in range(25)]
+    with app.batch_update():
+        if width is not None:
+            scroll.styles.width = width
+        await scroll.mount_all(news, before=scroll.children[0])
+        app.screen._refresh_layout(app.screen.size)
+        yield
+
+
+@pytest.mark.asyncio
+async def test_prepend_keeps_visible_row_no_frame_jump():
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll, held, row = await _scrolled_held(pilot, 30)
+        before = scroll.scroll_y
+        async with _prepend_and_layout(app, scroll):
+            assert held.region.y == row
+            assert scroll.scroll_y > before
+
+
+@pytest.mark.asyncio
+async def test_prepend_keeps_row_after_width_change():
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll, held, row = await _scrolled_held(pilot, 40)
+        async with _prepend_and_layout(app, scroll, width=24):
+            assert held.region.y == row
+
+
+@pytest.mark.asyncio
+async def test_hold_off_and_anchored_keep_textual_behaviour():
+    """Без удержания домонтирование сдвигает строку (контроль); якорь
+    низа удержанию не уступает."""
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll, held, row = await _scrolled_held(pilot, 30)
+        scroll.hold_first_visible(None)
+        async with _prepend_and_layout(app, scroll):
+            assert held.region.y != row
+        scroll.hold_first_visible(held)
+        scroll.anchor()
+        await pilot.pause()
+        assert scroll.scroll_y == scroll.max_scroll_y
+
+
+@pytest.mark.asyncio
+async def test_other_version_hold_is_off(monkeypatch):
+    _other_version(monkeypatch)
+    app = _Held()
+    async with app.run_test(size=(80, 20)) as pilot:
+        scroll = app.query_one("#a")
+        await pilot.pause()
+        assert scroll.first_visible() is None
+
+
+class _Rows(App):
+    """Лента строк: снятие строк, как окно ленты."""
+
+    def compose(self):
+        with VerticalScroll(id="a"):
+            for i in range(20):
+                yield Static(f"line {i}")
+
+
+def _upstream_inner_outer():
+    """Копия `StylesCache.get_inner_outer` Textual 8.2.8: `lru_cache` на
+    методе экземпляра. Свежий кеш на каждый вызов — не живёт весь
+    прогон набора."""
+    from textual.style import Style
+
+    @functools.lru_cache(1024)
+    def get_inner_outer(cls, base_background, background):
+        return (
+            Style(background=base_background + background),
+            Style(background=base_background),
+        )
+
+    return get_inner_outer
+
+
+async def _removed_line_caches() -> int:
+    """Сколько кешей строк снятых и отрисованных виджетов переживают
+    полную сборку мусора."""
+    import gc
+    import weakref
+
+    app = _Rows()
+    async with app.run_test(size=(40, 30)) as pilot:
+        await pilot.pause()
+        rows = list(app.query(Static))
+        caches = [weakref.ref(row._styles_cache) for row in rows]
+        await app.query_one("#a").remove_children()
+        await pilot.pause()
+        del rows
+    gc.collect()
+    return sum(ref() is not None for ref in caches)
+
+
+@pytest.mark.asyncio
+async def test_removed_widget_line_cache_is_freed():
+    assert apply_textual_patches() is True
+    assert await _removed_line_caches() == 0
+
+
+@pytest.mark.asyncio
+async def test_upstream_inner_outer_keeps_removed_line_caches(monkeypatch):
+    """Контроль стенда: с копией формулы Textual 8.2.8 (`lru_cache` на
+    методе экземпляра) кеши строк снятых виджетов переживают сборку —
+    тест выше умеет падать. О починке в апстриме этот тест не скажет:
+    на неё укажет страж версии."""
+    from textual._styles_cache import StylesCache
+
+    inner_outer = _upstream_inner_outer()
+    monkeypatch.setattr(StylesCache, "get_inner_outer", inner_outer)
+    try:
+        assert await _removed_line_caches() > 0
+    finally:
+        inner_outer.cache_clear()

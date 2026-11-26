@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import contextlib
-import gc
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from gc_core.config_modules.gc import collect_run_garbage
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
@@ -178,8 +178,7 @@ class RunSummaryCoordinator:
         return self._proj_tags
 
     def _collect_garbage(self) -> None:
-        collect = getattr(self._ctx, "collect_garbage", None) or gc.collect
-        collect()
+        collect_run_garbage(self._ctx)
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:

@@ -377,6 +377,8 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
 .thinking-indicator { color: $deep-dim; padding: 0 1 0 0; height: 1; }
 .thinking-indicator.hidden { display: none; }
+/* «• обновляю ленту» — неподвижная надпись перед пересборкой ленты. */
+#rebuild-label { padding: 0 1 0 0; height: 1; }
 /* Строка итога хода (P1b, S10): уровень 0, глиф в колонке ●, пустая
    строка сверху, тусклая. Свежая (-latest) — со сводкой правок; у ошибки —
    хвост причины. */

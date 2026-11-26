@@ -540,7 +540,7 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
         frozen[0] = False
         scr._poll_active()
         await pilot.pause(0.05)
-        ids = [e.message_id for e in scr._task_events]
+        ids = [e.message_id for e in scr._feed_history.events()]
 
     assert True not in reads
     assert {"u2", "fc1", "fo1"} <= set(ids)
@@ -582,7 +582,9 @@ async def test_stream_answer_under_selection_drawn_once(tmp_path, monkeypatch):
         frozen[0] = False
         scr._poll_active()
         await pilot.pause(0.05)
-        answers = [e for e in scr._task_events if e.message_id == "a1"]
+        answers = [
+            e for e in scr._feed_history.events() if e.message_id == "a1"
+        ]
         mounted = block in scr.query_one("#trace").children
 
     assert len(answers) == 1

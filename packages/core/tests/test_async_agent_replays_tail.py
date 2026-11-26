@@ -55,7 +55,10 @@ def _dropped(caplog) -> list:
 @pytest.fixture()
 def env(monkeypatch):
     ae = importlib.import_module("gc_core.agent_executor")
-    monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
+    monkeypatch.setattr(
+        "gc_core.config_modules.gc.gc",
+        types.SimpleNamespace(collect=lambda: None),
+    )
     h = types.SimpleNamespace(batches=[], teardown_steps=[], calls=[], ae=ae)
 
     async def _loop(messages, state, ctx, **kw):
@@ -67,10 +70,10 @@ def env(monkeypatch):
 
     original_teardown = ae._aclose_mcp_and_release
 
-    async def _teardown(owner_reset):
+    async def _teardown(owner_reset, **kw):
         if h.teardown_steps:
             h.teardown_steps.pop(0)()
-        await original_teardown(owner_reset)
+        await original_teardown(owner_reset, **kw)
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", _teardown)

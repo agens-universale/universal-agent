@@ -8,9 +8,7 @@ from pathlib import Path
 
 import pytest
 from gc_testkit.tui_support import tui_settings
-
 from gc_tui.palette import (
-    ACCENT,
     HIGHLIGHT_BG,
     INK,
     MUTED,
@@ -378,9 +376,8 @@ async def test_sticky_colours(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sticky_skill_full_id_in_reply_colour(tmp_path):
-    from textual.containers import VerticalScroll
-
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from textual.containers import VerticalScroll
 
     _write_task(tmp_path, "o5s")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
@@ -609,9 +606,12 @@ async def test_click_on_detached_reply_is_ignored(tmp_path):
         first, _ = _replies(scr)
         await _scroll(pilot, scr, 30)
         await first.remove()
+        await pilot.pause()
+        # Снятие выше видимой строки держит её на месте (окно ленты, §5.3).
+        y = _trace(scr).scroll_offset.y
         scr.on_scroll_to_reply(ScrollToReply(first))
         await pilot.pause()
-        assert _trace(scr).scroll_offset.y == 30
+        assert _trace(scr).scroll_offset.y == y
 
 
 @pytest.mark.asyncio
@@ -658,9 +658,8 @@ async def test_sticky_sees_remove_and_mount_in_one_tick(tmp_path):
 async def _mixed(pilot, tid, *, calls=True):
     """Лента: реплики одно- и многострочные вперемешку с завершёнными
     строками вызовов со следствиями `└` (`calls`) и ответами агента."""
-    from rich.text import Text
-
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from rich.text import Text
 
     scr = pilot.app.screen
     scr.attach_active_task(tid)
@@ -708,11 +707,15 @@ async def _leave_bottom(pilot, scr):
 
 @pytest.mark.asyncio
 async def test_sticky_reply_matches_virtual_region_on_every_position(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
     """Страж семантики: на каждом положении прокрутки — сразу, на пути
     наблюдателя, без паузы — та же реплика, что у поиска по
-    `virtual_region.y`."""
+    `virtual_region.y`. Окно ленты не снимает и не домонтирует: лента
+    целиком в лимите (иначе кусок сверху сдвигает прокрутку под тестом)."""
+    from gc_tui.services import trace_window_policy as policy
+
+    monkeypatch.setattr(policy, "WINDOW_LIMIT", 10**7)
     _write_task(tmp_path, "o30")
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         scr = await _mixed(pilot, "o30")
@@ -1079,11 +1082,10 @@ async def test_pill_label_stable_on_app_blur(tmp_path):
 async def test_quiet_reply_look_is_shared(tmp_path):
     """Реплика в очереди и липкая реплика — один «тихий» вид: подложка,
     текст, маркер, цвет текста и имя скилла совпадают посимвольно."""
-    from rich.console import Console
-    from textual.color import Color
-
     from gc_tui import palette
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from rich.console import Console
+    from textual.color import Color
 
     _write_task(tmp_path, "o30")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:

@@ -126,9 +126,10 @@ async def test_preview_enter_still_resumes_when_scrolled_up(tmp_path):
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _open(pilot, result)
         await _scroll(pilot, scr, 10)
+        scr.action_resume = lambda: result.update(v="resume")
         await pilot.press("enter")
         await pilot.pause()
-    assert result["v"] is True
+    assert result["v"] == "resume"
 
 
 @pytest.mark.asyncio

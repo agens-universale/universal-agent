@@ -19,12 +19,11 @@ from gc_core.execution.progress import (
 )
 from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.tui_support import tui_settings
-from textual.containers import VerticalScroll
-
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_blocks_view import HIDDEN_CLASS, BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
+from textual.containers import VerticalScroll
 
 TID = "blockkeys000000000000000000000001"
 
@@ -374,15 +373,17 @@ async def test_tab_skips_hidden_rows_and_phrases(tmp_path):
 
 @pytest.mark.asyncio
 async def test_space_at_bottom_keeps_trace_at_bottom(tmp_path):
+    # Десять чтений — одна группа: серия длиннее шага хода делится
+    # границей шага на группы (`trace_steps`).
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 16)) as pilot:
         scr = await _open(pilot)
-        await _tail(pilot, thread, *_reads(*range(12)))
+        await _tail(pilot, thread, *_reads(*range(10)))
         trace = _trace(scr)
         trace.scroll_end(animate=False)
         await pilot.pause()
         (header,) = _headers(scr)
-        await _press_on(pilot, _row(scr, "r11"), "space")
+        await _press_on(pilot, _row(scr, "r9"), "space")
         await pilot.pause()
         assert _shown(scr, "r0") == [True]
         assert trace.scroll_y == trace.max_scroll_y

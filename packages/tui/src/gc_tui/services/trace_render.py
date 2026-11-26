@@ -19,42 +19,22 @@ from gc_core.constants.tool_display import (
     McpToolInfo,
     tool_display,
 )
-from gc_core.persistence.model_choice_record import (
-    is_model_choice_record,
-    parse_model_choice,
-)
-from gc_core.persistence.turn_outcome import (
-    TurnOutcome,
-    is_turn_outcome_record,
-    parse_turn_outcome,
-)
+from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import AgentHead, ResultOutcome, TraceEvent
 from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int, format_timer
-from gc_tui.services.think_text import think_rejected
 from gc_tui.services.trace_glyphs import PROMPT
-from gc_tui.services.trace_retention import (
-    apply_payload_retention,
-    filter_sidecar_to_parents,
-    message_ids_in_retention_window,
-    retention_window_start_index,
-)
 from gc_tui.services.turn_outcome import kind_of, turn_head
 
 if TYPE_CHECKING:
     from gc_core.tools.turn.turn_close import TurnClose
     from gc_core.vision.notes import TraceNote
     from rich.text import Text
-    from textual.widget import Widget
 
-    from gc_tui.services.trace_mapper import RenderContext
     from gc_tui.widgets.consequence_line import ConsequenceLine
-    from gc_tui.widgets.tool_blocks_view import (
-        PreviewBlocks,
-        ToolBlocksView,
-    )
+    from gc_tui.widgets.tool_blocks_view import ToolBlocksView
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.trace_row import (
         CompactionBody,
@@ -72,7 +52,7 @@ TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
 # Уровень вложенности события — единственный источник отступа ленты: глиф
 # события уровня n стоит в колонке `●` реплики агента плюс 2n. Живой трейс
 # (TraceScreen._mount_nested_*, main.py) и read-only превью
-# (merge_nested_readonly ниже) берут отступ отсюда.
+# (узел вложенного трейса `nested_trace`) берут отступ отсюда.
 LEVEL_INDENT = "  "
 
 
@@ -449,11 +429,16 @@ def build_answered_question_widget(
 
 def note_question(question, note: str) -> None:
     """Следствие вопроса `└ note` серым — один вид для ленты и превью."""
+    question.add_consequence(question_note_body(note))
+
+
+def question_note_body(note: str) -> Text:
+    """Тело следствия вопроса (`note_question`)."""
     from rich.text import Text
 
     from gc_tui.palette import DIM
 
-    question.add_consequence(Text(note, style=DIM))
+    return Text(note, style=DIM)
 
 
 # Промежуточный ответ субагента, который ядро не приняло (решение
@@ -854,553 +839,30 @@ def raw_output(ev) -> Optional[str]:
     return None
 
 
-def _mount(
-    target, widget: Widget, *, before: Optional[Widget] = None, after=None
+def result_with_edits(
+    view: ToolBlocksView,
+    row,
+    ev,
+    *,
+    edits_lookup,
+    window: int,
+    body: bool = False,
 ) -> None:
-    """Монтирование в цель превью: якорь — только заданный."""
-    if before is not None:
-        target.mount(widget, before=before)
-    elif after is not None:
-        target.mount(widget, after=after)
-    else:
-        target.mount(widget)
-
-
-class _PreviewHost:
-    """Хост блоков верхнего уровня превью — единственная точка закрытия
-    групп превью (решение плана P4 10): виджет не из модели блоков —
-    событие ленты, закрывает открытую группу."""
-
-    def __init__(self, target, blocks: PreviewBlocks) -> None:
-        self._target = target
-        self._blocks = blocks
-
-    def mount(self, widget, *, before=None, after=None) -> None:
-        _mount(self._target, widget, before=before, after=after)
-        view = self._blocks.views.get("")
-        if view is not None and not view.issued(widget):
-            view.event_closing()
-
-
-class _LevelHost:
-    """Хост блоков уровня субагента превью: монтирование под `Agent`."""
-
-    def __init__(self, mount) -> None:
-        self._mount = mount
-
-    def mount(self, widget, *, before=None, after=None) -> None:
-        self._mount(widget, before=before, after=after)
-
-
-def _readonly_result(
-    blocks: PreviewBlocks, view: ToolBlocksView, row, ev
-) -> None:
-    """Исход вызова превью — через модель уровня, с правкой из журнала
+    """Исход вызова истории — через модель уровня, с правкой из журнала
     треда тем же билдером, что вживую; сбой журнала — без правки, причина
-    — в лог."""
+    — в лог. ``body`` — дифф телом и вне окна раскрытых (ход вернулся
+    таким, каким был снят)."""
     from gc_tui.services.block_edits import call_edit, ran_result_of
     from gc_tui.services.tool_blocks import BlockKind
 
-    lookup = blocks.edits_lookup
-    window = blocks.expanded_turns
     try:
-        edit, compact = call_edit(lookup, ev.call_id or "", window=window)
+        edit, compact = call_edit(
+            edits_lookup, ev.call_id or "", window=window
+        )
         ran = None
         if view.model.kind_of(row.call_id) == BlockKind.RAN:
-            ran = ran_result_of(lookup, ev, window=window)
+            ran = ran_result_of(edits_lookup, ev, window=window)
     except Exception as exc:
         _log.warning("правки вызова %s не прочитаны: %r", ev.call_id, exc)
         edit, compact, ran = None, False, None
-    view.result(row, ev, edit, compact=compact, ran=ran)
-
-
-def _mount_model_mark(
-    mount_target, rec: dict, slots: Mapping[str, str | None]
-) -> None:
-    """Черта смены модели в превью — как при восстановлении ленты: на
-    месте записи, черта сразу за чертой её заменяет."""
-    from gc_tui.widgets.model_mark import drop_mark_before, restored_mark
-
-    record = parse_model_choice(rec)
-    if record is None:
-        return
-    mark = restored_mark(record, slots)
-    mount_target.mount(mark)
-    drop_mark_before(mark)
-
-
-def _mount_compaction(mount_target, ev: TraceEvent) -> None:
-    """Метка сжатия и тело в read-only превью. Метка не focusable: иначе
-    перехватывала бы Enter (в превью Enter — открыть тред); раскрытие —
-    кликом (`PreviewScreen.on_summary_toggle_request`)."""
-    rule, body = build_compaction_widgets(ev, focusable=False)
-    mount_target.mount(rule)
-    if body is not None:
-        mount_target.mount(body)
-
-
-def _dispatch_readonly(
-    mount_target,
-    ev,
-    calls: dict,
-    *,
-    blocks: PreviewBlocks | None = None,
-    mcp_tools: Mapping[str, McpToolInfo] | None = None,
-    mcp_servers: Iterable[str] = (),
-    questions: dict | None = None,
-) -> None:
-    """Смонтировать виджеты одного события (read-only паритет с _render_event).
-
-    ``questions`` — `{call_id: QuestionRow}` вопросов превью: ответ «без
-    ответа» дописывается под свой вопрос, а не отдельной строкой. Строки
-    вызовов и их исходы — через модель блоков верхнего уровня
-    (``blocks``, обязателен для событий вызовов)."""
-    from gc_tui.widgets.trace_row import TraceRow
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
-    if ev.kind == "user":
-        mount_target.mount(
-            UserReplyContainer(
-                ev.summary,
-                event_no=ev.no,
-                images=ev.attachments,
-                skill=ev.skill or None,
-            )
-        )
-    elif ev.kind == "agent":
-        if ev.tool_name == "intermediate_reply":
-            for w in build_intermediate_widgets(ev.summary, event_no=ev.no):
-                mount_target.mount(w)
-            return
-        widgets = (
-            build_finish_widgets(finish_close_of(ev), event_no=ev.no)
-            if ev.tool_name == "submit_solution"
-            else build_agent_widgets(ev.summary, event_no=ev.no)
-        )
-        for w in widgets:
-            mount_target.mount(w)
-    elif ev.kind == "call":
-        wire_name = ev.wire_name or ev.tool_name or "<tool>"
-        row = build_call_row(
-            call_id=ev.call_id or f"_anon_{ev.no}",
-            wire_name=wire_name,
-            args_summary=ev.args_summary,
-            level=0,
-            event_no=ev.no,
-            mcp_tools=mcp_tools,
-            mcp_servers=mcp_servers,
-            agent=ev.agent,
-            think_text=ev.think_text,
-        )
-        calls[row.call_id] = row
-        category, _ = tool_caption(wire_name, mcp_tools, mcp_servers)
-        blocks.views[""].add_call(
-            row, category, waiting=False, command=ev.command_lines
-        )
-    elif ev.kind in ("result", "error"):
-        row = calls.get(ev.call_id) if ev.call_id else None
-        if row is not None:
-            _readonly_result(blocks, blocks.views[""], row, ev)
-        elif think_rejected((ev.full_payload or {}).get("output")):
-            pass  # отказ пустого Think: строки вызова нет
-        elif ev.kind == "error":
-            mount_target.mount(
-                build_orphan_result_row(
-                    ev.summary, ev.result_outcome, event_no=ev.no
-                )
-            )
-        else:
-            mount_target.mount(
-                TraceRow(
-                    prefix="   ",
-                    content=ev.summary,
-                    kind_class="line-ok",
-                    event_no=ev.no,
-                )
-            )
-    elif ev.kind == "summary":
-        _mount_compaction(mount_target, ev)
-    elif ev.kind == "error_msg":
-        # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с
-        # известным call_id финализирует свою строку-вызов (красный `●`)
-        # и не дублируется строкой `!`. Иначе строка навсегда осталась бы
-        # «выполняется»:
-        # схемные ошибки приходят техническим error_message с call_id, а не
-        # function_call_output.
-        err_row = calls.get(ev.call_id) if ev.call_id else None
-        if err_row is not None:
-            from dataclasses import replace
-
-            blocks.views[""].result(
-                err_row, replace(ev, outcome="error"), None
-            )
-            calls.pop(ev.call_id, None)
-        else:
-            mount_target.mount(
-                build_standalone_row(
-                    ev.summary, severity="error", event_no=ev.no
-                )
-            )
-    elif ev.kind == "ask_human":
-        question = build_answered_question_widget(
-            ev.summary, event_no=ev.no, call_id=ev.call_id
-        )
-        if questions is not None and ev.call_id:
-            questions[ev.call_id] = question
-        mount_target.mount(question)
-    elif ev.kind == "todo":
-        # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
-        # живого канала в main.py), здесь только монтируем.
-        from gc_core.execution.progress import todo_items_from_arguments
-
-        from gc_tui.services.todo_render import build_todo_block
-
-        items = todo_items_from_arguments(
-            (ev.full_payload or {}).get("arguments")
-        )
-        mount_target.mount(
-            build_todo_block(items, subagent=False, indent="", event_no=ev.no)
-        )
-    else:
-        question = (
-            (questions or {}).get(ev.call_id)
-            if ev.tool_name == "ask_human"
-            else None
-        )
-        if question is not None:
-            note_question(question, QUESTION_UNANSWERED)
-            return
-        m = TAG_RE.match(ev.summary or "")
-        if m:
-            mount_target.mount(
-                TraceRow(
-                    prefix=f"[{m.group('tag')}] ",
-                    content=m.group("rest"),
-                    kind_class="line-meta",
-                    event_no=ev.no,
-                )
-            )
-        else:
-            mount_target.mount(
-                TraceRow(
-                    prefix="",
-                    content=ev.summary or "",
-                    kind_class="line-meta",
-                    event_no=ev.no,
-                )
-            )
-
-
-def _render_record_readonly(
-    mount_target,
-    rec: dict,
-    no: int,
-    calls: dict,
-    context: RenderContext | None = None,
-    *,
-    blocks: PreviewBlocks,
-    in_window: bool = True,
-    mcp_tools: Mapping[str, McpToolInfo] | None = None,
-    mcp_servers: Iterable[str] = (),
-    questions: dict | None = None,
-    model_slots: Mapping[str, str | None] | None = None,
-) -> int:
-    """Одна envelope-запись → виджеты. Возвращает следующий no.
-    hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
-    как _render_event на основном экране."""
-    from gc_tui.services.trace_mapper import map_message
-    from gc_tui.widgets.tool_blocks_view import end_turn
-
-    if is_model_choice_record(rec):
-        _mount_model_mark(mount_target, rec, model_slots or {})
-        return no
-    if is_turn_outcome_record(rec):
-        # Итог хода — строка на месте записи, не событие ленты; в превью
-        # индикатора нет, поэтому видна и строка последнего хода. Время
-        # вызовов хода — застывшим таймерам блоков.
-        outcome = parse_turn_outcome(rec)
-        if outcome is not None:
-            mount_target.mount(build_turn_line(outcome))
-            end_turn(blocks.views, blocks.timers, outcome, settled=True)
-        return no
-    payload = rec.get("payload")
-    if not isinstance(payload, dict):
-        return no
-    ev = map_message(payload, no=no, ts=rec.get("ts", ""), context=context)
-    if ev is None:
-        return no
-    apply_payload_retention(ev, seg_in_window=in_window)
-    no += 1
-    if ev.hidden:
-        return no
-    _dispatch_readonly(
-        mount_target,
-        ev,
-        calls,
-        blocks=blocks,
-        mcp_tools=mcp_tools,
-        mcp_servers=mcp_servers,
-        questions=questions,
-    )
-    return no
-
-
-def render_segments_readonly(
-    mount_target,
-    segments: list,
-    *,
-    mcp_tools: Mapping[str, McpToolInfo] | None = None,
-    mcp_servers: Iterable[str] = (),
-    root: str | None = None,
-    blocks: PreviewBlocks | None = None,
-    model_slots: Mapping[str, str | None] | None = None,
-    injected_fields: Iterable[str] = (),
-) -> dict:
-    """Read-only превью из сегментов: полная история (все сегменты сырьём) +
-    нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
-    трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там),
-    черты смены модели — по слотам ``model_slots`` (точки знака).
-    Возвращает `calls` (`{call_id: ToolCallRow}`) — нужен вызывающему для
-    домонтирования вложенного трейса субагентов (см. `merge_nested_readonly`).
-
-    ``blocks`` — блоки превью (исполнители уровней, таймеры, журнал правок
-    треда): тот же объект вызывающий отдаёт `merge_nested_readonly`; без
-    него — свои, без журнала. ``injected_fields`` — служебные поля схем
-    тулов: в мысль Think не входят, пока есть своё."""
-    from gc_tui.services.tool_blocks import ToolBlocks
-    from gc_tui.services.trace_mapper import collect_render_context
-    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
-
-    blocks = blocks if blocks is not None else PreviewBlocks()
-    host = _PreviewHost(mount_target, blocks)
-    blocks.views[""] = ToolBlocksView(
-        host,
-        ToolBlocks(blocks.timers, diff_preview=blocks.diff_preview),
-        level="",
-        depth=0,
-    )
-    no = 1
-    calls: dict = {}
-    questions: dict = {}
-    context = collect_render_context(
-        (
-            rec.get("payload")
-            for seg in segments
-            for rec in seg.get("messages", [])
-            if isinstance(rec, dict)
-        ),
-        root=root,
-        injected_fields=injected_fields,
-    )
-    # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
-    # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
-    # в окне segments[-2:].
-    seen_ids: set = set()
-    window_start = retention_window_start_index(len(segments))
-    window_ids = message_ids_in_retention_window(segments)
-    for i, seg in enumerate(segments):
-        seg_in_window = i >= window_start
-        for rec in seg.get("messages", []):
-            payload = rec.get("payload") if isinstance(rec, dict) else None
-            mid = payload.get("id") if isinstance(payload, dict) else None
-            if mid is not None:
-                if mid in seen_ids:
-                    continue
-                seen_ids.add(mid)
-            in_window = seg_in_window or (
-                mid is not None and mid in window_ids
-            )
-            no = _render_record_readonly(
-                host,
-                rec,
-                no,
-                calls,
-                context,
-                blocks=blocks,
-                in_window=in_window,
-                mcp_tools=mcp_tools,
-                mcp_servers=mcp_servers,
-                questions=questions,
-                model_slots=model_slots,
-            )
-        comp = seg.get("compacted_by")
-        if comp:
-            _mount_compaction(
-                host,
-                build_compaction_marker_event(no, seg.get("index", 0), comp),
-            )
-            no += 1
-    return calls
-
-
-def merge_nested_readonly(
-    mount_target,
-    records: list,
-    calls: dict,
-    *,
-    allowed_parent_ids: set[str] | None = None,
-    mcp_tools: Mapping[str, McpToolInfo] | None = None,
-    mcp_servers: Iterable[str] = (),
-    root: str | None = None,
-    blocks: PreviewBlocks | None = None,
-    injected_fields: Iterable[str] = (),
-) -> None:
-    """Read-only домонтирование вложенного трейса субагентов из sidecar-records
-    (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
-    модель уровня субагента на каждую строку `Agent`, монтирование «после
-    последнего виджета уровня» (заголовки и фразы — тоже, §9.1).
-
-    ``allowed_parent_ids`` — parent'ы из окна retention. None оставляет все
-    записи (вызывающий без сегментов). Полный sidecar после вызова не хранить.
-    ``blocks`` — те же блоки превью, что у `render_segments_readonly`.
-    """
-    if allowed_parent_ids is not None:
-        records = filter_sidecar_to_parents(records, allowed_parent_ids)
-    from functools import partial
-
-    from gc_tui.services.command_output import split_command
-    from gc_tui.services.subagent_sidecar_mapper import (
-        CHILD_SUMMARY_LABEL,
-        apply_sidecar_nested_actions,
-        nested_result_event,
-        plan_sidecar_nested_actions,
-    )
-    from gc_tui.services.todo_render import build_todo_block
-    from gc_tui.services.tool_blocks import ToolBlocks
-    from gc_tui.widgets.tool_blocks_view import (
-        PreviewBlocks,
-        ToolBlocksView,
-        nested_tail,
-    )
-    from gc_tui.widgets.user_reply import NestedUserReply
-
-    blocks = blocks if blocks is not None else PreviewBlocks()
-    levels: dict = {}  # parent_call_id -> виджеты уровня по монтированию
-    nested_rows: dict = {}  # tool_call_id -> ToolCallRow (для finish)
-
-    def _level(pid: str):
-        parent = calls.get(pid)
-        if parent is None:
-            return None
-        view = blocks.views.get(pid)
-        if view is None:
-            model = ToolBlocks(
-                blocks.timers,
-                diff_preview=blocks.diff_preview,
-                agent_window=True,
-            )
-            host = _LevelHost(partial(_mount_after, pid))
-            view = ToolBlocksView(host, model, level=pid, depth=1)
-            view.set_owner(parent)
-            blocks.views[pid] = view
-        return view
-
-    def _mount_after(pid: str, widget, *, before=None, after=None) -> None:
-        view = _level(pid)
-        if view is None:
-            return
-        level = levels.setdefault(pid, [])
-        widget.add_class("-in-agent")
-        if before is None and after is None:
-            children = list(mount_target.children)
-            after = nested_tail(children, level, calls[pid])
-        try:
-            _mount(mount_target, widget, before=before, after=after)
-        except Exception:
-            mount_target.mount(widget)
-        level.append(widget)
-        if not view.issued(widget):
-            view.event_added(widget)
-
-    def _tool(
-        *,
-        parent_call_id,
-        tool_name,
-        tool_call_id,
-        args_summary,
-        command=None,
-        **_kw,
-    ):
-        view = _level(parent_call_id)
-        if view is None:
-            return
-        row = build_call_row(
-            call_id=tool_call_id or f"_nested_{tool_name}",
-            wire_name=tool_name,
-            args_summary=args_summary or "",
-            level=1,
-            mcp_tools=mcp_tools,
-            mcp_servers=mcp_servers,
-        )
-        if tool_call_id:
-            nested_rows[tool_call_id] = row
-        category, _ = tool_caption(
-            tool_name, mcp_tools, mcp_servers, nested=True
-        )
-        lines = split_command(command, root=root)
-        view.add_call(row, category, waiting=False, command=lines)
-
-    def _finish(
-        *,
-        parent_call_id,
-        tool_call_id="",
-        ok=True,
-        error_brief=None,
-        outcome=None,
-        output=None,
-        **_kw,
-    ):
-        row = nested_rows.get(tool_call_id)
-        view = blocks.views.get(parent_call_id)
-        if row is None or view is None:
-            return
-        ev = nested_result_event(
-            tool_call_id,
-            ok=ok,
-            error_brief=error_brief,
-            outcome=outcome,
-            output=output,
-        )
-        _readonly_result(blocks, view, row, ev)
-
-    def _prose(*, parent_call_id, prose, ok=True, error_brief=None, **_kw):
-        text = (prose or "").strip()
-        if not text:
-            return
-        _mount_after(
-            parent_call_id,
-            build_nested_prose_row(text, ok=ok, error_brief=error_brief),
-        )
-
-    def _user(*, parent_call_id, prose, images=(), **_kw):
-        text = (prose or "").strip()
-        if not text:
-            return
-        _mount_after(parent_call_id, NestedUserReply(text, images=images))
-
-    def _child_summary(*, parent_call_id, prose="", **_kw):
-        _prose(
-            parent_call_id=parent_call_id, prose=prose or CHILD_SUMMARY_LABEL
-        )
-
-    def _todo(*, parent_call_id, tool_call_id="", todo_items=None, **_kw):  # noqa: ARG001  # часть контракта: подпись менять нельзя
-        _mount_after(
-            parent_call_id,
-            build_todo_block(
-                todo_items or [], subagent=True, indent=level_prefix(1)
-            ),
-        )
-
-    apply_sidecar_nested_actions(
-        plan_sidecar_nested_actions(
-            records, root=root, injected=frozenset(injected_fields)
-        ),
-        mount_nested_tool=_tool,
-        finish_nested_tool=_finish,
-        mount_nested_prose=_prose,
-        mount_nested_user=_user,
-        mount_nested_summary=_child_summary,
-        mount_nested_todo=_todo,
-    )
-    # Исход хода родителя — уровням, домонтированным после записи итога.
-    blocks.views.settle_levels()
+    view.result(row, ev, edit, compact=compact and not body, ran=ran)
