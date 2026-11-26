@@ -4,7 +4,8 @@
     "requests во всех сценариях: в запрос к модели входят служебные наджи и живой блок режима разрешений.",
     "In memory_two_turns, nudges in tool output change thread, meta, and state. Step and call counts are unchanged.",
     "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, а уходит с аргументами {}, поэтому requests тоже другой; в ответе на битый вызов — фрагмент полученных аргументов.",
-    "Optional fs_read_file line numbering changes request schemas in all scenarios. In file_roundtrip both reads succeed without the flag, restoring the reference thread, meta, and state without changing step or call counts."
+    "Optional fs_read_file line numbering changes request schemas in all scenarios. In file_roundtrip both reads succeed without the flag, restoring the reference thread, meta, and state without changing step or call counts.",
+    "After !209, finish gate requests report the original JSON string type in finish_handoff_normalization. The requests digests for finish_judge_accept and finish_judge_reject account for this field in JSON and SSE."
   ],
   "scenarios": {
     "deferred_accounting_outcome:json": {
@@ -116,16 +117,16 @@
       "requests": "52b662f722305515934332f84f2c02966c56ac1039c02d7fcb00c6f105c8cc61"
     },
     "finish_judge_accept:json": {
-      "requests": "6aba05a1a053d1d60644c6d7c1f0dad470cdb33ac5073bda2998d7d48e2b8be9"
+      "requests": "20cfed56b664477e5b8c50448957879fd87f684be42204b4d5f1cfeb5bdd8e6a"
     },
     "finish_judge_accept:sse": {
-      "requests": "559457e286e968ef3940596b05a2fa3dc3de2dbb37fe6477624240336c8ce416"
+      "requests": "5d15afd13cc8327e8023110c29f7745782bb7c390f58b22420fe61211876e968"
     },
     "finish_judge_reject:json": {
-      "requests": "55bb3af41f85c6d47929bf5701d0f65c3f6059260b4d52f86e53f9bc85545b5b"
+      "requests": "1561615a88744ff2643c929d19d2768c3bdfc12632eba4df3497431a9e8baf30"
     },
     "finish_judge_reject:sse": {
-      "requests": "d3a25a23f3185d5c4d71501f4c340776687e054b2a60a268ed53cdb4ea735903"
+      "requests": "4b5c323631d8052c23c3fc62302f9fe770f18d0165e76438a700035a6f283078"
     },
     "human_boundary:json": {
       "requests": "f2fb9888dfd1d24d5755118123b4918cecefb0cc312e1a7908b88bf815e035cc",
