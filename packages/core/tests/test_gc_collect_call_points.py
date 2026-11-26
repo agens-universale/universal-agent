@@ -287,15 +287,27 @@ class TestC2AgentExecutorFinally:
         )
         assert gc_calls == []
 
-    @pytest.mark.parametrize(("is_tui", "collects"), [(True, 0), (False, 1)])
+    @pytest.mark.parametrize(
+        ("is_tui", "fails", "collects"),
+        [(True, False, 0), (False, False, 1), (False, True, 1)],
+    )
     async def test_mcp_consumer_turn_end_follows_mode(
-        self, monkeypatch, tmp_path, mcp_home, mcp_reaper, is_tui, collects
+        self,
+        monkeypatch,
+        tmp_path,
+        mcp_home,
+        mcp_reaper,
+        is_tui,
+        fails,
+        collects,
     ):
         """С потребителем сервиса MCP (окно TUI открывает его всегда)
-        уборка хода идёт портом ``mcp_cleanup``; C2 и там по режиму."""
+        уборка хода идёт портом ``mcp_cleanup``; C2 и там по режиму — и
+        когда уборка потребителя упала."""
         import gc
 
         from gc_core.run_context import acreate_run_context
+        from gc_core.tools.connect_mcp.consumer import McpConsumer
         from gc_core.tools.connect_mcp.service import McpService
 
         ae = importlib.import_module("gc_core.agent_executor")
@@ -306,7 +318,12 @@ class TestC2AgentExecutorFinally:
         async def _arun_agent_stub(*_a, **_kw):
             return {"finished": True}
 
+        async def _failing_end_turn(_self):
+            raise RuntimeError("уборка MCP упала")
+
         monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
+        if fails:
+            monkeypatch.setattr(McpConsumer, "aend_turn", _failing_end_turn)
         service = mcp_reaper.track(McpService(connect_on_start=True))
         ctx = await acreate_run_context(
             self._make_cfg(tmp_path),
@@ -348,6 +365,21 @@ class TestRunCollectHelper:
         gcmod.collect_run_garbage(types.SimpleNamespace(is_tui=False))
         gcmod.collect_run_garbage(types.SimpleNamespace(is_tui=True))
         assert (rt_calls, gc_calls) == ([1], [1])
+
+    def test_failed_collect_still_releases_ownership(self):
+        """Сбой сборки не оставляет владение MCP-сессиями занятым и не
+        выходит наружу: снятие владения — последним при любом исходе."""
+        from gc_core.mcp_session_owner import current_owner, set_owner
+
+        ae = importlib.import_module("gc_core.agent_executor")
+
+        def _boom():
+            raise RuntimeError("сборка упала")
+
+        ctx = types.SimpleNamespace(is_tui=False, collect_garbage=_boom)
+        before = current_owner()
+        ae._collect_and_release(set_owner("gc-test"), ctx)
+        assert current_owner() == before
 
     async def test_portless_teardown_uses_runtime_collector(self):
         """Уборка без порта ``mcp_cleanup`` собирает мусор сборкой

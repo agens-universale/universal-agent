@@ -217,13 +217,24 @@ async def _aclose_mcp_and_release(
         cancelled = cancelled or exc
     except Exception:
         pass
-    # C2: после закрытия MCP/stdio — подбираем циклический мусор
-    # (pipes, ClientSession, loop buffers) — по режиму контекста ``ctx``.
-    collect_run_garbage(ctx)
-    # Владение снимаем последним: всё выше его требует.
-    reset_owner(owner_reset)
+    _collect_and_release(owner_reset, ctx)
     if cancelled is not None:
         raise cancelled
+
+
+def _collect_and_release(owner_reset: Any, ctx: Any) -> None:
+    """Конец уборки хода — одно правило для обеих уборок (локальной и
+    потребителя MCP): C2 по режиму контекста (pipes, ClientSession, loop
+    buffers), затем снятие владения — последним и при сбое сборки: сбой
+    сборки не отменяет ни готовый ответ хода, ни отмену."""
+    try:
+        collect_run_garbage(ctx)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "run_garbage_collect_failed", exc_info=True
+        )
+    finally:
+        reset_owner(owner_reset)
 
 
 def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
@@ -1523,8 +1534,6 @@ class AgentExecutor:
             else:
                 try:
                     await cleanup()
-                    # C2 и после уборки потребителя — по режиму.
-                    collect_run_garbage(self._ctx)
                 except Exception:
                     # Как локальная уборка: сбой закрытия MCP не отменяет
                     # готовый ответ хода.
@@ -1532,7 +1541,9 @@ class AgentExecutor:
                     if logger is not None:
                         logger.warning("mcp_cleanup_failed", exc_info=True)
                 finally:
-                    reset_owner(owner_reset)
+                    # C2 и снятие владения — как у локальной уборки, и при
+                    # сбое или отмене уборки потребителя.
+                    _collect_and_release(owner_reset, self._ctx)
         except asyncio.CancelledError as exc:
             # arun persists accounting for a completed loop before re-raising.
             return exc
