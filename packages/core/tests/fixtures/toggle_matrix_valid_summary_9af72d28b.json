@@ -2,7 +2,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -71,7 +71,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -278,7 +278,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -347,7 +347,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -416,7 +416,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -485,7 +485,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -554,7 +554,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "prompts",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -623,7 +623,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "prompts",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -692,7 +692,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {
@@ -904,7 +904,7 @@
   {
     "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
     "area": "summary",
-    "backend_calls": 16,
+    "backend_calls": 13,
     "dump": [
       {
         "payload": {

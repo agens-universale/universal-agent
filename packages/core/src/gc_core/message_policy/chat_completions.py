@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any, Dict, List
 
 
-def _collect_tool_output_call_id(message: Dict) -> str | None:
+def tool_output_call_id(message: Dict) -> str | None:
     role = message.get("role")
     if role == "tool":
         tool_call_id = message.get("tool_call_id")
@@ -96,7 +96,7 @@ def repair_tool_call_pairing(
         if not isinstance(message, dict):
             continue
 
-        call_output_id = _collect_tool_output_call_id(message)
+        call_output_id = tool_output_call_id(message)
         if call_output_id:
             future_tool_call_ids.add(call_output_id)
             normalized_reversed.append(message)

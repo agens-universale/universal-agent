@@ -87,6 +87,7 @@ def project_text_for_model(
     tags: Sequence[str] = (),
     strip_think: bool = True,
     pipeline: Optional[MessageProjectionPipeline] = None,
+    strip_outer_whitespace: bool = True,
 ) -> str:
     """Прогнать plain text через ``for_model`` (итоговый список тегов)."""
     if not isinstance(text, str):
@@ -96,7 +97,9 @@ def project_text_for_model(
     effective = effective_for_model_tags(tags, strip_think=strip_think)
     if not effective:
         return text
-    return strip_tagged_blocks(text, effective)
+    return strip_tagged_blocks(
+        text, effective, strip_outer_whitespace=strip_outer_whitespace
+    )
 
 
 def _content_to_plain_text(content: Any) -> str:

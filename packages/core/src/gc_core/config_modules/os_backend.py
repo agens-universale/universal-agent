@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_core.config_modules.field_meta import gc_meta
 
-OsBackendKind = Literal["local", "harbor", "docker", "ssh", "exec", "sandbox"]
+OsBackendKind = Literal[
+    "local", "harbor", "harbor-workspace", "docker", "ssh", "exec", "sandbox"
+]
 
 
 class DockerBackendConfig(BaseModel):
@@ -55,6 +57,9 @@ class OsBackendConfig(BaseModel):
 
     kind: OsBackendKind = "local"
     cwd: str | None = None  # стартовый каталог «там» (не для sandbox)
+    harbor_workspace_write: bool = (
+        False  # Compatibility with existing Harbor profiles.
+    )
     # Переменные окружения команд «там»: могут быть токены — секрет,
     # в публичный снимок (историю Temporal) не идут.
     env: dict[str, str] = Field(

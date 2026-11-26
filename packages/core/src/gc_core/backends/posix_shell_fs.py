@@ -114,6 +114,10 @@ class PosixShellFsMixin:
     async def _adownload_bytes(self, path: str) -> bytes:
         """Прочитать файл ``path`` целиком."""
 
+    async def _afs_write_exec(self, command: str) -> ExecResult:
+        """Use the view that governs writes and write-access checks."""
+        return await self._afs_exec(command)
+
     # --- file read ---
     async def read(self, path: str) -> str:
         # Raw bytes via download, then same codec as local ``read_text_for_edit``.
@@ -176,11 +180,14 @@ class PosixShellFsMixin:
         return await self.sha256(path)
 
     # --- stat ---
-    async def _test(self, expr: str, path: str) -> bool:
+    async def _test(
+        self, expr: str, path: str, *, for_write: bool = False
+    ) -> bool:
         """``test`` с явным ответом: код возврата транспорта и «нет файла» не
         различимы (остановленный контейнер выглядел как пустой диск)."""
         q = shlex.quote(path)
-        res = await self._afs_exec(
+        execute = self._afs_write_exec if for_write else self._afs_exec
+        res = await execute(
             f"if {expr.format(p=q)}; then echo 1; else echo 0; fi"
         )
         answer = (res.stdout or "").strip().splitlines()
@@ -216,7 +223,7 @@ class PosixShellFsMixin:
         return await self._test("test -r {p}", path)
 
     async def writable(self, path: str) -> bool:
-        return await self._test("test -w {p}", path)
+        return await self._test("test -w {p}", path, for_write=True)
 
     async def is_hidden(self, path: str) -> bool:
         return path.rstrip("/").rsplit("/", 1)[-1].startswith(".")
@@ -457,12 +464,14 @@ class PosixShellFsMixin:
                 pass
 
     async def copy(self, src: str, dst: str) -> None:
-        res = await self._afs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
+        res = await self._afs_write_exec(
+            f"cp {shlex.quote(src)} {shlex.quote(dst)}"
+        )
         if res.return_code != 0:
             raise self._fs_failure(f"{src} -> {dst}", res, what="cp")
 
     async def makedirs(self, path: str) -> None:
-        res = await self._afs_exec(f"mkdir -p {shlex.quote(path)}")
+        res = await self._afs_write_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
             raise self._fs_failure(path, res, what="mkdir")
 

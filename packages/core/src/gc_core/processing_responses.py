@@ -9,6 +9,7 @@ import json
 # когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
 import logging
 import time
+from itertools import chain
 from types import SimpleNamespace
 from typing import (
     Any,
@@ -86,6 +87,7 @@ from gc_core.execution.contracts import (
     MainModelUnavailable,
     ModelRequestStopped,
 )
+from gc_core.execution.message_keys import has_tool_call_identity
 from gc_core.execution.model import arequest_model
 from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
@@ -100,6 +102,15 @@ from gc_core.execution.progress import (
     run_command_text,
     todo_items_from_arguments,
     tool_args_summary,
+)
+from gc_core.execution.run_trace import (
+    bind_trace_root,
+    finish_model_trace,
+    start_model_trace,
+    trace_committed_messages,
+    trace_compacted_history,
+    trace_discarded_response,
+    trace_observer,
 )
 from gc_core.execution.turn_clock import (
     TurnClock,
@@ -138,6 +149,9 @@ from gc_core.message_policy.attachments_outbound import (
     request_carries_images,
 )
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.invalid_tool_calls import (
+    outbound_invalid_tool_call,
+)
 from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
@@ -243,8 +257,9 @@ from gc_core.utils.connect_backend import (
 )
 from gc_core.utils.convertations import (
     UnparseableModelResponse,
+    get_md5_hash,
     output_chat_completion_to_response,
-    sanitize_messages_for_chat_completions,
+    sanitize_invalid_tool_calls,
 )
 from gc_core.utils.format_messages import format_message_responses
 from gc_core.utils.generate_message_id import (
@@ -317,9 +332,13 @@ async def _maybe_persist(
     асинхронный (история треда может лежать в базе, и ждать её надо нативно),
     а внешние вызывающие и тесты — обычный синхронный.
     """
-    if callback is None:
+    observer = trace_observer(state)
+    if callback is None and observer is None:
         return
     if is_persist_discarded(state, pairing=pairing):
+        return
+    trace_committed_messages(observer, messages)
+    if callback is None:
         return
     if any(_is_agent_record(m) for m in messages):
         state.produced_output = True
@@ -1102,6 +1121,7 @@ async def _aread_live(
 
 
 _UNRESOLVED_MAIN = object()
+_REPAIRED_CALL_PREFIX = "call_uag_"
 
 
 async def _arequest_backend_canonical(
@@ -1279,6 +1299,7 @@ async def _arequest_responses_once(
     )
     if take_probe():
         use_retry = False
+    request_trace = start_model_trace(state)
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"
     ):
@@ -1299,7 +1320,17 @@ async def _arequest_responses_once(
         or any(not isinstance(item, dict) for item in res["output"])
     ):
         raise UnparseableModelResponse("Invalid Responses API output")
-    return res["output"], str(res["id"]), res_headers
+    response_id = str(res["id"])
+    output = _repair_duplicate_tool_call_ids(
+        res["output"],
+        response_id,
+        state.messages,
+        getattr(ctx, "logger", None) or _fallback_logger,
+    )
+    finish_model_trace(
+        request_trace, res, call_data.get("model"), output, response_id
+    )
+    return output, response_id, res_headers
 
 
 def _chat_token_limits(
@@ -1581,39 +1612,6 @@ def _no_probe_right() -> bool:
     return False
 
 
-def _function_call_output_id(message) -> str:
-    if not isinstance(message, dict):
-        return ""
-    if message.get("type") != "function_call_output":
-        return ""
-    call_id = message.get("call_id")
-    if isinstance(call_id, str):
-        return call_id
-    return ""
-
-
-def _answered_call_ids(history) -> set[str]:
-    answered: set[str] = set()
-    for batch in history:
-        for message in batch or []:
-            call_id = _function_call_output_id(message)
-            if call_id:
-                answered.add(call_id)
-    return answered
-
-
-def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
-    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
-    answered = _answered_call_ids(history)
-
-    def factory(message: Dict) -> Dict:
-        if message.get("call_id") in answered:
-            return message
-        return build_invalid_tool_call_feedback_message(message)
-
-    return factory
-
-
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1655,6 +1653,14 @@ async def _arequest_backend_canonical_once(
         retry_embedded_choice_errors,
     ) = resolve_network_params(settings, resolved_for_network)
 
+    # Битые вызовы — одним правилом в обоих режимах: responses после промаха
+    # кэша тоже шлёт полную историю, иначе 400 на каждом следующем ходе.
+    state_messages = getattr(state, "messages", []) or []
+    invalid_call = outbound_invalid_tool_call((state_messages, messages))
+    messages = sanitize_invalid_tool_calls(
+        messages, invalid_tool_call_factory=invalid_call, require_object=True
+    )
+
     if backend_mode == "responses":
         return await _arequest_responses_once(
             messages,
@@ -1686,17 +1692,10 @@ async def _arequest_backend_canonical_once(
         if resolved is not None
         else settings.backend.completions_url
     )
-    state_messages = getattr(state, "messages", []) or []
-    keep_answered = _keep_answered_invalid_tool_call(
-        (state_messages, messages)
-    )
-    sanitized_messages = sanitize_messages_for_chat_completions(
-        messages,
-        invalid_tool_call_factory=keep_answered,
-    )
-    sanitized_state_messages = sanitize_messages_for_chat_completions(
+    sanitized_state_messages = sanitize_invalid_tool_calls(
         state_messages,
-        invalid_tool_call_factory=keep_answered,
+        invalid_tool_call_factory=invalid_call,
+        require_object=True,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
@@ -1720,7 +1719,7 @@ async def _arequest_backend_canonical_once(
     send = functools.partial(
         _asend_chat_completions,
         state,
-        sanitized_messages=sanitized_messages,
+        sanitized_messages=messages,
         sanitized_state_messages=sanitized_state_messages,
         read_bytes=_image_bytes_reader(ctx),
         ctx=ctx,
@@ -1746,6 +1745,7 @@ async def _arequest_backend_canonical_once(
             "config_proxy": config_proxy,
         },
     )
+    request_trace = start_model_trace(state)
     res, call_data = await _asend_with_image_fallback(
         state,
         ctx,
@@ -1755,7 +1755,7 @@ async def _arequest_backend_canonical_once(
         # дедупликацией по id (`create_call_data_completions`). Живость считается по
         # слитой последовательности (повтор по id считается один раз), проекция
         # ложится на оба списка и сохраняет id — дедупликация видит те же ключи.
-        merged_messages=[*sanitized_state_messages, *sanitized_messages],
+        merged_messages=[*sanitized_state_messages, *messages],
         images_config=read_images_config(settings),
         route_key=route_key,
     )
@@ -1791,10 +1791,15 @@ async def _arequest_backend_canonical_once(
         persist_reasoning_content=persist_reasoning,
         recover_invalid_tool_calls=settings.agent.stop_on_no_tool_response,
     )
-    resp_messages = canonical["output"]
     response_id = str(canonical.get("id") or res.get("id") or "")
     if not response_id:
         raise ValueError("chat/completions response id is empty")
+    resp_messages = _repair_duplicate_tool_call_ids(
+        canonical["output"], response_id, state.messages, _run_log
+    )
+    finish_model_trace(
+        request_trace, res, call_data.get("model"), resp_messages, response_id
+    )
     remember_main_prompt_tokens(
         state,
         res.get("usage"),
@@ -1891,10 +1896,7 @@ def _drop_unidentifiable_tool_calls(messages: List[Dict]) -> List[Dict]:
         message
         for message in messages
         if message.get("type") != "function_call"
-        or all(
-            isinstance(value, str) and value.strip()
-            for value in (message.get("call_id"), message.get("name"))
-        )
+        or has_tool_call_identity(message)
     ]
     if len(filtered) != len(
         messages
@@ -1903,6 +1905,71 @@ def _drop_unidentifiable_tool_calls(messages: List[Dict]) -> List[Dict]:
             "Model tool calls have no usable identity"
         )
     return filtered
+
+
+def _repair_duplicate_tool_call_ids(
+    messages: List[Dict],
+    response_id: str,
+    history: List[Dict],
+    logger: logging.Logger,
+) -> List[Dict]:
+    """Assign separate call and message IDs to repeated calls in one response."""
+    seen: set[str] = set()
+    repaired = messages
+    reserved: set[str] = set()
+    for index, message in enumerate(messages):
+        if message.get("type") != "function_call":
+            continue
+        call_id = message.get("call_id")
+        if not isinstance(call_id, str) or not call_id.strip():
+            continue
+        if call_id not in seen:
+            seen.add(call_id)
+            continue
+        if repaired is messages:
+            repaired = list(messages)
+            reserved = _reserved_message_ids(history, messages)
+        new_call_id, new_message_id = _allocate_repaired_call_ids(
+            response_id, index, reserved
+        )
+        repaired[index] = {
+            **message,
+            "call_id": new_call_id,
+            "id": new_message_id,
+        }
+        logger.warning(
+            "Repeated tool call ID %r for %r reassigned to %r",
+            call_id,
+            message.get("name"),
+            new_call_id,
+        )
+    return repaired
+
+
+def _reserved_message_ids(
+    history: List[Dict], messages: List[Dict]
+) -> set[str]:
+    return {
+        value
+        for item in chain(history, messages)
+        if isinstance(item, dict)
+        for key in ("call_id", "id")
+        if isinstance(value := item.get(key), str)
+    }
+
+
+def _allocate_repaired_call_ids(
+    response_id: str, index: int, reserved: set[str]
+) -> tuple[str, str]:
+    salt = 0
+    while True:
+        digest = get_md5_hash([response_id, index, salt])
+        call_id = f"{_REPAIRED_CALL_PREFIX}{digest}"
+        message_id = f"fc_uag_{digest}"
+        if call_id not in reserved and message_id not in reserved:
+            reserved.update((call_id, message_id))
+            return call_id, message_id
+        salt += 1
 
 
 def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
@@ -2035,6 +2102,7 @@ async def _amaybe_reroute_for_floors(
         return resp_messages, response_id, res_headers
     logger = getattr(ctx, "logger", None) or _fallback_logger
 
+    trace_discarded_response(state, response_id)
     discarded_calls, discarded_text = discarded_answer(resp_messages)
     log_artifact_reroute(
         logger,
@@ -2955,6 +3023,7 @@ async def _aclose_after_session_compact(
         _closings_after_session_compact(tools_outputs, pending),
         state,
     )
+    trace_compacted_history(state)
     if archive is not None:
         await _release_summary_archive(ctx, archive)
     _log_unstarted_after_session_compact(ctx, pending)
@@ -3704,7 +3773,7 @@ class _AgentLoop:
                 return message
             return build_invalid_tool_call_feedback_message(message)
 
-        messages = sanitize_messages_for_chat_completions(
+        messages = sanitize_invalid_tool_calls(
             messages,
             invalid_tool_call_factory=rejected_tool_call,
         )
@@ -3714,7 +3783,7 @@ class _AgentLoop:
         if _post_sanitize_digest != _pre_sanitize_digest:
             self.run_logger.info(
                 "\n<message_batch_committed>\n"
-                "Санитайз для chat/completions изменил батч относительно сырого "
+                "Санитайз битых вызовов изменил батч относительно сырого "
                 "ответа выше (например, невалидный JSON вызова тула заменён на "
                 "техническое user-сообщение — то же, что уходит в persist треда).\n"
                 "</message_batch_committed>\n"
@@ -3832,8 +3901,15 @@ class _AgentLoop:
         режима) может добавиться следом. Реплика из отложенного хвоста на
         диск уже не попадёт — в намерения открытого хода её пишем до сброса.
         """
-        self._discard_nudges_after_summary(skip_fill=True)
         state = self.state
+        observer = trace_observer(state)
+        if observer is not None:
+            held = self._nudges.followers
+            if self._nudges.carrier is not None:
+                held = [self._nudges.carrier, *held]
+            # These messages reached the old history, which the summary replaced.
+            trace_committed_messages(observer, held)
+        self._discard_nudges_after_summary(skip_fill=True)
         state.current_user_intent = append_user_asks_from_messages(
             state.current_user_intent,
             self._nudges.followers,
@@ -3858,6 +3934,7 @@ class _AgentLoop:
         )
         if skip_fill:
             self._nudges.skip_fill = True
+        trace_compacted_history(self.state)
 
     async def _apre_backend_compaction(self, messages, mode) -> bool:
         if self.pre_backend_compaction_hook is None:
@@ -3997,16 +4074,41 @@ class _AgentLoop:
             return await self._atext_response(messages)
         raise ValueError(f"unconventional mode: {mode}")
 
-    def _remember_response_id(self, response_id, backend_mode: str) -> None:
+    def _remember_response_id(
+        self, response_id, backend_mode: str, messages
+    ) -> None:
         if backend_mode == "responses":
-            self.state.previous_response_id = response_id
+            repaired = any(
+                message.get("type") == "function_call"
+                and isinstance(call_id := message.get("call_id"), str)
+                and call_id.startswith(_REPAIRED_CALL_PREFIX)
+                and message.get("id") == f"fc_{call_id.removeprefix('call_')}"
+                for message in messages
+            )
+            self.state.previous_response_id = None if repaired else response_id
         self.state.last_backend_response_id = response_id
+
+    def _model_input_messages(self, messages, backend_mode: str):
+        state = self.state
+        if (
+            backend_mode != "responses"
+            or state.previous_response_id is not None
+            or not getattr(state, "last_backend_response_id", None)
+        ):
+            return messages
+        # Repaired calls only exist in local history. Build the full input in
+        # the agent loop, while prior turns are still available to this caller.
+        if self.get_full_history_messages is not None:
+            history = self.get_full_history_messages()
+        else:
+            history = state.messages
+        return [*history, *filter_messages_not_in_state(history, messages)]
 
     async def _auser_ask(self, messages, backend_mode: str) -> _Outcome:
         state, ctx = self.state, self.ctx
         try:
             messages, response_id = await aprocess_user_ask(
-                messages, state, ctx
+                self._model_input_messages(messages, backend_mode), state, ctx
             )
         except ExecutionFailure:
             raise
@@ -4040,7 +4142,7 @@ class _AgentLoop:
             state_ops.close_tick(
                 state, getattr(state, "_call_level", None) or "default"
             )
-        self._remember_response_id(response_id, backend_mode)
+        self._remember_response_id(response_id, backend_mode, messages)
         # Half-turn: ответ модели обработаем на следующей итерации.
         return _Outcome(messages)
 
@@ -4048,9 +4150,11 @@ class _AgentLoop:
         self, messages, backend_mode: str
     ) -> _Outcome:
         messages, response_id = await aprocess_tool_outputs(
-            messages, self.state, self.ctx
+            self._model_input_messages(messages, backend_mode),
+            self.state,
+            self.ctx,
         )
-        self._remember_response_id(response_id, backend_mode)
+        self._remember_response_id(response_id, backend_mode, messages)
         # Half-turn: как user_ask — ждём разбора ответа модели.
         return _Outcome(messages)
 
@@ -4541,4 +4645,8 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         mark_finalizing=mark_finalizing,
         mark_finish_gate_checking=mark_finish_gate_checking,
     )
-    return await loop.arun(messages)
+    with bind_trace_root(state):
+        observer = trace_observer(state)
+        if observer is not None:
+            trace_committed_messages(observer, state.messages)
+        return await loop.arun(messages)

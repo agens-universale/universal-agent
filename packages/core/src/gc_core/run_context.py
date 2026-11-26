@@ -32,6 +32,7 @@ from gc_core.auto_routing.levels import (
 from gc_core.auto_routing.policy import RoutingParams
 from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.backends.factory import resolve_os_backend
+from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.protocol import FsBackend, base_backend
 from gc_core.config_modules.chat_completions import (
     ChatCompletionsLlmConfig,
@@ -59,6 +60,7 @@ from gc_core.execution_workspace import (
     areconcile_remote_root,
     build_execution_workspace,
     launch_root_from_config,
+    resolve_execution_root,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import (
@@ -522,6 +524,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         source = prep.settings
         await aprime_backend_cwd(prep.backend, source)
         source = await areconcile_remote_root(prep.backend, source)
+        if isinstance(prep.backend, HarborBackend):
+            await prep.backend.aprepare_workspace(
+                resolve_execution_root(prep.backend, source)
+            )
         prep.settings = source
         # Скиллы, которые надо доставить в среду исполнения (файловое
         # хранилище и remote-бэкенд), — реестр по доставленной копии.
@@ -595,13 +601,12 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         from gc_core.utils.logging_module import release_run_logger
 
         try:
-            # Закрытую корутину (`GeneratorExit`) ждать уже нельзя: `await`
-            # здесь кончился бы «coroutine ignored GeneratorExit». Тогда
-            # серверы доберёт хук на выход, а логгер отдаём в любом случае.
-            # Сессии потребителя не трогаем: под его владельцем это закрыло
-            # бы сессии всего окна (спека §5.2).
-            if mcp_consumer is None and not isinstance(exc, GeneratorExit):
-                await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
+            # A closing coroutine cannot await cleanup. Shared MCP sessions
+            # remain owned by the consumer and outlive this context build.
+            if not isinstance(exc, GeneratorExit):
+                await _acleanup_context_build(
+                    prep, close_mcp_sessions=mcp_consumer is None
+                )
         finally:
             release_run_logger(prep.run_logger)
         raise
@@ -683,6 +688,21 @@ async def arefresh_context_tools(ctx: RunContext) -> None:
         ctx.mcp_status,
     ) = tools
     ctx.registered_tool_names = set(registered)
+
+
+async def _acleanup_context_build(
+    prep: _RunContextPrep, *, close_mcp_sessions: bool
+) -> None:
+    try:
+        if isinstance(prep.backend, HarborBackend):
+            await prep.backend.arelease_workspace()
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Failed to release Harbor workspace after context error"
+        )
+    finally:
+        if close_mcp_sessions:
+            await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
 
 
 async def _aclose_owned_mcp_sessions(owner: str) -> None:

@@ -764,6 +764,7 @@ NOT_IN_MATRIX = {
     # контейнера или хоста. Покрытие: os_backends/test_os_backend_factory.py,
     # test_remote_shell_backend.py, test_sandbox_backend.py.
     "os_backend.kind": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.harbor_workspace_write": "Legacy Harbor profile selector; covered by test_harbor_adapter_config_schema_parity and test_harbor_workspace_write",
     "os_backend.cwd": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.env": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.docker.name": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
@@ -888,6 +889,8 @@ NOT_IN_MATRIX = {
     # исполнения. Асинхронность на них не завязана.
     "agent.walk_output_max_chars": "потолок обхода бэкенда; сценарий не обходит ФС",
     "agent.harbor_exec_init": "только Harbor: префикс канала модели в песочнице; сценарии матрицы локальные, покрыт test_harbor_backend",
+    "agent.stop_on_no_tool_response": "Covered by test_executor_turn_outcome and test_harbor_adapter_bundled_paths",
+    "agent.text_answer_mode": "Covered by test_executor_turn_outcome and test_harbor_adapter_bundled_paths",
     "chat_completions.llm.subagent_role_max_tokens": "потолок запроса роли субагента",
     "project_memory.compaction_max_tokens": "потолок компакции проектной памяти",
     # Задаёт сам харнесс: подмена сломала бы маршрутизацию ScriptedBackend.

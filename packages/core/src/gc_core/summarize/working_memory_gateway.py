@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Mapping
+from typing import Any, Dict, Mapping
 
 REGISTER_GOAL = "goal"
 REGISTER_CONSTRAINTS = "constraints"
@@ -104,26 +104,6 @@ def render_memory_patch_registers_for_prompt() -> str:
         f"{rules}\n"
         "- Empty tag body clears that register — rare during active work.\n"
         "- No verbose tool logs. No facts unsupported by the inputs."
-    )
-
-
-def render_memory_deltas_format_repair_system_prompt(
-    *, full_replace: bool = False
-) -> str:
-    register_tags = ", ".join(
-        f"<{name}>...</{name}>" for name in REGISTER_ORDER
-    )
-    n = len(REGISTER_ORDER)
-    replace_hint = (
-        f"Use all {n} register tags when the source covers a full memory rebuild; "
-        "keep empty tags when the source meant to clear a register (empty body means clear)."
-    )
-    del full_replace  # all gateway registers use replace semantics
-    return (
-        "You are a strict formatter. Convert input text into session memory register tags only. "
-        f"Use zero or more of: {register_tags}. "
-        "Do not add new facts. Preserve meaning. "
-        f"{replace_hint}"
     )
 
 
@@ -231,11 +211,6 @@ def read_snapshot_from_state(state: Any) -> WorkingMemorySnapshot:
     return _snapshot_from_mapping(getattr(shared, "working_memory", None))
 
 
-MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL = (
-    "working_memory_deltas_format_repair"
-)
-
-
 def render_persistent_state_for_prompt(
     snapshot: WorkingMemorySnapshot,
     session_todo: Any = None,
@@ -277,21 +252,6 @@ def resolve_persistent_state_block(
     )
 
 
-def build_memory_deltas_format_repair_messages(
-    raw_output: str,
-    *,
-    full_replace: bool = False,
-) -> List[Dict[str, str]]:
-    system_prompt = render_memory_deltas_format_repair_system_prompt(
-        full_replace=full_replace
-    )
-    user_prompt = f"<raw_memory_step_output>\n{raw_output or ''!s}\n</raw_memory_step_output>\n"
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-
 def _register_uses_replace_semantics(
     name: str, *, full_replace: bool = False
 ) -> bool:
@@ -329,6 +289,13 @@ _PATCH_FENCE = re.compile(
     r"^(?P<marker>`{3,})[^`\n]*\n(?P<body>.*?)\n(?P=marker)[ \t]*(?=\n|\Z)",
     re.DOTALL | re.MULTILINE,
 )
+_DRAFT_FENCE = re.compile(
+    r"^ {0,3}(?P<fence>(?P<marker>[`~])(?P=marker){2,})"
+    r"(?!(?P=marker))[^\n]*(?:\n|\Z)"
+    r".*?(?:^ {0,3}(?P=fence)(?P=marker)*[ \t]*\r?$|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+_DRAFT_INDENTED_CODE = re.compile(r"^(?: {4}| {0,3}\t)[^\r\n]*", re.MULTILINE)
 _EXAMPLE_CUE = re.compile(
     r"\b(?:example|for instance|do not use|пример|для иллюстрации формата)\b|\be\.g\.",
     re.I,
@@ -356,9 +323,37 @@ _PERSISTENT_STATE_WITH_TODO = re.compile(
 _THINK_PATCH_BOUNDARY = re.compile(
     rf"</think>\s*(?=<(?:{'|'.join(REGISTER_ORDER)}|persistent_state)>|`{{3,}})"
 )
+_QUOTED_REGISTER_BLOCK = re.compile(
+    rf"""(?P<quote>["'])(?=\s*(?:</think>\s*)?<(?:{"|".join(REGISTER_ORDER)})>)"""
+    rf"""(?:(?!(?P=quote)).)*?</(?:{"|".join(REGISTER_ORDER)})>\s*(?P=quote)""",
+    re.DOTALL,
+)
+_SHELL_HEREDOC_START = (
+    r"""[ \t]*(?P<command>[\w./-]+)"""
+    r"""(?:[ \t]+(?:[\w./%-]+|"[^"\r\n]*"|'[^'\r\n]*'))*[ \t]*"""
+    r"""<<(?P<strip_tabs>-)?[ \t]*(?P<quote>["']?)"""
+    r"(?P<label>[A-Za-z_]\w*)(?P=quote)"
+)
+_SHELL_HEREDOC_HEAD = rf"^{_SHELL_HEREDOC_START}[ \t]*\r?\n"
+_SHELL_HEREDOC_BODY = (
+    r".*?^(?P<terminator>(?(strip_tabs)\t*)(?P=label))(?=\r?$)"
+)
+_SHELL_HEREDOC = re.compile(
+    _SHELL_HEREDOC_HEAD + _SHELL_HEREDOC_BODY,
+    re.DOTALL | re.MULTILINE,
+)
+_SHELL_HEREDOC_OPENING = re.compile(_SHELL_HEREDOC_HEAD, re.MULTILINE)
+_HEREDOC_COMMANDS = frozenset(
+    {"bash", "cat", "dash", "echo", "ksh", "printf", "sh", "tee", "zsh"}
+)
+_OPTIONAL_SUMMARY_TRAILER = re.compile(r"(?:</summary>(?:\s+[^<>\r\n]+)?)?")
+_DRAFT_LITERAL_MARKER = re.compile(r"""[<>`"'“”‘’\\]""")
+_DRAFT_PREFIX_LITERAL = re.compile(r"<<|<[!?]|[`\\]|(?m:^[ \t]*(?:>|~{3,}))")
+_DRAFT_QUOTATION = re.compile(r"""["“”«»]|(?<!\w)['‘’]|['‘’](?!\w)""")
+_DRAFT_TAG_TOKEN = re.compile(r"<(?:[!?]|/?[A-Za-z_][\w.:-]*(?=[\s/>]))")
 
 
-def _is_markdown_literal(position: int, spans: list[tuple[int, int]]) -> bool:
+def _is_literal(position: int, spans: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
@@ -372,7 +367,7 @@ def _next_unquoted_tag(
         (
             tag
             for tag in pattern.finditer(text, start)
-            if not _is_markdown_literal(tag.start(), spans)
+            if not _is_literal(tag.start(), spans)
         ),
         None,
     )
@@ -382,7 +377,7 @@ def _next_structural_tag(
     text: str, start: int, spans: list[tuple[int, int]]
 ) -> re.Match[str] | None:
     for tag in _REGISTER_TAG_TOKEN.finditer(text, start):
-        if _is_markdown_literal(tag.start(), spans):
+        if _is_literal(tag.start(), spans):
             continue
         line_start = text.rfind("\n", start, tag.start()) + 1
         before = text[max(start, line_start) : tag.start()].strip()
@@ -460,16 +455,118 @@ def _parse_register_block(
     return None
 
 
-def _extract_balanced_registers(s: str) -> dict[str, str]:
+def _heredoc_overlaps_register_end(
+    text: str, heredoc: re.Match[str], literal_spans: list[tuple[int, int]]
+) -> bool:
+    last_tag = None
+    for tag in _RESERVED_REGISTER_TAG.finditer(text, 0, heredoc.start()):
+        if not _is_literal(tag.start(), literal_spans):
+            last_tag = tag
+    if last_tag is None or last_tag.group(1):
+        return False
+    name = last_tag.group(2)
+    closing = _matching_register_close(
+        text, heredoc.start(), name, literal_spans
+    )
+    # A matching close after the heredoc can enclose the entire literal.
+    return (
+        closing is not None
+        and closing.start() < heredoc.end()
+        and _matching_register_close(text, heredoc.end(), name, literal_spans)
+        is None
+    )
+
+
+def _has_shell_heredoc_context(heredoc: re.Match[str]) -> bool:
+    command = heredoc.group("command").rsplit("/", 1)[-1]
+    return (
+        heredoc.group("quote") != ""
+        or heredoc.group("strip_tabs") is not None
+        or command in _HEREDOC_COMMANDS
+    )
+
+
+def _heredoc_ends_inside_register(
+    text: str, heredoc: re.Match[str], literal_spans: list[tuple[int, int]]
+) -> bool:
+    for tag in _RESERVED_REGISTER_TAG.finditer(
+        text, heredoc.end("label"), heredoc.start("terminator")
+    ):
+        if tag.group(1) or _is_literal(tag.start(), literal_spans):
+            continue
+        closing = _matching_register_close(
+            text, tag.end(), tag.group(2), literal_spans
+        )
+        if closing is not None and closing.start() >= heredoc.end():
+            return True
+    return False
+
+
+def _command_and_quote_spans(
+    text: str, code_spans: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
     spans = [
         match.span()
-        for match in _MARKDOWN_CODE_SPAN.finditer(s)
-        if len(match.group(1)) >= 3
-        or _REGISTER_BOUNDARY_IN_SPAN.search(match.group()) is None
-        or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
+        for match in _QUOTED_REGISTER_BLOCK.finditer(text)
+        if not _is_literal(match.start(), code_spans)
     ]
+    for match in _SHELL_HEREDOC.finditer(text):
+        literals = code_spans + spans
+        if _is_literal(
+            match.start(), literals
+        ) or _heredoc_overlaps_register_end(text, match, literals):
+            continue
+        if _has_shell_heredoc_context(
+            match
+        ) or not _heredoc_ends_inside_register(text, match, literals):
+            spans.append(match.span())
+
+    # A missing terminator cannot resolve an ambiguous shift expression.
+    leading = _SHELL_HEREDOC_OPENING.match(text)
+    if (
+        leading is not None
+        and _has_shell_heredoc_context(leading)
+        and not _is_literal(0, spans)
+    ):
+        spans.append((0, len(text)))
+    return spans
+
+
+def _register_literal_spans(
+    text: str, *, for_draft: bool = False
+) -> list[tuple[int, int]]:
+    code_matches = list(_MARKDOWN_CODE_SPAN.finditer(text))
+    code_spans = [match.span() for match in code_matches]
+    draft_code = []
+    if for_draft:
+        draft_code = [
+            match.span()
+            for match in _DRAFT_FENCE.finditer(text)
+            if not any(
+                start < match.start() < end for start, end in code_spans
+            )
+        ]
+        draft_code.extend(
+            match.span() for match in _DRAFT_INDENTED_CODE.finditer(text)
+        )
+    return (
+        _command_and_quote_spans(text, code_spans + draft_code)
+        + draft_code
+        + [
+            match.span()
+            for match in code_matches
+            if for_draft
+            or len(match.group(1)) >= 3
+            or _REGISTER_BOUNDARY_IN_SPAN.search(match.group()) is None
+            or _REGISTER_BOUNDARY_IN_SPAN.fullmatch(match.group(2)) is not None
+        ]
+    )
+
+
+def _extract_balanced_registers(s: str) -> dict[str, str]:
+    spans = _register_literal_spans(s)
     for token in _REGISTER_TAG_TOKEN.finditer(s):
-        if _is_markdown_literal(token.start(), spans):
+        if _is_literal(token.start(), spans):
             continue
         if token.group(1) or token.group(2) not in _REGISTER_NAMES:
             continue
@@ -532,9 +629,11 @@ def extract_register_bodies(text: str) -> dict[str, str]:
     s = _unwrap_session_memory_with_todo((text or "").strip())
     if not s:
         return {}
-    spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]
+    code_spans = [match.span() for match in _MARKDOWN_CODE_SPAN.finditer(s)]
+    literal_blocks = _command_and_quote_spans(s, code_spans)
+    spans = literal_blocks + code_spans
     for boundary in _THINK_PATCH_BOUNDARY.finditer(s):
-        if _is_markdown_literal(boundary.start(), spans):
+        if _is_literal(boundary.start(), spans):
             continue
         after_think = _extract_register_candidate(s[boundary.end() :].strip())
         if after_think:
@@ -543,6 +642,8 @@ def extract_register_bodies(text: str) -> dict[str, str]:
     if full:
         return full
     for boundary in re.finditer(r"</think>", s):
+        if _is_literal(boundary.start(), literal_blocks):
+            continue
         after_think = _extract_register_candidate(s[boundary.end() :].strip())
         if after_think:
             return after_think
@@ -575,44 +676,130 @@ def parse_memory_deltas(
     return _deltas_from_mapping(deltas), frozenset(present)
 
 
-def should_attempt_memory_deltas_repair(
-    raw_output: str,
-    deltas: WorkingMemoryDeltas,
-    *,
-    min_chars_for_repair: int = 100,
-) -> bool:
-    if not isinstance(deltas, WorkingMemoryDeltas):
-        return False
-    if not deltas.is_empty():
-        return False
-    return len(str(raw_output or "").strip()) >= max(
-        1, int(min_chars_for_repair)
+def _draft_at(text: str, start: int) -> str:
+    line_start = text.rfind("\n", 0, start) + 1
+    if _DRAFT_INDENTED_CODE.match(text, line_start):
+        return ""
+    draft = text[start:]
+    # A heredoc opener can make subsequent register boundaries ambiguous.
+    return "" if "<<" in draft else draft
+
+
+def _final_register_draft(text: str) -> str:
+    start = len(text) - len(text.lstrip())
+    if _register_opening(text, start) is not None:
+        return _draft_at(text, start)
+    boundaries = list(_THINK_PATCH_BOUNDARY.finditer(text, start))
+    if len(boundaries) != 1:
+        return ""
+    boundary = boundaries[0]
+    prefix = text[start : boundary.start()]
+    # Only a standalone delimiter after plain reasoning can anchor a draft.
+    if (
+        not prefix.endswith("\n")
+        or _OUTSIDE_TAG_LIKE.search(prefix)
+        or _DRAFT_PREFIX_LITERAL.search(prefix)
+        or _DRAFT_QUOTATION.search(prefix)
+        or _EXAMPLE_CUE.search(prefix)
+        or _FENCED_EXAMPLE_CAPTION.search(prefix)
+    ):
+        return ""
+    return _draft_at(text, boundary.end())
+
+
+def _missing_close_position(
+    draft: str, body_start: int, next_tag: re.Match[str], value: str
+) -> int | None:
+    # A complete inline value may be followed by a register on a new line.
+    body = draft[body_start : next_tag.start()]
+    inline = body.partition("\n")[0]
+    _, newline, indent = body.rpartition("\n")
+    if (
+        next_tag.group(1)
+        or not newline
+        or indent.strip(" ")
+        or not value
+        or inline.strip() != value
+        or value.endswith(":")
+        or _DRAFT_LITERAL_MARKER.search(value)
+        or _EXAMPLE_CUE.search(value)
+    ):
+        return None
+    return body_start + len(inline)
+
+
+def _next_draft_boundary(
+    draft: str, start: int, spans: list[tuple[int, int]]
+) -> re.Match[str] | None:
+    register = _next_unquoted_tag(_RESERVED_REGISTER_TAG, draft, start, spans)
+    structural = _next_unquoted_tag(_DRAFT_TAG_TOKEN, draft, start, spans)
+    if register is None or (
+        structural is not None and structural.start() < register.start()
+    ):
+        return None
+    return register
+
+
+def _valid_draft_trailer(text: str) -> bool:
+    return bool(_OPTIONAL_SUMMARY_TRAILER.fullmatch(text)) and not (
+        _DRAFT_QUOTATION.search(text)
+        or _EXAMPLE_CUE.search(text)
+        or _DRAFT_FENCE.search(text)
     )
+
+
+def _recover_register_draft(text: str) -> str:
+    """Close only unambiguous register bodies in the final raw draft."""
+    draft = _final_register_draft(text)
+    spans = _register_literal_spans(draft, for_draft=True)
+    values: dict[str, str] = {}
+    missing_closes: list[tuple[int, str]] = []
+    cursor = end = 0
+    while opening := _register_opening(draft, cursor):
+        name = opening.group(2)
+        if name in values or _is_literal(cursor, spans):
+            return ""
+        next_tag = _next_draft_boundary(draft, opening.end(), spans)
+        if next_tag is None:
+            return ""
+        value = draft[opening.end() : next_tag.start()].strip()
+        values[name] = value
+        if next_tag.group(1) == "/" and next_tag.group(2) == name:
+            end = next_tag.end()
+            cursor = len(draft) - len(draft[end:].lstrip())
+            continue
+        position = _missing_close_position(
+            draft, opening.end(), next_tag, value
+        )
+        if position is None:
+            return ""
+        missing_closes.append((position, f"</{name}>"))
+        cursor = next_tag.start()
+    if not missing_closes or not _valid_draft_trailer(draft[end:].strip()):
+        return ""
+    repaired = draft[:end]
+    for position, tag in reversed(missing_closes):
+        repaired = repaired[:position] + tag + repaired[position:]
+    return repaired if extract_register_bodies(repaired) == values else ""
 
 
 def parse_memory_deltas_with_repair(
     raw_output: str,
     *,
-    repair_fn: Callable[[str], str] | None = None,
-    min_chars_for_repair: int = 100,
     full_replace: bool = False,
 ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, str]:
-    first_pass, first_present = parse_memory_deltas(
-        raw_output, full_replace=full_replace
+    """Parse directly or recover structure without changing register values."""
+    raw = str(raw_output or "")
+    direct, touched = parse_memory_deltas(raw, full_replace=full_replace)
+    if touched:
+        return direct, touched, False, raw
+    repaired = _recover_register_draft(raw)
+    if not repaired:
+        return direct, touched, False, raw
+    expected, expected_touched = parse_memory_deltas(
+        repaired, full_replace=full_replace
     )
-    if not should_attempt_memory_deltas_repair(
-        raw_output,
-        first_pass,
-        min_chars_for_repair=min_chars_for_repair,
-    ):
-        return first_pass, first_present, False, str(raw_output or "")
-    if repair_fn is None:
-        return first_pass, first_present, False, str(raw_output or "")
-    repaired_output = str(repair_fn(str(raw_output or "")) or "")
-    repaired_pass, repaired_present = parse_memory_deltas(
-        repaired_output, full_replace=full_replace
-    )
-    return repaired_pass, repaired_present, True, repaired_output
+    return expected, expected_touched, True, repaired
 
 
 def apply_append_deltas(
@@ -751,7 +938,6 @@ def render_session_memory_for_summary_message(
 
 
 __all__ = [
-    "MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL",
     "REGISTER_MERGE_MODES",
     "REGISTER_ORDER",
     "SUMMARY_PATCH_REPLACE_REGISTERS",
@@ -761,7 +947,6 @@ __all__ = [
     "apply_memory_patch",
     "apply_replace_deltas",
     "apply_summary_memory_patch",
-    "build_memory_deltas_format_repair_messages",
     "coerce_working_memory_deltas",
     "extract_register_bodies",
     "parse_memory_deltas",
@@ -770,5 +955,4 @@ __all__ = [
     "render_persistent_state_for_prompt",
     "render_session_memory_for_summary_message",
     "resolve_persistent_state_block",
-    "should_attempt_memory_deltas_repair",
 ]

@@ -1867,7 +1867,7 @@ plugins:
 
 Готовые YAML-блоки для каждого `kind` — в [os_backends.md](os_backends.md).
 
-`kind`: `local` (по умолчанию) | `harbor` (только из Harbor-адаптера) | `docker` | `ssh` | `exec` | `sandbox`.
+`kind`: `local` (по умолчанию) | `harbor`, `harbor-workspace` (только из Harbor-адаптера) | `docker` | `ssh` | `exec` | `sandbox`.
 Голая строка `os_backend: docker` эквивалентна `{kind: docker}`.
 
 | Ключ | Назначение |
