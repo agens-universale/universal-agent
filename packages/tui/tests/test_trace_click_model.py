@@ -504,4 +504,4 @@ async def test_a_just_sent_reply_gets_its_event_number_on_delivery(tmp_path):
 
         request = widget._open_request()
         assert isinstance(request, OpenEventRequest)
-        assert request.event_no == scr._task_events[-1].no
+        assert request.event_no == scr._feed_history.events()[-1].no

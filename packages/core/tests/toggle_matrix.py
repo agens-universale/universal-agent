@@ -733,6 +733,12 @@ NOT_IN_MATRIX = {
     "storage.threads": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
     "storage.agent": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
     "storage.ensure_schema": "накат схемы при открытии в gc-stores; покрытие в stores/tests/test_open_configured",
+    # --- плагины (песочница): по умолчанию пустой список, путь исполнения ядра
+    # не меняется; поведение покрыто packages/core/tests/plugins/test_plugins.py.
+    "plugins.paths": "песочница плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.sources": "git-источники плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.use_installed": "выбор источника плагинов (установленные или нет), не путь исполнения ядра; покрытие в plugins/test_plugins.py",
+    "plugins.hook_timeout_sec": "таймаут внешних хуков плагинов, не путь исполнения ядра; покрытие в plugins/test_plugins.py",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
@@ -791,7 +797,6 @@ NOT_IN_MATRIX = {
     # Порог напоминания чек-листа. Числился непрочитанным и потому не сверялся
     # с матрицей; эталон develop случаев с ним не содержит. Сам рычаг покрыт
     # test_todo_config.py и test_todo_reminder.py.
-    "todo.reminder_steps": "эталон develop его не содержит, покрытие в test_todo_config и test_todo_reminder",
     # --- приехало с develop при вливании 09.09.2026 (PR #97, #99, #100) -------
     #
     # Оба ключа меняют ФОРМУ вывода, а не путь исполнения: preview-края режут
@@ -902,6 +907,7 @@ NOT_IN_MATRIX = {
     "backend.proxy": "то же",
     "backend.request_timeout_sec": "нужен живой медленный бэкенд — L4",
     "mcp.meta.request_timeout_sec": "нужен живой MCP-сервер — L4",
+    "mcp.meta.tools_cache_ttl": "нужен живой MCP-сервер — L4",
     "mcp.servers": "нужны живые серверы — L3/L4",
     "agent_auth": "внешняя авторизация, нужен живой провайдер",
     "endpoint_presets": "выбор эндпойнта, нужен живой провайдер",
@@ -909,6 +915,12 @@ NOT_IN_MATRIX = {
     "paths.chat_completions_system_prompt_path": "выставляет parity_config",
     "paths.threads_data_path": "выставляет parity_config — туда пишется тред",
     "paths.logs_dump_dir": "выставляет parity_config",
+    # Сценарий матрицы всегда отвечает вызовами инструментов и turn_finish:
+    # переключение политики ответа без инструментов в нём не наблюдаемо.
+    # Текстовые/пустые ответы и повреждённые вызовы при обоих значениях
+    # stop_on_no_tool_response проверяет test_executor_turn_outcome.py.
+    "agent.text_answer_mode": "нет текстового ответа в сценарии; покрытие deny/judge/allow в test_executor_turn_outcome",
+    "agent.stop_on_no_tool_response": "нет ответа без инструментов в сценарии; покрытие opt-in и дефолта в test_executor_turn_outcome",
     # Только TUI: матрица гоняет CLI-прогон.
     "tui.stream": "только TUI",
     "tui.text_answer_mode": "только TUI",
@@ -995,6 +1007,7 @@ NOT_IN_MATRIX = {
     # --- читатель был скрыт в помощниках config_modules (KNOWN_UNREAD по ошибке)
     "mcp.meta.recommended_mcp_manifest": "путь манифеста для gc-cli -a/install, не ход агента; покрытие — mcp/test_manifest_versions",
     "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
+    "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
     "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
     "tui.show_reasoning": "не ход агента: только показ рассуждений в живой ленте TUI; покрытие — tui/test_trace_thoughts",

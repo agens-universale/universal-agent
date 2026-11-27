@@ -71,3 +71,35 @@ def test_find_in_files_summary_keeps_the_pattern():
         ts="t",
     )
     assert "def abuild_tools_data" in ev.summary
+
+
+def test_finish_is_recognized_by_one_predicate():
+    """«Это сдача хода» — одно правило (`trace_mapper.is_finish`,
+    `FINISH_ID`): строка-литерал канонического id сдачи в коде — только у
+    владельцев имени (`tool_identity`, маппер), ни в сравнении, ни в
+    наборе, ни в ``in (…)``. Старое имя `submit_solution` id не меняет —
+    старые треды узнаются тем же правилом."""
+    import ast
+    import io
+    import tokenize
+
+    from gc_testkit.paths import package_dir
+    from gc_tui.services.trace_mapper import FINISH_ID
+
+    assert tool_id("submit_solution") == FINISH_ID
+    owners = {"tool_identity.py", "trace_mapper.py"}
+    copies = []
+    for path in package_dir("gc_tui").rglob("*.py"):
+        if path.name in owners:
+            continue
+        source = io.StringIO(path.read_text()).readline
+        for tok in tokenize.generate_tokens(source):
+            if tok.type != tokenize.STRING:
+                continue
+            try:
+                value = ast.literal_eval(tok.string)
+            except ValueError:
+                continue
+            if value == FINISH_ID:
+                copies.append(f"{path.name}:{tok.start[0]}")
+    assert copies == []

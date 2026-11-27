@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import contextlib
-import gc
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from gc_core.config_modules.gc import collect_run_garbage
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
@@ -178,8 +178,7 @@ class RunSummaryCoordinator:
         return self._proj_tags
 
     def _collect_garbage(self) -> None:
-        collect = getattr(self._ctx, "collect_garbage", None) or gc.collect
-        collect()
+        collect_run_garbage(self._ctx)
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -488,7 +487,8 @@ class RunSummaryCoordinator:
         current_messages: list[dict] | None,
         mode: str | None,
     ) -> list[dict]:
-        """Реплики и картинки текущего шага. Пусто, если батча нет или он не хвост истории.
+        """Реплики, картинки и сообщения к запросу текущего шага. Пусто, если
+        батча нет или он не хвост истории.
 
         Ответ инструмента сюда не входит: после сводки вызов уже внутри неё,
         и ответ без вызова бэкенд отверг бы.
@@ -505,7 +505,6 @@ class RunSummaryCoordinator:
             current_messages=batch,
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
 
     async def _areattach_preserved_batch(
@@ -560,12 +559,6 @@ class RunSummaryCoordinator:
             tags=self._projection_tags(),
             strip_think=True,
         )
-
-    def _keys_persisted_before_last_batch(self) -> frozenset[str] | None:
-        snap = getattr(
-            self._thread_session, "known_keys_snapshot_before_last_batch", None
-        )
-        return snap if isinstance(snap, frozenset) else None
 
     def _restore_after_failed_compaction(
         self, msgs: Any, state_tail: list

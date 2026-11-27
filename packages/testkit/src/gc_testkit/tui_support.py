@@ -71,8 +71,12 @@ def tui_settings(config: Optional[Mapping[str, Any]] = None, **dotted: Any):
     строгая валидация), плюс одно правило набора TUI: тест, не задавший
     ``logging.save_logs`` явно, логов агента не пишет — умолчание модели
     «писать», а каталог логов в тестовом конфиге не задан. Тест, которому логи
-    нужны, задаёт ``logging.save_logs`` сам.
+    нужны, задаёт ``logging.save_logs`` сам. Снимок набора плагинов — как у
+    настоящего входа ``gc-ua``: без него окно сочло бы набор сменившимся и
+    сбросило бы раннер, подставленный тестом.
     """
+    from gc_core.plugins.catalog import with_plugin_snapshot
+
     from gc_testkit.settings import make_settings
 
     values = dict(config or {})
@@ -82,7 +86,7 @@ def tui_settings(config: Optional[Mapping[str, Any]] = None, **dotted: Any):
         isinstance(section, Mapping) and "save_logs" in section
     ):
         values["logging.save_logs"] = False
-    return make_settings(values, **dotted)
+    return with_plugin_snapshot(make_settings(values, **dotted), clone=False)
 
 
 def as_settings(value: Any = None):

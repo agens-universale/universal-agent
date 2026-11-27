@@ -27,7 +27,12 @@ class PreparedRequestEquivalence:
 def resolve_level_requests(source: Any) -> dict[str, ResolvedModel]:
     from gc_core.model_router import ModelRouter
 
-    router = ModelRouter(source, choice_provider=lambda: START_LEVEL)
+    # Синхронная проекция настроек: роутер не покидает этот вызов и не
+    # разделяется потоками. Работает и внутри workflow без thread-lock.
+    router = ModelRouter.sequential(
+        source,
+        choice_provider=lambda: START_LEVEL,
+    )
     kits = {}
     for level in LEVEL_ORDER:
         try:

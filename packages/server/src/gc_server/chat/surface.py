@@ -17,7 +17,7 @@ from gc_core.constants.tool_names import (
     INTERMEDIATE_REPLY_TOOL_NAME,
 )
 from gc_core.settings import LoadedSettings
-from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_core.tools.connect_mcp.service import McpService
 
 from gc_server.chat.app import create_app
 from gc_server.chat.completions.facade import CompletionsFacade
@@ -28,6 +28,7 @@ from gc_server.config import (
     ServerConfigError,
     reject_moved_section,
 )
+from gc_server.surface import aclose_mcp_service
 
 if TYPE_CHECKING:
     from gc_server.app import ServerRuntime
@@ -99,13 +100,18 @@ class ChatSurface:
         self.settings = apply_chat_runtime_defaults(loaded, self.section)
         auth = build_auth_connector(self.settings)
         backend = resolve_os_backend(self.settings)
+        # Один сервис на поверхность, общий для Responses и Completions;
+        # сервер подключается первым вызовом тула, если тулы известны.
+        self._mcp_service = McpService(
+            os_backend=backend, connect_on_start=False
+        )
         shared = {
             "settings": self.settings,
             "agent_factory": runtime.agent_factory(
                 self.settings, surface="chat"
             ),
             "auth_connector": auth,
-            "tools_cache": ToolsCache(os_backend=backend),
+            "mcp_service": self._mcp_service,
             "os_backend": backend,
             "section": self.section,
         }
@@ -129,7 +135,12 @@ class ChatSurface:
         return app
 
     async def astart(self) -> None:
-        return None
+        self.responses.recovery.start()
 
     async def astop(self) -> None:
+        # Порядок — у ``aclose_mcp_service``: ходы, сервис, агенты.
+        try:
+            await self.responses.stop_turns()
+        finally:
+            await aclose_mcp_service(self.name, self._mcp_service)
         await self.responses.shutdown()

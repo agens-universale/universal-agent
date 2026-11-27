@@ -165,6 +165,9 @@ class State(ExecutionState):
         # тред, старт тула. До этого фронтенд вправе отменить отправку без
         # следов. Служебные записи (реплика, техзаметки) не в счёт.
         self.produced_output: bool = False
+        # Плагины, чей SessionStart в этом ходе отработал без вывода (маркера
+        # в истории у них нет): повтор — раз на ход. Не сохраняется.
+        self.plugin_hooks_ran_turn: set[str] = set()
         self.terminal_outcome: Optional[str] = (
             None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )

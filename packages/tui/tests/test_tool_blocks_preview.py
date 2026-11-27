@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("textual")
+pytestmark = pytest.mark.usefixtures("color_trace")
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.execution.progress import (
@@ -34,12 +35,12 @@ from gc_testkit.trace_grid import (
     trace_rows,
 )
 from gc_testkit.tui_support import tui_settings
-from rich.style import Style
-
+from gc_tui.services.history_render import history_level
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_blocks_view import HIDDEN_CLASS, BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.turn_line import TurnLine
+from rich.style import Style
 
 TID = "preview00000000000000000000000001"
 ORIGIN = 1
@@ -167,7 +168,7 @@ def _after_agent() -> list[dict]:
 def _calls() -> dict:
     ids = [f"r{i}" for i in range(4)] + [f"e{i}" for i in range(3)]
     ids += ["x1", "x2", "x3", AGENT, "n0", "m0", "m1", "m2", "m3"]
-    return {cid: 1.0 for cid in ids}
+    return dict.fromkeys(ids, 1.0)
 
 
 def _hunks(n: int) -> str:
@@ -557,13 +558,14 @@ async def test_preview_enter_opens_thread_and_space_toggles(tmp_path):
         await pilot.pause()
         assert not rows["n0"].has_class(HIDDEN_CLASS)
         assert rows["r0"].has_class(HIDDEN_CLASS)
-        phrases = [w for w in preview.query(BlockAction) if w.level == ""]
+        top = history_level(0)
+        phrases = [w for w in preview.query(BlockAction) if w.level == top]
         assert any(w.phrase == "… ещё 2" for w in phrases)
-        dismissed = []
-        preview.dismiss = lambda result=None: dismissed.append(result)
+        resumed = []
+        preview.action_resume = lambda: resumed.append(True)
         await pilot.press("enter")
         await pilot.pause()
-        assert dismissed == [True]
+        assert resumed == [True]
 
 
 @pytest.mark.asyncio
@@ -571,24 +573,25 @@ async def test_preview_collapse_brings_header_into_view(tmp_path):
     """Прокрутка при раскрытии и свёртке — как в живой ленте (§9.3):
     лента прокручена вверх внутрь раскрытого блока, свёртка оставляет его
     заголовок видимым."""
+    from gc_tui.messages import BlockToggle
     from textual.containers import VerticalScroll
 
-    from gc_tui.messages import BlockToggle
-
+    # Десять чтений — одна группа: серия длиннее шага хода делится
+    # границей шага на группы (`trace_steps`).
     thread = _Thread(tmp_path, status="stopped")
-    thread.add(*[p for i in range(12) for p in _read(i)])
+    thread.add(*[p for i in range(10) for p in _read(i)])
     thread.add(_say("a1", "\n\n".join(f"абзац {i}" for i in range(20))))
     async with _app(tmp_path).run_test(size=(100, 14)) as pilot:
         preview = await _open_preview(pilot)
         trace = preview.query_one("#trace", VerticalScroll)
-        preview.post_message(BlockToggle("", "block:0:top"))
+        preview.post_message(BlockToggle(history_level(0), "block:0:top"))
         await pilot.pause()
         await pilot.pause()
         (header,) = [r for r in trace.query(ToolCallRow) if r.mode == "header"]
         trace.scroll_to(y=header.virtual_region.y + 8, animate=False)
         await pilot.pause()
         assert preview._stick_bottom is False
-        preview.post_message(BlockToggle("", "block:0:bottom"))
+        preview.post_message(BlockToggle(history_level(0), "block:0:bottom"))
         await pilot.pause()
         await pilot.pause()
         top = trace.scroll_offset.y
@@ -603,12 +606,15 @@ def _long_read(i):
 
 
 async def _toggle_frames(pilot, screen, frames, key) -> None:
-    """Тогл ``key`` экрана ``screen`` — ровно один новый кадр."""
+    """Тогл ``key`` экрана ``screen`` — ровно один новый кадр. Уровень
+    ленты превью — первого хода куска истории."""
     from gc_tui.messages import BlockToggle
+    from gc_tui.screens.preview import PreviewScreen
 
     await pilot.pause()
     del frames[:-1]
-    screen.post_message(BlockToggle("", key))
+    level = history_level(0) if isinstance(screen, PreviewScreen) else ""
+    screen.post_message(BlockToggle(level, key))
     for _ in range(4):
         await pilot.pause()
     assert len(frames) == 2, frames[1:]
@@ -624,7 +630,9 @@ async def test_window_toggle_one_frame(tmp_path, monkeypatch, where):
     thread = _Thread(tmp_path, status="stopped")
     thread.add(*[p for i in range(5) for p in _long_read(i)])
     thread.add(_say("a1", "Готово."))
-    async with _app(tmp_path).run_test(size=(70, 24)) as pilot:
+    # Высота — чтобы лента переполнялась и свёрнутой: иначе свёртка снимает
+    # полосу прокрутки вторым кадром, а проверка — про ленту с прокруткой.
+    async with _app(tmp_path).run_test(size=(70, 20)) as pilot:
         if where == "preview":
             screen = await _open_preview(pilot)
         else:

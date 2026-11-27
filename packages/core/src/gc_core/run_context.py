@@ -33,7 +33,7 @@ from gc_core.auto_routing.policy import RoutingParams
 from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.harbor import HarborBackend
-from gc_core.backends.protocol import FsBackend
+from gc_core.backends.protocol import FsBackend, base_backend
 from gc_core.config_modules.chat_completions import (
     ChatCompletionsLlmConfig,
     auxiliary_llm_from_config_dict,
@@ -176,6 +176,9 @@ class RunContext:
     # и глобаль отдавала сообщение тому, кто зарегистрировался последним, чужой
     # сессии в том числе. Подробности — в `tools/subagents/active_scope`.
     child_input_scope: Optional[Any] = None
+    # Очередь родителя этого прогона (ставит `AgentExecutor`): сюда скоуп
+    # субагента на выходе отдаёт реплики, которые ребёнок не успел забрать.
+    parent_input_sink: Optional[Callable[[Dict[str, Any]], None]] = None
     # Хранилище тредов. None — файловое по умолчанию (прежнее поведение).
     # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
     # ни ThreadSession, ни ядро больше диска не касаются.
@@ -185,14 +188,17 @@ class RunContext:
     # всегда его имеет (по умолчанию файловое); ``None`` — контекст собран в
     # обход фабрики, читатели берут файловое через ``agent_store_of``.
     agent_store: Any = None
-    # ToolsCache этого контекста, если владелец его передал. Лежит здесь, чтобы
-    # субагенты (они пересобирают tools_data на каждый спавн) брали готовое, а не
-    # ходили в дискавери заново.
+    # Источник MCP-тулов этого контекста: ToolsCache, если владелец его
+    # передал, или потребитель сервиса MCP. Лежит здесь, чтобы субагенты (они
+    # пересобирают tools_data на каждый спавн) брали готовое, а не ходили в
+    # дискавери заново.
     tools_cache: Any = None
     # Владелец живых MCP-сессий этого контекста (см. gc_core.mcp_session_owner).
-    # По нему ``arun`` понимает, ЧТО ему закрывать на выходе, и не сносит
-    # сессии параллельных агентов. Пустая строка — контекст собран в обход
-    # create_run_context (тесты, ручная сборка); тогда владельца нет.
+    # Без потребителя по нему ``arun`` понимает, ЧТО ему закрывать на выходе,
+    # и не сносит сессии параллельных агентов; с потребителем это его
+    # владелец, и сессии закрывает потребитель. Пустая строка — контекст
+    # собран в обход acreate_run_context (тесты, ручная сборка); тогда
+    # владельца нет.
     mcp_session_owner: str = ""
     #: Типизированные настройки (``AppConfig``) и рантайм (``RuntimeEnv``).
     settings: Any = None
@@ -391,6 +397,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     guard_probe: Optional[GuardProbe] = None,
     tool_effect: Optional[ToolEffectExecutor] = None,
     agent_store: Optional[AgentStore] = None,
+    mcp_consumer: Any = None,
 ) -> RunContext:
     """Собрать RunContext, не блокируя event loop.
 
@@ -413,8 +420,8 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     объясняли его привязкой MCP-сессий к loop'у — обоснование было неверным:
     синхронная форма уводила дискавери в `run_coro_blocking`, то есть на
     такой же одноразовый loop. Настоящая причина была в том, что фабрика
-    исполнителя в TUI — обычная функция без своего loop; теперь она заводит
-    его сама (`asyncio.run`), как уже делает на каждый ход.
+    исполнителя в TUI — обычная функция без своего loop; теперь сборку
+    ведёт корутина на цикле агента окна, где идут и ходы.
 
 
     Создать RunContext для одного запуска агента.
@@ -438,6 +445,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - ``force_legacy`` — легаси-форс (спека §2): CLI `--model`/`--completions_url`
       поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
       запуск (детект — ``config.cli_forces_legacy_model``).
+    - ``mcp_consumer`` — потребитель сервиса MCP (спека §5.2), вместо
+      ``tools_cache``: источник тулов, владелец сессий и уборка хода —
+      его; сессии потребителя сборка не закрывает ни при каком исходе.
     """
     # Хранилище встраивающего проверяем ДО всего остального. Проверка стояла в
     # `_finish_run_context`, то есть после MCP-дискавери и создания логгера: на
@@ -460,6 +470,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # Хранилище агента — там же и по той же причине: до дискавери.
     if agent_store is not None:
         check_agent_store(agent_store)
+    # Номер сборки — после синхронных проверок, до первого await и до
+    # подготовки бэкенда: набор потребителя меняет только сверка самой
+    # поздней сборки.
+    consumer_build = _take_consumer_build(mcp_consumer, tools_cache)
 
     source = _coerce_settings(settings, runtime)
     if agent_store is not None:
@@ -475,6 +489,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         # Файловое по умолчанию — по настройкам этой сборки (с runtime-слоем
         # фронтенда: ACP, TUI и chat подменяют special_instructions).
         agent_store=agent_store or FileAgentStore(source),
+        mcp_session_owner=_consumer_owner(mcp_consumer),
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -501,7 +516,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # отмена посреди неё и исключение сборки после неё раньше шли мимо:
     # логгер доживал до конца процесса, сервер (браузер) — до `atexit`.
     # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
-    # которому он принадлежит, так и не появилось.
+    # которому он принадлежит, так и не появилось. С потребителем сервиса
+    # MCP иначе: сессии принадлежат ему, а не контексту, и упавшая сборка
+    # их не закрывает (это закрыло бы сессии всего окна) — только логгер.
     try:
         # sandbox.workdir=auto мог сменить корень рантайма в подготовке.
         source = prep.settings
@@ -538,6 +555,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             subagent_diagnostics=None,
             agent_store=prep.agent_store,
         )
+        await _aensure_consumer_set(
+            mcp_consumer, consumer_build, build_source, prep.backend
+        )
+        tools_source = _tools_source(mcp_consumer, tools_cache)
         with use_owner(prep.mcp_session_owner):
             tools = await abuild_tools_data(
                 build_source,
@@ -545,7 +566,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
                 os_backend=prep.backend,
                 skills_registry=prep.skills_registry,
                 logger=prep.run_logger,
-                tools_cache=tools_cache,
+                tools_cache=tools_source,
                 registered_names=registered,
             )
         ctx = _finish_run_context(
@@ -558,7 +579,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             on_trace_note=on_trace_note,
             on_messages_evicted=on_messages_evicted,
             is_tui=is_tui,
-            tools_cache=tools_cache,
+            tools_cache=tools_source,
             thread_store=thread_store,
             choice_provider=choice_provider,
             circuit_breaker=circuit_breaker,
@@ -568,6 +589,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             human_request=human_request,
             guard_probe=guard_probe,
             tool_effect=tool_effect,
+            mcp_cleanup=_consumer_cleanup(mcp_consumer),
         )
         # Локально — сами объекты сборки, а не их пересборка из снимка.
         ctx.settings, ctx.runtime = source.settings, source.runtime
@@ -579,32 +601,118 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         from gc_core.utils.logging_module import release_run_logger
 
         try:
-            # A closing coroutine cannot await remote cleanup.
+            # A closing coroutine cannot await cleanup. Shared MCP sessions
+            # remain owned by the consumer and outlive this context build.
             if not isinstance(exc, GeneratorExit):
-                await _acleanup_context_build(prep)
+                await _acleanup_context_build(
+                    prep, close_mcp_sessions=mcp_consumer is None
+                )
         finally:
             release_run_logger(prep.run_logger)
         raise
 
 
-async def _acleanup_context_build(prep: _RunContextPrep) -> None:
-    if isinstance(prep.backend, HarborBackend):
-        try:
+def _take_consumer_build(mcp_consumer: Any, tools_cache: Any) -> int | None:
+    """Номер сборки у потребителя; без потребителя — ``None``.
+
+    Берётся после синхронных проверок входа: упавшая на них сборка не
+    сжигает номер и не делает сверку соседней сборки устаревшей.
+    Потребитель и ``tools_cache`` — два источника тулов на одном шве:
+    вместе они не задаются.
+    """
+    if mcp_consumer is None:
+        return None
+    if tools_cache is not None:
+        raise ValueError("mcp_consumer и tools_cache вместе не задаются")
+    return mcp_consumer.next_build()
+
+
+def _consumer_owner(mcp_consumer: Any) -> str | None:
+    """Владелец сессий потребителя; без потребителя — ``None`` (новый
+    токен на контекст)."""
+    return None if mcp_consumer is None else mcp_consumer.owner
+
+
+async def _aensure_consumer_set(
+    mcp_consumer: Any, build: int | None, settings: Any, backend: Any
+) -> None:
+    """Сверить набор серверов потребителя с этой сборкой (спека §5.3)."""
+    if mcp_consumer is not None:
+        await mcp_consumer.aensure(build, settings, os_backend=backend)
+
+
+def _tools_source(mcp_consumer: Any, tools_cache: Any) -> Any:
+    """Источник MCP-тулов сборки и ``ctx.tools_cache``: потребитель либо
+    кэш вызывающего."""
+    return tools_cache if mcp_consumer is None else mcp_consumer
+
+
+def _consumer_cleanup(mcp_consumer: Any) -> Any:
+    """Порт уборки хода: у потребителя — его ``aend_turn``; без него —
+    ``None`` (прежняя уборка исполнителя)."""
+    return None if mcp_consumer is None else mcp_consumer.aend_turn
+
+
+async def arefresh_context_tools(ctx: RunContext) -> None:
+    """Пересобрать набор тулов контекста тем же вызовом, что при сборке
+    (спека §5.6).
+
+    Сети нет: MCP-часть — закреплённый срез источника тулов контекста.
+    Источник — двойник контекста с уже найденными определениями
+    субагентов: дискавери не повторяется. Бэкенд — тот, что получила
+    сборка тулов контекста: обёртку записи правок контекст ставит после
+    неё. Предупреждения сборки не повторяются (без логгера). Пять полей
+    набора заменяются вместе.
+    """
+    registered: list[str] = []
+    source = SimpleNamespace(
+        settings=ctx.settings,
+        runtime=ctx.runtime,
+        subagent_definitions=ctx.subagent_definitions,
+        subagent_diagnostics=ctx.subagent_diagnostics,
+        agent_store=ctx.agent_store,
+    )
+    with use_owner(ctx.mcp_session_owner):
+        tools = await abuild_tools_data(
+            source,
+            os_backend=base_backend(ctx.os_backend),
+            skills_registry=ctx.skills_registry,
+            logger=None,
+            tools_cache=ctx.tools_cache,
+            registered_names=registered,
+        )
+    (
+        ctx.tools_data,
+        ctx.tools_spec,
+        ctx.tools_description,
+        ctx.mcp_status,
+    ) = tools
+    ctx.registered_tool_names = set(registered)
+
+
+async def _acleanup_context_build(
+    prep: _RunContextPrep, *, close_mcp_sessions: bool
+) -> None:
+    try:
+        if isinstance(prep.backend, HarborBackend):
             await prep.backend.arelease_workspace()
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "Failed to release Harbor workspace after context error"
-            )
-    await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Failed to release Harbor workspace after context error"
+        )
+    finally:
+        if close_mcp_sessions:
+            await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
 
 
 async def _aclose_owned_mcp_sessions(owner: str) -> None:
     """Закрыть MCP-сессии, поднятые под владельцем несостоявшегося контекста.
 
-    Закрывается долгоживущий stdio, и этого достаточно: других живых сессий
-    дискавери не оставляет. Stream-транспорты спрашивают список тулов
-    одноразовой сессией, а долгоживущую заводит только вызов тула — до него
-    сборка не доходит.
+    Только путь без потребителя: сессии потребителя сервиса MCP упавшая
+    сборка не трогает. Закрывается долгоживущий stdio, и этого достаточно:
+    других живых сессий дискавери не оставляет. Stream-транспорты без
+    потребителя спрашивают список тулов одноразовой сессией, а долгоживущую
+    заводит только вызов тула — до него сборка не доходит.
 
     Не ``_aclose_mcp_and_release`` из исполнителя, хотя по сути то же самое.
     Тот держит реестр, связанный при импорте ``agent_executor``, а дискавери
@@ -665,12 +773,15 @@ def _prepare_run_context(
     os_backend: Optional[FsBackend],
     log_handlers: Any = None,
     agent_store: AgentStore | None = None,
+    mcp_session_owner: str | None = None,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
     Вынесено, чтобы синхронная и асинхронная сборка делили одно тело: между
     ними отличается ровно один шаг — как дождаться дискавери. ``settings`` —
     всё, что принимают ``settings_of``/``runtime_of`` (``LoadedSettings``).
+    ``mcp_session_owner`` — владелец потребителя сервиса MCP; без него —
+    новый токен на контекст.
     """
     effective_run_id = run_id or generate_run_id()
     # Проект рана — каталог хода (``launch_root`` фронтенда: chat и A2A ведут
@@ -709,10 +820,11 @@ def _prepare_run_context(
         agent_kind="main",
         log_handlers=log_handlers,
     )
-    # Токен владельца MCP-сессий рождается здесь и живёт столько же, сколько
-    # контекст. Дискавери поднимает сессии прямо сейчас, поэтому она обязана
-    # идти уже под ним — иначе поднятое ею оказалось бы ничьим, и ни один
-    # прогон не смог бы это закрыть.
+    # Без потребителя токен владельца MCP-сессий рождается здесь и живёт
+    # столько же, сколько контекст. Дискавери поднимает сессии прямо сейчас,
+    # поэтому она обязана идти уже под ним — иначе поднятое ею оказалось бы
+    # ничьим, и ни один прогон не смог бы это закрыть. С потребителем сервиса
+    # MCP токен приходит готовым (``consumer.owner``) и живёт с потребителем.
     return _RunContextPrep(
         run_id=effective_run_id,
         backend=backend,
@@ -720,7 +832,7 @@ def _prepare_run_context(
         run_logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
-        mcp_session_owner=new_owner_token(),
+        mcp_session_owner=mcp_session_owner or new_owner_token(),
         backend_was_overridden=os_backend is not None,
         settings=settings,
         agent_store=agent_store,
@@ -759,8 +871,13 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     human_request: Optional[HumanRequester] = None,
     guard_probe: Optional[GuardProbe] = None,
     tool_effect: Optional[ToolEffectExecutor] = None,
+    mcp_cleanup: Any = None,
 ) -> RunContext:
-    """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
+    """Досборка после тулов: логи старта, trace-binding, сам RunContext.
+
+    ``mcp_cleanup`` — порт уборки MCP в конце хода (у потребителя сервиса
+    — его ``aend_turn``); ``None`` — прежняя уборка исполнителя.
+    """
     # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
     # Раньше негодный объект принимался молча, а падал на 630-й строке
     # thread_store.py с «TypeError: cannot unpack non-iterable coroutine
@@ -876,6 +993,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         human_request=human_request,
         guard_probe=guard_probe,
         tool_effect=tool_effect,
+        mcp_cleanup=mcp_cleanup,
     )
     ctx = assemble_run_context(prepared, bindings)
     # Хранилище тредов SDK/воркера с файлами треда держит картинки у себя;
@@ -928,5 +1046,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 __all__ = [
     "RunContext",
     "acreate_run_context",
+    "arefresh_context_tools",
     "assemble_run_context",
 ]

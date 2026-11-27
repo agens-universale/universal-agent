@@ -10,6 +10,7 @@ import argparse
 import importlib
 import importlib.util
 import os
+import signal
 import sys
 from typing import Optional, Sequence
 
@@ -118,7 +119,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="auto_mcp",
         help=(
-            "Поднять HTTP/SSE MCP-daemon'ы для серверов из mcp-servers "
+            "Поднять HTTP/SSE MCP-daemon'ы для серверов из mcp.servers "
             "(по умолчанию включено; пересечение с манифестом recommended_mcp); "
             "по завершении гасятся только процессы этого запуска"
         ),
@@ -329,6 +330,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(storage_rejection, file=sys.stderr)
         return 1
 
+    # Снимок набора плагинов — после всех оверрайдов и до цикла Textual:
+    # клон git-источников — синхронный git (§8.3).
+    from gc_core.plugins.catalog import with_plugin_snapshot
+
+    settings = with_plugin_snapshot(settings)
+
     _select_theme(settings)
     # importlib.import_module goes through sys.modules, not the package
     # attribute cache, so evicting tui.app in tests forces a real re-import.
@@ -371,12 +378,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # и совет «запустить без профиля, ничего не потеряв» переставал работать
     # ровно там, где человек начинал чинить. У чинилки флага нет: она читает и
     # пишет ПОЛЬЗОВАТЕЛЬСКИЙ файл, и `--profile` там не в счёт (см. выше).
+    # Сервис MCP окна (спека §5.1): серверы подключаются на старте в фоне.
+    # Импорт здесь, а не в шапке модуля: `gc_tui` обязан оставаться лёгким.
+    from gc_core.tools.connect_mcp.service import McpService
+
+    mcp_service = McpService(connect_on_start=True)
     app = _app_mod.TuiApp(
         threads_dir=threads_dir,
         system="cli",
         settings=settings,
         profile_override=None if args.init_config else args.profile,
         model_override=None if args.init_config else args.model,
+        mcp_service=mcp_service,
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)
@@ -414,7 +427,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # об апгрейде на следующем запуске.
 
     def _shutdown_runtime() -> None:
-        # Процессы индекса путей (git ls-files) — первыми: поток сборки индекса — демон
+        # Процессы серверов MCP окна — самыми первыми (спека §5.12): гашение по
+        # журналу без цикла и замков, до 2 с, не бросает. На штатном выходе
+        # `on_unmount` их уже закрыл, и гасить нечего; на аварийном (SIGHUP,
+        # SIGTERM, мёртвый терминал) цикл агента может стоять, а `on_unmount` —
+        # идти параллельно: гашение с ним совместимо.
+        mcp_service.kill_processes_now()
+        # Процессы индекса путей (git ls-files) — следом: поток сборки индекса — демон
         # и умрёт вместе с процессом, а сам git пережил бы программу, дочитывая
         # репозиторий без хозяина. Быстро и не бросает: ошибки гашения глотаются внутри.
         from gc_tui.services import file_index
@@ -446,11 +465,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Textual навсегда встал на записи в него (см. gc_tui.services.terminal_guard).
     # Не успеет аварийная уборка в бюджет — сторож добьёт MCP-демонов этого запуска
     # перед выходом. Голос сюда не входит: сервис общий для нескольких TUI.
-    from gc_tui.services.terminal_guard import TerminalGuard
+    # SIGTERM — тем же путём, что обрыв терминала (спека §5.12): уборка и
+    # выход кодом 143; терминал, как и раньше при SIGTERM, не
+    # восстанавливается.
+    from gc_tui.services.terminal_guard import HANGUP_SIGNALS, TerminalGuard
 
     guard = TerminalGuard(
         _shutdown_runtime,
         force_kill=kill_mcp_daemons_now if auto_mcp else None,
+        signals=(*HANGUP_SIGNALS, signal.SIGTERM),
     )
     try:
         guard.install()

@@ -137,7 +137,8 @@ def _shown_openers(tmp_path, tid=TID):
     """Записи итога, которые отдаёт полное чтение треда (без сирот)."""
     from gc_tui.services.stores.file_store import FileTaskStore
 
-    records, _cursor = FileTaskStore(str(tmp_path)).read_all_events(tid)
+    segments, _cursor = FileTaskStore(str(tmp_path)).read_history(tid)
+    records = segments[-1]["messages"]
     return [
         r["outcome"]["opened_by"]
         for r in records
@@ -808,7 +809,7 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
         scr._poll_trace_tail()
         await pilot.pause()
         assert _record_openers(scr) == ["u1"]
-        assert scr._last_turn_outcome.opened_by == "u1"
+        assert scr._feed_history.last_turn_outcome.opened_by == "u1"
 
         runner._running = False
         scr._run_orphan_cleanups()
@@ -820,7 +821,7 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
         assert _outcome_openers(tmp_path) == ["u1", "m_orphan"]
         assert _shown_openers(tmp_path) == ["u1"]
         assert _record_openers(scr) == ["u1"]
-        assert scr._last_turn_outcome.opened_by == "u1"
+        assert scr._feed_history.last_turn_outcome.opened_by == "u1"
         tail = scr._store.tail_events(TID, scr._cursor)
         assert tail.stream_reset is False
 
@@ -1563,12 +1564,12 @@ async def test_new_record_resets_superseded(tmp_path):
     thread.messages(_reply("u2"))
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
-        assert scr._outcome_superseded is True
+        assert scr._feed_history.outcome_superseded is True
         thread.messages(_answer("a2"))
         thread.record(2, "u2")
         scr._poll_trace_tail()
         await pilot.pause()
-        assert scr._outcome_superseded is False
+        assert scr._feed_history.outcome_superseded is False
         first, second = _turn_lines(scr)
         assert not first.is_fresh
         assert second.is_fresh
@@ -1610,12 +1611,16 @@ async def test_live_and_reopen_turn_line_order_equal(tmp_path):
 async def test_idle_gap_is_one_row(tmp_path, failed):
     """Между низом строки итога (у ошибки с влезающей причиной — та же
     одна строка) и рамкой поля ввода — ровно одна пустая строка: нижний
-    зазор ленты, бара нет."""
+    зазор ленты, бара нет. Лента переполнена: зазор меряется у её низа,
+    а не под короткой лентой, которая до поля ввода не достаёт."""
     _write_thread(
         tmp_path, tui={"status": "failed" if failed else "completed"}
     )
     thread = _Thread(tmp_path)
-    thread.messages(_reply("u1"), _answer("a1"))
+    earlier = [
+        m for i in range(5) for m in (_reply(f"p{i}"), _answer(f"q{i}"))
+    ]
+    thread.messages(*earlier, _reply("u1"), _answer("a1"))
     error = {"type": "ReadError", "message": "ReadError: boom"}
     if failed:
         thread.record(1, "u1", status="error", error=error)
@@ -1626,6 +1631,8 @@ async def test_idle_gap_is_one_row(tmp_path, failed):
         await pilot.pause()
         line = _fresh_line(scr)
         assert line.region.height == 1
+        trace = scr.query_one("#trace")
+        assert trace.virtual_size.height > trace.size.height
         input_row = scr.query_one("#input-row")
         assert input_row.region.y - line.region.bottom == 1
 

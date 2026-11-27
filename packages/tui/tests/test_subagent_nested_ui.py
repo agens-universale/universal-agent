@@ -193,7 +193,7 @@ async def test_nested_stays_after_parent_result():
 #
 # Один вывод тула (или одна промежуточная реплика) даёт и событие прогресса
 # ядра, и запись sidecar. Живой путь, возврат в сессию (plan/apply на экране)
-# и превью (`merge_nested_readonly`) рисуют одно и то же.
+# и превью (узел вложенного трейса) рисуют одно и то же.
 
 _ARGS = json.dumps({"path": "a.txt", "content": "x"})
 
@@ -345,15 +345,15 @@ class _Target:
 
 def _preview_views(records: list, pid: str, calls: dict) -> list:
     """Превью тех же записей; ``calls`` — время вызовов записи итога."""
-    from gc_tui.services.trace_render import merge_nested_readonly
     from gc_tui.widgets.tool_blocks_view import PreviewBlocks
+    from trace_readonly import merge_nested
 
     target = _Target()
     parent = ToolCallRow(call_id=pid, label="Agent", target="")
     target.mount(parent)
     blocks = PreviewBlocks()
     blocks.timers.update(calls)
-    merge_nested_readonly(target, records, {pid: parent}, blocks=blocks)
+    merge_nested(target, records, {pid: parent}, blocks=blocks)
     return [_view(w) for w in target.children[1:]]
 
 

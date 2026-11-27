@@ -1,7 +1,7 @@
 """Подпись вызова: один билдер `build_call_row` на четыре пути ленты.
 
-Живой `_render_event`, превью `render_segments_readonly`, вложенный живой
-`_mount_nested_tool` и вложенный из sidecar `merge_nested_readonly` — все
+Живой `_render_event`, превью `render_turns`, вложенный живой
+`_mount_nested_tool` и вложенный из sidecar узел вложенного трейса — все
 рисуют `Label  объект` из ядра (`tool_display` + `tool_args_summary`);
 сырого wire-имени в строке нет (спека P3 §2.1)."""
 
@@ -287,13 +287,10 @@ async def test_live_mcp_label_from_screen_snapshot():
 @pytest.mark.asyncio
 async def test_preview_and_sidecar_nested_have_no_wire_name():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import (
-        merge_nested_readonly,
-        render_segments_readonly,
-    )
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
     from textual.containers import VerticalScroll
+    from trace_readonly import merge_nested, render_segments_history
 
     segments = [
         {
@@ -343,8 +340,10 @@ async def test_preview_and_sidecar_nested_have_no_wire_name():
 
         def on_mount(self):
             trace = self.query_one("#t", VerticalScroll)
-            calls = render_segments_readonly(trace, segments, mcp_tools=_JIRA)
-            merge_nested_readonly(trace, records, calls, mcp_tools=_JIRA)
+            calls = render_segments_history(
+                trace, segments, mcp_tools=_JIRA
+            ).call_rows
+            merge_nested(trace, records, calls, mcp_tools=_JIRA)
 
     async with _A().run_test() as pilot:
         # Заголовки блоков (P4) — не строки вызовов: подписи — у строк.
@@ -727,7 +726,6 @@ def test_memory_caption_verb_and_target(wire, args, verb, target):
     """Член блока Memory: глагол из действия, объект — регистр или
     `project`; содержимое не показывается."""
     from gc_core.execution.progress import tool_args_summary
-
     from gc_tui.services.trace_render import build_call_row
 
     summary = tool_args_summary(wire, {**args, "content": "секрет"})
@@ -744,7 +742,6 @@ def test_memory_without_action_is_called_whatever_args(wire, args):
     """Без `action` член блока Memory — `Called`, какие бы ни были прочие
     аргументы: глагол не выводится из пар `key=value`."""
     from gc_core.execution.progress import tool_args_summary
-
     from gc_tui.services.trace_render import build_call_row
 
     summary = tool_args_summary(wire, args)

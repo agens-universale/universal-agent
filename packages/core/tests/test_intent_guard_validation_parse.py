@@ -147,6 +147,178 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.action, "accept")
 
+    def test_unpaired_closing_think_with_braces_preserves_verdict(
+        self,
+    ) -> None:
+        raw = (
+            'Reasoning mentions handoff {} and {"trace_ok": true}.\n'
+            "</think>\n"
+            + _raw(
+                action="fix_report_and_continue",
+                trace_ok=False,
+                report_ok=False,
+                trace_gaps=["missing evidence", "missing check"],
+                report_mismatches=["unsupported claim", "empty handoff"],
+            )
+        )
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(
+            result.trace_gaps, ["missing evidence", "missing check"]
+        )
+        self.assertEqual(
+            result.report_mismatches, ["unsupported claim", "empty handoff"]
+        )
+
+    def test_json_inside_reasoning_is_ignored(self) -> None:
+        self.assertIsNone(
+            parse_validator_response("</think> is absent <think>" + _raw())
+        )
+
+    def test_multiple_valid_verdicts_are_ambiguous(self) -> None:
+        self.assertIsNone(parse_validator_response(_raw() + "\n" + _raw()))
+
+    def test_invalid_verdict_after_closing_think_is_rejected(self) -> None:
+        self.assertIsNone(
+            parse_validator_response("</think>\n" + _raw(is_question="false"))
+        )
+
+    def test_nested_valid_verdict_in_broken_outer_object_is_rejected(
+        self,
+    ) -> None:
+        self.assertIsNone(
+            parse_validator_response('{"wrapper": ' + _raw() + ",}")
+        )
+
+    def test_closing_think_literal_inside_json_string_is_preserved(
+        self,
+    ) -> None:
+        result = parse_validator_response(
+            _raw(trace_gaps=["Check literal </think> in feedback."])
+        )
+        assert result is not None
+        self.assertEqual(
+            result.trace_gaps, ["Check literal </think> in feedback."]
+        )
+
+    def test_inline_code_inside_json_string_is_preserved(self) -> None:
+        detail = "Check `make` output and the literal `{` in stderr."
+        result = parse_validator_response(
+            _raw(action="continue_work", trace_ok=False, trace_gaps=[detail])
+        )
+        assert result is not None
+        self.assertEqual(result.trace_gaps, [detail])
+
+    def test_reasoning_boundary_precedes_literal_tag_in_verdict(self) -> None:
+        raw = '{"action": "accept", "trace_ok": true}\n</think>\n' + _raw(
+            action="continue_work",
+            trace_ok=False,
+            trace_gaps=["Check literal </think> in feedback."],
+        )
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.action, "continue_work")
+        self.assertEqual(
+            result.trace_gaps, ["Check literal </think> in feedback."]
+        )
+
+    def test_closing_think_literal_inside_fenced_json_is_preserved(
+        self,
+    ) -> None:
+        result = parse_validator_response(
+            "```json\n"
+            + _raw(trace_gaps=["Check literal </think> in feedback."])
+            + "\n```"
+        )
+        assert result is not None
+        self.assertEqual(
+            result.trace_gaps, ["Check literal </think> in feedback."]
+        )
+
+    def test_fenced_rejection_takes_precedence_over_prose_example(
+        self,
+    ) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"```json\n{rejected}\n```\nA passing result would be {_raw()}"
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_invalid_fenced_verdict_does_not_fall_back_to_example(
+        self,
+    ) -> None:
+        invalid = _raw(action="continue_work", trace_ok=False)
+        invalid = invalid[:-1] + ",}"
+        raw = f"A passing result would be {_raw()}\nObserved:\n```json\n{invalid}\n```"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_incomplete_final_verdict_does_not_fall_back_to_example(
+        self,
+    ) -> None:
+        raw = (
+            f"A passing result would be {_raw()}\nObserved: "
+            + _raw(action="continue_work", trace_ok=False)[:-1]
+        )
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_stray_brace_before_fenced_verdict_is_ignored(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"The report printed a stray `{{` before failure.\n```json\n{rejected}\n```"
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_literal_closing_tag_after_fenced_verdict_is_ignored(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"```json\n{rejected}\n```\nThe log mentions literal `</think>`."
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_strict_json_in_other_labeled_fence_is_verdict(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"A passing report would be {_raw()}\n```jsonc\n{rejected}\n```"
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
+    def test_other_labeled_fence_does_not_allow_jsonc_syntax(self) -> None:
+        rejected = _raw(action="continue_work", trace_ok=False)
+        raw = f"A passing report would be {_raw()}\n```jsonc\n{rejected[:-1]},}}\n```"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_fenced_accept_cannot_override_unfenced_rejection(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        raw = f"```json\n{_raw()}\n```\nActual verdict:\n{rejected}"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_fenced_accept_cannot_override_invalid_unfenced_final(
+        self,
+    ) -> None:
+        rejected = _raw(action="continue_work", trace_ok=False)
+        raw = f"```json\n{_raw()}\n```\nActual verdict:\n{rejected[:-1]}"
+        self.assertIsNone(parse_validator_response(raw))
+
+    def test_unrelated_code_fence_does_not_hide_plain_verdict(self) -> None:
+        rejected = _raw(
+            action="continue_work", trace_ok=False, trace_gaps=["missing test"]
+        )
+        result = parse_validator_response(
+            "```python\nprint('no verdict here')\n```\n" + rejected
+        )
+        assert result is not None
+        self.assertEqual(result.trace_gaps, ["missing test"])
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(
             parse_validator_response(

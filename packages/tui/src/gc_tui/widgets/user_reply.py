@@ -23,6 +23,7 @@ from gc_tui.palette import QUIET_REPLY_MARK as _QUIET_MARK
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import fit_path
+from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS
 from gc_tui.services.trace_render import (
     LINE_USER_CLASS,
     NESTED_USER_PREFIX,
@@ -389,6 +390,21 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     def images(self) -> tuple[Attachment, ...]:
         return self._images
 
+    def respawn(self) -> UserReplyContainer | None:
+        """Копия реплики, которой нет в треде («не отправлено»), для
+        памяти эфемерного; реплика из треда вернётся из модели — None."""
+        if self._event_no:
+            return None
+        return UserReplyContainer(
+            self._text,
+            state=self._state,
+            images=self._images,
+            skill=self._skill,
+            skill_error=self._skill_error,
+            message_id=self.message_id,
+            client_id=self.client_id,
+        )
+
     def set_state(self, new_state: _State) -> None:
         """Переключить состояние реплики: цвет маркера и вид очереди."""
         self._state = new_state
@@ -409,10 +425,18 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         self.add_class("has-consequence")
         self._consequence_slot.set_bodies(self._consequences)
 
+    @property
+    def event_no(self) -> int:
+        """Номер события треда; 0 — реплики в треде ещё нет (отправлена,
+        в очереди, «не отправлено» из meta)."""
+        return self._event_no
+
     def set_event_no(self, event_no: int) -> None:
         """Номер события треда: живая реплика получает его при сверке с записью треда —
-        до этого Ctrl+клик и Enter экрана события не открывают."""
+        до этого Ctrl+клик и Enter экрана события не открывают. Реплика
+        в треде — не эфемерное: её вернёт модель истории."""
         self._event_no = event_no
+        self.remove_class(EPHEMERAL_CLASS)
 
     def set_images(self, images: tuple[Attachment, ...]) -> None:
         """Заменить картинки реплики: pending-реплика при сверке получает копии из

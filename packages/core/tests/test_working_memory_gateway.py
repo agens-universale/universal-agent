@@ -1,5 +1,6 @@
 import types
 
+import pytest
 from gc_core.summarize.working_memory_gateway import (
     _REGISTER_BODY_PATTERNS,
     REGISTER_MERGE_MODES,
@@ -11,7 +12,6 @@ from gc_core.summarize.working_memory_gateway import (
     apply_memory_patch,
     apply_replace_deltas,
     apply_summary_memory_patch,
-    build_memory_deltas_format_repair_messages,
     coerce_working_memory_deltas,
     extract_register_bodies,
     parse_memory_deltas,
@@ -20,7 +20,6 @@ from gc_core.summarize.working_memory_gateway import (
     render_persistent_state_for_prompt,
     render_session_memory_for_summary_message,
     resolve_persistent_state_block,
-    should_attempt_memory_deltas_repair,
 )
 
 
@@ -58,14 +57,499 @@ def test_extract_register_bodies_unescaped_ampersand_and_last_match():
     assert bodies["state"] == "second"
 
 
-def test_render_persistent_state_roundtrip_all_registers():
+def test_final_register_block_excludes_open_tag_in_preamble():
+    raw = (
+        "<knowledge>: draft notes\n<goal>: draft objective\n"
+        "Let me format this properly:\n</think>\n"
+        "<goal>final goal</goal>\n<constraints>keep x < 5</constraints>\n"
+        "<state>next step</state>\n<knowledge>final fact</knowledge>"
+    )
+    old = WorkingMemorySnapshot(knowledge="old fact")
+
+    deltas, present = parse_memory_deltas(raw, full_replace=True)
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert updated.goal == "final goal"
+    assert updated.constraints == "keep x < 5"
+    assert updated.state == "next step"
+    assert updated.knowledge == "final fact"
+
+
+def test_partial_register_patch_and_empty_clear_remain_valid():
+    old = WorkingMemorySnapshot(goal="old goal", knowledge="old fact")
+    deltas, present = parse_memory_deltas(
+        "preface\n<goal>new goal</goal><knowledge></knowledge>"
+    )
+
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert updated.goal == "new goal"
+    assert updated.knowledge == ""
+    assert present == frozenset({"goal", "knowledge"})
+
+
+def test_register_body_keeps_generic_type_parameters():
+    value = "Use std::vector<int> and preserve the result."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_register_body_keeps_markdown_quoted_register_tag():
+    value = "Keep the `<state>` element in the exported document."
+    raw = (
+        "<goal>Validate XML export</goal>"
+        "<constraints>Keep its schema</constraints>"
+        "<state>Validate the rendered XML next</state>"
+        f"<knowledge>{value}</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.knowledge == value
+
+
+def test_whole_response_fence_wraps_valid_register_patch():
+    raw = "```xml\n<knowledge>Use the newer offline cache.</knowledge>\n```"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == "Use the newer offline cache."
+
+
+def test_fenced_example_in_explanation_is_not_applied():
+    raw = (
+        "For example:\n```xml\n<knowledge>illustration</knowledge>\n```\n"
+        "Now decide what to store."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_final_fenced_register_block_after_intro_is_applied():
+    raw = (
+        "Here is the updated memory:\n```xml\n"
+        "<goal>new goal</goal><knowledge>new fact</knowledge>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "knowledge"})
+    assert deltas.goal == "new goal"
+    assert deltas.knowledge == "new fact"
+
+
+def test_single_fenced_register_block_with_text_on_both_sides_is_applied():
+    raw = (
+        "Here is the updated memory:\n```xml\n"
+        "<goal>new goal</goal><knowledge>new fact</knowledge>\n```\n"
+        "The registers above are ready."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "knowledge"})
+    assert deltas.goal == "new goal"
+    assert deltas.knowledge == "new fact"
+
+
+@pytest.mark.parametrize("commands_first", [False, True])
+def test_fenced_register_patch_with_separate_command_block(commands_first):
     snapshot = WorkingMemorySnapshot(
         **{name: f"body-{name}" for name in REGISTER_ORDER}
     )
-    rendered = render_persistent_state_for_prompt(snapshot)
+    payload = "\n".join(
+        f"<{name}>{value}</{name}>"
+        for name, value in snapshot.to_dict().items()
+    )
+    patch = f"```xml\n{payload}\n```"
+    commands = "```bash\npwd\n```"
+    blocks = (commands, patch) if commands_first else (patch, commands)
+
+    deltas, present = parse_memory_deltas("\n\n".join(blocks))
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.to_dict() == snapshot.to_dict()
+
+
+@pytest.mark.parametrize("caption", ["For example:", "Do not use:"])
+def test_fenced_patch_example_next_to_command_block_stays_quoted(caption):
+    raw = f"{caption}\n```xml\n<goal>sample</goal>\n```\n```bash\npwd\n```"
+
+    assert extract_register_bodies(raw) == {}
+
+
+def test_fenced_example_inside_register_body_stays_literal():
+    value = "Run:\n```xml\n<state>example</state>\n```\nKeep this text."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_text_mentions_between_and_after_registers_keep_entire_patch():
+    raw = (
+        "<goal>G</goal><constraints>C</constraints>\n"
+        "Note: prints <stdout> only.\n"
+        "<state>S</state><knowledge>K</knowledge>\n"
+        "I updated <knowledge> with verified facts."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.to_dict() == {
+        "goal": "G",
+        "constraints": "C",
+        "state": "S",
+        "knowledge": "K",
+    }
+
+
+def test_inline_code_caption_before_register_does_not_drop_update():
+    raw = (
+        "<goal>new goal</goal>"
+        "<knowledge>Keep `</think>` literal and `run` in notes.</knowledge>\n"
+        "`state notes` <state>new state</state>"
+    )
+    old = WorkingMemorySnapshot(state="old state")
+
+    deltas, present = parse_memory_deltas(raw)
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert present == frozenset({"goal", "knowledge", "state"})
+    assert updated.state == "new state"
+    assert updated.knowledge == "Keep `</think>` literal and `run` in notes."
+
+
+def test_quoted_think_between_registers_keeps_earlier_update():
+    raw = "<goal>new goal</goal>\nThe log says `</think>`.\n<state>new state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.state == "new state"
+
+
+def test_prose_caption_before_complete_register_keeps_update():
+    raw = "<goal>new goal</goal>\nCurrent state: <state>Run checks</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.state == "Run checks"
+
+
+def test_complete_register_in_explanatory_sentence_stays_literal():
+    raw = "<goal>Current goal</goal>\nDo not use <state>Example state</state>."
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal"})
+    assert deltas.goal == "Current goal"
+
+
+def test_complete_register_in_negative_caption_stays_literal():
+    raw = (
+        "<goal>Current goal</goal>\nDo not use: <state>Example state</state>."
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal"})
+    assert deltas.goal == "Current goal"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "<goal>new goal</goal>\n**Constraints** <constraints>new constraints</constraints>\n<state>new state</state>",
+        "<goal>new goal</goal>, <constraints>new constraints</constraints>, <state>new state</state>",
+    ],
+)
+def test_formatted_caption_and_comma_preserve_complete_registers(raw):
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "constraints", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.constraints == "new constraints"
+    assert deltas.state == "new state"
+
+
+@pytest.mark.parametrize(
+    "intro",
+    [
+        "This patch keeps a worked example.",
+        "Update the goal, e.g. to preserve the verified test.",
+    ],
+)
+def test_example_word_in_prose_does_not_invalidate_real_fenced_patch(intro):
+    raw = (
+        f"{intro}\n```xml\n<goal>new goal</goal><state>new state</state>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.state == "new state"
+
+
+def test_explicit_example_caption_with_detail_does_not_apply_fenced_patch():
+    raw = (
+        "For example, use this format:\n```xml\n<goal>sample goal</goal>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_four_backtick_fence_can_wrap_one_complete_patch():
+    raw = "````xml\n<goal>new goal</goal><state>new state</state>\n````"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal", "state"})
+    assert deltas.goal == "new goal"
+    assert deltas.state == "new state"
+
+
+def test_two_four_backtick_fenced_patches_are_ambiguous():
+    raw = (
+        "````xml\n<goal>draft</goal>\n````\n````xml\n<goal>final</goal>\n````"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_register_before_think_boundary_is_not_part_of_final_patch():
+    raw = "<state>DRAFT</state> End of notes.</think><goal>new goal</goal>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"goal"})
+    assert deltas.goal == "new goal"
+
+
+def test_multiple_command_fences_inside_register_stay_literal():
+    value = "Commands\n```sh\nls\n```\n```sh\npwd\n```"
+    raw = f"<knowledge>{value}\n</knowledge><state>next</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert deltas.knowledge == value
+    assert deltas.state == "next"
+
+
+def test_quoted_register_boundary_inside_body_stays_literal():
+    value = "Quoted `</knowledge><state>` is literal."
+    raw = f"<knowledge>{value}</knowledge><state>real state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert deltas.knowledge == value
+    assert deltas.state == "real state"
+
+
+@pytest.mark.parametrize("caption", ["Для иллюстрации формата", "E.g.:"])
+def test_illustrative_fenced_register_is_not_applied(caption):
+    raw = f"{caption}\n```xml\n<goal>sample goal</goal>\n```"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_escaped_backtick_does_not_hide_later_code_span():
+    raw = (
+        "<knowledge>Keep \\` literally in the source.</knowledge>"
+        "<state>Use `<goal>` as a label.</state>"
+    )
+    old = WorkingMemorySnapshot(knowledge="old fact", state="old state")
+
+    deltas, present = parse_memory_deltas(raw)
+    updated = apply_summary_memory_patch(old, deltas, replace_touched=present)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert updated.knowledge == "Keep \\` literally in the source."
+    assert updated.state == "Use `<goal>` as a label."
+
+
+def test_even_backslashes_leave_backtick_as_code_delimiter():
+    value = r"Keep \\`<state>` as a literal label."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_backslash_before_closing_backtick_keeps_literal_tag_in_code():
+    value = "Keep `<goal> ends with \\` literally."
+    raw = f"<knowledge>{value}</knowledge><state>new state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge", "state"})
+    assert deltas.knowledge == value
+    assert deltas.state == "new state"
+
+
+def test_inline_code_example_caption_does_not_replace_register():
+    raw = "<state>real state</state>\n`Example`: <state>example state</state>"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"state"})
+    assert deltas.state == "real state"
+
+
+def test_backticks_do_not_span_across_register_boundaries():
+    raw = (
+        "<goal>Run `make.</goal>"
+        "<constraints>Keep the existing `schema`.</constraints>"
+        "<state>Next step</state><knowledge>Verified fact</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset(REGISTER_ORDER)
+    assert deltas.goal == "Run `make."
+    assert deltas.constraints == "Keep the existing `schema`."
+
+
+def test_damaged_structural_tail_does_not_apply_partial_patch():
+    prefix = (
+        "<goal>new goal</goal><constraints>new rule</constraints>"
+        "<state>new step</state><knowledge>new fact</knowledge>"
+    )
+
+    for tail in ("\n<knowledge>unfinished", "\n<knowledge"):
+        deltas, present = parse_memory_deltas(prefix + tail)
+
+        assert present == frozenset()
+        assert deltas.is_empty()
+
+
+def test_unknown_structural_tag_between_registers_does_not_apply_tail():
+    raw = (
+        "<goal>G</goal><constraints>C</constraints>\n"
+        "<stdout>unexpected</stdout>\n"
+        "<state>S</state><knowledge>K</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_terminal_fenced_example_is_not_a_memory_patch():
+    raw = "For example:\n```xml\n<knowledge>illustration</knowledge>\n```"
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+@pytest.mark.parametrize("commands", ["", "```bash\npwd\n```\n"])
+def test_multiple_fenced_register_blocks_are_ambiguous(commands):
+    raw = (
+        f"```xml\n<knowledge>draft</knowledge>\n```\n{commands}"
+        "```xml\n<knowledge>final</knowledge>\n```"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset()
+    assert deltas.is_empty()
+
+
+def test_register_body_keeps_literal_think_closing_tag():
+    value = "Generic <Result> comes from transport; keep </think> literal."
+
+    deltas, present = parse_memory_deltas(f"<knowledge>{value}</knowledge>")
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_final_register_body_keeps_literal_think_after_preamble():
+    value = "Use std::vector<int> and keep </think> in the fixture."
+    raw = (
+        "Format the <knowledge>: register as follows.\n</think>\n"
+        f"<knowledge>{value}</knowledge>"
+    )
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert present == frozenset({"knowledge"})
+    assert deltas.knowledge == value
+
+
+def test_unclosed_or_nested_registers_do_not_apply():
+    old = WorkingMemorySnapshot(knowledge="old fact")
+    for raw in (
+        "<knowledge>draft <goal>inner</goal></knowledge>",
+        "<goal>unfinished <state>valid</state>",
+        "<goal>new goal</goal><knowledge>unfinished",
+        "<goal>new goal</goal><unknown>unexpected</unknown>",
+    ):
+        deltas, present = parse_memory_deltas(raw)
+        updated = apply_summary_memory_patch(
+            old, deltas, replace_touched=present
+        )
+        assert updated == old
+        assert present == frozenset()
+
+
+@pytest.mark.parametrize("include_todo", [False, True])
+def test_render_persistent_state_roundtrip_all_registers(include_todo):
+    snapshot = WorkingMemorySnapshot(
+        **{name: f"body-{name}" for name in REGISTER_ORDER}
+    )
+    todo = [{"status": "pending", "content": "Verify <goal>sample</goal>."}]
+    rendered = render_persistent_state_for_prompt(
+        snapshot, session_todo=todo if include_todo else None
+    )
     extracted = extract_register_bodies(rendered)
     for name in REGISTER_ORDER:
         assert extracted[name] == f"body-{name}"
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_persistent_state_with_todo_after_reasoning_boundary(fenced):
+    snapshot = WorkingMemorySnapshot(
+        goal="verified goal", state="current step"
+    )
+    rendered = render_persistent_state_for_prompt(
+        snapshot,
+        session_todo=[{"status": "pending", "content": "Run checks"}],
+    )
+    patch = (
+        f"```xml\n{rendered}\n```\n```bash\npwd\n```" if fenced else rendered
+    )
+    raw = "<goal>draft</goal> End of notes.</think>\n" + patch
+
+    assert extract_register_bodies(raw) == snapshot.to_dict()
 
 
 def test_render_persistent_state_for_prompt_contains_all_registers():
@@ -302,62 +786,33 @@ def test_render_session_memory_for_summary_message_skips_empty_registers():
     assert rendered.strip().endswith("</session_memory>")
 
 
-def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():
-    raw = "x" * 120
-    deltas = WorkingMemoryDeltas()
-    assert (
-        should_attempt_memory_deltas_repair(
-            raw, deltas, min_chars_for_repair=100
-        )
-        is True
-    )
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("x" * 120, False),
+        ("Notes " * 30 + "\n<goal></goal>", False),
+        ("<state>Index the files.\n<knowledge>Count: 3</knowledge>", True),
+    ],
+)
+def test_only_recovers_eligible_drafts(raw, expected):
+    _, _, attempted, _ = parse_memory_deltas_with_repair(raw)
+    assert attempted is expected
 
 
-def test_should_not_attempt_memory_deltas_repair_when_short_or_parsed():
-    assert (
-        should_attempt_memory_deltas_repair(
-            "short", WorkingMemoryDeltas(), min_chars_for_repair=100
-        )
-        is False
-    )
-    assert (
-        should_attempt_memory_deltas_repair(
-            "x" * 120,
-            WorkingMemoryDeltas(goal="parsed"),
-            min_chars_for_repair=100,
-        )
-        is False
-    )
-
-
-def test_parse_memory_deltas_with_repair_invokes_callback_once():
-    raw = "narrative text without tags " + ("x" * 120)
-    calls = {"count": 0}
-
-    def _repair(text: str) -> str:
-        calls["count"] += 1
-        assert text == raw
-        return "<goal>recovered goal</goal>"
-
+def test_local_repair_preserves_exact_registers_and_values():
+    raw = "<state>  Index the files.  \n<knowledge>Count: 3</knowledge>"
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
-        raw,
-        repair_fn=_repair,
-        min_chars_for_repair=100,
+        raw
     )
 
     assert attempted is True
-    assert repaired_raw == "<goal>recovered goal</goal>"
-    assert deltas == WorkingMemoryDeltas(goal="recovered goal")
-    assert present == frozenset({"goal"})
-    assert calls["count"] == 1
-
-
-def test_build_memory_deltas_format_repair_messages_lists_register_tags():
-    messages = build_memory_deltas_format_repair_messages("free text")
-    assert messages[0]["role"] == "system"
-    assert "<goal>" in messages[0]["content"]
-    assert "<knowledge>" in messages[0]["content"]
-    assert "free text" in messages[1]["content"]
+    assert repaired_raw == (
+        "<state>  Index the files.  </state>\n<knowledge>Count: 3</knowledge>"
+    )
+    assert deltas == WorkingMemoryDeltas(
+        state="Index the files.", knowledge="Count: 3"
+    )
+    assert present == frozenset({"state", "knowledge"})
 
 
 def test_resolve_persistent_state_block_uses_explicit_block():
@@ -377,22 +832,13 @@ def test_resolve_persistent_state_block_reads_from_state_when_none():
     assert "from state" in resolved
 
 
-def test_parse_memory_deltas_with_repair_skips_callback_when_not_needed():
+def test_parse_memory_deltas_with_repair_returns_balanced_patch_unchanged():
     raw = "<state>ok</state>"
-    calls = {"count": 0}
-
-    def _repair(_text: str) -> str:
-        calls["count"] += 1
-        return "<goal>unexpected</goal>"
-
     deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
-        raw,
-        repair_fn=_repair,
-        min_chars_for_repair=100,
+        raw
     )
 
     assert attempted is False
     assert repaired_raw == raw
     assert deltas == WorkingMemoryDeltas(state="ok")
     assert present == frozenset({"state"})
-    assert calls["count"] == 0

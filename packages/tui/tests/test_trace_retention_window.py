@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.trace_retention import (
     events_leaving_window,
@@ -300,18 +300,22 @@ class _SidecarStore:
 
 
 def _event(scr, call_id: str, kind: str):
-    for ev in scr._task_events:
+    for ev in scr._feed_history.events():
         if ev.call_id == call_id and ev.kind == kind:
             return ev
     raise AssertionError(f"нет {kind} {call_id}")
 
 
 def _assert_prose_full(scr):
-    users = [ev.summary for ev in scr._task_events if ev.kind == "user"]
+    users = [
+        ev.summary for ev in scr._feed_history.events() if ev.kind == "user"
+    ]
     assert _OLD_USER in users
     assert _MID_USER in users
     assert _LIVE_USER in users
-    agents = [ev.summary for ev in scr._task_events if ev.kind == "agent"]
+    agents = [
+        ev.summary for ev in scr._feed_history.events() if ev.kind == "agent"
+    ]
     assert _OLD_ASSISTANT in agents
     assert _OLD_FINISH in agents
     assert _LIVE_ASSISTANT in agents
@@ -352,8 +356,7 @@ async def test_render_segments_keeps_prose_and_lights_tools_outside_window(
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar())
-        scr._render_segments(_three_segments())
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(_three_segments(), task_id="t")
         await pilot.pause()
 
         texts = [r._text for r in scr.query(UserReplyContainer)]
@@ -448,8 +451,7 @@ async def test_stream_reset_rebuild_drops_former_window_tools(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar())
-        scr._render_segments(two)
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(two, task_id="t")
         await pilot.pause()
         _assert_tool_full(_event(scr, "call_old", "call"))
         assert "child_old" in {
@@ -458,8 +460,7 @@ async def test_stream_reset_rebuild_drops_former_window_tools(tmp_path):
 
         scr._clear_trace()
         scr._reset_render_state()
-        scr._render_segments(_three_segments())
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(_three_segments(), task_id="t")
         await pilot.pause()
 
         _assert_prose_full(scr)
@@ -496,7 +497,6 @@ async def test_preview_same_retention_and_drops_sidecar_list(tmp_path):
         await pilot.pause()
         scr = pilot.app.screen
         assert isinstance(scr, PreviewScreen)
-        assert scr._segments == []
         assert scr._subagent_records == []
         texts = [r._text for r in scr.query(UserReplyContainer)]
         assert _OLD_USER in texts and _LIVE_USER in texts
@@ -590,8 +590,9 @@ async def test_preserved_id_in_window_keeps_first_row_full(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar_kept())
-        scr._render_segments(_preserved_subagent_segments(copy_in_window=True))
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(
+            _preserved_subagent_segments(copy_in_window=True), task_id="t"
+        )
         await pilot.pause()
 
         rows = [
@@ -633,9 +634,8 @@ async def test_preserved_id_outside_window_stays_light(tmp_path):
         scr = pilot.app.screen
         scr._store = _SidecarStore(_sidecar_kept())
         scr._render_segments(
-            _preserved_subagent_segments(copy_in_window=False)
+            _preserved_subagent_segments(copy_in_window=False), task_id="t"
         )
-        scr._merge_sidecar_nested("t")
         await pilot.pause()
 
         rows = [

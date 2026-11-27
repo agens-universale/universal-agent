@@ -46,7 +46,8 @@ def begin_turn(state: State, ctx: Any) -> None:
     (они уже не открыты); проверка остаётся для ребёнка и для
     durable-истории без маркера пробы.
 
-    Здесь же снимается граница сообщений хода:
+    Здесь же сбрасывается признак SessionStart плагинов без вывода
+    (``plugin_hooks_ran_turn``) и снимается граница сообщений хода:
     свои сообщения ход в историю ещё не положил, а поставит её
     `State.mark_turn_start` на первом же батче."""
     attach = getattr(ctx, "attach_state", None)
@@ -55,6 +56,7 @@ def begin_turn(state: State, ctx: Any) -> None:
     state_ops.reset(state)
     state.turn_level = None
     state.turn_messages_start = None
+    state.plugin_hooks_ran_turn = set()
     state.resumed_turn = None
     if not getattr(state, "parent_state_id", None):
         # Ключ хода для проб зрения. В durable-исполнении id выдаёт среда

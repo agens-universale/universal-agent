@@ -15,6 +15,7 @@ from gc_core.tools.connect_mcp.client import (
     _acall_mcp_tool,
     _aget_or_init_session_id,
     _atools_list_request,
+    _tools_from,
     forget_session,
 )
 from gc_core.tools.connect_mcp.durable_scope import require_no_reconnect
@@ -22,6 +23,7 @@ from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     is_persistent_stdio,
 )
+from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
 from gc_core.tools.connect_mcp.stream_client import (
     acall_tool_stream_http,
     acall_tool_stream_sse,
@@ -122,8 +124,10 @@ class McpClientPort(ABC):
         Синхронный вход остаётся, но НЕ как «второй способ сделать то же»:
         он живёт ровно для долгоживущего stdio, где обмен блокирующий по
         существу (``subprocess.Popen``: asyncio-подпроцесс привязан к
-        создавшему его loop, а эту сессию заводит дискавери, зовут тулы и
-        закрывает ``arun`` — три разных loop). Асинхронная форма сама уводит
+        создавшему его loop, а эту сессию заводит дискавери или подключение
+        потребителя, зовут тулы, а закрывает ``arun`` без потребителя или
+        закрытие потребителя через много ходов — общий loop ядро не
+        гарантирует). Асинхронная форма сама уводит
         туда вызов через брошенный поток
         (``run_abandonable(self.list_tools, …)``), а всем прочим транспортам
         синхронный вход отказывает — см. ``AgentRuntimeClient.list_tools``.
@@ -176,7 +180,9 @@ class AgentRuntimeClient(McpClientPort):
         token = self.server_cfg.get("token")
         return str(token) if token else None
 
-    def list_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
+    def list_tools(
+        self, *, timeout: float, strict: bool = False
+    ) -> List[Dict[str, Any]]:
         """Только долгоживущий stdio. Остальные транспорты — асинхронной формой.
 
         Метод остался ради одного случая: обмен с долгоживущей сессией
@@ -186,6 +192,8 @@ class AgentRuntimeClient(McpClientPort):
         Легаси `http`/`sse` отсюда УШЛИ: до них доходила только синхронная
         дискавери, а форм дискавери больше не две. Транспорты SDK сюда не
         попадали и раньше.
+
+        ``strict`` — как у :meth:`alist_tools`.
         """
         self._require_transport()
         if not is_persistent_stdio(self.server_cfg):
@@ -198,9 +206,7 @@ class AgentRuntimeClient(McpClientPort):
             resp = session.call("tools/list", {}, timeout)
         finally:
             self._unbind_stdio_session(session)
-        result = resp.get("result") if isinstance(resp, dict) else None
-        tools = result.get("tools", []) if isinstance(result, dict) else []
-        return tools if isinstance(tools, list) else []
+        return _tools_from(resp, strict=strict)
 
     def call_tool(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
@@ -235,8 +241,9 @@ class AgentRuntimeClient(McpClientPort):
         return session.cancel_inflight()
 
     def _bind_stdio_session(self):
+        server_key = self.server_cfg.get(SESSION_KEY_FIELD) or self.server_name
         session = PersistentStdioRegistry.instance().get_or_create(
-            self.server_name, self.server_cfg
+            server_key, self.server_cfg, self.server_name
         )
         self._stdio_session = session
         return session
@@ -245,7 +252,14 @@ class AgentRuntimeClient(McpClientPort):
         if getattr(self, "_stdio_session", None) is session:
             self._stdio_session = None
 
-    async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
+    async def alist_tools(
+        self, *, timeout: float, strict: bool = False
+    ) -> List[Dict[str, Any]]:
+        """``strict`` — ответ без списка тулов даёт ``McpProtocolError``.
+
+        Касается разбора здесь (долгоживущий и разовый stdio, легаси-http):
+        потоковые клиенты SDK такой ответ отвергают сами.
+        """
         transport = self._require_transport()
         effective = _effective_transport(self.server_cfg)
         url = self._url()
@@ -267,14 +281,20 @@ class AgentRuntimeClient(McpClientPort):
             )
         if transport == "stream_stdio":
             return await alist_tools_stream_stdio(
-                server_cfg=self.server_cfg, timeout=timeout
+                server_cfg=self.server_cfg,
+                timeout=timeout,
+                server_name=self.server_name,
             )
         if is_persistent_stdio(self.server_cfg):
             # Долгоживущая сессия сидит на `subprocess.Popen` СОЗНАТЕЛЬНО:
             # asyncio-подпроцесс привязан к создавшему его loop, а эту сессию
-            # заводит дискавери, зовут тулы и закрывает `arun` — три разных
-            # loop. Прервать блокирующий обмен нечем, поэтому поток-демон.
-            return await run_abandonable(self.list_tools, timeout=timeout)
+            # заводит дискавери или подключение потребителя, зовут тулы, а
+            # закрывает `arun` без потребителя или закрытие потребителя через
+            # много ходов — общий loop ядро не гарантирует. Прервать
+            # блокирующий обмен нечем, поэтому поток-демон.
+            return await run_abandonable(
+                self.list_tools, timeout=timeout, strict=strict
+            )
 
         session_id = await _aget_or_init_session_id(
             self.server_name, url, self.server_cfg, token=token
@@ -289,6 +309,8 @@ class AgentRuntimeClient(McpClientPort):
                 session_id=session_id,
                 server_cfg=self.server_cfg,
                 token=token,
+                server_key=self.server_name,
+                strict=strict,
             )
         except httpx.HTTPStatusError:
             forget_session(self.server_name)
@@ -304,6 +326,8 @@ class AgentRuntimeClient(McpClientPort):
                 session_id=session_id,
                 server_cfg=self.server_cfg,
                 token=token,
+                server_key=self.server_name,
+                strict=strict,
             )
 
     async def acall_tool(
@@ -355,6 +379,7 @@ class AgentRuntimeClient(McpClientPort):
                 timeout=timeout,
                 tool_name=tool_name,
                 arguments=arguments,
+                server_name=self.server_name,
             )
         if is_persistent_stdio(self.server_cfg):
             # См. `alist_tools`: сессия на `Popen` — сознательное ограничение.

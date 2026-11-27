@@ -7,7 +7,6 @@ retention), под живым — монтируется."""
 import json
 
 import pytest
-
 from gc_core.attachments.model import (
     ORIGIN_USER,
     Attachment,
@@ -174,13 +173,12 @@ async def test_main_screen_keeps_images_of_a_segment_outside_the_window(
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._store = _Store(_SIDECAR)
-        scr._render_segments(_segments(a1, a3))
-        scr._merge_sidecar_nested("t")
+        scr._render_segments(_segments(a1, a3), task_id="t")
         await pilot.pause()
         replies = {r._text: r._images for r in scr.query(UserReplyContainer)}
         assert replies[f"{chip_text(1)} старое"] == (a1,)
         assert replies[f"{chip_text(3)} вот"] == (a3,)
-        users = [ev for ev in scr._task_events if ev.kind == "user"]
+        users = [ev for ev in scr._feed_history.events() if ev.kind == "user"]
         assert all(
             ev.full_payload.get("_retention") != "light" for ev in users
         )
@@ -190,15 +188,11 @@ async def test_main_screen_keeps_images_of_a_segment_outside_the_window(
 
 @pytest.mark.asyncio
 async def test_preview_keeps_images_of_a_segment_outside_the_window(tmp_path):
-    from textual.app import App
-    from textual.containers import VerticalScroll
-
-    from gc_tui.services.trace_render import (
-        merge_nested_readonly,
-        render_segments_readonly,
-    )
     from gc_tui.services.trace_retention import subagent_parent_ids_in_window
     from gc_tui.widgets.user_reply import NestedUserReply, UserReplyContainer
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from trace_readonly import merge_nested, render_segments_history
 
     a1, a3 = _att(1, tmp_path), _att(3, tmp_path)
     segs = _segments(a1, a3)
@@ -209,8 +203,8 @@ async def test_preview_keeps_images_of_a_segment_outside_the_window(tmp_path):
 
         def on_mount(self):
             t = self.query_one("#t", VerticalScroll)
-            calls = render_segments_readonly(t, segs)
-            merge_nested_readonly(
+            calls = render_segments_history(t, segs).call_rows
+            merge_nested(
                 t,
                 _SIDECAR,
                 calls,

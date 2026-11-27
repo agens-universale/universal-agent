@@ -74,3 +74,47 @@ async def test_invalid_request_is_not_retried(turn_request):
     with pytest.raises(ApplicationError) as error:
         await ActivityEnvironment().run(runner.run, turn_request)
     assert error.value.non_retryable
+
+
+def _profile_with_plugin(tmp_path):
+    plug = tmp_path / "p" / "demo"
+    (plug / ".claude-plugin").mkdir(parents=True)
+    (plug / ".claude-plugin" / "plugin.json").write_text('{"name": "demo"}')
+    (plug / "skills" / "s1").mkdir(parents=True)
+    (plug / "skills" / "s1" / "SKILL.md").write_text(
+        "---\nname: s1\ndescription: d\n---\nbody\n"
+    )
+    base = default_settings()
+    plugins = base.plugins.model_copy(
+        update={"paths": [str(plug)], "use_installed": False}
+    )
+    return base.model_copy(update={"plugins": plugins})
+
+
+def test_profile_plugins_are_off_with_warning(tmp_path, caplog):
+    """Плагины в durable-режиме не поддерживаются: профиль с
+    ``plugins.paths`` — пустой снимок и та же строка в лог, что у воркера."""
+    from gc_core.plugins.snapshot import PluginSnapshot
+
+    caplog.set_level("WARNING")
+    runner = AgentActivity(
+        {"a": _profile_with_plugin(tmp_path)}, thread_store=object()
+    )
+    settings = runner._settings(AgentActivityRequest("a", "hi", "t1"))
+    assert settings.runtime.plugins == PluginSnapshot()
+    assert settings.runtime.untrusted_plugin_entries == frozenset()
+    assert "Профиль a: plugins под воркером Temporal" in caplog.text
+
+
+def test_prebuilt_plugin_snapshot_is_dropped(tmp_path):
+    from gc_core.plugins.catalog import with_plugin_snapshot
+    from gc_core.plugins.snapshot import PluginSnapshot
+    from gc_core.settings import LoadedSettings
+
+    loaded = with_plugin_snapshot(
+        LoadedSettings(settings=_profile_with_plugin(tmp_path)), clone=False
+    )
+    assert loaded.runtime.plugins != PluginSnapshot()
+    runner = AgentActivity({"a": loaded}, thread_store=object())
+    settings = runner._settings(AgentActivityRequest("a", "hi", "t1"))
+    assert settings.runtime.plugins == PluginSnapshot()

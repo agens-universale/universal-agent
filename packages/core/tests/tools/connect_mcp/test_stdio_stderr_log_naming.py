@@ -1,0 +1,241 @@
+"""Лог stderr — по имени сервера; причина падения есть и у ``stream_stdio``.
+
+Лог назывался по команде и хэшу аргументов: два сервера с одной командой и
+разным env/cwd делили один файл, и причина одного могла прийти другому.
+Имя сервера на пути дискавери и вызова известно — им лог и назван.
+
+``stream_stdio`` (SDK ``stdio_client``) отдавал stderr сервера в stderr
+родителя: под TUI он терялся, а упавший при старте сервер на ``/mcp`` был
+без причины.
+
+Каталог состояния — изолированный ``GC_HOME`` набора (плагин gc_testkit).
+"""
+
+import re
+import sys
+from pathlib import Path
+
+import pytest
+from gc_core.tools.connect_mcp import persistent_stdio, transport
+from gc_core.tools.connect_mcp.registry import _adiscover_one
+
+_CRASH_LINE = "ModuleNotFoundError: No module named mcp.server.fastmcp"
+
+#: Одна команда и одни аргументы на оба сервера; различает их только env.
+_WHO_CRASH_SCRIPT = (
+    "import os, sys; "
+    "sys.stderr.write('who=' + os.environ['WHO'] + '\\n'); "
+    "sys.stderr.write("
+    "'ModuleNotFoundError: No module named mcp.server.fastmcp\\n'); "
+    "sys.exit(1)"
+)
+
+
+def _cfg(transport_name: str, who: str, **extra) -> dict:
+    return {
+        "transport": transport_name,
+        "command": sys.executable,
+        "args": ["-c", _WHO_CRASH_SCRIPT],
+        "env": {"WHO": who},
+        **extra,
+    }
+
+
+@pytest.fixture
+async def persistent_registry():
+    """Долгоживущие сессии теста гасятся в любом исходе."""
+    registry = persistent_stdio.PersistentStdioRegistry.instance()
+    yield registry
+    await registry.aclose_all()
+
+
+_TRANSPORTS = [
+    pytest.param("stdio", {}, id="stdio"),
+    pytest.param("stdio", {"persistent_session": True}, id="stdio-persistent"),
+    pytest.param("stream_stdio", {}, id="stream_stdio"),
+]
+
+
+@pytest.mark.parametrize(("transport_name", "extra"), _TRANSPORTS)
+async def test_same_command_different_servers_get_their_own_logs(
+    transport_name, extra, persistent_registry
+):
+    reasons = {}
+    for who in ("alpha", "beta"):
+        name = f"{who}_{transport_name}"
+        _tools, status = await _adiscover_one(
+            name, _cfg(transport_name, who, **extra), timeout=10
+        )
+        assert status["status"] == "failed", status
+        reasons[who] = status["reason"]
+
+    for who, other in (("alpha", "beta"), ("beta", "alpha")):
+        log_path = Path(re.search(r"\(лог: (.+)\)$", reasons[who])[1])
+        assert log_path.name.startswith(f"{who}_{transport_name}.")
+        text = log_path.read_text(encoding="utf-8")
+        assert f"who={who}" in text
+        assert f"who={other}" not in text
+        assert str(log_path) in reasons[who], reasons[who]
+
+
+async def test_stream_stdio_crash_before_initialize_names_the_real_cause():
+    _tools, status = await _adiscover_one(
+        "pw", _cfg("stream_stdio", "pw"), timeout=10
+    )
+
+    assert status["status"] == "failed"
+    reason = status["reason"]
+    assert "сервер завершился при старте" in reason, reason
+    assert _CRASH_LINE in reason, reason
+    assert "/pw." in reason and ".stderr.log" in reason, reason
+
+
+async def test_stream_stdio_silent_crash_keeps_the_old_reason():
+    """Пустой stderr — причины нет, сообщение прежнее."""
+    cfg = {
+        "transport": "stream_stdio",
+        "command": sys.executable,
+        "args": ["-c", "import sys; sys.exit(1)"],
+    }
+    _tools, status = await _adiscover_one("mute_stream", cfg, timeout=10)
+
+    assert status["status"] == "failed"
+    assert "завершился при старте" not in (status["reason"] or "")
+
+
+def test_server_name_is_sanitized_for_the_filesystem():
+    path = transport._stderr_log_path({"command": "x"}, "../evil name/ok")
+    assert path.parent.name == "mcp"
+    assert "/" not in path.name and " " not in path.name
+    assert path.name.endswith(".stderr.log")
+
+
+def test_without_a_name_the_log_is_named_by_the_command():
+    path = transport._stderr_log_path({"command": "/usr/bin/ddgs-mcp"})
+    assert path.name.startswith("ddgs-mcp.") and path.name.endswith(
+        ".stderr.log"
+    )
+
+
+async def test_stream_stdio_persistent_crash_names_the_real_cause():
+    """Долгоживущая SDK-сессия: та же причина при входе, лог — по имени.
+
+    Постоянную сессию открывает подключение потребителя — список тулов с
+    ключом сессии; вызов идёт по той же сессии."""
+    from gc_core.tools.connect_mcp import stream_client
+    from gc_core.tools.connect_mcp.server_identity import SESSION_KEY_FIELD
+
+    cfg = _cfg(
+        "stream_stdio",
+        "persist",
+        persistent_session=True,
+        **{SESSION_KEY_FIELD: "stream_stdio::test-persist"},
+    )
+    # Класс берём из модуля сейчас: плагин набора между тестами
+    # перезагружает пакет ``tools``, и класс импорта модуля теста — уже
+    # другой объект.
+    from gc_core.tools.connect_mcp.transport import McpServerExitedError
+
+    with pytest.raises(McpServerExitedError) as info:
+        await stream_client.alist_tools_stream_stdio(
+            cfg, timeout=10, server_name="persist_pw"
+        )
+
+    assert _CRASH_LINE in str(info.value)
+    assert info.value.log_path.name.startswith("persist_pw.")
+
+
+def test_parallel_same_name_logs_are_independent_and_bounded():
+    import subprocess
+
+    from gc_core.tools.connect_mcp.stderr_capture import MAX_BYTES, finish
+
+    config = {"command": sys.executable}
+    with transport._stderr_log(config, "same") as (first, first_path):
+        with transport._stderr_log(config, "same") as (second, second_path):
+            assert first_path != second_path
+            script = "import sys; sys.stderr.buffer.write(b'x' * 2200000 + sys.argv[1].encode())"
+            processes = [
+                subprocess.Popen(
+                    [sys.executable, "-c", script, marker], stderr=handle
+                )
+                for handle, marker in [
+                    (first, "FIRST-END"),
+                    (second, "SECOND-END"),
+                ]
+            ]
+            for process in processes:
+                assert process.wait(timeout=10) == 0
+    for path, marker in [
+        (first_path, b"FIRST-END"),
+        (second_path, b"SECOND-END"),
+    ]:
+        finish(path)
+        assert 0 < path.stat().st_size <= MAX_BYTES
+        assert path.read_bytes().endswith(marker)
+
+
+def test_closed_log_retention_does_not_remove_a_live_writer(monkeypatch):
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    monkeypatch.setattr(stderr_capture, "KEEP_CLOSED", 2)
+    config = {"command": sys.executable}
+    paths = []
+    with transport._stderr_log(config, "alive") as (live, live_path):
+        for i in range(4):
+            with transport._stderr_log(config, "closed") as (handle, path):
+                handle.write(str(i).encode())
+                paths.append(path)
+            stderr_capture.finish(path)
+        assert live_path.exists()
+        assert paths[-1].exists() and paths[-2].exists()
+        assert not paths[0].exists()
+        live.write(b"still alive")
+    stderr_capture.finish(live_path)
+    assert live_path.read_bytes() == b"still alive"
+
+
+async def test_sdk_failed_start_does_not_wait_for_stderr_on_event_loop(
+    monkeypatch,
+):
+    import threading
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    finish = stderr_capture.finish
+    loop_thread = threading.get_ident()
+    workers = []
+
+    def checked(path):
+        workers.append(threading.get_ident())
+        assert threading.get_ident() != loop_thread
+        finish(path)
+        assert path not in stderr_capture._READERS
+
+    monkeypatch.setattr(stderr_capture, "finish", checked)
+    await test_stream_stdio_crash_before_initialize_names_the_real_cause()
+    assert workers
+
+
+def test_retention_migrates_stale_legacy_logs_and_keeps_fresh_ones(tmp_path):
+    import os
+    import time
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    old = tmp_path / "old.stderr.log"
+    fresh = tmp_path / "fresh.stderr.log"
+    old.write_bytes(b"old version")
+    fresh.write_bytes(b"possibly active old version")
+    stamp = time.time() - 8 * 86400
+    os.utime(old, (stamp, stamp))
+    stderr_capture._prune(tmp_path, fresh)
+    assert not old.exists()
+    assert fresh.exists()
+
+
+def test_closed_retention_has_order_when_clock_does_not_advance(monkeypatch):
+    from gc_core.tools.connect_mcp import stderr_capture
+
+    monkeypatch.setattr(
+        stderr_capture.time, "time_ns", lambda: 1_700_000_000_000_000_000
+    )
+    test_closed_log_retention_does_not_remove_a_live_writer(monkeypatch)

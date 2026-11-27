@@ -25,6 +25,20 @@ class PlanPanel(Vertical):
         """Рамка показывает именно этот текст плана."""
         return self.plan_text == str(plan_text or "").strip()
 
+    def respawn(self) -> PlanPanel:
+        """Копия рамки (`/plan`, итог «План готов») для памяти
+        эфемерного: тот же текст и состояние."""
+        from gc_tui.services.trace_render import build_block_widgets
+
+        panel = PlanPanel(
+            *build_block_widgets(
+                self.plan_text, prose_bullet=False, event_no=0
+            ),
+            plan_text=self.plan_text,
+        )
+        panel.set_accepted(self.has_class("plan-accepted"))
+        return panel
+
     def set_accepted(self, accepted: bool) -> None:
         self.set_class(accepted, "plan-accepted")
         self.border_title = _TITLE_ACCEPTED if accepted else _TITLE_PROPOSED

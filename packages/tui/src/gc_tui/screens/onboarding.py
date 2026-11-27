@@ -18,7 +18,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui import branding
+from gc_tui.branding import BrandHeader, version_label
 from gc_tui.form_frame import (
     FOOTER_SCROLL,
     body_scrollable,
@@ -28,6 +28,7 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
+from gc_tui.widgets.column_static import ColumnStatic
 
 # Подсказка свёрнутого списка выбора.
 _LIST_HINT = "Alt+↓ — показать список"
@@ -283,13 +284,8 @@ class OnboardingScreen(Screen):
             # только незанятое (PgUp/PgDn, Home/End).
             with VerticalScroll(id="onb-scroll"):
                 with Vertical(id="onb-frame"):
-                    yield Static(
-                        branding.logo_text(), id="onb-logo", markup=False
-                    )
-                    yield Static(
-                        branding.tagline_under_logo(),
-                        id="onb-tagline",
-                        markup=False,
+                    yield ColumnStatic(
+                        BrandHeader(version_label()), id="onb-brand"
                     )
                     yield Static(
                         self._stepper_text(), id="onb-stepper", markup=False

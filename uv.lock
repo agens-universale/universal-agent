@@ -1273,7 +1273,7 @@ wheels = [
 
 [[package]]
 name = "gc-acp"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/acp" }
 dependencies = [
     { name = "gc-core" },
@@ -1284,7 +1284,7 @@ requires-dist = [{ name = "gc-core", editable = "packages/core" }]
 
 [[package]]
 name = "gc-cli"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "gc-core" },
@@ -1299,9 +1299,10 @@ requires-dist = [
 
 [[package]]
 name = "gc-core"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/core" }
 dependencies = [
+    { name = "anyio" },
     { name = "certifi" },
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
@@ -1318,6 +1319,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.5" },
     { name = "certifi" },
     { name = "chardet", specifier = ">=7.4.3" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
@@ -1334,7 +1336,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-core-temporalio"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/temporalio" }
 dependencies = [
     { name = "gc-core" },
@@ -1351,7 +1353,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-mcp"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "gc-core" },
@@ -1366,7 +1368,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-server"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/server" }
 dependencies = [
     { name = "fastapi" },
@@ -1418,7 +1420,7 @@ provides-extras = ["postgres", "mysql", "redis", "s3", "all", "a2a"]
 
 [[package]]
 name = "gc-stores"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/stores" }
 dependencies = [
     { name = "gc-core" },
@@ -1457,7 +1459,7 @@ provides-extras = ["postgres", "mysql", "redis", "s3", "all"]
 
 [[package]]
 name = "gc-testkit"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/testkit" }
 dependencies = [
     { name = "pytest" },
@@ -1468,7 +1470,7 @@ requires-dist = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "gc-tui"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "packages/tui" }
 dependencies = [
     { name = "gc-core" },
@@ -1493,13 +1495,13 @@ requires-dist = [
     { name = "pygments", specifier = ">=2.13" },
     { name = "rich", specifier = ">=13" },
     { name = "sounddevice", specifier = ">=0.4" },
-    { name = "textual", specifier = ">=8.2.8,<8.3" },
+    { name = "textual", specifier = "==8.2.8" },
     { name = "truststore", specifier = ">=0.9" },
 ]
 
 [[package]]
 name = "gc-ua"
-version = "0.6.1"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "gc-acp" },
@@ -1601,7 +1603,7 @@ dev = [
     { name = "pytest-textual-snapshot", specifier = ">=1.0,<1.1" },
     { name = "rich", specifier = ">=13" },
     { name = "ruff", specifier = ">=0.14" },
-    { name = "textual", specifier = ">=8.2.8,<8.3" },
+    { name = "textual", specifier = "==8.2.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
     { name = "vulture", specifier = ">=2.14" },
 ]
@@ -1627,7 +1629,7 @@ test = [
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-textual-snapshot", specifier = ">=1.0,<1.1" },
     { name = "rich", specifier = ">=13" },
-    { name = "textual", specifier = ">=8.2.8,<8.3" },
+    { name = "textual", specifier = "==8.2.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 

@@ -1318,3 +1318,29 @@ async def test_nothing_is_recorded_where_recording_is_off(tmp_path):
 
     assert list(threads_dir.glob("edits_*.jsonl")) == []
     assert not (launch_root / ".gc").exists()
+
+
+async def test_write_into_gc_own_data_inside_project_is_not_recorded(roots):
+    """fs-канал: каталог тредов настроен внутрь проекта — правка тулом файла
+    в нём не правка агента (иначе откат «Сессии» вернул бы журнал к началу),
+    а правка файла проекта рядом пишется как обычно."""
+    launch_root, _ = roots
+    threads_dir = launch_root / "threads"
+    threads_dir.mkdir()
+    ctx = _ctx(launch_root, threads_dir)
+    update_ctx(ctx, {"paths.threads_data_path": str(threads_dir)})
+    own = threads_dir / "cli_th1.jsonl"
+    project_file = launch_root / "a.txt"
+
+    for path in (own, project_file):
+        path.write_bytes(b"new\n")
+        await record_edit(
+            ctx,
+            abs_path=str(path),
+            old_bytes=b"old\n",
+            new_bytes=b"new\n",
+            op="edit",
+            call_id="call-1",
+        )
+
+    assert [r.path for r in _journal(threads_dir).read_all()] == ["a.txt"]

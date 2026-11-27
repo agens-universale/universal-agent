@@ -7,6 +7,7 @@ the credential-bearing worker configuration.
 """
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,25 +74,36 @@ class PreparedRunContext:
         )
 
 
+def _runtime_value(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    return tuple(tuple(v) if isinstance(v, list) else v for v in value)
+
+
 def settings_from_snapshot(settings: Any, runtime: Any) -> Any:
     """``LoadedSettings`` из подготовленных значений ``PreparedRunContext``.
 
     Объекты (локальная сборка) берутся как есть. JSON-снимок (durable) —
-    ``AppConfig.model_validate`` БЕЗ ``resolve_paths``: пути снимка уже такие,
+    совместимые переименования ключей и ``AppConfig.model_validate`` БЕЗ
+    ``resolve_paths``: пути снимка уже такие,
     какими их видит воркер, а резолв полез бы в cwd/home — в песочнице workflow
     это запрещено. Явность полей сохраняет сам снимок (в нём только заданное).
     """
     from gc_core.settings import AppConfig, LoadedSettings, RuntimeEnv
 
     if isinstance(settings, Mapping):
-        settings = AppConfig.model_validate(settings)
+        from gc_core.config_modules.compat import apply_compat
+
+        # История может быть записана старой схемой (например, level → model).
+        # Меняем только копию значений: без файлов, окружения и резолва путей.
+        raw = deepcopy(dict(settings))
+        apply_compat(raw)
+        settings = AppConfig.model_validate(raw)
     if isinstance(runtime, Mapping):
-        # Списков в ``RuntimeEnv`` нет: список снимка — это кортеж рантайма.
+        # Списков в ``RuntimeEnv`` нет: список снимка — это кортеж рантайма
+        # (и пары внутри него — кортежи).
         runtime = RuntimeEnv(
-            **{
-                key: tuple(value) if isinstance(value, list) else value
-                for key, value in runtime.items()
-            }
+            **{key: _runtime_value(value) for key, value in runtime.items()}
         )
     return LoadedSettings(settings=settings, runtime=runtime or RuntimeEnv())
 

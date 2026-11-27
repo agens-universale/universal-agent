@@ -143,3 +143,34 @@ def test_summary_intent_tail_matches_read_page_slice():
     )
     assert preview["content"].strip() in body
     assert 'truncated="true"' in body
+
+
+def test_tool_hints_are_kept_when_tool_set_is_unknown():
+    """``available_tools=None`` — набор неизвестен, подсказки не гейтятся."""
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        session_memory_block="<session_memory>\n</session_memory>",
+        session_todo_block="<session_todo>\n[ ] шаг\n</session_todo>",
+    )
+    assert "use the session memory tool" in body
+    assert "update session memory with append or write" in body
+    assert "with the session_todo tool" in body
+
+
+def test_tool_hints_follow_the_tool_set_of_the_run():
+    """Подсказка про тул, которого нет в наборе рана, в сводку не попадает;
+    сами блоки памяти и чек-листа остаются."""
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        session_memory_block="<session_memory>\n</session_memory>",
+        session_todo_block="<session_todo>\n[ ] шаг\n</session_todo>",
+        available_tools=set(),
+    )
+    assert "<session_memory>" in body
+    assert "<session_todo>" in body
+    assert "session memory tool" not in body
+    assert "update session memory" not in body
+    assert "session_todo tool" not in body
+    assert "Continue the dialogue from here after summarization." in body

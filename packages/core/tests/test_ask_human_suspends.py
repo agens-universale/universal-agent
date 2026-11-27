@@ -199,10 +199,10 @@ async def test_answer_is_not_replayed_into_the_tail_turn(
         real_teardown = ae._aclose_mcp_and_release
         late = [{"role": "user", "content": "и ещё", "id": "m-tail"}]
 
-        async def teardown(owner_reset):
+        async def teardown(owner_reset, **kw):
             if late:
                 agent.send(late.pop())
-            await real_teardown(owner_reset)
+            await real_teardown(owner_reset, **kw)
 
         monkeypatch.setattr(ae, "_aclose_mcp_and_release", teardown)
         await agent.run([], answer="B", thread_id=KEY.thread)

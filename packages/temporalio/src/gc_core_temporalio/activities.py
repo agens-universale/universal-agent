@@ -628,7 +628,9 @@ class AgentActivities:
             from gc_core.agent_executor import _aclose_mcp_and_release
             from gc_core.mcp_session_owner import set_owner
 
-            await _aclose_mcp_and_release(set_owner(ctx.mcp_session_owner))
+            await _aclose_mcp_and_release(
+                set_owner(ctx.mcp_session_owner), ctx=ctx
+            )
         return True
 
     @activity.defn(name="universal_agent.context.release")

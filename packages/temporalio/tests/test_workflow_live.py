@@ -9,6 +9,7 @@ import pytest
 from live_support import temporal_cli, thread_messages, thread_meta
 from gc_core.run_context import acreate_run_context
 from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
@@ -127,11 +128,11 @@ async def test_native_executor_uses_real_file_session_and_replays(
         # persist: step — шаг одной записью (commit) без чтения перед ней;
         # persist: turn — ход одной записью в конце. Тред читается один раз —
         # при открытии сессии. Аренда — claim в начале, release в конце.
-        # Записей сбоку нет: отметку хода под Temporal не ставят, а сброс
-        # флагов хода без залипших флагов ничего не пишет.
+        # Завершение хода сбрасывает отложенные изменения и отдельной
+        # append_side сохраняет итог (поток turns и runtime.last_turn).
         expected = {
-            "step": {"commit": 8, "get": 1, "append_side": 0},
-            "turn": {"commit": 1, "get": 1, "append_side": 0},
+            "step": {"commit": 9, "get": 1, "append_side": 1},
+            "turn": {"commit": 2, "get": 1, "append_side": 1},
         }[persist]
         for operation, count in expected.items():
             name = f"universal_agent.thread.{operation}"
@@ -160,6 +161,11 @@ async def test_native_executor_uses_real_file_session_and_replays(
         assert (await thread_meta(files, "test", "native-thread"))["shared"][
             "working_memory"
         ]["knowledge"] == "durable fact"
+        (turn,) = await files.read_stream(
+            ThreadKey(system="test", thread="native-thread"), "turns"
+        )
+        assert turn.data["outcome"]["status"] == "done"
+        assert turn.data["outcome"]["duration_sec"] >= 0
         await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             history
         )

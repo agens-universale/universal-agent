@@ -60,6 +60,7 @@ import pytest
 # Исходники разъехались по пакетам — раскладку знает gc_testkit.paths.
 # Импорты абсолютные, как во всех остальных пакетах: относительные оставались
 # только здесь.
+from gc_testkit.git_hooks import ensure_hooks_installed
 from gc_testkit.paths import (
     _declares_gc_core,
     module_dir,
@@ -354,6 +355,7 @@ def pytest_load_initial_conftests(early_config) -> None:
     use_repo_root(suite_root)
 
     _OUR_SUITE = True
+    ensure_hooks_installed(suite_root)
     _isolate_gc_home()
     ensure_sources_on_path()
     if not _mcp_runtime_available():

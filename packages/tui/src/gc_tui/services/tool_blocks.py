@@ -15,11 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Iterable, Literal, Mapping, Optional, Sequence, Union
+from typing import (
+    Callable,
+    Iterable,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+)
 
 from gc_core.agent_edits.journal import CREATED_FLAG, EditRecord
 from gc_core.config_modules.agent_edits import DEFAULT_TRACE_DIFF_PREVIEW_LINES
-from gc_core.constants.tool_display import DisplayCategory
+from gc_core.constants.tool_display import DisplayCategory, tool_display
 
 from gc_tui.models import ResultOutcome
 from gc_tui.services.duration_format import format_size
@@ -145,6 +153,26 @@ def block_kind(category: DisplayCategory) -> Optional[BlockKind]:
     if category == DisplayCategory.HIDDEN:
         return None
     return _KIND_OF.get(category, BlockKind.SINGLE)
+
+
+def call_block_kind(wire_name: str) -> Optional[BlockKind]:
+    """Вид блока вызова по wire-имени — без сведений о серверах MCP (вне
+    экрана: модель истории). Тот же вид, что у ленты: вызов MCP —
+    одиночный и с ними, и без них (`tool_display`)."""
+    return block_kind(tool_display(wire_name).category)
+
+
+def may_join(above: Optional[BlockKind], kind: Optional[BlockKind]) -> bool:
+    """Вызов вида ``kind`` может встать в блок вида ``above`` прямо над
+    ним — одно правило группировки ленты: сгруппированные виды — по виду,
+    правка — в правки (по исходу, `_accepts`). Нет — группа над вызовом
+    закрывается перед ним; его же зовёт сплиттер шагов (`trace_steps`):
+    граница шага встаёт там, где группа закрылась бы и так."""
+    if above is None or kind is None:
+        return False
+    if kind == BlockKind.EDITS:
+        return above == BlockKind.EDITS
+    return kind in _GROUPED and kind == above
 
 
 def header_word(
@@ -657,7 +685,11 @@ def _accepts(group: Optional[_Block], member: _Member) -> bool:
     """Встаёт ли законченная правка в группу над ней (решение плана 4):
     сбой — в любую группу правок; успешная — в группу своего глагола с
     хотя бы одной применившейся."""
-    if group is None or group.kind != BlockKind.EDITS or group.pending:
+    if (
+        group is None
+        or not may_join(group.kind, BlockKind.EDITS)
+        or group.pending
+    ):
         return False
     if member.outcome != "ok":
         return True
@@ -718,7 +750,11 @@ class ToolBlocks:
         above = self._block_above(member)
         self._order.append(member)
         self._members[call_id] = member
-        if kind in _GROUPED and above is not None and above.kind == kind:
+        if (
+            kind != BlockKind.EDITS
+            and above is not None
+            and may_join(above.kind, kind)
+        ):
             block = above
         else:
             block = self._new_block(kind)
@@ -957,6 +993,50 @@ class ToolBlocks:
         if found is None or not found.members:
             return None
         return found.members[-1].key
+
+    # --- снимок вида (память эфемерного) ---------------------------------
+
+    def view_state(self, calls: Iterable[str]) -> dict[str, bool]:
+        """Раскрытие блоков с членами из ``calls`` по ключам, которые не
+        зависят от уровня и счёта блоков (блок — по первому вызову): так
+        их находит отрисовка того же хода заново. Окно субагента —
+        ``window``."""
+        calls = set(calls)
+        out: dict[str, bool] = {}
+        for block in self._blocks:
+            keys = {m.key for m in block.members}
+            if not calls & keys:
+                continue
+            first = block.members[0].key
+            out[f"block:{first}"] = block.expanded
+            for owner in self._owners(block):
+                stable = _stable_key(block, first, owner)
+                out[f"open:{stable}"] = owner in self._open
+        if self._window is not None and calls & set(self._members):
+            out["window"] = self._window.expanded
+        return out
+
+    def restore_view(
+        self, view: Callable[[str], Optional[bool]]
+    ) -> list[Decision]:
+        """Раскрытие из снимка (`view_state`): ключа нет — как есть."""
+        out: list[Decision] = []
+        for block in self._blocks:
+            if not block.members:
+                continue
+            first = block.members[0].key
+            changed = _restore_flag(block, view(f"block:{first}"))
+            for owner in self._owners(block):
+                flag = view(f"open:{_stable_key(block, first, owner)}")
+                if flag is not None and flag != (owner in self._open):
+                    self._open ^= {owner}
+                    changed = True
+            if changed:
+                out += self._render(block)
+        window = self._window
+        if window is not None and _restore_flag(window, view("window")):
+            out += self._window_changes()
+        return out
 
     # --- отрисовка -------------------------------------------------------
 
@@ -1421,6 +1501,22 @@ class ToolBlocks:
         if not executed:
             return None
         return SetTimer(member.key, self._timers.get(member.key))
+
+
+def _stable_key(block: _Block, first: str, owner: str) -> str:
+    """Ключ раскрытого владельца без счёта блоков: фразы частей `Ran`
+    (``<блок>:<место>``) — по первому вызову блока."""
+    if owner.startswith(f"{block.key}:"):
+        return first + owner[len(block.key) :]
+    return owner
+
+
+def _restore_flag(block: _Block, flag: Optional[bool]) -> bool:
+    """Раскрытие блока из снимка; True — сменилось."""
+    if flag is None or flag == block.expanded:
+        return False
+    block.expanded = flag
+    return True
 
 
 def _ran_keys(block: _Block) -> tuple[str, ...]:

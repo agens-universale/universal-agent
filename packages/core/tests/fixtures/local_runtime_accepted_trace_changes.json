@@ -3,8 +3,9 @@
   "changes": [
     "requests во всех сценариях: в запрос к модели входят служебные наджи и живой блок режима разрешений.",
     "In memory_two_turns, nudges in tool output change thread, meta, and state. Step and call counts are unchanged.",
-    "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, поэтому requests тоже другой.",
-    "Optional fs_read_file line numbering changes request schemas in all scenarios. In file_roundtrip both reads succeed without the flag, restoring the reference thread, meta, and state without changing step or call counts."
+    "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, а уходит с аргументами {}, поэтому requests тоже другой; в ответе на битый вызов — фрагмент полученных аргументов.",
+    "Optional fs_read_file line numbering changes request schemas in all scenarios. In file_roundtrip both reads succeed without the flag, restoring the reference thread, meta, and state without changing step or call counts.",
+    "After !209, finish gate requests report the original JSON string type in finish_handoff_normalization. The requests digests for finish_judge_accept and finish_judge_reject account for this field in JSON and SSE."
   ],
   "scenarios": {
     "deferred_accounting_outcome:json": {
@@ -56,19 +57,19 @@
       "state": "d17cd8055638acb9a56bcfc3807172fed6711f803afa586269551dfe511bc7b7"
     },
     "invalid_json:json": {
-      "requests": "a4b8668d4aa06b116d662cc22db88f5266ec2b094267a28c2a358a31971123bd",
-      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
-      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
-      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "requests": "88c948929a1d4bf9b3ac4467016fb8a204ad5d54e3202c335424e63b478b6cb5",
+      "thread": "14f6a8d87bd78c007f6cecbb9e1be2298cf5954727722a11ede6efd853959570",
+      "meta": "fcef42e1cea1f6644502679488f91fb5805a905ee8b6a586ee80b8c8c1d4c020",
+      "state": "d5b7b1b59b9e7902b0b4669d5ea7418663eb499bbf74b1fd50e250ad566e24d3",
       "tool_calls": 3,
       "recorded_tool_calls": 3,
       "steps": 3
     },
     "invalid_json:sse": {
-      "requests": "9dadf20d4d63ce2c4b02e5e03c851a938edd102a0ce73445f7d59ef122660fe2",
-      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
-      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
-      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "requests": "973145e3d214fbf44073c4acb8f35dbecec9ca63165b49c48c85da11a95f81c2",
+      "thread": "14f6a8d87bd78c007f6cecbb9e1be2298cf5954727722a11ede6efd853959570",
+      "meta": "fcef42e1cea1f6644502679488f91fb5805a905ee8b6a586ee80b8c8c1d4c020",
+      "state": "d5b7b1b59b9e7902b0b4669d5ea7418663eb499bbf74b1fd50e250ad566e24d3",
       "tool_calls": 3,
       "recorded_tool_calls": 3,
       "steps": 3
@@ -116,16 +117,16 @@
       "requests": "52b662f722305515934332f84f2c02966c56ac1039c02d7fcb00c6f105c8cc61"
     },
     "finish_judge_accept:json": {
-      "requests": "6aba05a1a053d1d60644c6d7c1f0dad470cdb33ac5073bda2998d7d48e2b8be9"
+      "requests": "20cfed56b664477e5b8c50448957879fd87f684be42204b4d5f1cfeb5bdd8e6a"
     },
     "finish_judge_accept:sse": {
-      "requests": "559457e286e968ef3940596b05a2fa3dc3de2dbb37fe6477624240336c8ce416"
+      "requests": "5d15afd13cc8327e8023110c29f7745782bb7c390f58b22420fe61211876e968"
     },
     "finish_judge_reject:json": {
-      "requests": "55bb3af41f85c6d47929bf5701d0f65c3f6059260b4d52f86e53f9bc85545b5b"
+      "requests": "1561615a88744ff2643c929d19d2768c3bdfc12632eba4df3497431a9e8baf30"
     },
     "finish_judge_reject:sse": {
-      "requests": "d3a25a23f3185d5c4d71501f4c340776687e054b2a60a268ed53cdb4ea735903"
+      "requests": "4b5c323631d8052c23c3fc62302f9fe770f18d0165e76438a700035a6f283078"
     },
     "human_boundary:json": {
       "requests": "f2fb9888dfd1d24d5755118123b4918cecefb0cc312e1a7908b88bf815e035cc",

@@ -182,7 +182,7 @@ def _trace_text(app) -> str:
 
 
 def _events(scr) -> list[tuple]:
-    return [(e.no, e.kind, e.summary) for e in scr._task_events]
+    return [(e.no, e.kind, e.summary) for e in scr._feed_history.events()]
 
 
 def _count(monkeypatch, scr, name: str) -> list:
@@ -280,7 +280,7 @@ def _base_thread(tmp_path: Path) -> _Thread:
 def _payloads(scr) -> list:
     return [
         (e.call_id, is_light_payload(e))
-        for e in scr._task_events
+        for e in scr._feed_history.events()
         if e.kind in ("call", "result")
     ]
 
@@ -746,13 +746,14 @@ async def test_scroll_position_kept_after_compaction(tmp_path):
         trace = app.screen.query_one("#trace")
         assert trace.max_scroll_y > 5
         await pilot.pause(0.05)  # отложенное прижатие attach отработало
-        # Пользователь ушёл вверх.
+        # Пользователь ушёл вверх. У верха окно домонтирует историю и
+        # держит читаемую строку — позицию снимаем, когда кусок встал.
         trace.scroll_to(y=3, animate=False)
         await pilot.pause(0.05)
         scr._poll_active()  # тик замечает уход вверх
+        await _wait_until(pilot, lambda: not scr._window_busy, "встал")
         assert scr._stick_bottom is False
         y_before = trace.scroll_y
-        assert y_before == 3
         _compact_ticking(thread, scr, "S1", _user("u29", "реплика 29"))
         await pilot.pause(0.05)
 

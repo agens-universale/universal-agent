@@ -87,6 +87,18 @@ def _skill_pack(skill: dict) -> str:
     return str(skill.get("id", "")).rpartition(":")[0]
 
 
+def _plugin_mark(skill: dict) -> str:
+    """Пометка строки команды плагина (`· <плагин>`); у скилла — пусто."""
+    plugin = skill.get("plugin")
+    return f"· {plugin}" if plugin else ""
+
+
+def _plugin_mark_w(skill: dict) -> int:
+    """Место пометки справа: зазор 3 + пометка (или 0)."""
+    mark = _plugin_mark(skill)
+    return len(mark) + 3 if mark else 0
+
+
 def _skill_shown_name(
     skill: dict, prefix: str, taken: bool
 ) -> tuple[str, bool] | None:
@@ -463,7 +475,10 @@ class CommandPalette(VerticalScroll):
         skills = self._visible_skill_rows()
         longest = max(
             [len(c.description) for c in rows]
-            + [len(str(s.get("description") or "")) for s in skills],
+            + [
+                len(str(s.get("description") or "")) + _plugin_mark_w(s)
+                for s in skills
+            ],
             default=0,
         )
         return self._desc_start() + longest + self._hotkey_tail()
@@ -501,13 +516,17 @@ class CommandPalette(VerticalScroll):
     def _format_skill_row(self, skill: dict) -> Text:
         """Строка скилла: запускаемое `/имя` в общей колонке имён (цвет —
         классом `.palette-skill-row`), длиннее `SKILL_NAME_MAX` — с
-        многоточием; затем серым описание."""
+        многоточием; затем серым описание. У команды плагина справа —
+        пометка `· <плагин>`."""
         name = fit_name(_skill_label(skill))
         text = Text(f" {name.ljust(self._name_col_w())}")
-        desc = self._fit_desc(
-            str(skill.get("description") or ""), self._hotkey_tail()
-        )
+        mark = _plugin_mark(skill)
+        tail = max(self._hotkey_tail(), _plugin_mark_w(skill))
+        desc = self._fit_desc(str(skill.get("description") or ""), tail)
         text.append(desc, style=_pal.DIM)
+        if mark:
+            gap = max(3, self._line_width() - len(text) - len(mark))
+            text.append(" " * gap + mark, style=_pal.DEEP_DIM)
         return text
 
     def _skill_widgets(
@@ -699,14 +718,19 @@ class CommandPalette(VerticalScroll):
         """Все скиллы под фильтр (голый `/` — ни одного); в `input_name` —
         имя, которое показывает строка и вставляет Enter. Сначала совпавшие
         по имени (`skill_name_key`, как в пикере /skill), ниже совпавшие
-        только по пакету — по пакетам, внутри пакета по короткому имени."""
+        только по пакету — по пакетам, внутри пакета по короткому имени.
+        Команду плагина, чьё короткое имя занято словом TUI, строка
+        показывает и по короткому имени — с полным id в `input_name`."""
         f = self._prefix()
         if not f or self._skills is None:
             return []
         by_name: list[dict] = []
         by_pack: list[dict] = []
         for s in self._skills():
-            taken = self._registry.lookup(skill_short(s)) is not None
+            taken = (
+                not s.get("plugin")
+                and self._registry.lookup(skill_short(s)) is not None
+            )
             shown = _skill_shown_name(s, f, taken)
             if shown is None:
                 continue

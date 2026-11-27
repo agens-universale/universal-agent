@@ -81,6 +81,23 @@ def test_mcp_failed_from_status():
     assert "science" not in failed[0].message
 
 
+def test_mcp_failed_hint_names_screen_only_in_tui():
+    """Экран `/mcp` есть только в TUI: в gc-cli подсказка без команды."""
+    cfg = make_settings({})
+    mcp = {"office": {"status": "failed"}}
+
+    def _message(*, is_tui):
+        ns = collect_startup_notices(cfg, _BUILTIN, mcp, is_tui=is_tui)
+        return next(n.message for n in ns if n.code == "mcp_failed")
+
+    assert _message(is_tui=True) == (
+        "MCP не подключились: office. Проверьте конфиг/доступность (/mcp)."
+    )
+    assert _message(is_tui=False) == (
+        "MCP не подключились: office. Проверьте конфиг/доступность."
+    )
+
+
 def test_deprecated_key_info():
     cfg = make_settings({})
     ns = collect_startup_notices(

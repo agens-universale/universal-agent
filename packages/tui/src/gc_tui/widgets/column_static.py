@@ -22,7 +22,7 @@ from textual.style import Style
 from textual.visual import RenderOptions, Visual
 from textual.widgets import Static
 
-from gc_tui.services.column_row import ColumnRow, ColumnRows
+from gc_tui.services.column_row import WidthAware
 
 
 def _line_text(line: list[Segment]) -> Text:
@@ -41,9 +41,7 @@ def _line_text(line: list[Segment]) -> Text:
 class _ColumnVisual(Visual):
     """Строки с колонками, разложенные под ширину в `Content`."""
 
-    def __init__(
-        self, renderable: ColumnRow | ColumnRows, console: Console
-    ) -> None:
+    def __init__(self, renderable: WidthAware, console: Console) -> None:
         self._renderable = renderable
         self._console = console
         self._laid: dict[int, Content] = {}
@@ -87,7 +85,7 @@ class ColumnStatic(Static):
 
     def render(self) -> Visual:
         content = self.content
-        if not isinstance(content, (ColumnRow, ColumnRows)):
+        if not isinstance(content, WidthAware):
             return super().render()
         visual = self._column_visual
         if visual is None or visual._renderable is not content:

@@ -14,7 +14,6 @@ REQUIRED = (
     "turn_finish",
     "session_read_stored_tool_output",
     "session_memory",
-    "session_todo",
 )
 
 
@@ -66,6 +65,15 @@ class TestRequiredTools:
         assert FileDefinedSubagent.required_tools_banned(
             _definition(stop_tools=REQUIRED)
         ) == sorted(REQUIRED)
+
+    def test_todo_ban_is_honoured_not_reported(self):
+        # session_todo не в ядре: его запрет исполняется, варнинга нет.
+        assert (
+            FileDefinedSubagent.required_tools_banned(
+                _definition(stop_tools=("session_todo",))
+            )
+            == []
+        )
 
     def test_unrelated_stop_tools_are_ignored(self):
         assert (

@@ -5,26 +5,27 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-ua"
 
-version = "0.6.1"
+version = "0.6.2"
 description = "GigaCode Universal Agent — полный агент (ядро + CLI + TUI + server)"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.6.1",
-    "gc-cli==0.6.1",
-    "gc-tui==0.6.1",
-    "gc-server==0.6.1",
-    "gc-mcp==0.6.1",
-    "gc-acp==0.6.1",
+    "gc-core==0.6.2",
+    "gc-cli==0.6.2",
+    "gc-tui==0.6.2",
+    "gc-server==0.6.2",
+    "gc-mcp==0.6.2",
+    "gc-acp==0.6.2",
 ]
 
 [project.optional-dependencies]
-temporal = ["gc-core-temporalio==0.6.1"]
+temporal = ["gc-core-temporalio==0.6.2"]
 
 all = []
 
 [project.scripts]
 gc-cli = "gc_cli.cli:main"
+gc-plugin = "recommended_mcp.plugin_cli:main"
 gc-ua = "gc_tui:main"
 gc-serve = "gc_server.cli:main"
 gc-mcp = "recommended_mcp.runtime.cli:main"
@@ -57,7 +58,7 @@ lint = [
 test = [
 
     "gc-testkit",
-    "gc-core-temporalio==0.6.1",
+    "gc-core-temporalio==0.6.2",
     "gc-stores[all]",
     "gc-server[a2a]",
     "pytest>=9.0.3",
@@ -67,7 +68,7 @@ test = [
 
     # Патчи совместимости с Textual проверены только на 8.2.8 (gc_tui опирается
     # на его приватные модули); переход на новую версию — отдельная задача.
-    "textual>=8.2.8,<8.3",
+    "textual==8.2.8",
     "rich>=13",
 
     # Версия 1.1.0 требует syrupy==4.8.0, а тот — pytest<9.

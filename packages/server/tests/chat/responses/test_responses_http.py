@@ -160,7 +160,7 @@ def test_non_stream_failure_is_500(tmp_path):
     body = response.json()
     assert body["status"] == "failed"
     assert body["error"]["code"] == "server_error"
-    assert body["error"]["message"] == "boom"
+    assert body["error"]["message"] == "Internal server error."
 
 
 def test_harbor_is_refused_before_bind():

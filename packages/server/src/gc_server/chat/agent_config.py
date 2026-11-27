@@ -28,3 +28,22 @@ def prepare_agent_settings(
     return base.with_overrides(updates, layer="runtime").with_runtime(
         launch_root=cwd
     )
+
+
+def agent_io(settings, cwd, backend):
+    """Локальный I/O — на диалог; MCP — у общего сервиса поверхности."""
+    from gc_core.backends.factory import parse_os_backend_kind
+    from gc_core.backends.local import LocalFsBackend
+
+    if type(backend) is LocalFsBackend or (
+        backend is None and parse_os_backend_kind(settings) == "local"
+    ):
+        cap = (
+            backend.exec_output_capture_max_chars
+            if backend is not None
+            else settings_of(settings).agent.exec_output_capture_max_chars
+        )
+        # Серверы MCP подключает сервис поверхности, а не scoped: смена cwd
+        # файловых инструментов не требует нового подключения.
+        return LocalFsBackend(cwd=cwd, exec_output_capture_max_chars=cap)
+    return backend

@@ -13,7 +13,7 @@ from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
 
 from gc_server.agent_roles import COMPLETIONS
-from gc_server.chat.agent_config import prepare_agent_settings
+from gc_server.chat.agent_config import agent_io, prepare_agent_settings
 from gc_server.chat.completions.ask_human import bind_ask_human
 from gc_server.chat.completions.content import ContentMap
 from gc_server.chat.completions.history import (
@@ -43,7 +43,7 @@ class CompletionsFacade:
         settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         section: ChatConfig | None = None,
         threads: Threads | None = None,
@@ -52,14 +52,14 @@ class CompletionsFacade:
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._threads = threads or Threads.from_settings(settings)
         self.auth_token = section.auth_token or ""
         self.cors_origins = _cors_origins(section.cors_origins)
         self.bind_host = section.host or LOOPBACK
         self.max_body_bytes = section.max_body_bytes or DEFAULT_MAX_BODY_BYTES
-        self._launch_root = section.launch_root
+        self._launch_root = cwd_for_new(None, section.launch_root)
         self.model_id = str(settings.settings.agent.model or "")
         self._create_lock = asyncio.Lock()
 
@@ -68,15 +68,17 @@ class CompletionsFacade:
         thread_id = validate_thread_id(str(uuid.uuid4()))
         cwd = cwd_for_new(incoming.cwd_sent, self._launch_root)
         agent = await self._agent_for(thread_id, cwd)
+        # До старта хода агентом владеет запрос: отказ закрывает его, иначе
+        # его потребитель MCP остался бы у сервиса поверхности.
         try:
             bind_ask_human(agent)
             await seed_prior(self._threads, thread_id, incoming.prior)
+            return await self._begin(incoming, thread_id, cwd, agent)
         except Exception:
-            logger.exception("completions seed")
+            logger.exception("completions open")
             await _safe_aclose(agent)
             await _forget_quietly(self._threads, thread_id)
             raise
-        return await self._begin(incoming, thread_id, cwd, agent)
 
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         del thread_id
@@ -87,11 +89,12 @@ class CompletionsFacade:
                 instructions_path=completions_special_instructions_path(),
                 variant=COMPLETIONS,
             )
+            backend = agent_io(settings, cwd, self._os_backend)
             return await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=self._tools_cache,
-                os_backend=self._os_backend,
+                mcp_service=self._mcp_service,
+                os_backend=backend,
             )
 
     async def _begin(

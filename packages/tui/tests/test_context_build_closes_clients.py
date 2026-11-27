@@ -1,54 +1,54 @@
-"""Сборка executor в TUI закрывает httpx-клиенты своего loop.
+"""Пул httpx TUI закрывается на выходе цикла агента, не в сборке и не в сжатии.
 
-`_build_real_executor` заводит собственный `asyncio.run`, а реестр клиентов
-`async_http` ключуется по loop. Ход и `/compact` закрывают пул в `finally` и
-пишут об этом прямо в комментариях, а сборка — нет: клиент легаси http/sse MCP
-оставался в реестре с открытыми сокетами после смерти loop, и так на каждой
-пересборке контекста (смена конфига сессии, `/profile`).
+Раньше сборка контекста, ход и `/compact` поднимали каждый свой
+``asyncio.run`` и закрывали пул своего loop в ``finally``: реестр клиентов
+`async_http` ключуется по ``id(loop)``, и клиент умершего loop мог достаться
+следующему. Теперь цикл агента один на приложение и переживает ходы — на нём
+же живут фоновые субагенты. Закрыть пул посреди жизни цикла значит оборвать
+их запросы к модели (пересборка на ``/profile``, ``/compact`` при живых
+детях). Поэтому ``aclose_clients`` зовётся ровно в одном месте — в уборке
+потока цикла после `AgentLoop.shutdown`, на выходе приложения.
 
-Проверка структурная: поведенческая поймала бы утечку только на легаси-MCP с
-реальными сокетами, а эта краснеет на самой правке.
+Проверка структурная: поведенческая (``test_agent_loop``) ловит живой клиент,
+а эта краснеет на самой правке, вернувшей закрытие в сборку или сжатие.
 """
 
 import ast
 
 from gc_testkit.paths import TUI_PKG
 
-_SRC = TUI_PKG / "app.py"
+_SERVICES = TUI_PKG / "services"
 
 
-def _build_executor_node() -> ast.FunctionDef:
-    tree = ast.parse(_SRC.read_text(encoding="utf-8"))
-    return next(
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "_build_real_executor"
-    )
+def _calls_of(path, name: str) -> dict[str, int]:
+    """Число вызовов ``name`` по функциям файла (ключ — имя функции)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: dict[str, int] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = getattr(func, "id", None) or getattr(func, "attr", None)
+            if called == name:
+                found[fn.name] = found.get(fn.name, 0) + 1
+    return found
 
 
-def test_context_build_closes_its_clients():
-    node = _build_executor_node()
+def test_context_build_and_compaction_do_not_close_the_pool():
+    for path in (TUI_PKG / "app.py", _SERVICES / "agent_runner.py"):
+        assert _calls_of(path, "aclose_clients") == {}, (
+            f"{path.name}: пул httpx закрывается вне AgentLoop.shutdown — "
+            "сборка или сжатие оборвали бы запросы живых субагентов"
+        )
 
-    closes = [
-        n
-        for n in ast.walk(node)
-        if isinstance(n, ast.Call)
-        and getattr(n.func, "id", None) == "aclose_clients"
-    ]
-    assert closes, (
-        "сборка контекста в TUI не закрывает пул httpx своего loop — "
-        "клиент легаси http/sse MCP переживёт loop с открытыми сокетами"
-    )
 
-    in_finally = [
-        n
-        for t in ast.walk(node)
-        if isinstance(t, ast.Try)
-        for stmt in t.finalbody
-        for n in ast.walk(stmt)
-        if isinstance(n, ast.Call)
-        and getattr(n.func, "id", None) == "aclose_clients"
-    ]
-    assert in_finally, (
-        "закрытие пула не в `finally` — отказ сборки (нет сети, битый конфиг) оставит клиентов позади"
+def test_the_pool_closes_in_agent_loop_shutdown():
+    calls = _calls_of(_SERVICES / "agent_loop.py", "aclose_clients")
+    assert calls == {"_aclose_clients": 1}, (
+        "пул httpx цикла агента должен закрываться ровно один раз, в "
+        "уборке потока цикла после AgentLoop.shutdown "
+        f"(`_aclose_clients`), а не {calls}"
     )

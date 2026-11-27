@@ -43,6 +43,12 @@ def _tui_color_mode(monkeypatch):
     monkeypatch.delenv("NO_COLOR", raising=False)
 
 
+@pytest.fixture
+def color_trace(monkeypatch):
+    """Проверки палитры ленты явно выбирают цветной режим, как снимки."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _snapshot_clock(request, monkeypatch):
     """Часы эталонов — одни на все кадры (`pinned_snapshot_clock`): время
@@ -118,6 +124,44 @@ def pytest_collection_modifyitems(items):
             item.add_marker(flaky)
             if item.name in _SNAPSHOT_DRIFT:
                 item.add_marker(drift)
+
+
+@pytest.fixture
+def agent_loop():
+    """Цикл агента теста; teardown гасит его — поток не переживает тест."""
+    from gc_tui.services.agent_loop import AgentLoop
+
+    loop = AgentLoop()
+    yield loop
+    loop.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def _no_agent_loop_survives(monkeypatch):
+    """Ни один цикл агента не переживает тест.
+
+    Циклы заводят и раннеры без явного цикла, и окна, чью сборку тест зовёт
+    без монтирования (``on_unmount`` не наступит). Запомнить каждый
+    запущенный и погасить в teardown — проще, чем требовать этого от
+    каждого теста. Ссылки слабые: живой поток держит свой цикл сам, а
+    сильная ссылка держала бы до teardown и приложение (поток помнит
+    ``sys.stderr`` на старте — перехват Textual, а с ним окно).
+    """
+    import weakref
+
+    from gc_tui.services.agent_loop import AgentLoop
+
+    started: weakref.WeakSet[AgentLoop] = weakref.WeakSet()
+    real_start = AgentLoop.start
+
+    def _start(self) -> None:
+        started.add(self)
+        real_start(self)
+
+    monkeypatch.setattr(AgentLoop, "start", _start)
+    yield
+    for loop in list(started):
+        loop.shutdown()
 
 
 @pytest.fixture(autouse=True)

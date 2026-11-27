@@ -8,6 +8,7 @@ import pytest
 from gc_testkit.develop_files import append_new_thread_messages, meta_of
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.file_store import FileTaskStore
+from open_support import settle
 
 
 def _seed(
@@ -624,7 +625,7 @@ async def test_ctrl_p_opens_preview(tmp_path):
         )
         await pilot.pause()
         await pilot.press("ctrl+p")
-        await pilot.pause()
+        await settle(pilot)
         assert isinstance(pilot.app.screen, PreviewScreen)
 
 
@@ -877,6 +878,6 @@ async def test_preview_gets_the_mcp_snapshot_of_the_thread(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._preview_selected()
-        await pilot.pause()
+        await settle(pilot)
         assert isinstance(pilot.app.screen, PreviewScreen)
         assert pilot.app.screen._mcp_snapshot == snapshot

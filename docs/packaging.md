@@ -15,7 +15,7 @@
 | `gc-cli` | `gc_cli` | `gc-cli` |
 | `gc-tui` | `gc_tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc_server` | `gc-serve` — поверхности webhook, chat, a2a, swarm |
-| `gc-mcp` | `recommended_mcp` | `gc-mcp`, `gc-mcp-install` |
+| `gc-mcp` | `recommended_mcp` | `gc-mcp`, `gc-mcp-install`, `gc-plugin` |
 | `gc-acp` | `gc_acp` | `gc-acp` |
 | `gc-stores` | `gc_stores` | **нет** — библиотека: хранилища тредов на базах, драйвер — extra (`gc-stores[postgres]`) |
 | `gc-ua` | — (только метаданные) | все листовые команды выше |
@@ -231,10 +231,16 @@ provided by dependencies of tool packages are not installed»). Поэтому �
 | `gc-cli` | `gc-cli` |
 | `gc-tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc-serve` |
-| `gc-mcp` | `gc-mcp`, `gc-mcp-install` |
+| `gc-mcp` | `gc-mcp`, `gc-mcp-install`, `gc-plugin` |
 | `gc-acp` | `gc-acp` |
 | `gc-ua` (мета) | все листовые команды, включая `gc-acp` и `gc-serve` |
 | `gc-core` | ничего, это библиотека |
+
+`gc-plugin` (установка плагинов, [plugins.md](plugins.md)) живёт в
+`recommended_mcp.plugin_cli`, рядом с `gc-mcp`, а не в `gc-cli`: профиль
+`gc-tui` от `gc-cli` не зависит, и команды в нём не было бы. С
+`--with-executables-from gc-mcp` она приезжает в профили `gc-cli`, `gc-tui`
+и `gc-server`.
 
 Гайды: [acp.md](acp.md), [server.md](server.md), [chat.md](chat.md), [a2a.md](a2a.md).
 

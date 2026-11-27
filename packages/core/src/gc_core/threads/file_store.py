@@ -25,12 +25,13 @@ import re
 import shutil
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from gc_core.thread_store_journal import (
+    _CONTROL_FILE,
     _STORE_DIR,
     _control,
     _control_path,
@@ -46,6 +47,7 @@ from gc_core.threads.errors import (
     ThreadConflict,
 )
 from gc_core.threads.file_namespace import namespace_scope
+from gc_core.threads.local_io import local_io
 from gc_core.threads.meta_map import (
     ARCHIVE_SUFFIX_KEY,
     meta_from_parts,
@@ -785,6 +787,30 @@ class FileThreadStore(ThreadStore):
 
     # --- чтение --------------------------------------------------------------------
 
+    def files_stamp(
+        self, key: ThreadKey, streams: Sequence[str] = ()
+    ) -> tuple:
+        """Отпечаток файлов треда: размер, время записи (нс) и inode meta,
+        истории, трассы субагентов, журнала правок, ``control.json`` (и
+        старого, без system в имени), файлов потоков ``streams`` и каталога
+        тредов
+        (появление и удаление архивов). Из них `get_thread` собирает запись,
+        а `read_stream` читает потоки: тот же отпечаток — та же запись и те
+        же записи потоков. Читатель, который опрашивает тред (TUI на каждом
+        тике), по нему не перечитывает meta. Файла нет — его место ``None``."""
+        system, thread = key.system, key.thread
+        paths = [
+            layout.meta_file(self._dir, system, thread),
+            layout.history_file(self._dir, system, thread),
+            layout.subagent_trace_path(self._dir, system, thread),
+            layout.edits_journal_path(self._dir, system, thread),
+            self._base(key) / _CONTROL_FILE,
+            _physical_control_path(self._dir, thread) / _CONTROL_FILE,
+            self._dir,
+        ]
+        paths += [self._stream_file(key, s) for s in streams if s != _HISTORY]
+        return tuple(map(_file_stamp, paths))
+
     async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
         with self._read_scope(key):
             _control_doc, v2 = self._load(key)
@@ -800,14 +826,13 @@ class FileThreadStore(ThreadStore):
         смотрятся). Порядок списка — по ``updated_at`` из meta каждого
         треда, так что любая страница ``list_threads`` читает весь каталог:
         фасад обходит файловое хранилище этим, а не N/страница проходами."""
-        return in_list_order(self._matching(query), query)
+        return in_list_order(await local_io(self._matching, query), query)
 
     def _matching(self, query: ThreadQuery) -> list[ThreadRecord]:
         # Треды, чьи файлы не менялись с ``updated_after``, отсеиваются по
         # mtime до чтения meta: обход восстановления — stat, а не разбор
         # каждого треда каталога. Тред чужой системы — до блокировки и
-        # сборки записи. Обход — на месте, не в потоке: фасад над
-        # файловым хранилищем зовут и синхронно (``run_sync`` в TUI).
+        # сборки записи. list_all_threads выносит этот обход из event loop.
         since = _mtime_floor(query.updated_after)
         records = []
         for key in self._known_keys(since):
@@ -1005,8 +1030,12 @@ class FileThreadStore(ThreadStore):
                     "owner_id": granted.owner,
                     "owner_epoch": granted.epoch,
                 }
+            # Запись для ответа читается до записи аренды: упади чтение
+            # (битый meta) — control не тронут, и тред не остаётся «занятым»
+            # до истечения аренды (бессрочной у durable — навсегда).
+            record = self._record(key, v2)
             self._save_control(key, control, v2)
-            return self._record(key, v2)
+            return record
 
     async def release(self, key: ThreadKey, lease: Lease) -> None:
         with self._scope(key):
@@ -1340,6 +1369,17 @@ def _abandoned(base: Path, cutoff: float) -> bool:
 
 #: С какого окна с конца файла список ищет последнюю запись (растёт ×4).
 _TAIL_PROBE = 8 * 1024
+
+
+def _file_stamp(path: str | Path) -> tuple[int, int, int] | None:
+    """Размер, время записи (нс) и inode; файла нет — None. Inode ловит
+    перезапись тем же размером в тот же такт времени записи: meta и
+    ``control.json`` пишутся атомарной заменой — новым файлом."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns, st.st_ino
 
 
 def _last_seq(path: str | Path, stream: str) -> int:

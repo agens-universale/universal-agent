@@ -676,18 +676,6 @@ def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour():
     )
 
 
-def test_uncomment_template_block_finds_the_real_anchor():
-    """Живые шаблоны комментируют секции как «# gc:» — с пробелом после решётки.
-    Regex требовал «#gc:», блок не находился, и write_values молча уносил ключ в
-    missing. Тест выше собирает шаблон сам и проверяет формат, которого в шаблонах
-    не бывает, — поэтому дыру не видел."""
-    block = w.uncomment_template_block(_real_template(), "gc")
-    assert "\ngc:\n" in "\n" + block  # шапка раскомментирована и БЕЗ отступа
-    assert (
-        "\n  force_collect:" in "\n" + block
-    )  # поле — вложенным, как положено YAML
-
-
 def test_uncomment_template_block_unfolds_a_list_section():
     """Список пресетов — тот же случай: строки блока не «ключ: значение», а элементы."""
     block = w.uncomment_template_block(_real_template(), "endpoint_presets")
@@ -710,13 +698,11 @@ def test_write_values_unfolds_a_commented_section_and_keeps_yaml_valid(
         encoding="utf-8",
     )
     missing = w.write_values(
-        cfg, {"gc.force_collect": "true"}, template_path=_default_config_path()
+        cfg, {"voice.model": "whisper-1"}, template_path=_default_config_path()
     )
     assert missing == []
     data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
-    assert (
-        "gc" in data and "force_collect" in data["gc"]
-    )  # секция развернулась целиком
+    assert data["voice"]["provider"] == "openai"  # секция развернулась целиком
     assert data["backend"]["completions_url"] == "http://h/v1/chat/completions"
 
 

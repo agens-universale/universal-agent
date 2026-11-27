@@ -31,11 +31,14 @@ from gc_core.summarize.summary_validation import (
     missing_section_tags,
     validate_summary_text,
 )
+from gc_core.summarize.summary_xml_extraction import (
+    extract_final_summary_xml,
+    extract_summary_candidate,
+)
 from gc_core.summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
-    parse_memory_deltas,
+    parse_memory_deltas_with_repair,
     resolve_persistent_state_block,
-    should_attempt_memory_deltas_repair,
 )
 from gc_core.utils.llm_chat_client import shorten_for_log
 
@@ -51,6 +54,13 @@ class _NullLogger:
 
 
 _NULL_LOGGER = _NullLogger()
+
+
+def _extract_repair_text(raw_repaired: str) -> tuple[str, str]:
+    try:
+        return extract_final_summary_xml(raw_repaired) or raw_repaired, ""
+    except SummaryRejectedError as exc:
+        return raw_repaired, str(exc)
 
 
 def _int_param(raw: Any, default: int) -> int:
@@ -246,7 +256,18 @@ class _BatchRun:
             self.batch_total,
             text,
         )
-        is_valid, reason = validate_summary_text(text)
+        ambiguous_draft = False
+        partial_final = False
+        try:
+            candidate, partial_final = extract_summary_candidate(text)
+            text = candidate or text
+        except SummaryRejectedError:
+            ambiguous_draft = True
+        is_valid, reason = validate_summary_text(
+            text, require_closed_structure=partial_final
+        )
+        if ambiguous_draft:
+            is_valid, reason = False, "ambiguous_structure"
         if not is_valid:
             text = await self._arepair(
                 batch_index,
@@ -255,6 +276,8 @@ class _BatchRun:
                 batch_history_text,
                 accumulated_summary,
                 trace_batch,
+                preserve_partial=not ambiguous_draft,
+                require_closed_sections=partial_final,
             )
         accumulated_summary = text
         body_chars = summary_body_chars(accumulated_summary)
@@ -286,6 +309,9 @@ class _BatchRun:
         batch_history_text: str,
         accumulated_summary: str,
         trace_batch: Dict[str, Any],
+        *,
+        preserve_partial: bool = True,
+        require_closed_sections: bool = False,
     ) -> str:
         self.log.warning(
             "summary_batch_invalid batch=%s/%s reason=%s text_chars=%s text_preview=%s",
@@ -304,8 +330,10 @@ class _BatchRun:
             len(self.summarizer_prefix),
             len(text or ""),
         )
-        missing_tags = missing_section_tags(text)
-        repaired = await summary_llm_steps.arepair_summary_text(
+        missing_tags = missing_section_tags(
+            text, allow_unclosed=not require_closed_sections
+        )
+        raw_repaired = await summary_llm_steps.arepair_summary_text(
             ctx=self.ctx,
             state=self.state,
             history_text=batch_history_text,
@@ -316,11 +344,29 @@ class _BatchRun:
             missing_tags=missing_tags,
             max_tokens=self.max_tokens,
         )
-        merged = merge_repaired_summary(
-            invalid_text=text, repaired_text=repaired
+        repaired, extraction_error = _extract_repair_text(raw_repaired)
+        merged = (
+            merge_repaired_summary(
+                invalid_text=text if preserve_partial else "",
+                repaired_text=repaired,
+                allow_unclosed=not require_closed_sections,
+            )
+            if not extraction_error
+            else ""
         )
-        merged_valid, _ = validate_summary_text(merged)
-        repaired_valid, _ = validate_summary_text(repaired)
+        merged_valid = (
+            preserve_partial
+            and not extraction_error
+            and validate_summary_text(
+                merged, require_closed_structure=require_closed_sections
+            )[0]
+        )
+        repaired_valid = (
+            not extraction_error
+            and validate_summary_text(
+                repaired, require_closed_structure=require_closed_sections
+            )[0]
+        )
         if merged_valid:
             final_text, repair_resolution = merged, "merged_valid"
         elif repaired_valid:
@@ -329,6 +375,7 @@ class _BatchRun:
             final_text, repair_resolution = "", "rejected"
         trace_batch["repair"] = {
             "reason": reason,
+            "extraction_error": extraction_error,
             "missing_tags": list(missing_tags),
             "repaired_text": repaired,
             "merged_text": merged,
@@ -340,6 +387,7 @@ class _BatchRun:
         if not final_text:
             raise SummaryRejectedError(
                 "summary repair produced no usable summary"
+                + (f" ({extraction_error})" if extraction_error else "")
             )
         self.log.info(
             "summary_batch_repair_result batch=%s/%s merged_valid=%s repaired_chars=%s merged_chars=%s final_chars=%s final_preview=%s",
@@ -355,40 +403,15 @@ class _BatchRun:
 
 
 async def _arun_patch_step(
-    ctx: Any, state: Any, llm_result: Any, max_tokens: int | None
+    llm_result: memory_suggestions.MemoryPatchLlmResult,
 ) -> tuple:
-    """Разбор дельт WM с одной попыткой починки формата.
-
-    Шаг в шаг повторяет ``working_memory_gateway.parse_memory_deltas_with_repair``
-    (те же ветки, тот же порядок, тот же кортеж). Позвать его самого
-    нельзя: он ждёт синхронный ``repair_fn``, а починка теперь корутина —
-    синхронный колбэк на loop её не дождётся.
-    """
-    raw_output = llm_result.raw_response
-    deltas, touched = parse_memory_deltas(raw_output, full_replace=True)
-    repair_attempted = False
-    raw_used = str(raw_output or "")
-    if should_attempt_memory_deltas_repair(
-        raw_output,
-        deltas,
-        min_chars_for_repair=100,
-    ):
-        # Починка формата дельт вторым вызовом LLM. Асинхронна, потому что зовёт LLM.
-        repaired_raw = (
-            await memory_suggestions.arequest_memory_deltas_format_repair(
-                ctx=ctx,
-                state=state,
-                raw_output=str(raw_output or ""),
-                max_tokens=max_tokens,
-                full_replace=True,
-            )
+    """Parse the patch with an optional local format repair."""
+    deltas, touched, repair_attempted, raw_used = (
+        parse_memory_deltas_with_repair(
+            llm_result.raw_response, full_replace=True
         )
-        raw_used = str(repaired_raw or "")
-        deltas, touched = parse_memory_deltas(raw_used, full_replace=True)
-        repair_attempted = True
-    repair_success = repair_attempted and (
-        bool(touched) or not deltas.is_empty()
     )
+    repair_success = repair_attempted and bool(touched)
     return deltas, touched, repair_attempted, repair_success, raw_used
 
 
@@ -423,7 +446,6 @@ async def _arun_single_batch_memory_patch(
     text: str,
     full_history_text: str,
     persistent_state_block: str,
-    max_tokens: int | None,
     trace: Dict[str, Any],
     logger: Any,
 ) -> tuple:
@@ -441,7 +463,7 @@ async def _arun_single_batch_memory_patch(
         replace_repair,
         replace_repair_ok,
         replace_raw,
-    ) = await _arun_patch_step(ctx, state, replace_result, max_tokens)
+    ) = await _arun_patch_step(replace_result)
     trace["memory_patch"] = {
         "executed": True,
         "mode": "full_replace_all_registers",
@@ -663,7 +685,6 @@ async def asummarize_dialog_via_chat_completions(
             text=text,
             full_history_text=full_history_text,
             persistent_state_block=persistent_state_block,
-            max_tokens=max_tokens,
             trace=trace,
             logger=logger,
         )

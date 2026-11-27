@@ -59,7 +59,11 @@ def _config(overrides: dict | None = None) -> AppConfig:
 
 
 def _schema_defaults() -> AppConfig:
-    return resolve_paths(AppConfig.model_validate({}), str(_HARBOR_DIR))
+    # как в бенч-сборщике: установленные плагины разработчика не участвуют
+    return resolve_paths(
+        AppConfig.model_validate({"plugins": {"use_installed": False}}),
+        str(_HARBOR_DIR),
+    )
 
 
 def _leaves(value, prefix=()):
@@ -482,6 +486,10 @@ async def test_custom_image_bench_requires_successful_probe(
     ]
     assert state.vision_audience.native is not None
     assert b'"fs_view_image"' in spy.requests[1].content
+
+
+def test_bench_ignores_installed_plugins():
+    assert _config().plugins.use_installed is False
 
 
 def test_two_level_numbers_reach_the_bench_config_and_a_profile_overrides_one_of_them():

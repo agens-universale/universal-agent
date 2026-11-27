@@ -29,7 +29,10 @@ TUI работает с локальным файловым хранилищем
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+from collections.abc import Iterator
 from typing import Optional, Sequence
 
 from gc_core.message_format.serialization import (
@@ -50,6 +53,7 @@ from gc_core.persistence.turn_outcome import (
 )
 from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Cursor, TailBatch, Threads, run_sync
+from gc_core.threads.file_layout import subagent_trace_path
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
     MODEL_CHOICES,
@@ -84,8 +88,33 @@ class FileTaskStore:
     """Треды одного каталога; ``system`` — система тредов TUI по умолчанию."""
 
     def __init__(self, threads_dir: str, system: str = "cli") -> None:
-        self._threads = Threads(FileThreadStore(threads_dir))
+        files = FileThreadStore(threads_dir)
+        self._files = files
+        self._threads = Threads(files)
         self._system = system
+        # Каталог тредов, как его читает хранилище (абсолютный): по нему
+        # снимается отпечаток трассы и при другом cwd.
+        self._dir = files.threads_dir
+        # Разобранная трасса субагентов последнего прочитанного треда:
+        # (тред, размер и время записи файла) → записи.
+        self._subagents: tuple[tuple, list[dict]] | None = None
+        # Запись последнего прочитанного треда: (тред, отпечаток его
+        # файлов) → запись. Опрос хвоста спрашивает её на каждом тике.
+        self._record: tuple[tuple, ThreadRecord] | None = None
+        # Последний хвост без новых записей не перечитывается: (тред,
+        # курсор после чтения, отпечаток файлов до чтения).
+        self._tail_seen: tuple | None = None
+
+    @contextlib.contextmanager
+    def _writing(self) -> Iterator[None]:
+        """Своя запись в тред: после неё кеш записи и пропуск хвоста
+        сброшены, не полагаясь на отпечаток файлов (чтение для
+        read-modify-write секции `tui` не должно видеть прошлую запись)."""
+        try:
+            yield
+        finally:
+            self._record = None
+            self._tail_seen = None
 
     def _key(self, task_id: str, system: Optional[str] = None) -> ThreadKey:
         return ThreadKey(system=system or self._system, thread=task_id)
@@ -106,35 +135,55 @@ class FileTaskStore:
         self, task_id: str, system: Optional[str] = None
     ) -> Optional[ThreadRecord]:
         """Запись треда (части: ``info``, ``state``, ``usage``, ``runtime``,
-        ``frontend``, ``extra``); нет треда или он не читается — ``None``."""
+        ``frontend``, ``extra``); нет треда или он не читается — ``None``.
+        Файлы треда не менялись с прошлого чтения (тот же размер и время
+        записи, `FileThreadStore.files_stamp`) — без чтения meta: опрос
+        хвоста спрашивает запись на каждом тике. Отдаётся копия: вложенные
+        словари записи изменяемы, а кеш не должен видеть чужих правок."""
+        key = self._key(task_id, system)
+        files = self._files.files_stamp(key, _FEED)
+        stamp = (key, files)
+        cached = self._record
+        if cached is not None and cached[0] == stamp:
+            return cached[1].model_copy(deep=True)
         try:
-            return run_sync(self._threads.get(self._key(task_id, system)))
+            record = run_sync(self._threads.get(key))
         except (OSError, ValueError):
             return None
+        # Без meta на диске (тред ещё не записан) — не кешируется.
+        if record is None or files[0] is None:
+            self._record = None
+            return record
+        self._record = (stamp, record)
+        return record.model_copy(deep=True)
 
     def update_tui_meta(
         self, task_id: str, patch: dict, system: Optional[str] = None
     ) -> None:
         """Слить ``patch`` в состояние TUI треда (атомарно в хранилище; шаг
         исполнителя его не трогает). Треда нет — он создаётся."""
-        run_sync(
-            self._threads.update_frontend(
-                self._key(task_id, system), _TUI, dict(patch)
+        with self._writing():
+            run_sync(
+                self._threads.update_frontend(
+                    self._key(task_id, system), _TUI, dict(patch)
+                )
             )
-        )
 
     def append_messages(
         self, task_id: str, messages: list[dict], system: Optional[str] = None
     ) -> int:
         """Дописать сообщения в историю (уже сохранённые не повторяются)."""
-        return run_sync(
-            self._threads.append_messages(self._key(task_id, system), messages)
-        )
+        key = self._key(task_id, system)
+        with self._writing():
+            return run_sync(self._threads.append_messages(key, messages))
 
     def clear_plan(self, task_id: str, system: Optional[str] = None) -> bool:
         """Убрать план из сессии (`/plan clear`); True — план был. Решение и
         запись — в фасаде ``Threads`` (под арендой треда)."""
-        return run_sync(self._threads.clear_plan(self._key(task_id, system)))
+        with self._writing():
+            return run_sync(
+                self._threads.clear_plan(self._key(task_id, system))
+            )
 
     def append_model_choice(
         self,
@@ -148,13 +197,15 @@ class FileTaskStore:
         чужим ходом, записи не получают."""
         key = self._key(task_id, system)
         try:
-            return run_sync(self._threads.append_model_choice(key, record))
+            with self._writing():
+                return run_sync(self._threads.append_model_choice(key, record))
         except ThreadBusy:
             return False
 
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред: историю, архивы, трассу, картинки."""
-        run_sync(self._threads.delete(self._key(task_id, system)))
+        with self._writing():
+            run_sync(self._threads.delete(self._key(task_id, system)))
 
     def discard_message_by_id(
         self,
@@ -175,20 +226,31 @@ class FileTaskStore:
                 messages, tags=tags, strip_think=strip_think
             )
 
-        return run_sync(
-            self._threads.discard_message(
-                self._key(task_id, system), message_id, recount=recount
+        key = self._key(task_id, system)
+        with self._writing():
+            return run_sync(
+                self._threads.discard_message(key, message_id, recount=recount)
             )
-        )
 
     def read_subagent_trace(
         self, task_id: str, system: Optional[str] = None
     ) -> list[dict]:
-        """Трасса субагентов треда — записи в форме develop."""
-        entries = run_sync(
-            self._threads.subagent_events(self._key(task_id, system))
-        )
-        return [{"ts": e.ts, "seq": e.seq, **e.data} for e in entries]
+        """Трасса субагентов треда — записи в форме develop. Файл не
+        менялся с прошлого чтения (тот же размер и время записи) — без
+        чтения: окно ленты спрашивает её на каждый кусок с субагентами.
+        Список — новый, а записи в нём общие с кешем: не менять их."""
+        key = self._key(task_id, system)
+        stamp = (key, _file_stamp(self._subagent_path(key)))
+        cached = self._subagents
+        if cached is not None and cached[0] == stamp and stamp[1]:
+            return list(cached[1])
+        entries = run_sync(self._threads.subagent_events(key))
+        records = [{"ts": e.ts, "seq": e.seq, **e.data} for e in entries]
+        self._subagents = (stamp, records)
+        return list(records)
+
+    def _subagent_path(self, key: ThreadKey) -> str:
+        return subagent_trace_path(self._dir, key.system, key.thread)
 
     # ---- read & tail --------------------------------------------------
 
@@ -207,19 +269,30 @@ class FileTaskStore:
             user_content_to_text(payload.get("content"))
         )
 
-    def read_all_events(
+    def read_history(
         self, task_id: str, system: Optional[str] = None
     ) -> tuple[list[dict], TaskCursor]:
-        """Вся живая история и курсор сразу за ней — одним снимком; в
-        курсоре и число архивов: по нему тик узнает шаг сжатия."""
+        """Сегменты (как ``read_segments``) и курсор сразу за ними — из
+        одного снимка: дозапись между чтениями не разводит историю и
+        курсор. Тред без сжатия (живая история не начинается сводкой) —
+        один сегмент всех записей живой истории."""
         key = self._key(task_id, system)
-        view = run_sync(_aview(self._threads, key))
-        if view is None:
-            return [], TaskCursor(None, 0, None)
-        batch, archives = view
-        return _complete(_feed(key, batch)), _task_cursor(
-            batch.cursor, archives
-        )
+        snap = run_sync(_ahistory(self._threads, key))
+        if snap is None:
+            return [_segment(0, [], None)], TaskCursor(None, 0, None)
+        batch, archived = snap
+        cursor = _task_cursor(batch.cursor, len(archived))
+        history = [e for stream, e in batch.entries if stream == _HISTORY]
+        if not (
+            history and self.is_compaction_summary(_envelope(key, history[0]))
+        ):
+            return [_segment(0, _complete(_feed(key, batch)), None)], cursor
+        side = [
+            _side_envelope(key, stream, e)
+            for stream, e in batch.entries
+            if stream != _HISTORY
+        ]
+        return _segments(key, [*archived, history], side), cursor
 
     def read_raw_thread_jsonl(
         self, task_id: str, system: Optional[str] = None
@@ -249,24 +322,7 @@ class FileTaskStore:
         """
         key = self._key(task_id, system)
         parts, side = run_sync(_aparts_and_side(self._threads, key))
-        # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
-        parsed: list[tuple[list[dict], Optional[dict]]] = []
-        for part in parts:
-            leading, seg = _split_leading([_envelope(key, e) for e in part])
-            parsed.append((seg, leading))
-
-        segments: list[dict] = []
-        for i, (seg, _leading) in enumerate(parsed):
-            compacted_by = None
-            if i + 1 < len(parsed):
-                next_leading = parsed[i + 1][1]
-                if next_leading is not None:
-                    compacted_by = _compaction(seg, next_leading)
-            segments.append(
-                {"index": i, "messages": seg, "compacted_by": compacted_by}
-            )
-        _place_in_segments(segments, parsed, side)
-        return segments
+        return _segments(key, parts, side)
 
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None
@@ -291,12 +347,19 @@ class FileTaskStore:
             view = run_sync(_aview(self._threads, key))
             if view is None:
                 return TailResult(new_records=[], next_cursor=cursor)
-            batch, archives = view
+            batch, record = view
             return TailResult(
                 new_records=_feed(key, batch),
-                next_cursor=_task_cursor(batch.cursor, archives),
+                next_cursor=_task_cursor(batch.cursor, len(record.archives)),
             )
+        # Файлы треда те же, что до прошлого чтения хвоста, а курсор — тот,
+        # что оно вернуло: нового нет (опрос раз в тик не читает meta и
+        # потоки).
+        stamp = self._files.files_stamp(key, _FEED)
+        if self._tail_seen == (key, cursor.position_token, stamp):
+            return TailResult(new_records=[], next_cursor=cursor)
         batch = run_sync(self._threads.tail(key, _FEED, cursor.position_token))
+        self._tail_seen = None
         if batch.reset:
             step = run_sync(_acompaction_step(self._threads, key, cursor))
             if step is not None:
@@ -307,6 +370,8 @@ class FileTaskStore:
                 stream_reset=True,
                 reason=_reset_reason(cursor.position_token, batch.cursor),
             )
+        if stamp[0] is not None:
+            self._tail_seen = (key, batch.cursor, stamp)
         return TailResult(
             new_records=_feed(key, batch),
             next_cursor=_task_cursor(batch.cursor, cursor.archives),
@@ -319,8 +384,9 @@ async def _collect(threads: Threads, system: str) -> list[ThreadRecord]:
 
 async def _aview(
     threads: Threads, key: ThreadKey
-) -> Optional[tuple[TailBatch, int]]:
-    """Живая история, курсор за ней и число архивов — согласованные: тред,
+) -> Optional[tuple[TailBatch, ThreadRecord]]:
+    """Живая история, курсор за ней и запись треда (её архивы) —
+    согласованные: тред,
     сжатый между чтением его записи и истории, читается заново (иначе
     курсор новой версии истории нёс бы прежнее число архивов, и следующее
     сжатие стало бы сбросом). Треда нет — ``None``."""
@@ -332,7 +398,23 @@ async def _aview(
         batch = await threads.tail(key, _FEED, start)
         if not batch.reset:
             break
-    return batch, len(record.archives)
+    return batch, record
+
+
+async def _ahistory(
+    threads: Threads, key: ThreadKey
+) -> Optional[tuple[TailBatch, list[list[StreamEntry]]]]:
+    """Снимок ``_aview`` и части-архивы его записи треда: архив не
+    меняется, поэтому части и курсор согласованы. Треда нет — ``None``."""
+    view = await _aview(threads, key)
+    if view is None:
+        return None
+    batch, record = view
+    archived = [
+        await threads.store.read_archive(key, archive.id)
+        for archive in record.archives
+    ]
+    return batch, archived
 
 
 async def _acompaction_step(
@@ -517,6 +599,33 @@ async def _aparts_and_side(
     ]
 
 
+def _segment(index: int, messages: list[dict], compacted_by) -> dict:
+    return {"index": index, "messages": messages, "compacted_by": compacted_by}
+
+
+def _segments(
+    key: ThreadKey, parts: list[list[StreamEntry]], side: list[dict]
+) -> list[dict]:
+    """Части треда → сегменты: часть i без лидирующей сводки; synthesis
+    сегмента — лидирующая сводка следующей части, у последней — None.
+    Записи сбоку — в сегмент своего хода."""
+    # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
+    parsed: list[tuple[list[dict], Optional[dict]]] = []
+    for part in parts:
+        leading, seg = _split_leading([_envelope(key, e) for e in part])
+        parsed.append((seg, leading))
+    segments: list[dict] = []
+    for i, (seg, _leading) in enumerate(parsed):
+        compacted_by = None
+        if i + 1 < len(parsed):
+            next_leading = parsed[i + 1][1]
+            if next_leading is not None:
+                compacted_by = _compaction(seg, next_leading)
+        segments.append(_segment(i, seg, compacted_by))
+    _place_in_segments(segments, parsed, side)
+    return segments
+
+
 def _place_in_segments(
     segments: list[dict], parsed: list, side: list[dict]
 ) -> None:
@@ -605,3 +714,12 @@ def _payload_ids(records: list[dict]) -> frozenset[str]:
 def _max_seq(records: list[dict]) -> int:
     seqs = [r.get("seq") for r in records]
     return max((s for s in seqs if isinstance(s, int)), default=0)
+
+
+def _file_stamp(path: str) -> tuple[int, int] | None:
+    """Размер и время записи файла (нс); файла нет — None."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns

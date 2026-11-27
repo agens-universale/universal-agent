@@ -12,7 +12,7 @@ async def _anoop(*_a, **_k):
 
 
 def test_policy_retries_stream_error_then_succeeds(monkeypatch):
-    monkeypatch.setattr(policy.asyncio, "sleep", _anoop)  # без задержки
+    monkeypatch.setattr("asyncio.sleep", _anoop)  # без задержки
     calls = {"n": 0}
 
     async def _fake_request(

@@ -169,6 +169,7 @@ class ModelRequest:
     isolated_timeout_sec: float | None = None
     mute_answer: bool = False
     schema_version: int = 1
+    strip_outer_whitespace: bool = True
 
 
 @dataclass

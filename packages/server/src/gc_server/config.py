@@ -95,7 +95,18 @@ class ServerConfigError(ValueError):
 DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
-class SurfaceConfig(BaseModel):
+class _AuthTokenConfig(BaseModel):
+    @field_validator("auth_token", check_fields=False)
+    @classmethod
+    def _auth_token(cls, value: str | None) -> str | None:
+        if value and any(not 33 <= ord(char) <= 126 for char in value):
+            raise ValueError(
+                "auth_token должен содержать печатные ASCII-символы без пробелов"
+            )
+        return value
+
+
+class SurfaceConfig(_AuthTokenConfig):
     """Общие ключи поверхности; ``host``, ``auth_token`` и
     ``max_body_bytes`` — по умолчанию из секции ``server``."""
 
@@ -270,9 +281,16 @@ class _ChannelModes(SurfaceConfig):
         return value.strip() or None
 
 
+class ChatRecoveryConfig(RecoveryConfig):
+    """Восстановление сохранённых Responses; повтор тула возможен."""
+
+    max_attempts: int = Field(default=3, ge=1, le=20)
+
+
 class ChatConfig(_ApiDocs, _ChannelModes):
     _surface: ClassVar[str] = "chat"
     port: int = Field(default=8090, ge=1, le=65535)
+    recovery: ChatRecoveryConfig = Field(default_factory=ChatRecoveryConfig)
     #: Явный список origin; ``*`` отбрасывается — чужой сайт в браузере.
     cors_origins: list[str] = Field(default_factory=list)
 
@@ -342,7 +360,13 @@ class SwarmConfig(_ApiDocs, SurfaceConfig):
     thread_in_store: bool = False
 
 
-class ServerSection(BaseModel):
+#: Умолчания агента сервера под ``agent_overrides``. Плагины, установленные
+#: на хосте ``gc-plugin install``, сервер не берёт: их хуки и MCP — команды
+#: машины разработчика; включаются только явно.
+_AGENT_DEFAULTS = {"plugins.use_installed": False}
+
+
+class ServerSection(_AuthTokenConfig):
     model_config = _STRICT
 
     host: str = "127.0.0.1"
@@ -405,6 +429,7 @@ class ServerConfig(BaseModel):
         return {
             "swarm": {**raw, "enabled": True},
             "agent_overrides": {
+                **_AGENT_DEFAULTS,
                 **expand_section_updates(self.agent_overrides),
                 **expand_section_updates(own),
             },
@@ -535,10 +560,11 @@ def surface_settings(
     base: LoadedSettings, cfg: ServerConfig, name: str
 ) -> LoadedSettings:
     """Настройки агента поверхности: ``base`` (config.yml, профиль, env,
-    флаги) → ``server.logging`` → роль поверхности → общий
-    ``agent_overrides`` → ``agent_overrides`` поверхности."""
+    флаги) → ``server.logging`` и умолчания сервера (``_AGENT_DEFAULTS``) →
+    роль поверхности → общий ``agent_overrides`` → ``agent_overrides``
+    поверхности."""
     section = getattr(cfg, _known(name))
-    updates = {**_logging_updates(cfg.server.logging)}
+    updates = {**_logging_updates(cfg.server.logging), **_AGENT_DEFAULTS}
     if name != "swarm" and _agent_in_store(base):
         # Роль — ресурс агента в базе (L0@<роль>), а не путь.
         updates["agent.role"] = section.role or name
@@ -546,7 +572,7 @@ def surface_settings(
         updates["paths.agent_md_path"] = _resolve_role(
             section.agent_md_path, cfg, f"{name}.agent_md_path"
         )
-    loaded = base.with_overrides(updates, layer="server") if updates else base
+    loaded = base.with_overrides(updates, layer="server")
     loaded = _apply_overrides(loaded, cfg.agent_overrides, "agent_overrides")
     return _apply_overrides(
         loaded, section.agent_overrides, f"{name}.agent_overrides"

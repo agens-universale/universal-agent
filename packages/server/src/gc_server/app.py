@@ -22,6 +22,7 @@ import uvicorn
 from fastapi import FastAPI
 from gc_core.aio.agent import AsyncAgent
 from gc_core.config import cli_forces_legacy_model
+from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.settings import LoadedSettings
 from gc_core.threads.facade import Threads
 from starlette.responses import JSONResponse
@@ -53,9 +54,17 @@ class ServerRuntime:
     #: Свои агенты поверхностей (``<поверхность>.agent_id``): имя → хранилище.
     surface_agents: dict[str, Any] = field(default_factory=dict)
     _create_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _surfaces: dict[str, LoadedSettings] = field(default_factory=dict)
 
     def surface_settings(self, name: str) -> LoadedSettings:
-        return surface_settings(self.base, self.config, name)
+        """Настройки поверхности со снимком набора плагинов — один на
+        поверхность за процесс (§8.3). Здесь цикл уже идёт, поэтому без
+        клонов: источники прогрел ``prewarm_plugin_sources`` до него."""
+        if name not in self._surfaces:
+            self._surfaces[name] = with_plugin_snapshot(
+                surface_settings(self.base, self.config, name), clone=False
+            )
+        return self._surfaces[name]
 
     def store_kwargs(self, surface: str | None = None) -> dict[str, Any]:
         """Хранилища для ``acreate_run_context`` и ``AsyncAgent.create`` —
@@ -122,24 +131,25 @@ class ServerRuntime:
         surface: str | None = None,
         ask_human_suspends: bool = False,
     ) -> Callable[..., Any]:
-        """Фабрика агентов фасадов chat и a2a: создание — по одному (MCP-
-        дискавери не размножается), хранилища — процесса (свой агент
-        поверхности ``surface``, если задан). ``ask_human_suspends`` —
-        вопрос модели завершает ход (A2A)."""
+        """Фабрика агентов фасадов chat и a2a: создание — по одному,
+        хранилища — процесса (свой агент поверхности ``surface``, если
+        задан). ``mcp_service`` — сервис MCP поверхности: агент открывает
+        у него своего потребителя и закрывает его в ``aclose``.
+        ``ask_human_suspends`` — вопрос модели завершает ход (A2A)."""
         force_legacy = cli_forces_legacy_model(settings)
 
         async def factory(
             agent_settings: LoadedSettings,
             *,
             auth_connector: Any,
-            tools_cache: Any,
+            mcp_service: Any,
             os_backend: Any,
         ) -> AsyncAgent:
             async with self._create_lock:
                 return await AsyncAgent.create(
                     agent_settings,
                     auth_connector=auth_connector,
-                    tools_cache=tools_cache,
+                    mcp_service=mcp_service,
                     os_backend=os_backend,
                     force_legacy=force_legacy,
                     ask_human_suspends=ask_human_suspends,

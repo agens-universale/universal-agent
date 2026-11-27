@@ -1,14 +1,18 @@
-"""Пин Textual: диапазон, на котором проверены патчи TUI, во всех манифестах.
+"""Пин Textual: версия, на которой проверены патчи TUI, во всех манифестах.
 
-Патчи и приватные импорты Textual проверены только на 8.2.8; переход на
-новую версию — отдельная задача, а не побочный эффект `uv lock`.
+Патчи и приватные импорты Textual проверены только на одной версии и
+включаются только на ней (`textual_compat.PATCHED_TEXTUAL`), поэтому пин
+точный и берётся оттуда же: `uv tool install` и pipx не читают uv.lock и
+иначе подтянули бы версию без патчей. Переход на новую версию — отдельная
+задача.
 """
 
 import tomllib
 
 from gc_testkit.paths import REPO
+from gc_tui.textual_compat import PATCHED_TEXTUAL
 
-VERIFIED_PIN = "textual>=8.2.8,<8.3"
+VERIFIED_PIN = f"textual=={PATCHED_TEXTUAL}"
 
 
 def _textual_deps(manifest: str) -> list[str]:

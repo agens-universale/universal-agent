@@ -1,16 +1,18 @@
-# Скопируй этот блок в секцию mcp-servers: своего config.yml агента.
+# Скопируй этот блок в секцию mcp: → servers: своего config.yml агента.
 # Работает с persistent_session: true — один процесс npx и один Chromium
 # живут весь цикл работы агента (см. src/tools/connect_mcp/persistent_stdio.py).
 #
 # `command:` — {npx} подставляется gc-mcp wire автоматически (путь до npx
 # после `gc-mcp install`). Node лежит в gc_paths()['data']:
-#   Linux/macOS: ~/.local/share/gc/node/v18.0.0/bin/npx
-#   Windows:     ~/.gc/node/v18.0.0/bin/npx
+#   Linux/macOS: ~/.local/share/gc/node/v24.22.2/bin/npx
+#   Windows:     ~/.gc/node/v24.22.2/bin/npx
+# `--browser chromium` — Chromium, скачанный при установке, а не системный
+# Chrome (его у пользователя может не быть, версия у него своя).
 # `--output-dir` — {cache}/playwright-mcp → gc_paths()['cache']/playwright-mcp.
 browser_playwright:
   transport: stream_stdio
   command: "{npx}"
-  args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "{cache}/playwright-mcp"]
+  args: ["-y", "@playwright/mcp@0.0.70", "--browser", "chromium", "--output-dir", "{cache}/playwright-mcp"]
   persistent_session: true
   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
   server-name: playwright-browser

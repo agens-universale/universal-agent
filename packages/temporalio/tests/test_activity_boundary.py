@@ -11,6 +11,10 @@ from gc_core.execution.contracts import (
     ToolOutcomeUnknown,
 )
 from gc_core.threads.file_store import FileThreadStore
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallTimedOut,
+    McpServerGone,
+)
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.contracts import ActivityCall
 from gc_core_temporalio.public_config import public_config_snapshot
@@ -117,3 +121,63 @@ async def test_precondition_change_is_recoverable_tool_feedback(tmp_path):
     restored = restore_domain_error(caught.value)
     assert isinstance(restored, GuardPreconditionChanged)
     assert not isinstance(restored, ExecutionFailure)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [McpServerGone(), McpCallTimedOut(2)],
+    ids=["смерть", "срок"],
+)
+async def test_unanswered_mcp_call_is_outcome_unknown_with_its_text(
+    tmp_path, error
+):
+    """Вызов MCP ушёл серверу без ответа (смерть сервера, срок): через
+    границу activity — «исход неизвестен» (повторять нельзя) со своим
+    текстом, а не сбой исполнителя."""
+    from gc_core_temporalio.operations import WorkflowOperations
+    from temporalio.exceptions import ActivityError, RetryState
+
+    native, _ = activities(tmp_path)
+
+    async def unanswered(_call, _ctx):
+        raise error
+
+    with pytest.raises(Exception) as caught:
+        await native._recorded(
+            ActivityCall("test", "owner", "mcp"), str, unanswered
+        )
+    activity_error = ActivityError(
+        "failed",
+        scheduled_event_id=1,
+        started_event_id=2,
+        identity="worker",
+        activity_type="universal_agent.tool.execute",
+        activity_id="tool-1",
+        retry_state=RetryState.NON_RETRYABLE_FAILURE,
+    )
+    activity_error.__cause__ = caught.value
+
+    restored = WorkflowOperations._activity_error(
+        activity_error, "universal_agent.tool.execute", effect=True
+    )
+
+    assert isinstance(restored, ToolOutcomeUnknown)
+    assert str(restored) == str(error)
+
+
+async def test_context_close_follows_mode_helper(tmp_path, monkeypatch):
+    """Закрытие контекста хода без своего ``close`` у провайдера убирает
+    MCP по контексту хода: сборка мусора — по режиму и сборке рантайма
+    (``collect_run_garbage``), не голым ``gc.collect`` на общем worker."""
+    import gc_core.agent_executor as ae
+
+    native, ctx = activities(tmp_path)
+    ctx.mcp_session_owner = "owner-1"
+    seen = {}
+
+    async def close(_owner_reset, *, ctx=None):
+        seen["ctx"] = ctx
+
+    monkeypatch.setattr(ae, "_aclose_mcp_and_release", close)
+    assert await native._close(None, ctx) is True
+    assert seen["ctx"] is ctx

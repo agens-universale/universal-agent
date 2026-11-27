@@ -12,12 +12,13 @@ import os
 import threading
 import time
 import uuid
-from collections import namedtuple
+from collections import Counter, namedtuple
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Optional
+from weakref import WeakSet
 
 if TYPE_CHECKING:
     from gc_core.model_choice import ModelChoiceApplied
@@ -45,13 +46,19 @@ from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
     parse_turn_outcome,
-    turn_shown_in,
 )
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
+from gc_core.plugins.commands import (
+    Resolution,
+    listed_skill_ids,
+    resolve_slash_name,
+)
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
+from gc_core.settings import runtime_of
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.models import ThreadRecord
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.skills.skill_arg_resolver import (
     Failed,
     Resolved,
@@ -89,7 +96,6 @@ from gc_tui.models import (
     ResultOutcome,
     TaskCursor,
 )
-from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
@@ -98,8 +104,13 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
+from gc_tui.screens.trace_window import TraceWindowMixin
 from gc_tui.services import image_hints, image_paste, model_sign, os_ops
-from gc_tui.services.answer_flow import AnswerFlow
+from gc_tui.services.answer_flow import (
+    AnswerFlow,
+    answer_verdict,
+    finish_close,
+)
 from gc_tui.services.block_edits import (
     RanResult,
     call_edit,
@@ -133,6 +144,16 @@ from gc_tui.services.footer_slot import (
     toggle_info_line,
 )
 from gc_tui.services.git_info import current_branch
+from gc_tui.services.history_model import (
+    HistoryInputs,
+    HistoryModel,
+    build_history,
+)
+from gc_tui.services.history_render import (
+    ChunkOptions,
+    ChunkRefs,
+    history_level,
+)
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
 from gc_tui.services.keyboard_layout import swap_layout
@@ -147,6 +168,7 @@ from gc_tui.services.model_picker import (
     model_choice_refusal,
     model_name,
 )
+from gc_tui.services.nested_trace import NestedSource
 from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
@@ -168,7 +190,10 @@ from gc_tui.services.session_title import (
     should_update_task,
     task_title,
 )
-from gc_tui.services.skill_view import skill_input_name
+from gc_tui.services.skill_view import (
+    plugin_command_rows,
+    skill_input_name,
+)
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.stores.record_view import tui_section
 from gc_tui.services.subagent_progress import (
@@ -181,7 +206,6 @@ from gc_tui.services.subagent_sidecar_mapper import (
     apply_sidecar_nested_actions,
     nested_raw_texts,
     nested_result_event,
-    plan_sidecar_nested_actions,
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
 )
@@ -198,19 +222,18 @@ from gc_tui.services.tool_blocks import (
     ToolBlocks,
     block_kind,
 )
+from gc_tui.services.trace_ephemera import EPHEMERAL_CLASS, Ephemera
 from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
     RenderContext,
     coerce_args,
     collect_render_context,
-    map_message,
-    response_tail,
+    is_finish,
     with_closing_replies,
 )
 from gc_tui.services.trace_render import (
     build_call_row,
-    build_compaction_marker_event,
     build_compaction_widgets,
     build_nested_prose_row,
     build_turn_line,
@@ -218,14 +241,9 @@ from gc_tui.services.trace_render import (
     tool_caption,
 )
 from gc_tui.services.trace_retention import (
-    apply_payload_retention,
-    events_leaving_window,
-    filter_sidecar_to_parents,
     is_light_payload,
-    message_ids_in_retention_window,
     nested_call_parent_id,
     parent_outside_retention,
-    retention_window_start_index,
     subagent_parent_ids_from_events,
 )
 from gc_tui.services.turn_outcome import (
@@ -258,10 +276,14 @@ from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.model_mark import (
     ModelMark,
     drop_mark_before,
+    mark_model,
     pins_to_bottom,
     restored_mark,
 )
+from gc_tui.widgets.open_indicator import open_indicator_text
 from gc_tui.widgets.plan_panel import PlanPanel
+from gc_tui.widgets.respawn import respawn
+from gc_tui.widgets.start_header import StartHeader
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from gc_tui.widgets.tool_blocks_view import (
@@ -279,7 +301,6 @@ from gc_tui.widgets.trace_row import (
 )
 from gc_tui.widgets.turn_line import (
     TURN_LINE_HELD,
-    TURN_LINE_LATEST,
     TurnLine,
 )
 
@@ -296,6 +317,8 @@ _SEL_TRACE = "#trace"
 # высота постоянна — индикатор и нижний ряд (на нём плашка «в конец»).
 _BAR_TURN = "-turn"
 _BAR_HEIGHT = 2
+# Надпись бара, пока пересборка ленты ждёт кадра (§3.4).
+_REBUILD_LABEL = "обновляю ленту"
 # Нижний зазор ленты (`margin-bottom` #trace): в `region` ленты не входит.
 _TRACE_GAP = 1
 
@@ -306,6 +329,24 @@ _log = logging.getLogger(__name__)
 _DIALOG_CONTINUATION_KINDS = frozenset(
     {"user", "agent", "call", "result", "error", "error_msg"}
 )
+
+
+def _bound_widget(fn) -> object:
+    """Чей метод ``fn`` (и `partial` метода) — для реестров колбэков."""
+    owner = getattr(fn, "__self__", None)
+    if owner is None:
+        owner = getattr(getattr(fn, "func", None), "__self__", None)
+    return owner
+
+
+def _answers_question(ev, call_id: Optional[str]) -> bool:
+    """Событие — ответ на вопрос агента ``call_id`` (и пустой: «без
+    ответа»); у ответа без call_id — на любой."""
+    return (
+        ev.tool_name == "ask_human"
+        and ev.kind in ("user", "system")
+        and (not ev.call_id or ev.call_id == call_id)
+    )
 
 
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
@@ -359,11 +400,8 @@ def select_active_substate(
 
 # Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
-# подсказка «/mcp» уже в бренд-карточке.)
+# подсказка «/mcp» уже в строке статуса стартовой шапки.)
 # Diff: F3 в базовом хроме футера; в ленте о правках говорят блоки диффов.
-# Отступ колонки статусов от логотипа — тот же, что в CSS (#brand-mcp padding-left):
-# порог узости считается по нему, и разъехаться они не должны.
-_MCP_COL_PAD = 6
 # Слева в футере — пилюля режима разрешений и счётчик уведомлений (решение
 # владельца): постоянный индикатор режима важнее списка F-клавиш, а клавиши
 # перечислены в справке (F1). Во время хода к пилюле добавляется ТОЛЬКО
@@ -566,7 +604,7 @@ class _NestedBlockHost:
         )
 
 
-class TraceScreen(TraceFollowMixin, Screen):
+class TraceScreen(TraceWindowMixin, TraceFollowMixin, Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
     # Ctrl+A — select-all в #cmdinput (CommandTextArea); git add всего — только на /diff.
@@ -601,12 +639,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         super().__init__(*args, **kwargs)
         self._registry = build_default_registry()
         self._palette: CommandPalette | None = None
-        self._brand: Vertical | None = None
-        self._brand_wide: bool | None = (
-            None  # раскладка карточки: статусы сбоку/снизу
-        )
-        self._brand_row = None  # контейнер карточки (ссылка, не запрос)
-        self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
+        self._brand: StartHeader | None = None
+        # История ленты открытого треда — единственный её владелец (номера
+        # событий, показанные id, итог последнего хода, хвост ответа).
+        self._feed_history = HistoryModel()
         # A1: правило показа ответов (дедуп, попытки turn_finish) — то же,
         # что у /copy.
         self._answer_flow = AnswerFlow()
@@ -622,7 +658,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._store: Optional[FileTaskStore] = None
         self._cursor: Optional[TaskCursor] = None
-        self._next_no: int = 1
         self._active_task_id: Optional[str] = None
         # Снимок записи на тик опроса (см. _tick_record); вне тика — None.
         self._tick_record_cache: tuple[str, Optional[ThreadRecord]] | None = (
@@ -634,21 +669,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Пометки вызова, чья строка ещё не в ленте: (тред, пометка, тиков
         # ожидания осталось) — см. _drain_trace_notes.
         self._waiting_notes: list[tuple[str | None, TraceNote, int]] = []
-        self._mcp_status_row = (
-            None  # Optional[Static] — live MCP-loading индикатор
-        )
         self._warnings_toasted = (
             False  # warning-тосты при старте показываются один раз за запуск
         )
-        self._mcp_status_done = False
-        # последняя MCP-строка карточки — для перерисовки (runtime-notice / update-notice)
-        self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
         # Блоки вызовов (P4): застывшие таймеры — один реестр на ленту,
         # исполнители моделей — по уровню (`""` — верхний).
         self._call_timers = CallTimers()
         self._block_views = BlockViews()
+        # Виды блоков ходов, нарисованных отрисовщиком кусков (и их
+        # вложенных уровней), — только маршрут раскрытия: итог хода и
+        # живые уровни их не трогают.
+        self._history_views = BlockViews()
+        # Узел вложенного трейса открытой сессии (§5.9).
+        self._nested_source: NestedSource | None = None
         # Nested progress под subagent_*: live sink + reopen из data_subagents_*.
         self._subagent_progress = SubagentProgressConsumer()
         self._nested_tool_rows: dict[
@@ -668,11 +703,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._edits_lookup = None  # Optional[EditsLookup]
         self._edits_lookup_key: Optional[tuple] = None
         self._submit_solution_call_ids: set[str] = set()
-        # Виджеты последней попытки turn_finish хода (ответ, код, итог,
-        # заметка) — при повторе свернуть предыдущую.
-        self._submit_solution_widgets: list[list[Widget]] = []
-        # Записи незаконченного ответа модели из прошлой пачки опроса.
-        self._response_tail: list = []
+        # Виджеты попыток turn_finish хода (ответ, код, итог, заметка) по
+        # номеру события: свёрнутые моделью снимаются
+        # (`_drop_collapsed_attempts`).
+        self._submit_solution_widgets: dict[int, list[Widget]] = {}
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
         self._summary_body_widgets: dict[int, CompactionBody] = {}
         self._summary_marker_widgets: dict[int, CompactionRule] = {}
@@ -704,14 +738,15 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, UserReplyContainer] = {}
+        # Отправленные реплики, которые больше не держат отрисовку модели
+        # над собой: их запись в треде не сверилась (`_release_sent_reply`).
+        self._sent_released: WeakSet[UserReplyContainer] = WeakSet()
+        # call_id вопроса агента → client_id отправленного ответа на него
+        # (`_track_answer`).
+        self._question_answers: dict[str, str] = {}
         # client_id реплик, которые стоп или конец хода не сняли у ядра
         # (`_withdraw_queue`): ядро их держит, пока тред их не сверит.
         self._held_client_ids: set[str] = set()
-        # id записей, уже отрисованных в трейсе: запись с таким id не
-        # рисуется повторно ни на одном пути (rebuild, live-тик).
-        self._rendered_ids: set[str] = set()
-        # Индекс первого события каждого сегмента в _task_events (retention).
-        self._segment_starts: list[int] = []
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -746,6 +781,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
         self._stream_answer_row = None  # type: Optional["TraceRow"]
+        # Что уже нарисовано в стрим-виджет: (версия sink, виджет). Совпала
+        # с текущей — `_refresh_stream_content` ничего не трогает.
+        self._stream_drawn: tuple[int, object] | None = None
         # Строки мыслей ленты (`ThoughtRow`, спека мыслей §7) — только из
         # стрима, нигде не хранятся: строка на попытку, законченные стоят на
         # своих местах до перерисовки ленты.
@@ -762,9 +800,18 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
-        # Блоки bang в трейсе (header + result) для `! clear` / `! clear N`.
-        self._bang_blocks: list[list] = []
-        self._bang_open_block: Optional[list] = None
+        # Память эфемерного ленты (§5.4): снятые ходы возвращаются с ней;
+        # в ней же блоки bang для `! clear` / `! clear N`.
+        self._ephemera = Ephemera()
+        # Надпись «обновляю ленту», пока пересборка ждёт кадра (§5.8).
+        self._rebuild_label: Optional[Static] = None
+        # Идёт отрисовка элемента модели истории: смонтированное — не
+        # эфемерное (`_note_ephemeral`).
+        self._drawing_model = 0
+        # Шаг элемента модели, который сейчас рисует живой путь из готовой
+        # модели (`_draw_live_items`); None — живой путь дописывает модель,
+        # его шаг — последний (`_note_step`).
+        self._drawing_item: Optional[int] = None
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
@@ -799,11 +846,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Снимок `tui` открытого треда до записи «running» новым ходом —
         # `(тред, {status, last_indicator})`: откат его возвращает (§3.8).
         self._pre_run_tui_meta: Optional[tuple[str, dict]] = None
-        # Запись итога последнего хода открытого треда (из потока записей)
-        # и признак «после неё началась реплика» — тогда последний ход
-        # записи не имеет, строка — по статусу сессии.
-        self._last_turn_outcome: Optional[TurnOutcome] = None
-        self._outcome_superseded: bool = False
+        # Свежая строка хода — та, что последней получила `freshen`
+        # (`_freshen_turn_line`); снятую `_fresh_turn_line` не отдаёт.
+        self._fresh_line: Optional[TurnLine] = None
+        # Черта смены модели, поставленная живым путём, пока её запись не
+        # дочитана хвостом в модель истории (`_last_model_change`).
+        self._live_mark: Optional[ModelMark] = None
+        # Строки вопросов агента по call_id — «без ответа» находит свой
+        # вопрос и тогда, когда его ход снят с ленты (заполняет отрисовка).
+        self._question_rows: dict[str, TraceRow] = {}
+        # Решение человека по плану `(текст, принят)`, ещё не дошедшее до
+        # сессии: рамка, вставленная в ленту позже, получает его же.
+        self._plan_marked: Optional[tuple[str, bool]] = None
+        # Счётчик добавлений в ленту (`_feed_mount`): число её детей меняет
+        # и снятие старых ходов.
+        self._feed_appended = 0
         # Сводка правок закрытого хода открытого треда (`_close_turn_edits`):
         # строка итога получает её, когда встанет, — запись стопа может
         # дочитаться позже спадающего фронта.
@@ -951,11 +1008,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._refresh_header()  # пересчитать усечение пути под новую ширину
         self._refresh_footer()  # адаптивная вёрстка usage (стек сессии) под новую ширину
         self._sync_chrome_caps()  # потолки хрома под новую высоту экрана
-        # Раскладка бренд-карточки выбиралась только при сборке: сузив окно уже после
-        # старта, человек получал колонку статусов в пару символов шириной — слова
-        # рвались по буквам («подк / люче / ны»), а совсем узко она схлопывалась в ноль.
-        self._apply_brand_layout(self._brand_fits_beside(event.size.width))
         self.call_after_refresh(self._refresh_trace_overlays)
+        # Выше экран — смонтированного может не хватить на запас окна.
+        self.call_after_refresh(self._window_fill)
 
     def on_click(self, event: events.Click) -> None:
         """Клик в ЛЮБОЙ части трейса → фокус на #trace, чтобы колесо/стрелки/PgUp-
@@ -1637,7 +1692,9 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _refresh_header(self) -> None:
         left, right = self._compose_header_segments()
         try:
-            update_if_changed(self.query_one("#header-left", Static), left)
+            header_left = self.query_one("#header-left", Static)
+            update_if_changed(header_left, left)
+            header_left.set_class(self._active_task_id is None, "welcome")
             update_if_changed(self.query_one("#header-right", Static), right)
         except Exception:
             pass
@@ -1854,8 +1911,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         return True
 
     def on_screen_resume(self) -> None:
-        """После возврата с под-экрана — освежить карточку и футер уведомлений."""
-        self._refresh_notices_card()
+        """После возврата с под-экрана — освежить футер уведомлений."""
         self._refresh_footer()
 
     def _current_cwd(self) -> str:
@@ -2277,7 +2333,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             self, lambda: self.query_one_optional(_SEL_TRACE)
         )
         self._show_brand()
-        self._render_startup_notices()
         # Per-project история input-реплик: project_dir известен со старта
         # (threads_dir.parent), attach не нужен — ↑/↓ работают уже в empty-state.
         from gc_tui.services.input_history import InputHistory
@@ -2310,34 +2365,34 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
-        self._task_events.clear()
-        self._last_turn_outcome = None
-        self._outcome_superseded = False
-        self._rendered_ids.clear()
-        self._segment_starts.clear()
+        self._feed_history = HistoryModel()
+        self._live_mark = None
+        self._question_rows.clear()
+        self._plan_marked = None
         self._answer_flow.new_turn()
         self._reset_new_replies()
-        self._next_no = 1
+        self._window_reset()
         self._stick_bottom = True  # новый трейс → показываем низ (latest)
         self._last_auto_y = 0
         self._active_calls.clear()
         self._call_timers.clear()
         self._block_views.clear()
+        self._history_views.clear()
         self._subagent_progress.reset()
         self._nested_tool_rows.clear()
         self._nested_widgets_by_parent.clear()
         self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
-        self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
         self._held_reveals.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
+        self._sent_released = WeakSet()
+        self._question_answers.clear()
         self._held_client_ids.clear()
         self._pending_wire_cache.clear()
-        self._bang_blocks.clear()
-        self._bang_open_block = None
+        self._ephemera.clear()
         self._streamed_thoughts.clear()
         # clear ask_human state (banner lives in #root, not #trace)
         if self._ask_human_banner is not None:
@@ -2431,15 +2486,51 @@ class TraceScreen(TraceFollowMixin, Screen):
     def attach_active_task(
         self, task_id: str, *, is_resume: bool = False
     ) -> bool:
-        """Attach a thread for polling. Initial state loads via read_all_events.
+        """Attach a thread for polling: история одним чтением — в модель и
+        в ленту (`open_thread_with_history`).
 
         is_resume=True (переключение/возобновление сессии через пикер): промпт
         заголовка АВТОРИТЕТНО берётся из стора (даже если None — у пустой сессии).
         is_resume=False (auto-create после send): не затираем только что
         отправленный _resumed_prompt, если стор ещё не успел записать сообщение.
 
+        Модель строится после настроек сессии: её входы (служебные поля
+        схем) — сессионные.
+
         Returns False если сессия занята другим TUI (не attach).
         """
+        prev = self._active_task_id
+        withdrawn = self.withdrawn_in(task_id)
+        if not self._enter_thread(task_id, is_resume=is_resume):
+            return False
+        segments, cursor = self._store.read_history(task_id)
+        history = build_history(
+            segments, inputs=self._history_inputs(), withdrawn=withdrawn
+        )
+        self._show_thread(task_id, history, cursor, prev, is_resume=is_resume)
+        return True
+
+    def open_thread_with_history(
+        self,
+        task_id: str,
+        history: HistoryModel,
+        cursor: TaskCursor,
+        *,
+        is_resume: bool,
+    ) -> bool:
+        """Открыть сессию с готовой моделью истории — синхронно (§5.7):
+        замок, сброс, настройки сессии, хвост окна, засев живого
+        состояния, шапка и футер. Состояния «сессия открыта, а история
+        ещё грузится» нет. False — сессия занята другим TUI."""
+        prev = self._active_task_id
+        if not self._enter_thread(task_id, is_resume=is_resume):
+            return False
+        self._show_thread(task_id, history, cursor, prev, is_resume=is_resume)
+        return True
+
+    def _enter_thread(self, task_id: str, *, is_resume: bool) -> bool:
+        """Начало открытия: замок, сброс состояния прежнего треда,
+        настройки сессии, пустая лента. False — сессия занята."""
         prev = self._active_task_id
         if not self._session_lock_acquire(task_id):
             return False
@@ -2481,27 +2572,26 @@ class TraceScreen(TraceFollowMixin, Screen):
             task_record.state.permission_mode if task_record else None,
             resumed=is_resume,
         )
-        # read_all_events — атомарный снимок live-файла + cursor (как раньше).
-        # Была ли компакция, определяем по голове live-снимка (после turn_end
-        # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
-        # старым путём из ЭТОГО снимка (consistent с cursor, без лишних чтений —
-        # иначе перетасовка тайминга ломает гонку optimistic-reply). read_segments
-        # (glob архивов + повторное чтение) — только для сжатых тредов.
-        records, cursor = self._store.read_all_events(task_id)
-        compacted = bool(records) and self._store.is_compaction_summary(
-            records[0]
-        )
-        self._cursor = cursor
         # Очистить #trace от предыдущей сессии — иначе при переходе
         # session A → session B (через /sessions) трейсы склеиваются
         # (виджеты A остаются, B дорисовывается поверх).
         self._clear_trace()
-        if compacted:
-            self._render_segments(self._store.read_segments(task_id))
-        else:
-            self._segment_starts = [0]
-            self._render_records(records)
-        self._merge_sidecar_nested(task_id)
+        return True
+
+    def _show_thread(
+        self,
+        task_id: str,
+        history: HistoryModel,
+        cursor: TaskCursor,
+        prev: Optional[str],
+        *,
+        is_resume: bool,
+    ) -> None:
+        """Конец открытия: модель — в ленту окном, засев живого
+        состояния, шапка и футер."""
+        self._feed_history = history
+        self._cursor = cursor
+        self._show_history(task_id, remnant=True)
         self._refresh_header()
         self._refresh_footer()
         sp = self._session_last_prompt()
@@ -2527,7 +2617,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # баннер для уже отвеченного вопроса (его output суммаризован) — см. helper.
         # Висячий вопрос (реально последний, без живого агента) → remnant с меткой.
         self._reconcile_ask_human_after_render(allow_remnant=True)
-        return True
 
     def on_unmount(self) -> None:
         """App exit / снятие экрана — отпустить lock удерживаемого tid и закрыть сеанс
@@ -2571,12 +2660,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         """После рестарта: смонтировать виджеты failed-реплик из
         meta.tui.pending_user_messages — но только truly-orphaned (не нашли
         соответствующего user-сообщения ни в meta.user_intent_log,
-        ни в self._task_events). Реплика очереди при живом прогоне
+        ни в событиях истории ленты). Реплика очереди при живом прогоне
         (пересборка ленты посреди хода) — снова в очереди, не failed.
 
         Source of truth — meta.user_intent_log (persisted across
         summarizations; user_ask-записи); legacy meta.user_messages_log и
-        _task_events — safety net на случай пустого/старого log."""
+        события истории ленты — safety net на случай пустого/старого log."""
         if self._store is None:
             return
         from gc_tui.services.relative_time import parse_iso_utc
@@ -2603,7 +2692,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Safety net: live trace (на случай если оба log пусты —
         # старый формат meta, повреждение и т.п.).
         delivered_wires.update(
-            ev.summary for ev in self._task_events if ev.kind == "user"
+            ev.summary
+            for ev in self._feed_history.events()
+            if ev.kind == "user"
         )
         # Устаревание: самый поздний ts доставленного user_ask. Pending/failed
         # реплику старше него пользователь уже оставил позади (есть доставленные
@@ -2676,45 +2767,382 @@ class TraceScreen(TraceFollowMixin, Screen):
             message_id=message_id,
         )
 
-    def _render_segments(self, segments: list[dict]) -> None:
-        """Рендер ВСЕХ сегментов сырьём — полный трейс, без схлопывания старых
-        сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
-        между сегментами, чтобы было видно, где прошла компакция).
+    def withdrawn_in(self, task_id: str) -> set[str]:
+        """Реплики треда, снятые откатом: отметка модели открытого треда и
+        заявки на удаление, ещё не исполненные."""
+        ids = {
+            mid
+            for _runner, tid, mid in self._pending_orphan_cleanups
+            if tid == task_id
+        }
+        if task_id == self._active_task_id:
+            ids |= self._feed_history.withdrawn
+        return ids
 
-        Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
-        лежит в следующем файле с тем же id, рисуется первое вхождение.
-        Payload остаётся full, пока этот id есть в окне segments[-2:]."""
-        records = [rec for seg in segments for rec in seg["messages"]]
-        context = self._render_context(
-            rec.get("payload") for rec in records if isinstance(rec, dict)
+    def _history_inputs(self) -> HistoryInputs:
+        """Входы построения модели из настроек открытой сессии."""
+        return HistoryInputs(
+            root=self._current_cwd(),
+            injected_fields=tuple(sorted(self._injected_fields())),
         )
-        # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
-        self._response_tail = response_tail(
-            [rec.get("payload") for rec in records if isinstance(rec, dict)]
-        )
-        window_start = retention_window_start_index(len(segments))
-        window_ids = message_ids_in_retention_window(segments)
-        for i, seg in enumerate(segments):
-            seg_in_window = i >= window_start
-            self._segment_starts.append(len(self._task_events))
-            for rec in seg["messages"]:
-                payload = rec.get("payload")
-                mid = payload.get("id") if isinstance(payload, dict) else None
-                in_window = seg_in_window or (
-                    mid is not None and mid in window_ids
-                )
-                self._render_record(rec, context=context, in_window=in_window)
-            comp = seg["compacted_by"]
-            if comp is not None:
-                self._append_and_render(
-                    build_compaction_marker_event(self._next_no, i, comp)
-                )
 
-    def _append_and_render(self, ev, *, live: bool = False) -> None:
-        """Событие с номером _next_no — в _task_events и на экран."""
-        self._next_no += 1
-        self._task_events.append(ev)
-        self._render_event(ev, live=live)
+    def _render_segments(
+        self,
+        segments: list[dict],
+        *,
+        task_id: str = "",
+        withdrawn: set[str] | frozenset = frozenset(),
+    ) -> None:
+        """Модель истории из ВСЕХ сегментов (маркер сжатия между
+        сегментами; дедуп preserved-копий и окно удержания — в построении
+        модели) — в ленту окном. ``task_id`` — тред трассы субагентов."""
+        self._feed_history = build_history(
+            segments, inputs=self._history_inputs(), withdrawn=withdrawn
+        )
+        self._show_history(task_id, remnant=False)
+
+    def _show_history(self, task_id: str, *, remnant: bool) -> None:
+        """Модель истории — в ленту окном (§5.6, §5.7): хвост законченных
+        ходов — отрисовщиком кусков, незаконченный последний ход — живым
+        путём (его вызовы, вопрос и вложенное — живое состояние экрана);
+        засев живого состояния из ссылок куска и модели. ``remnant`` —
+        висячий вопрос истории помечается «прервано» (открытие)."""
+        history = self._feed_history
+        self._nested_source = self._history_nested(task_id)
+        open_turn = history.open_turn()
+        stop = history.turn_count() if open_turn is None else open_turn
+        refs = self._window_mount_tail(history.turn_step(stop))
+        self._adopt_history_refs(refs)
+        self._seed_fresh_line(refs.fresh_turn_line)
+        live_from = self._live_items_start(stop)
+        self._seed_from_history(live_from)
+        self._draw_live_items(live_from)
+        self._merge_live_turn_nested()
+        if remnant:
+            self._interrupt_history_question(stop)
+
+    def _history_nested(self, task_id: str) -> NestedSource:
+        """Узел вложенного трейса треда: трасса читается по требованию,
+        родители — субагенты модели в окне удержания."""
+
+        def read() -> list[dict]:
+            if self._store is None or not task_id:
+                return []
+            return self._store.read_subagent_trace(task_id)
+
+        return NestedSource(
+            read,
+            window_parent_ids=lambda: subagent_parent_ids_from_events(
+                self._feed_history.subagent_calls()
+            ),
+            root=self._current_cwd(),
+            injected=self._injected_fields(),
+        )
+
+    def _live_items_start(self, stop: int) -> int:
+        """Первый элемент модели, который рисует живой путь: начало хода
+        ``stop``; ходов нет — все элементы, все ходы законченные — ни
+        одного."""
+        history = self._feed_history
+        if stop < history.turn_count():
+            return history.turn_starts[stop]
+        return len(history.items) if history.turn_starts else 0
+
+    def _draw_live_items(self, start: int) -> None:
+        """Элементы модели с ``start`` — в ленту теми же виджетами, что
+        живой путь рисует запись за записью."""
+        history = self._feed_history
+        replies = Counter(p for p in history.reply_points if p >= start)
+        try:
+            for i in range(start, len(history.items)):
+                self._drawing_item = i
+                self._draw_live_item(history.items[i], replies[i])
+        finally:
+            self._drawing_item = None
+        # Повтор реплики последней записью — тоже начало хода.
+        self._settle_for_replies(replies[len(history.items)])
+
+    def _draw_live_item(self, item, replies: int) -> None:
+        """Элемент модели живым путём; ``replies`` — начал хода перед
+        ним."""
+        self._settle_for_replies(replies)
+        if item.kind == "model_choice":
+            self._restore_model_mark(item.side)
+        elif item.kind == "outcome":
+            self._show_outcome(parse_turn_outcome(item.side))
+        elif item.kind == "compaction":
+            self._render_event(item.event)
+        else:
+            self._draw_event(item.event, live=False)
+
+    # ---- окно ленты (§5.3) -----------------------------------------------
+
+    def _window_feed(self):
+        return self.query_one(_SEL_TRACE, VerticalScroll)
+
+    def _window_model(self) -> HistoryModel:
+        return self._feed_history
+
+    def _window_options(self) -> ChunkOptions:
+        mcp_tools, mcp_servers = self._mcp_tool_info()
+        return ChunkOptions(
+            focusable_compaction=True,
+            edits_lookup=self._edits_lookup_for_thread(),
+            diff_preview=self._trace_diff_preview_lines(),
+            expanded_turns=self._replay_expanded_turns(),
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
+            model_slots=self._footer_slots(),
+            timers=self._call_timers,
+            plan_accepted=self._plan_panel_accepted,
+            thoughts=self._thoughts_on(),
+        )
+
+    def _window_nested(self) -> NestedSource | None:
+        return self._nested_source
+
+    def _window_ephemera(self) -> Ephemera:
+        return self._ephemera
+
+    def _window_forget_step(self, step: int) -> bool:
+        return self.forget_step(step)
+
+    def _window_pinned(self, step: int) -> bool:
+        return self._step_pinned(step)
+
+    def _window_focus_home(self) -> None:
+        self.set_focus(
+            self.query_one(_SEL_CMDINPUT, CommandTextArea),
+            scroll_visible=False,
+        )
+
+    def forget_step(self, step: int) -> bool:
+        """«Забыть шаг» (§5.3, §5.11): шаг хода ``step`` на конце
+        прочитанного диапазона снимается с ленты одной операцией —
+        эфемерное и снимок вида уходят в память, ни один реестр экрана не
+        держит снятый виджет; события остаются в модели. Не снимаются
+        (False): шаг не на конце и живой (`_step_pinned`)."""
+        with self._window_scope():
+            if not self._window_removable(step) or self._step_pinned(step):
+                return False
+            gone = self._step_subtree(step)
+            self._remember_step(step, gone)
+            self._forget_widgets(gone)
+            return super()._window_forget_step(step)
+
+    def _step_pinned(self, step: int) -> bool:
+        """Шаг нельзя снимать (§5.3, R32, R41): последний шаг модели, шаг
+        с прижатым хвостом, шаг со строкой, на которую держит ссылку живое
+        состояние или фокус (`_live_widgets`: идущий вызов, «!», вопрос,
+        стрим). Попытка сдачи шаг не держит (R44): снятая просто не стоит
+        в ленте, вернувшаяся куском — снова в свёртке
+        (`ChunkRefs.attempts`). Прочие шаги текущего хода снимаются, как
+        шаги старых: гигантский живой ход у низа и при подъёме держится в
+        пределах окна; раскрытое возвращается со снятым шагом снимком
+        вида."""
+        if step >= self._feed_history.step_count() - 1:
+            return True
+        widgets = self._window_step_widgets(step)
+        if any(pins_to_bottom(w) for w in widgets):
+            return True
+        live = self._live_widgets()
+        return any(
+            w in live
+            for top in widgets
+            for w in top.walk_children(with_self=True)
+        )
+
+    def _step_subtree(self, step: int) -> set:
+        """Все виджеты поддерева ленты шага ``step``."""
+        return {
+            w
+            for top in self._window_step_widgets(step)
+            for w in top.walk_children(with_self=True)
+        }
+
+    def _live_widgets(self) -> set:
+        """Строки, на которые держит ссылку живое состояние (§5.3), и
+        виджет в фокусе: их ход снимать нельзя.
+
+        Строк родителей бегущих субагентов (`_subagent_parent_rows`) здесь
+        нет: строка бегущего субагента — идущий вызов (`_active_calls`).
+        С фоновыми субагентами родитель может остаться в старом ходе без
+        идущего вызова — тогда их строки добавить сюда (спека шага 2 окна
+        ленты, §9)."""
+        live = {
+            self.focused,
+            self._fresh_turn_line(),
+            self._ask_human_question_row,
+            self._stream_block,
+            self._stream_answer_row,
+            *self._active_calls.values(),
+            *self._pending_user_widgets.values(),
+            *self._ephemera.bang_open_widgets(),
+        }
+        live.discard(None)
+        return live
+
+    def _remember_step(self, step: int, gone: set) -> None:
+        """Эфемерное и снимок вида снимаемого шага — в память (§5.4)."""
+        ephemera = self._ephemera
+        at = self._feed_history.step_starts[step]
+        for widget in gone:
+            view_key = getattr(widget, "view_key", None)
+            key = view_key() if view_key else ""
+            if key:
+                ephemera.note_view(key, widget.view_state(), at=at)
+        for views in (self._block_views, self._history_views):
+            for view in views.values():
+                for key, flag in view.view_state(gone).items():
+                    ephemera.note_view(key, flag, at=at)
+        ephemera.freeze(gone, at=at, gone=self._gone_widget, respawn=respawn)
+
+    @staticmethod
+    def _gone_widget(widget) -> bool:
+        """Виджет уже снят с ленты (не снятием хода)."""
+        return not widget.is_attached or textual_compat.is_being_removed(
+            widget
+        )
+
+    def _forget_widgets(self, gone: set) -> None:
+        """Реестры экрана со ссылками на виджеты (§5.3) забывают снятые
+        ``gone``."""
+        for registry in (
+            self._active_calls,
+            self._subagent_parent_rows,
+            self._nested_tool_rows,
+            self._summary_marker_widgets,
+            self._summary_body_widgets,
+            self._question_rows,
+        ):
+            for key in [k for k, w in registry.items() if w in gone]:
+                del registry[key]
+        nested = self._nested_widgets_by_parent
+        for pid in list(nested):
+            nested[pid] = [w for w in nested[pid] if w not in gone]
+            if not nested[pid]:
+                del nested[pid]
+        for views in (self._block_views, self._history_views):
+            for level, view in list(views.items()):
+                if level == "":
+                    view.forget(gone)
+                elif view.holds(gone):
+                    del views[level]
+        self._streamed_thoughts = [
+            w for w in self._streamed_thoughts if w not in gone
+        ]
+        self._submit_solution_widgets = {
+            no: ws
+            for no, ws in self._submit_solution_widgets.items()
+            if not any(w in gone for w in ws)
+        }
+        self._held_reveals = [
+            fn for fn in self._held_reveals if _bound_widget(fn) not in gone
+        ]
+        if self._live_mark in gone:
+            self._live_mark = None
+
+    def _window_adopt_chunk(self, refs: ChunkRefs) -> None:
+        self._adopt_history_refs(refs)
+
+    def _adopt_history_refs(self, refs: ChunkRefs) -> None:
+        """Ссылки куска истории — в реестры экрана: виды блоков (маршрут
+        раскрытия), строки вопросов, маркеры и тела сводок сжатия."""
+        self._history_views.update(refs.block_views)
+        self._question_rows.update(refs.question_rows)
+        self._summary_marker_widgets.update(refs.summary_markers)
+        self._summary_body_widgets.update(refs.summary_bodies)
+        self._streamed_thoughts += refs.thoughts
+        # Попытка сдачи последнего хода, которую ещё может свернуть
+        # следующая, — в свёртку, где бы её ни нарисовали (R44).
+        self._submit_solution_widgets.update(refs.attempts)
+
+    def _seed_fresh_line(self, line: Optional[TurnLine]) -> None:
+        """Свежая строка итога из куска — ссылкой экрана; пока стоит бар
+        хода (пересборка посреди прогона), она ждёт за ним, как вживую."""
+        if line is None:
+            return
+        self._fresh_line = line
+        if self._bar_wanted():
+            line.hold()
+            self._held_reveals.append(line.reveal)
+
+    def _seed_from_history(self, stop: int) -> None:
+        """Состояние, которое живой путь берёт из событий истории, — по
+        элементам модели до ``stop`` (их рисует отрисовщик кусков):
+        вид последнего события для индикатора и имя сессии из
+        финализатора (`_seed_or_update_task_from_submit`)."""
+        events = [
+            it.event
+            for it in self._feed_history.items[:stop]
+            if it.kind == "event" and it.event is not None
+        ]
+        if not events:
+            return
+        last = events[-1]
+        self._last_event_kind = "_finalized" if is_finish(last) else last.kind
+        submits = [ev for ev in events if is_finish(ev)]
+        # Первый финализатор сеет имя; дальше имя меняет только ход с
+        # работой — тогда каждый перезаписывает, итог — последнего.
+        if submits:
+            self._seed_or_update_task_from_submit(submits[0])
+        if len(submits) > 1 and self._live_turn_tool_calls > 0:
+            self._seed_or_update_task_from_submit(submits[-1])
+
+    def _merge_live_turn_nested(self) -> None:
+        """Вложенный трейс субагентов незаконченного хода (его рисует
+        живой путь): действия — от узла вложенного трейса, монтаж — живым
+        путём, в реестры экрана: живые события прогресса продолжают те же
+        уровни."""
+        source = self._nested_source
+        parents = set(self._subagent_parent_rows)
+        if source is None or not parents:
+            return
+        actions = source.actions_for(parents)
+        if not actions:
+            return
+        apply_sidecar_nested_actions(
+            actions,
+            mount_nested_tool=partial(self._mount_nested_tool, live=False),
+            finish_nested_tool=self._finish_nested_tool,
+            mount_nested_prose=self._mount_nested_prose,
+            mount_nested_summary=self._mount_nested_child_summary,
+            mount_nested_user=self._mount_nested_user,
+            mount_nested_todo=self._mount_nested_todo,
+        )
+        # Исход хода родителя — уровням, домонтированным после записи итога.
+        self._block_views.settle_levels()
+
+    def _interrupt_history_question(self, stop: int) -> None:
+        """Последний вопрос агента в ходе, нарисованном отрисовщиком кусков
+        (там баннера нет): ответа нет, диалог не продолжился и живого
+        агента нет — «прервано» под его строкой, как сверка баннера при
+        открытии (`_reconcile_ask_human_after_render`)."""
+
+        history = self._feed_history
+        events = history.events()
+        at = self._last_ask_human_index(events)
+        if at is None or history.turn_index_of(events[at].no) >= stop:
+            return
+        question, after = events[at], events[at + 1 :]
+        meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
+        if any(
+            _answers_question(ev, question.call_id) or ev.kind in meaningful
+            for ev in after
+        ):
+            return
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            return
+        row = self._question_rows.get(question.call_id or "")
+        if row is not None:
+            self._note_interrupted(row)
+
+    def _settle_for_replies(self, count: int) -> None:
+        """Реплики (и повторы preserved-копий) перед элементом — столько
+        же начал хода, сколько у живого пути."""
+        for _ in range(count):
+            self._turn_started_after_record(live=False)
 
     def _render_records(
         self,
@@ -2729,11 +3157,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
         ]
-        if live:
-            # Ответ модели мог начаться в прошлой пачке опроса: его текст
-            # нужен вызову turn_finish, пришедшему сейчас.
-            payloads = [*self._response_tail, *payloads]
-        self._response_tail = response_tail(payloads)
+        # Ответ модели мог начаться в прошлой пачке опроса: его текст
+        # нужен вызову turn_finish, пришедшему сейчас.
+        payloads = self._feed_history.carry_response_tail(payloads, live=live)
         if context is None:
             context = self._render_context(payloads)
         elif live:
@@ -2748,16 +3174,11 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _render_finish(self, ev) -> None:
         """Конец хода turn_finish: отчёт ответом, запись «итог» или строка
         «заметка» (правило — turn_close.finish_close)."""
-        from gc_tui.services.trace_render import (
-            build_finish_widgets,
-            finish_close_of,
-        )
+        from gc_tui.services.trace_render import build_finish_widgets
 
         # A1: отчёт, уже показанный прозой, вторым блоком не рисуем. База
         # дедупа — только проза: попытки хода убирает свёртка ниже.
-        close = self._answer_flow.finish(
-            finish_close_of(ev), tracked=bool(ev.call_id)
-        )
+        close = finish_close(self._answer_flow, ev)
         following = self._stick_bottom
         widgets = build_finish_widgets(close, event_no=ev.no)
         for w in widgets:
@@ -2767,11 +3188,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         if following:
             self._scroll_trace_end()
+        self._drop_collapsed_attempts()
         if not ev.call_id:
             return
         self._submit_solution_call_ids.add(ev.call_id)
-        self._drop_finish_attempts()
-        self._submit_solution_widgets.append(widgets)
+        self._submit_solution_widgets[ev.no] = widgets
         self._new_attempt_replies = int(counted)
         # Финальный ответ виден — переключаем индикатор в режим
         # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
@@ -2780,17 +3201,23 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._thinking is not None:
             self._thinking.set_state("validating")
 
-    def _drop_finish_attempts(self) -> None:
-        """Убрать прошлые попытки turn_finish хода.
+    def _drop_collapsed_attempts(self) -> None:
+        """Убрать попытки turn_finish хода, которые модель истории пометила
+        свёрнутыми (`HistoryModel.collapsed_attempts`, одно правило с
+        отрисовщиком кусков): следующая попытка или проза, повторившая
+        отчёт.
 
         Отклонённые intent_guard'ом попытки убираем молча (как regenerate
         в чатах): внутренняя кухня качества юзеру не показывается, обе
         попытки сохранены в jsonl треда. Убранная попытка уходит и из
         счётчика плашки: он равен видимым новым ответам."""
-        for prev_widgets in self._submit_solution_widgets:
-            for w in prev_widgets:
+        collapsed = self._feed_history.collapsed_attempts
+        gone = [no for no in self._submit_solution_widgets if no in collapsed]
+        if not gone:
+            return
+        for no in gone:
+            for w in self._submit_solution_widgets.pop(no):
                 w.remove()
-        self._submit_solution_widgets.clear()
         if self._new_attempt_replies:
             self._new_replies -= self._new_attempt_replies
             self._new_attempt_replies = 0
@@ -2804,51 +3231,55 @@ class TraceScreen(TraceFollowMixin, Screen):
         context: RenderContext | None = None,
         in_window: bool = True,
     ) -> None:
+        """Запись треда — в модель истории (единственная точка дописывания
+        живым путём) и в ленту."""
+        history = self._feed_history
         if is_model_choice_record(rec):
-            if not live:
-                self._restore_model_mark(rec)
+            # Живой хвост записи не рисует: черту уже дала живая смена;
+            # модель теперь знает смену сама.
+            if history.add_model_choice(rec):
+                if live:
+                    self._live_mark = None
+                else:
+                    self._restore_model_mark(rec)
             return
         if is_turn_outcome_record(rec):
-            # Итог хода — не сообщение ленты: строка последнего хода, пока
-            # после записи не началась реплика. Сирота (сообщения её хода
-            # в ленте нет: откат, сброс) строки не даёт.
-            outcome = parse_turn_outcome(rec)
-            if outcome is None or not turn_shown_in(rec, self._rendered_ids):
-                return
-            self._last_turn_outcome = outcome
-            self._outcome_superseded = False
-            self._end_turn_blocks(outcome)
-            self._mount_turn_line(outcome)
+            outcome = history.add_outcome(rec)
+            if outcome is not None:
+                self._show_outcome(outcome)
             return
         payload = rec.get("payload")
-        if not isinstance(payload, dict) or self._is_withdrawn(payload):
+        if not isinstance(payload, dict) or history.is_withdrawn(payload):
             return
+        ev = history.add_message(rec, context=context, in_window=in_window)
         # Реплика после записи — начало следующего хода (и та, что экран
         # уже показал сам: важна позиция в файле, а не повтор).
         if extract_real_user_message_text(payload):
-            self._outcome_superseded = True
             self._turn_started_after_record(live=live)
-        mid = payload.get("id")
-        if mid is not None:
-            if mid in self._rendered_ids:
-                return
-            self._rendered_ids.add(mid)
-        ev = map_message(
-            payload,
-            no=self._next_no,
-            ts=rec.get("ts", ""),
-            context=context,
-        )
-        if ev is None:
-            return
-        apply_payload_retention(ev, seg_in_window=in_window)
-        self._append_and_render(ev, live=live)
+        if ev is not None:
+            self._draw_event(ev, live=live)
+
+    def _show_outcome(self, outcome: TurnOutcome) -> None:
+        """Итог хода — не сообщение ленты: строка последнего хода на месте
+        записи. Сирота (сообщения её хода в истории нет: откат, сброс) в
+        модель не входит и строки не даёт."""
+        self._end_turn_blocks(outcome)
+        with self._model_drawing():
+            self._mount_turn_line(outcome)
+
+    def _draw_event(self, ev, *, live: bool) -> None:
+        view = self._block_views.get("")
+        if view is not None and self._feed_history.starts_step(ev.no):
+            # Граница шага закрывает группу вызовов, как отрисовщик
+            # кусков рисует шаг своим видом блоков (`trace_steps`).
+            view.event_closing()
+        self._render_event(ev, live=live)
         # Spec 2026-05-26 + 2026-05-28: запоминаем kind последнего события.
         # Для submit_solution финального ответа — sticky sentinel
         # "_finalized" вместо "agent": блокирует повторный mount в
         # _poll_active, пока не придёт новое значимое событие (gate-reject
         # [policy], новый submit_solution и т.п.).
-        if ev.kind == "agent" and ev.tool_name == "submit_solution":
+        if is_finish(ev):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
@@ -2939,22 +3370,14 @@ class TraceScreen(TraceFollowMixin, Screen):
                 row.display = shown
         self._thoughts_shown = shown
 
-    def _is_withdrawn(self, payload: dict) -> bool:
-        """Реплика открытого треда снята откатом, а тред её ещё держит
-        (заявка на удаление ждёт освобождения треда): в историю ленты она не
-        входит — ни перерисовкой, ни хвостом."""
-        mid, tid = payload.get("id"), self._active_task_id
-        return mid is not None and any(
-            claim[1:] == (tid, mid) for claim in self._pending_orphan_cleanups
-        )
-
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
         над очередью и над отправленной, ещё не записанной репликой: запись
         стопа дочитана после новой отправки). Строка последнего хода свежая
         (§3.2), если под ней нет отправленной незаписанной реплики, —
-        тогда следующий ход уже начался; прошлая оседает."""
-        fresh = not self._outcome_superseded and not self._sent_reply_below()
+        тогда следующий ход уже начался; прошлая оседает от реплики за
+        записью (`_turn_started_after_record`)."""
+        fresh = not self._sent_reply_below()
         summary = None
         stale = self._fallback_line_for(outcome.opened_by)
         if stale is not None:
@@ -2969,7 +3392,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._reveal_held()
         line = build_turn_line(outcome)
         # Причина записи хранится и у осевшей строки (освежить её снова).
-        line.freshen(summary, outcome_error(outcome))
+        self._freshen_turn_line(line, summary, outcome_error(outcome))
         if not fresh:
             line.settle()
         if self._bar_wanted():
@@ -3009,18 +3432,40 @@ class TraceScreen(TraceFollowMixin, Screen):
             w.state == "pending" for w in self._queued_tail(trace, sent=True)
         )
 
+    def _freshen_turn_line(
+        self,
+        line: TurnLine,
+        summary: Optional[tuple[int, int, int]],
+        error: Optional[str],
+    ) -> None:
+        """Единственный путь `freshen` на экране: прежняя свежая строка
+        оседает — свежей бывает не больше одной."""
+        if self._fresh_line is not line:
+            self._settle_turn_line()
+        line.freshen(summary, error)
+        self._fresh_line = line
+
     def _fresh_turn_line(self) -> Optional[TurnLine]:
-        """Свежая строка последнего хода в ленте; None — её нет."""
-        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
-        return lines[-1] if lines else None
+        """Свежая строка последнего хода в ленте; None — её нет. Ссылка
+        чинится сама: снятая любым путём или осевшая строка — None."""
+        line = self._fresh_line
+        if (
+            line is None
+            or not line.is_attached
+            or textual_compat.is_being_removed(line)
+            or not line.is_fresh
+        ):
+            return None
+        return line
 
     def _settle_turn_line(self) -> bool:
         """Начался новый ход: строка прошлого оседает в ленте. True — было
         чему оседать."""
-        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
-        for line in lines:
-            line.settle()
-        return bool(lines)
+        line = self._fresh_turn_line()
+        if line is None:
+            return False
+        line.settle()
+        return True
 
     def _turn_started_after_record(self, *, live: bool) -> None:
         """Реплика за записью итога — следующий ход. Пришла хвостом посреди
@@ -3046,13 +3491,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Откат реплики `msg_id`: её нет в истории ленты — запись её хода
         стала сиротой (`turn_shown_in`), дочитанная позже строки не даст;
         строка, вставшая до отката (запись дочитана раньше Esc), уходит."""
-        self._rendered_ids.discard(msg_id)
+        self._feed_history.mark_withdrawn(msg_id)
         for line in self.query(TurnLine):
             if line.opened_by == msg_id:
                 line.remove()
-        last = self._last_turn_outcome
-        if last is not None and last.opened_by == msg_id:
-            self._last_turn_outcome = None
 
     def _show_thinking_indicator(self, *, state: str = "thinking") -> None:
         """Показать индикатор: смонтировать (если ещё нет) или снять `.hidden`.
@@ -3123,11 +3565,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         записи (статус «running» без живого хода: процесс убит) — тоже
         None: запись — прошлого хода, даже если реплики после неё нет
         (континуация плана открывается технической)."""
-        if self._outcome_superseded:
+        if self._feed_history.outcome_superseded:
             return None
         if self._session_status_word() == "interrupted":
             return None
-        return self._last_turn_outcome
+        return self._feed_history.last_turn_outcome
 
     def _show_turn_outcome(
         self,
@@ -3151,7 +3593,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         line = self._fresh_turn_line()
         if outcome is not None:
             if line is not None:
-                line.freshen(summary, outcome_error(outcome))
+                self._freshen_turn_line(line, summary, outcome_error(outcome))
             return
         error = self._active_run_error() if word == "failed" else None
         if line is None or line.recorded:
@@ -3159,10 +3601,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             line = build_turn_line(
                 word=word, plan=plan, opened_by=self._last_user_message_id
             )
-            line.freshen(summary, error)
+            self._freshen_turn_line(line, summary, error)
             self._trace_mount(line, above_sent=True)
             return
-        line.freshen(summary, error)
+        self._freshen_turn_line(line, summary, error)
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
@@ -3182,35 +3624,50 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
         Зовётся poll-веткой (после mount/switch) и событийно (StreamPump → app →
-        call_from_thread). НЕ монтирует/снимает/переключает — это poll."""
+        `_post_stream_signal`). НЕ монтирует/снимает/переключает — это poll.
+        Без новых данных (та же версия sink, тот же виджет) — ничего не
+        трогает: лишние сигналы и тики опроса ничего не стоят."""
         # F3: freeze UI на время app-select — не красим стрим и не двигаем stick
         # (здесь зовутся _update_stick_state/_scroll_trace_end). Гейт железный:
-        # покрывает и poll, и событийный путь _stream_signal → call_from_thread.
+        # покрывает и poll, и событийный путь _stream_signal. Нарисованное не
+        # запоминается — после отпускания первый вызов догонит содержимое.
         if self._ui_frozen_for_select():
             return
         sink = getattr(self.app, "_stream_sink", None)
         if sink is None:
             return
+        version, think, answer = sink.versioned_snapshot()
+        target = self._stream_answer_row
+        if target is None:
+            target = self._stream_block
+        if target is None or (version, target) == self._stream_drawn:
+            return
+        self._update_stick_state()
+        if self._draw_stream(think, answer):
+            self._stream_drawn = (version, target)
+        if self._stick_bottom:
+            self._scroll_trace_end()
+
+    def _draw_stream(self, think: str, answer: str) -> bool:
+        """Нарисовать снимок sink в стрим-виджет; True — текст лёг.
+        `StreamBlock` до монтажа текст молча не берёт (опрос монтирует его
+        и зовёт перерисовку в одном обработчике), `TraceRow` берёт до
+        `compose`."""
         from gc_tui.services.markdown_render import render_prose
         from gc_tui.services.stream_sink import (
             format_reasoning_line,
             format_stream_block,
         )
 
-        self._update_stick_state()
-        think, answer = sink.snapshot()
         if self._stream_answer_row is not None:
             self._stream_answer_row.set_content(
                 render_prose(format_stream_block(answer=answer))
             )
-        elif self._stream_block is not None:
-            self._stream_block.set_text(
-                format_reasoning_line(think=think), thinking=True
-            )
-        else:
-            return
-        if self._stick_bottom:
-            self._scroll_trace_end()
+            return True
+        self._stream_block.set_text(
+            format_reasoning_line(think=think), thinking=True
+        )
+        return self._stream_block.is_mounted
 
     def _commit_stream(self) -> None:
         """Строка ленты закоммичена — живой вывод шага уходит из-под неё.
@@ -3234,6 +3691,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         reset_sink=False: виджет убирается, но sink не трогается — счётчик и
         reasoning-состояние индикатора продолжают жить (нужно для
         tui.show_*=False: действие в drain без сброса буфера)."""
+        self._stream_drawn = None
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None
@@ -3329,13 +3787,17 @@ class TraceScreen(TraceFollowMixin, Screen):
         `desired_height`), лента берёт остаток.
 
         Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
-        раздувает chrome и выдавливает поле ввода за край экрана."""
+        раздувает chrome и выдавливает поле ввода за край экрана.
+
+        Без оверлея и баннера капать нечего — выход до замеров хрома."""
+        overlay = self._open_overlay_widget()
+        banner = self._sticky_banner_widget()
+        if overlay is None and banner is None:
+            return
         try:
             root = self.query_one(_SEL_ROOT, Vertical)
         except Exception:
             return
-        overlay = self._open_overlay_widget()
-        banner = self._sticky_banner_widget()
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
         # Баннер/оверлей исключаем — их желаемую высоту считаем отдельно (иначе
         # ещё не ужатый region баннера раздувает chrome до available<=0).
@@ -3441,7 +3903,10 @@ class TraceScreen(TraceFollowMixin, Screen):
 
         above_sent=True — запись о прошлом (итог хода): встаёт и над
         отправленной репликой, которую ядро ещё не записало (`pending`), —
-        в файле треда она будет после.
+        в файле треда она будет после. Так же — всё, что рисует элемент
+        модели истории (`_model_drawing`): он дочитан из файла, а
+        отправленная реплика ляжет в файл за ним (ответ старого хода,
+        дочитанный после отправки, — над ней, как после переоткрытия).
 
         close_groups=False — виджет не событие верхнего уровня (вложенный
         без якоря): группы блоков он не закрывает.
@@ -3453,17 +3918,85 @@ class TraceScreen(TraceFollowMixin, Screen):
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
+        sent = above_sent or self._drawing_model > 0
         queue = (
             []
             if pins_to_bottom(widget)
-            else self._pinned_tail(trace, sent=above_sent)
+            else self._pinned_tail(trace, sent=sent)
         )
         if queue:
-            trace.mount(widget, before=queue[0])
+            self._feed_mount(trace, widget, at_end=True, before=queue[0])
         else:
-            trace.mount(widget)
+            self._feed_mount(trace, widget)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
+
+    def _feed_mount(
+        self,
+        trace,
+        widget,
+        *,
+        at: Optional[int] = None,
+        at_end: bool = False,
+        **where,
+    ) -> None:
+        """Добавить виджет в ленту (``where`` — `before` / `after`) с
+        отметкой в счётчике добавлений; ``at`` — место эфемерного в
+        модели, если он встаёт не в конец (`_note_ephemeral`);
+        ``at_end`` — якорь ``where`` лишь прижатый хвост, по смыслу виджет
+        встаёт в конец ленты."""
+        self._feed_appended += 1
+        trace.mount(widget, **where)
+        anchor = None if at_end else where.get("before") or where.get("after")
+        self._note_step(widget, anchor)
+        self._note_ephemeral(widget, at)
+
+    def _note_ephemeral(self, widget, at: Optional[int] = None) -> None:
+        """Виджет, за которым нет элемента модели истории, — в память
+        эфемерного (§5.4): место ``at`` — число элементов модели перед
+        ним (по умолчанию — все). Не эфемерное: отрисовка элемента
+        модели, вложенный трейс (его вернёт узел), стрим ответа, черты
+        модели и прижатый хвост. Реплика без номера события (отправлена,
+        «не отправлено») захватывается вся: записанная ядром при снятии
+        возвращается моделью (`respawn` — None) и класс эфемерного снимает
+        сама (`set_event_no`)."""
+        if (
+            self._drawing_model
+            or widget.has_class("-in-agent")
+            or isinstance(widget, ModelMark)
+            or pins_to_bottom(widget)
+            or widget is self._stream_block
+            or widget is self._stream_answer_row
+        ):
+            return
+        widget.add_class(EPHEMERAL_CLASS)
+        if at is None:
+            at = len(self._feed_history.items)
+        self._ephemera.capture(widget, after=at)
+
+    @contextlib.contextmanager
+    def _model_drawing(self):
+        """Отрисовка элемента модели истории (`_note_ephemeral`)."""
+        self._drawing_model += 1
+        try:
+            yield
+        finally:
+            self._drawing_model -= 1
+
+    def _note_step(self, widget, anchor=None) -> None:
+        """Виджет живого пути — меткой своего элемента модели в окно (§5.3:
+        окно режет ленту по шагам ходов, голова шага — первый по ленте его
+        виджет): встал рядом со своим виджетом ``anchor`` — элемент якоря
+        (заголовок группы, исход вызова прошлого шага, вложенное); иначе
+        рисуемый элемент готовой модели (`_draw_live_items`); иначе —
+        последний в модели (живой путь сначала дописывает элемент, потом
+        рисует)."""
+        item = None if anchor is None else self._window_item_at(anchor)
+        if item is None:
+            item = self._drawing_item
+        if item is None:
+            item = len(self._feed_history.items) - 1
+        self._window_appended(item, widget)
 
     def _note_top_event(self, widget) -> None:
         """Единственная точка закрытия групп верхнего уровня (решение
@@ -3477,25 +4010,48 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         view.event_closing()
 
-    @staticmethod
-    def _pinned_tail(trace, *, sent: bool = False) -> list:
+    def _pinned_tail(self, trace, *, sent: bool = False) -> list:
         """Прижатое к низу по порядку: реплики очереди и тихая отметка
         модели. Это всегда сплошной хвост ленты (`_trace_mount`), поэтому
-        обход с конца, а не всей ленты. ``sent`` — с ними и отправленные,
-        ещё не записанные ядром."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
+        обход с конца, а не всей ленты. ``sent`` — перед ними и
+        отправленные реплики, ещё не записанные ядром (`_sent_replies`),
+        где бы они ни стояли: под отправленной может встать строка не из
+        модели (вывод «!», служебная строка)."""
         tail = []
         for widget in reversed(trace.children):
-            sent_reply = (
-                sent
-                and isinstance(widget, UserReplyContainer)
-                and widget.state == "pending"
-            )
-            if not (pins_to_bottom(widget) or sent_reply):
+            if not pins_to_bottom(widget):
                 break
             tail.append(widget)
-        return tail[::-1]
+        tail.reverse()
+        return [*self._sent_replies(trace), *tail] if sent else tail
+
+    def _sent_replies(self, trace) -> list:
+        """Отправленные реплики, ещё не записанные ядром, по порядку
+        ленты: всё, что рисует модель, встаёт над ними — в файле треда они
+        будут после (R39). Отпущенные (`_release_sent_reply`) — нет."""
+        replies = [
+            w
+            for w in self._pending_user_widgets.values()
+            if w.state == "pending"
+            and w.parent is trace
+            and w not in self._sent_released
+        ]
+        if len(replies) > 1:
+            order = {w: i for i, w in enumerate(trace.children)}
+            replies.sort(key=order.__getitem__)
+        return replies
+
+    def _release_sent_reply(self) -> None:
+        """Реплика из треда не сверилась ни с одной отправленной (wire
+        другой): ядро её записало — самая ранняя отправленная больше не
+        держит отрисовку модели над собой. Иначе несверенная реплика
+        навсегда последняя в ленте, а все следующие ходы — над ней. Цена
+        ошибки (реплика треда не от отправки): запись, дочитанная до
+        записи отправленной, встанет под ней, как до R39."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        replies = self._sent_replies(trace)
+        if replies:
+            self._sent_released.add(replies[0])
 
     def _queued_tail(self, trace, *, sent: bool = False) -> list:
         """Реплики очереди по порядку (с ``sent`` — и отправленные, ещё не
@@ -3529,10 +4085,18 @@ class TraceScreen(TraceFollowMixin, Screen):
             return True
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         events_ = [w for w in trace.children if w.can_focus and w.display]
+        if key == "up" and events_ and current is events_[0]:
+            # Верхний край окна: кусок истории сверху и фокус на него.
+            self._window_edge_up()
+            return True
         step = -1 if key == "up" else 1
         at = events_.index(current) + step if current in events_ else -1
-        if 0 <= at < len(events_):
-            events_[at].focus()
+        following = events_[at] if 0 <= at < len(events_) else None
+        if key == "down" and self._window_edge_down(current, following):
+            # Нижний край перед разрывом: кусок снизу и фокус на него.
+            return True
+        if following is not None:
+            following.focus()
         return True
 
     def _withdraw_last_queued(self) -> bool:
@@ -3817,6 +4381,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._destroy_thinking_indicator()
 
     def _render_event(self, ev, *, live: bool = False) -> None:
+        """Событие модели истории — в ленту."""
+        with self._model_drawing():
+            self._render_model_event(ev, live=live)
+
+    def _render_model_event(self, ev, *, live: bool) -> None:
         if ev.hidden:
             return
 
@@ -3867,11 +4436,26 @@ class TraceScreen(TraceFollowMixin, Screen):
                 c = ev.full_payload.get("content")
                 if isinstance(c, str):
                     polled_wire = c
-            for cid, widget in list(self._pending_user_widgets.items()):
-                if self._pending_wire_match(cid, polled_wire):
+            answered = (
+                self._question_answers.pop(ev.call_id, None)
+                if ev.tool_name == "ask_human" and ev.call_id
+                else None
+            )
+            # Ответ на известный вопрос — сначала его отправленный ответ, потом
+            # по порядку отправки по wire.
+            pending = sorted(
+                self._pending_user_widgets.items(),
+                key=lambda item: item[0] != answered,
+            )
+            for cid, widget in pending:
+                if cid == answered or self._pending_wire_match(
+                    cid, polled_wire
+                ):
                     widget.set_state("normal")
                     self._top_blocks().queued_admitted()
                     widget.set_event_no(ev.no)
+                    # Реплика встала раньше, чем ядро открыло её ход.
+                    self._note_step(widget)
                     # Картинки из треда — копии, закоммиченные ядром; у pending-реплики
                     # пути кармана процесса, который чистится на выходе (дизайн картинок §3).
                     if ev.attachments:
@@ -3881,6 +4465,10 @@ class TraceScreen(TraceFollowMixin, Screen):
                     self._refresh_queue_hint()
                     return
             # Без pending-матча — обычный mount (используем display_content = ev.summary).
+            if ev.tool_name != "ask_human":
+                # Ответ на вопрос агента сверяется ещё и по вопросу (выше);
+                # чужой ответ отправленные реплики не отпускает.
+                self._release_sent_reply()
             self._mount_user_reply(
                 ev.summary,
                 event_no=ev.no,
@@ -3895,23 +4483,19 @@ class TraceScreen(TraceFollowMixin, Screen):
             # Без гейта на live: перерисовка после компакции (stream_reset) —
             # единственный путь финализатора, если poll-тик не успел до неё;
             # от записей на реплее защищает should_update_task (счётчик live-only).
-            if ev.tool_name == "submit_solution":
+            if is_finish(ev):
                 self._seed_or_update_task_from_submit(ev)
                 self._render_finish(ev)
                 return
             # A1: дубль контента (проза → тот же финализатор / повтор) — молча
             # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
             # без маркера: завершение хода и так видно по готовому инпуту.
-            verdict = self._answer_flow.agent(
-                (ev.summary or "").strip(),
-                intermediate=ev.tool_name == "intermediate_reply",
-            )
+            verdict = answer_verdict(self._answer_flow, ev)
             if not verdict.show:
                 return
-            if verdict.drop_attempt:
-                # Ответ модели повторил отчёт отклонённой попытки: попытка
-                # уходит, текст остаётся ответом — свёртка не унесёт его.
-                self._drop_finish_attempts()
+            # Ответ модели повторил отчёт отклонённой попытки: попытка
+            # уходит, текст остаётся ответом — свёртка не унесёт его.
+            self._drop_collapsed_attempts()
             if ev.tool_name == "intermediate_reply":
                 from gc_tui.services.trace_render import (
                     build_intermediate_widgets,
@@ -3945,10 +4529,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
             if is_plan:
                 # План — в рамке с подписью: он не обычный ответ, его одобряют.
-                self._trace_mount(
-                    PlanPanel(*mounted_widgets, plan_text=ev.summary),
-                    scroll=False,
-                )
+                panel = PlanPanel(*mounted_widgets, plan_text=ev.summary)
+                panel.set_accepted(self._plan_panel_accepted(ev.summary))
+                self._trace_mount(panel, scroll=False)
             else:
                 for w in mounted_widgets:
                     self._trace_mount(w, scroll=False)
@@ -4102,22 +4685,20 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
 
     def _note_unanswered(self, call_id: str | None) -> bool:
-        """«└ без ответа» под вопросом `call_id` в его рамке. Вопроса в ленте
-        нет (ушёл в сжатие) — False: событие рисуется строкой, как было."""
+        """«└ без ответа» под вопросом `call_id` в его рамке (реестр строк
+        вопросов). Ход вопроса снят с ленты — пометку вернёт отрисовка по
+        модели (`unanswered`), строки не нужно: True. Вопроса нет и в
+        модели (ушёл в сжатие) — False: событие рисуется строкой."""
         from gc_tui.services.trace_render import (
             QUESTION_UNANSWERED,
             note_question,
         )
-        from gc_tui.widgets.trace_row import QuestionRow
 
-        if not call_id:
-            return False
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        for question in trace.query(QuestionRow):
-            if question.call_id == call_id:
-                note_question(question, QUESTION_UNANSWERED)
-                return True
-        return False
+        question = self._question_rows.get(call_id) if call_id else None
+        if question is None:
+            return self._feed_history.has_question(call_id)
+        note_question(question, QUESTION_UNANSWERED)
+        return True
 
     def _render_error_msg(self, ev) -> None:
         """error_msg с известным call_id финализирует соответствующую строку-вызов
@@ -4156,12 +4737,15 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _mount_block_widget(self, widget, *, before=None, after=None) -> None:
         """Виджет блока: в конец ленты — по правилу очереди, рядом со своим
-        виджетом — прямо (якорь — прямой ребёнок `#trace`)."""
-        if before is None and after is None:
-            self._trace_mount(widget)
-            return
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        trace.mount(widget, before=before, after=after)
+        виджетом — прямо (якорь — прямой ребёнок `#trace`). Виджеты блоков
+        следуют из событий модели (и раскрытие — из снимка вида), не
+        эфемерное."""
+        with self._model_drawing():
+            if before is None and after is None:
+                self._trace_mount(widget)
+                return
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
+            self._feed_mount(trace, widget, before=before, after=after)
         if self._stick_bottom:
             self._scroll_trace_end()
 
@@ -4194,13 +4778,36 @@ class TraceScreen(TraceFollowMixin, Screen):
             return RanResult(output=ev.command)
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
-        """Итог хода — моделям блоков всех уровней (таймеры, стоп)."""
+        """Итог хода — моделям блоков всех уровней (таймеры, стоп) и
+        видам шагов этого хода, вернувшихся куском после снятия (R32)."""
         end_turn(self._block_views, self._call_timers, outcome, settled=False)
+        history = self._feed_history
+        last = history.turn_count() - 1
+        if last < 0:
+            return
+        steps = range(history.turn_step(last), history.step_count())
+        returned = [
+            view
+            for s in steps
+            if (view := self._history_views.get(history_level(s)))
+        ]
+        if returned:
+            end_turn(
+                self._history_views,
+                self._call_timers,
+                outcome,
+                settled=False,
+                levels=returned,
+            )
 
     def on_block_toggle(self, message: BlockToggle) -> None:
-        """Раскрыть / свернуть блок; прокрутка — общая для лент (§9.3)."""
+        """Раскрыть / свернуть блок; прокрутка — общая для лент (§9.3).
+        Уровень живой ленты — в живые виды, иначе — в виды кусков
+        истории."""
         message.stop()
-        self._toggle_trace_block(self._block_views, message)
+        live = self._block_views
+        views = live if message.level in live else self._history_views
+        self._toggle_trace_block(views, message)
 
     def _drain_subagent_progress(self) -> None:
         """Слить live-события субагента из app-очереди и отрисовать nested."""
@@ -4231,42 +4838,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         Parent вне окна retention (light payload) — nested не монтируем.
         Нет call-события в ленте — якорь оставляем (live до записи сегментов).
         """
-        if parent_outside_retention(self._task_events, parent_call_id):
+        if parent_outside_retention(
+            self._feed_history.subagent_calls(), parent_call_id
+        ):
             return None
         return self._active_calls.get(
             parent_call_id
         ) or self._subagent_parent_rows.get(parent_call_id)
-
-    def _merge_sidecar_nested(self, task_id: str) -> None:
-        """После rebuild parent-трейса: nested только для parent'ов из окна.
-
-        read_subagent_trace читает файл целиком (разовый spike). В поля экрана
-        полный список не кладём: фильтр и локальные actions умирают с вызовом.
-        """
-        if self._store is None or not task_id:
-            return
-        records = self._store.read_subagent_trace(task_id)
-        if not records:
-            return
-        records = filter_sidecar_to_parents(
-            records, subagent_parent_ids_from_events(self._task_events)
-        )
-        if not records:
-            return
-        actions = plan_sidecar_nested_actions(
-            records, root=self._current_cwd(), injected=self._injected_fields()
-        )
-        apply_sidecar_nested_actions(
-            actions,
-            mount_nested_tool=partial(self._mount_nested_tool, live=False),
-            finish_nested_tool=self._finish_nested_tool,
-            mount_nested_prose=self._mount_nested_prose,
-            mount_nested_summary=self._mount_nested_child_summary,
-            mount_nested_user=self._mount_nested_user,
-            mount_nested_todo=self._mount_nested_todo,
-        )
-        # Исход хода родителя — уровням, домонтированным после записи итога.
-        self._block_views.settle_levels()
 
     def _nested_blocks(self, parent_call_id: str) -> Optional[ToolBlocksView]:
         """Исполнитель блоков уровня субагента (ключ — строка `Agent`);
@@ -4307,13 +4885,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         widget.add_class("-in-agent")
         try:
             if before is not None:
-                trace.mount(widget, before=before)
+                self._feed_mount(trace, widget, before=before)
             else:
                 level = self._nested_widgets_by_parent.get(parent_call_id)
                 anchor = after or nested_tail(
                     trace.children, level or (), parent
                 )
-                trace.mount(widget, after=anchor)
+                self._feed_mount(trace, widget, after=anchor)
         except Exception:
             # Якоря нет в ленте — в конец, но над очередью; группы верхнего
             # уровня вложенный виджет не закрывает.
@@ -4429,7 +5007,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         error_brief: str | None = None,
         **_kw,
     ) -> None:
-        """Read-only счёт-в-счёт с merge_nested_readonly._prose (trace_render.py)."""
+        """Read-only счёт-в-счёт с узлом вложенного трейса (nested_trace.py)."""
         if self._nested_parent_row(parent_call_id) is None:
             return
         text = (prose or "").strip()
@@ -4452,7 +5030,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
         Пассивные todo-строки (не ToolCallRow): в _nested_tool_rows НЕ
         регистрируются, поэтому finish по их call_id — естественный no-op.
-        Строки собирает общий билдер (он же у merge_nested_readonly)."""
+        Строки собирает общий билдер (он же у узла nested_trace)."""
         if self._nested_parent_row(parent_call_id) is None:
             return
         from gc_tui.services.todo_render import build_todo_block
@@ -4475,7 +5053,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Mid-run user steer under active subagent_* (active-scope input) и ответ на
         вопрос субагента — с картинками ответа (визуальный контракт картинок §3).
 
-        Read-only счёт-в-счёт с merge_nested_readonly._user (trace_render.py)."""
+        Read-only счёт-в-счёт с узлом вложенного трейса (nested_trace.py)."""
         from gc_tui.widgets.user_reply import NestedUserReply
 
         if self._nested_parent_row(parent_call_id) is None:
@@ -4681,8 +5259,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         Сводка правок — тихий правый сегмент строки итога; compact ходом не
         считается, правок в нём нет. Сводка — по журналу треда прогона
         `task_id`; строке — только если этот тред на экране."""
-        self._skills_cache = None
-        self._warm_skills_cache()
+        self.drop_skills_cache()
         self._edits_baseline_taken = False
         if kind == "compact":
             return None
@@ -4758,6 +5335,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             extra_classes="ask-human-question hidden",
             call_id=ev.call_id,
         )
+        if ev.call_id:
+            self._question_rows[ev.call_id] = self._ask_human_question_row
         self._trace_mount(self._ask_human_question_row, scroll=False)
         banner = AskHumanBanner(question=ev.summary)
         self._ask_human_banner = banner
@@ -4966,9 +5545,20 @@ class TraceScreen(TraceFollowMixin, Screen):
         except Exception:
             return []
 
+    def _plan_panel_accepted(self, plan_text: str) -> bool:
+        """Состояние рамки плана при вставке в ленту (живой путь, копия,
+        домонтирование снятого хода): решение человека по этому плану, ещё
+        не дошедшее до сессии, иначе статус плана в сессии."""
+        text = str(plan_text or "").strip()
+        marked = self._plan_marked
+        if marked is not None and marked[0] == text:
+            return marked[1]
+        return plan_is_accepted(self._session_plan(), text)
+
     def _mark_plan_accepted(self, accepted: bool, plan_text: str) -> None:
         """Все рамки этого плана в ленте (исходная и копии): серые, пока план
         ждёт решения; цвета режима plan — когда принят и идёт реализация."""
+        self._plan_marked = (str(plan_text or "").strip(), accepted)
         for panel in self._plan_panels():
             if panel.shows(plan_text):
                 panel.set_accepted(accepted)
@@ -4977,6 +5567,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Привести рамки к сессии: утверждённой остаётся только рамка плана,
         принятого в сессии; прежние (заменённые) планы — серые. Зовётся там,
         где лента перерисована или статус мог смениться."""
+        self._plan_marked = None
         plan = self._session_plan()
         for panel in self._plan_panels():
             panel.set_accepted(plan_is_accepted(plan, panel.plan_text))
@@ -5022,13 +5613,15 @@ class TraceScreen(TraceFollowMixin, Screen):
             # Идёт потоковый ответ: копия встаёт ПЕРЕД ним, иначе готовый
             # ответ потом перепрыгнул бы через план.
             self._note_top_event(panel)
-            trace.mount(panel, before=live)
+            self._feed_mount(trace, panel, before=live)
         elif anchor is not None:
+            # Место копии в модели — перед записью итога свежей строки.
             self._note_top_event(panel)
-            trace.mount(panel, before=anchor)
+            at = self._feed_history.last_outcome_index()
+            self._feed_mount(trace, panel, at=at, before=anchor)
         else:
             self._trace_mount(panel)
-        panel.set_accepted(plan_is_accepted(plan, text))
+        panel.set_accepted(self._plan_panel_accepted(text))
 
     def _present_session_plan(self) -> None:
         """Ход закончился планом: рамка в ленте (её может не быть, если агент
@@ -5278,13 +5871,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         осмысленные события (ответ / 'контекст сжат' / продолжение) — значит вопрос
         НЕ висячий (его output мог быть суммаризован при компакции), remnant не нужен.
         False — ask_human реально последнее осмысленное событие (висячий вопрос)."""
-        ah_idx = self._last_ask_human_index(self._task_events)
+        events = self._feed_history.events()
+        ah_idx = self._last_ask_human_index(events)
         if ah_idx is None:
             return False
         meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
-        return any(
-            ev.kind in meaningful for ev in self._task_events[ah_idx + 1 :]
-        )
+        return any(ev.kind in meaningful for ev in events[ah_idx + 1 :])
 
     def _last_ask_human_index(self, events: list) -> int | None:
         """Индекс последнего события смонтированного вопроса ask_human."""
@@ -5321,18 +5913,30 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         from gc_tui.services.trace_render import (
             QUESTION_INTERRUPTED,
-            note_question,
         )
 
         if question is not None:
             # Следствие — строкой `└` в рамке вопроса «? …» (её монтирует
             # _on_ask_human_event), не отдельной строкой ленты.
-            note_question(question, QUESTION_INTERRUPTED)
+            self._note_interrupted(question)
             return
         # Строки вопроса в ленте нет (баннер ребёнка) — отдельной строкой.
         self._mount_trace_row(
             prefix="", content=QUESTION_INTERRUPTED, kind_class="line-meta"
         )
+
+    def _note_interrupted(self, question) -> None:
+        """«Прервано» под строкой вопроса — и в память эфемерного: из
+        модели оно не следует."""
+        from gc_tui.services.trace_render import (
+            QUESTION_INTERRUPTED,
+            question_note_body,
+        )
+
+        body = question_note_body(QUESTION_INTERRUPTED)
+        question.add_consequence(body)
+        at = len(self._feed_history.items)
+        self._ephemera.decorate(question, body, at=at)
 
     def _mount_user_reply(
         self,
@@ -5408,10 +6012,22 @@ class TraceScreen(TraceFollowMixin, Screen):
             elif not item.at_run_end:
                 self._apply_choice_event(item)
         self._waiting_notes = []
+        at = len(self._feed_history.items)
         for note, ticks in waiting + fresh:
             owner = self._trace_note_owner(note)
+            trimmed = self._trimmed_note_reply(note, owner)
             if owner is not None:
-                owner.add_consequence(note_consequence(note))
+                body = note_consequence(note)
+                owner.add_consequence(body)
+                self._ephemera.decorate(owner, body, at=at)
+            elif trimmed is not None:
+                # Реплика-владелец снята с ленты — пометка вернётся с ней;
+                # место — начало её хода (окно удержания).
+                history = self._feed_history
+                start = history.turn_starts[history.turn_index_of(trimmed)]
+                self._ephemera.decorate_key(
+                    f"event:{trimmed}", note_consequence(note), at=start
+                )
             elif note.owner == "call" and ticks > 0:
                 # Строка вызова ещё не в ленте — ждём её несколько тиков.
                 self._waiting_notes.append((tid, note, ticks - 1))
@@ -5433,14 +6049,23 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._refresh_footer()
 
     def _last_model_choice(self) -> str | None:
-        """Выбор последней отметки модели в ленте; отметок нет — None."""
-        mark = self._last_model_mark()
-        return mark.choice if mark is not None else None
+        """Выбор последней смены модели в ленте; смен нет — None."""
+        shown = self._last_model_change()
+        return shown[0] if shown is not None else None
 
-    def _last_model_mark(self) -> Optional[ModelMark]:
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        marks = trace.query(ModelMark)
-        return marks.last() if marks else None
+    def _last_model_change(self) -> Optional[tuple[str, str]]:
+        """Последняя смена модели в ленте — `(выбор, модель)`; смен нет —
+        None. Черта живого пути новее модели истории, пока её запись не
+        дочитана хвостом; дальше — последняя смена в модели (снятые с
+        ленты ходы её не теряют)."""
+        live = self._live_mark
+        if live is not None:
+            return live.choice, live.model
+        rec = self._feed_history.last_model_choice
+        record = parse_model_choice(rec) if rec is not None else None
+        if record is None:
+            return None
+        return record.choice, mark_model(record.choice, record.alias)
 
     def _follow_next_model(self, baseline: str | None = None) -> None:
         """Смена между ходами (профиль, «модель по умолчанию», перечитанный
@@ -5454,8 +6079,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         pending = self._pending_model_mark()
         if not self._between_turns() or pending is not None:
             return
-        last = self._last_model_mark()
-        shown = last.model if last is not None else baseline
+        last = self._last_model_change()
+        shown = last[1] if last is not None else baseline
         if shown is None or model_name(self.app) == shown:
             return
         choice = current_choice(self.app)
@@ -5482,6 +6107,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         tail = [w for w in self._pinned_tail(trace) if w is not mark]
         mark.set_choice(choice, alias)
         mark.apply()
+        self._live_mark = mark
         self._note_top_event(mark)
         if tail:
             trace.move_child(mark, before=tail[0])
@@ -5489,6 +6115,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _mount_applied_mark(self, choice: str, before: str | None) -> None:
         mark = self._new_model_mark(choice, pending=False, before=before)
+        self._live_mark = mark
         self._trace_mount(mark)
         drop_mark_before(mark)
 
@@ -5500,7 +6127,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         if record is None:
             return
         mark = restored_mark(record, self._footer_slots())
-        self._trace_mount(mark, scroll=False)
+        with self._model_drawing():
+            self._trace_mount(mark, scroll=False)
         drop_mark_before(mark)
 
     def _write_model_choice(self, choice: str, before: str) -> None:
@@ -5632,7 +6260,12 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _trace_note_owner(self, note):
         """Владелец пометки в ленте: строка вызова `call_id` (верхняя или
-        вложенная) или реплика — последняя с картинками, иначе последняя."""
+        вложенная) или реплика — последняя с картинками, иначе последняя.
+
+        Какая реплика последняя, решает модель истории: смонтированным
+        может остаться старый ход (в фокусе), когда новые сняты. Реплики,
+        которых в модели ещё нет (номер события 0: отправленные, из meta),
+        новее её. Реплика-владелец снята — на экране владельца нет."""
         from gc_tui.widgets.tool_call_row import ToolCallRow
         from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -5641,8 +6274,26 @@ class TraceScreen(TraceFollowMixin, Screen):
             rows = trace.query(ToolCallRow)
             return next((r for r in rows if r.call_id == note.call_id), None)
         replies = list(trace.query(UserReplyContainer))
-        with_images = [r for r in replies if r.has_images]
-        return (with_images or replies or [None])[-1]
+        for with_images in (True, False):
+            shown = [r for r in replies if r.has_images or not with_images]
+            last = shown[-1] if shown else None
+            latest = self._feed_history.last_reply(with_images=with_images)
+            if latest is not None and (
+                last is None or 0 < last.event_no < latest.no
+            ):
+                return None  # реплика-владелец снята с ленты
+            if last is not None:
+                return last
+        return None
+
+    def _trimmed_note_reply(self, note, owner) -> Optional[int]:
+        """Номер события реплики-владельца пометки, снятой с ленты
+        (`_trace_note_owner` её не нашёл, а модель её знает); иначе None."""
+        if owner is not None or note.owner == "call":
+            return None
+        history = self._feed_history
+        latest = history.last_reply(with_images=True) or history.last_reply()
+        return latest.no if latest is not None else None
 
     def _mount_standalone(
         self,
@@ -5705,6 +6356,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._pending_wire_cache[client_id] = wire_content
         self._last_pending_client_id = client_id
         return client_id
+
+    def _track_answer(self, client_id: str) -> None:
+        """Отправленная реплика — ответ на вопрос агента, что сейчас на
+        баннере: запись ответа сверится с ней и по вопросу (call_id), если
+        wire не совпал."""
+        if self._ask_human_call_id:
+            self._question_answers[self._ask_human_call_id] = client_id
 
     def _record_pending_widget(self, client_id: str, widget) -> None:
         """Связать только что смонтированный pending-виджет с его client_id."""
@@ -5796,10 +6454,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Подготовить TUI к новому запуску runner.start:
         сбросить error-флаг, очистить last_runner_error,
         сбросить meta.tui.status → running (B1: иначе после прошлого completed
-        бейдж/список сессий врут, пока живой runner не перекрывает live).
-
-        _mcp_status_row НЕ обнуляем: колонка — часть бренд-карточки (#brand-mcp),
-        переживает пересборку (_clear_trace); ссылка остаётся валидной."""
+        бейдж/список сессий врут, пока живой runner не перекрывает live)."""
         # Сначала конец прошлого хода: кончился между тиками — его исход
         # пишется с его флагами, до сброса.
         self._settle_ended_run()
@@ -5868,7 +6523,6 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _reset_run_flags(self) -> None:
         """Сбросить error- и stop-флаги прошлого прогона (app-уровня)."""
         self._error_shown = False
-        self._mcp_status_done = False
         self.app.last_runner_error = None
         self.app.last_terminal_outcome = None
         self.app.last_stop_requested = False
@@ -5890,7 +6544,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if tid == self._active_task_id:
             # Начался новый ход: запись итога прошлого — уже не его строка,
             # она оседает в ленте до реплики нового.
-            self._outcome_superseded = True
+            self._feed_history.supersede_outcome()
             self._closed_turn_summary = None
             self._settle_turn_line()
 
@@ -5905,42 +6559,25 @@ class TraceScreen(TraceFollowMixin, Screen):
                 {k: tui.get(k) for k in ("status", "last_indicator")},
             )
 
-    def _update_mcp_indicator(self) -> None:
-        if self._mcp_status_done:
-            return
+    def _feed_start_header(self) -> None:
+        """Снимок загрузки MCP — в шапку. Каждая сборка executor заводит
+        свой `McpProgress`, другой объект шапка считает новым поколением."""
         progress = getattr(self.app, "_mcp_progress", None)
-        if progress is None:
+        if progress is None or self._brand is None:
             return
-        servers, _active = progress.snapshot()
-        if not servers:
+        # Прогресс живёт на app до следующей сборки: дошедший до итога
+        # не опрашиваем каждые 250 мс до конца сессии.
+        if self._brand.finished(progress):
             return
-        from gc_tui.services.mcp_progress import (
-            format_mcp_progress,
-            format_mcp_settle,
-        )
+        # Серверы удачной сборки подключаются в фоне: окончательные статусы
+        # потребителя окна — в поколение на каждом тике (спека §5.7).
+        self.app.settle_mcp_progress(progress)
+        servers, outcome = progress.state()
+        self._brand.feed(progress, servers, outcome)
 
-        if self._mcp_status_row is None:
-            return  # карточка ещё не смонтирована
-        self._mcp_status_row.update(format_mcp_progress(servers))
-        if progress.all_reported():
-            self._mcp_status_done = True
-            self.app._mcp_progress = None
-            row = self._mcp_status_row
-            mcp_line = format_mcp_settle(servers)
-            self.set_timer(1.0, lambda: self._settle_mcp_row(row, mcp_line))
-
-    def _settle_mcp_row(self, row, mcp_line: str) -> None:
-        """Схлопнуть MCP-прогресс в итог-запись карточки: статус MCP + строка
-        уведомлений + готовность. Считается ЗДЕСЬ, а не на boot: к моменту settle
-        mcp_status осел → карточка и /notices согласованы (иначе счётчик уведомлений
-        недосчитывал бы MCP-фейлы)."""
-        try:
-            self._refresh_notices_card(
-                mcp_line=mcp_line
-            )  # запоминает mcp_line для перерисовок
-        except Exception:
-            pass
-        self._maybe_toast_warnings()  # notices финальны (mcp_status осел) → warning-тосты
+    def on_start_header_settled(self, _event: StartHeader.Settled) -> None:
+        # Итог загрузки: mcp_status осел, уведомления финальны → тосты.
+        self._maybe_toast_warnings()
 
     def _mcp_screen_snapshot(self):
         """Снапшот для экрана /mcp: предпочитаем boot-результат (app._mcp_snapshot,
@@ -6271,8 +6908,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._refresh_trace_overlays()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
-        # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
-        self._update_mcp_indicator()
+        # Загрузка MCP в шапке — на старте (до появления активной задачи) тоже.
+        # F2: при заморозке не подаём — смена фазы сдвинула бы высоту шапки и
+        # выделенный текст; после разморозки снимок возьмётся свежий.
+        if not _frozen:
+            self._feed_start_header()
+        # Копии статусов MCP окна следуют за сервисом и после итога шапки:
+        # уведомления, значок футера, `/mcp` (спека §5.7).
+        self.app.refresh_mcp_snapshot()
         # Замок выбора в открытом пикере (`/profile` во время хода) снимается
         # с концом хода — без переоткрытия.
         if self._arg_picker is not None:
@@ -6623,7 +7266,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self, before_record: Callable[[dict], None] | None = None
     ) -> None:
         """Дочитать и отрисовать хвост записей активного треда;
-        ``before_record`` — как у `_render_records`."""
+        ``before_record`` — как у `_render_records`. Пока ждёт
+        пересборка (`_schedule_rebuild`), тик пропускается."""
+        if self._rebuild_label is not None:
+            return
         if (
             self._store is None
             or self._active_task_id is None
@@ -6659,7 +7305,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._apply_compaction(tail.compaction, tail.next_cursor)
             return
         if tail.stream_reset:
-            self._rebuild_from_store()
+            self._schedule_rebuild()
             return
         self._cursor = tail.next_cursor
         self._render_records(
@@ -6667,20 +7313,40 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._refresh_header()
 
+    def _schedule_rebuild(self) -> None:
+        """Пересборка ленты (§3.4, §5.8): сначала кадр с неподвижной
+        надписью «• обновляю ленту» в баре над вводом, затем сама
+        пересборка. Пока она ждёт, тик опроса хвоста пропускается — иначе
+        дописал бы в ленту, которую сейчас выбросят, негодным курсором."""
+        if self._rebuild_label is not None:
+            return
+        self._rebuild_label = Static(
+            open_indicator_text(_REBUILD_LABEL, 0), id="rebuild-label"
+        )
+        self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(self._rebuild_label)
+        self._sync_indicator_bar()
+        self.call_after_refresh(
+            self._rebuild_after_label, self._active_task_id
+        )
+
+    def _rebuild_after_label(self, task_id: Optional[str]) -> None:
+        """Кадр с надписью нарисован: пересборка, если сессия та же."""
+        label, self._rebuild_label = self._rebuild_label, None
+        if label is not None:
+            label.remove()
+        if task_id == self._active_task_id and self._store is not None:
+            self._rebuild_from_store()
+        self._sync_indicator_bar()
+
     def _rebuild_from_store(self) -> None:
         """Полная перерисовка трейса из хранилища: сброс потока и откат
         неудавшегося шага сжатия."""
         tid = self._active_task_id
+        withdrawn = self.withdrawn_in(tid)
         self._clear_trace()
         self._reset_render_state()
-        records, cur = self._store.read_all_events(tid)
-        self._cursor = cur
-        if records and self._store.is_compaction_summary(records[0]):
-            self._render_segments(self._store.read_segments(tid))
-        else:
-            self._segment_starts = [0]
-            self._render_records(records)
-        self._merge_sidecar_nested(tid)
+        segments, self._cursor = self._store.read_history(tid)
+        self._render_segments(segments, task_id=tid, withdrawn=withdrawn)
         # После компакции (stream_reset) баннер мог пере-монтироваться для уже
         # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
         self._reconcile_ask_human_after_render(allow_remnant=False)
@@ -6705,14 +7371,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._append_compaction_step(step)
         except Exception:
             _log.exception("шаг сжатия не применён, трейс перерисован")
-            self._rebuild_from_store()
+            self._schedule_rebuild()
             return
         self._refresh_header()
 
     def _append_compaction_step(self, step: CompactionStep) -> None:
         """Хвост архива, маркер, новый живой файл — живым путём, одним
         контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
-        start = len(self._task_events)
+        start = len(self._feed_history.items)
         context = self._render_context(
             rec.get("payload")
             for rec in [*step.archive_tail, *step.live_records]
@@ -6720,26 +7386,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)
-        self._segment_starts.append(len(self._task_events))
+        self._feed_history.start_segment()
         self._render_records(step.live_records, live=True, context=context)
-        self._lighten_segment_left_window(step)
+        # Retention: сегмент, выпавший из окна, облегчаем как полная
+        # перерисовка. Вложенные строки субагентов не трогаем (спека 3.4).
+        self._feed_history.apply_retention(step.window_ids)
+        # Ходы за окном удержания вернутся как после переоткрытия (§3.5).
+        self._ephemera.drop_before(self._feed_history.retention_start())
         self._drop_answered_ask_human_banner(start)
 
-    def _lighten_segment_left_window(self, step: CompactionStep) -> None:
-        """Retention: сегмент, выпавший из окна, облегчаем как полная
-        перерисовка. Вложенные строки субагентов не трогаем (спека 3.4)."""
-        for ev in events_leaving_window(
-            self._task_events, self._segment_starts, step.window_ids
-        ):
-            apply_payload_retention(ev, seg_in_window=False)
-
     def _mount_compaction_marker(self, step: CompactionStep) -> None:
-        no = self._next_no
-        self._append_and_render(
-            build_compaction_marker_event(
-                no, step.segment_index, step.compacted_by
-            )
+        ev = self._feed_history.add_compaction_marker(
+            step.segment_index, step.compacted_by
         )
+        self._render_event(ev)
+        no = ev.no
         marker = self._summary_marker_widgets.get(no)
         runner = getattr(self.app, "active_runner", None)
         if (
@@ -6755,107 +7416,31 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
 
     def _drop_answered_ask_human_banner(self, start: int) -> None:
-        """Снять баннер ask_human, если среди событий шага (с индекса start)
+        """Снять баннер ask_human, если среди событий шага (с элемента
+        истории start)
         после вопроса диалог продолжился: ответ ушёл в сводку и отдельной
         записью не придёт. Маркер сжатия — не продолжение: агент, который
         реально ждёт ответа, баннер сохраняет."""
         if self._ask_human_banner is None:
             return
-        added = self._task_events[start:]
+        added = self._feed_history.events(start)
         ah_idx = self._last_ask_human_index(added)
         after = 0 if ah_idx is None else ah_idx + 1
         if any(ev.kind in _DIALOG_CONTINUATION_KINDS for ev in added[after:]):
             self._unmount_ask_human_banner()
 
-    # Ширина хрома вокруг колонки статусов. Порог узости считается по факту
-    # (`_brand_fits_beside`), а не константой: длина строк статусов зависит от MCP и
-    # уведомлений, и фиксированный порог либо рвал слова в колонке, либо уводил её
-    # вниз раньше времени. Слагаемые (styles.tcss, поэтому и продублированы здесь,
-    # как _MCP_COL_PAD): border round у #brand-block — 2, его padding 1 2 — 4,
-    # padding 0 1 у #trace — 2, вертикальный скроллбар трейса — 1. Скроллбар
-    # считаем всегда: в живой сессии он есть, а на пустом старте лишняя колонка
-    # стоит одной пограничной ширины, где статусы встанут под логотипом — это
-    # легальная раскладка, в отличие от «подк / люче / ны».
-    _BRAND_CHROME = 9
-
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        # без класса line-meta: его margin-top:1 опускал бы MCP-блок ниже логотипа;
-        # цвет MCP-колонки задаёт #brand-mcp (color: $deep-dim).
-        self._mcp_status_row = Static("", id="brand-mcp", markup=False)
-        try:
-            wide = self._brand_fits_beside(self.app.size.width)
-        except Exception:
-            wide = True
-        logo = Static(branding.logo_text(), classes="brand-logo")
-        # Тэглайн — отдельной строкой под логотипом, центрирован по ширине лого
-        # (а не border_subtitle: тот центрируется по всей рамке, не под брендом).
-        tagline = Static(
-            branding.tagline_under_logo(),
-            classes="brand-tagline",
-            markup=False,
-        )
-        # Версия — своей строкой под тэглайном, с воздухом над ней (CSS): карточка это
-        # визитка продукта, и номер читается там же, где имя. Рядом же появляется
-        # «↑ доступна новая версия» — текущая версия и предложение обновиться
-        # складываются в одну мысль.
-        version = Static(
-            branding.version_under_logo(),
-            classes="brand-version",
-            markup=False,
-        )
-        left = Vertical(logo, tagline, version, id="brand-left")
-        inner = Horizontal(left, self._mcp_status_row, id="brand-row")
-        self._brand_row = inner  # раскладку ставит _apply_brand_layout ниже
-        self._brand_wide = None
-        brand = Vertical(inner, id="brand-block")
+        servers = effective_mcp_servers(self.app.effective_settings())
+        brand = StartHeader(mcp_total=len(servers))
+        brand.set_update(getattr(self.app, "_update_available", False))
         trace.mount(brand)
         self._brand = brand
-        self._apply_brand_layout(wide)
-
-    def _brand_fits_beside(self, width: int) -> bool:
-        """Влезает ли колонка статусов СБОКУ от логотипа целиком.
-
-        Считаем по самой длинной строке статусов, а не по фиксированному порогу: их
-        длина зависит от MCP и уведомлений, и любое постоянное число либо рвало слова
-        («подк / люче / ны»), либо уводило колонку вниз там, где она помещалась."""
-        from gc_tui import branding
-
-        lines = self._compose_card_lines(
-            self._last_mcp_card_line
-        ).plain.splitlines()
-        need = max((len(line) for line in lines), default=0)
-        logo_w = max(
-            (len(line) for line in branding.LOGO.splitlines()), default=0
-        )
-        return width >= logo_w + _MCP_COL_PAD + need + self._BRAND_CHROME
-
-    def _apply_brand_layout(self, wide: bool) -> None:
-        """Статусы сбоку от логотипа (широкое окно) или под ним (узкое).
-
-        Меняем layout уже смонтированного контейнера, а не пересобираем карточку:
-        `remove()` у Textual отложенный, и на кадр в трейсе оказались бы две карточки.
-        Под логотипом первой строке нужен воздух сверху, сбоку — нет."""
-        row = self._brand_row
-        if row is None or self._brand_wide == wide:
-            return
-        # Ссылку на контейнер держим сами: сразу после mount он ещё не находится
-        # запросом (монтирование у Textual отложенное), а раскладку надо поставить
-        # уже на сборке — иначе старт в узком окне остался бы в широкой раскладке.
-        row.styles.layout = "horizontal" if wide else "vertical"
-        if self._mcp_status_row is not None:
-            toggle = (
-                self._mcp_status_row.remove_class
-                if wide
-                else self._mcp_status_row.add_class
-            )
-            toggle("brand-mcp-stacked")
-        self._brand_wide = wide  # только после успешного применения
 
     def _collect_notices(self):
-        """Бейдж КАРТОЧКИ: стартовые + unread runtime (без обновления — оно там строкой).
+        """Стартовые + unread runtime, без обновления (запасной путь бейджа футера).
 
         Владелец сборки — App (_startup_notices / collect_unread_notices): экран не
         пересобирает то же самое, иначе новый источник уведомлений, добавленный на
@@ -6872,56 +7457,18 @@ class TraceScreen(TraceFollowMixin, Screen):
             return collect()
         return self._collect_notices()
 
-    def _has_mcp_servers(self) -> bool:
-        """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
-        MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
-        return bool(self.app.base_settings().settings.mcp.servers)
-
-    def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
-        """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
-
-            ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
-
-            ⚠2 ℹ1 · F4/notices                  (только если есть уведомления)
-
-            ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
-
-            ✓ готов к работе                         (всегда)
-
-        Строка уведомлений — голый бейдж `format_notices_badge`, без слова-префикса:
-        тот же вид, что в футере и на /sessions (единый источник — notices_ui).
-        Детали уведомлений — на экране /notices (F4); трейс держим чистым."""
-        notices = self._collect_notices()
-        lines = []  # (text, style|None)
-        if mcp_line:
-            lines.append((mcp_line, None))
-        badge = format_notices_badge(notices)
-        if badge:
-            lines.append(
-                (badge, None)
-            )  # строка целиком — базовым цветом карточки
-        if getattr(self.app, "_update_available", False):
-            lines.append(
-                ("↑ доступна новая версия · /settings → Обновление", _ACCENT)
-            )
-        lines.append(("✓ готов к работе", None))
-        t = Text()
-        for i, (s, style) in enumerate(lines):
-            if i:
-                t.append("\n\n")
-            t.append(s, style=style)
-        return t
-
     def refresh_update_notice(self) -> None:
-        """Дорисовать строку «доступна новая версия» в brand-карточке — зовётся из
-        async авто-чека (app) при находке обновления. MCP-строку карточки не трогаем:
-        _refresh_notices_card без mcp_line переиспользует запомненную."""
-        self._refresh_notices_card()
+        """Хвост «доступна новая версия» в строке версии шапки — по флагу app
+        (авто-проверка, секция «Обновление»). Строку статуса не трогает."""
+        if self._brand is not None:
+            self._brand.set_update(
+                getattr(self.app, "_update_available", False)
+            )
 
     def _maybe_toast_warnings(self) -> None:
         """Один раз при старте (когда notices финальны): warning-уведомления → тост,
         только если набор warning-кодов изменился с прошлого показа (on-change — не
-        спамим тем же; карточка/notices держат постоянную видимость). info не тостим.
+        спамим тем же; постоянная видимость — футер и /notices). info не тостим.
         Кап 3 + сводный «+N ещё». Персист набора — в agent_state.json."""
         if self._warnings_toasted:
             return
@@ -6937,7 +7484,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 upgrade_gate.read_state().get("last_shown_warning_codes") or []
             )
             if codes == last:
-                return  # набор тот же — молчим (постоянная видимость в карточке)
+                return  # набор тот же — молчим (постоянная видимость — футер)
             upgrade_gate.write_state(
                 {"last_shown_warning_codes": sorted(codes)}
             )
@@ -6948,36 +7495,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         except Exception:
             pass  # тосты — best-effort, не роняют старт
 
-    def _render_startup_notices(self) -> None:
-        """Boot-оркестрация карточки. Без MCP-серверов данные полны сразу →
-        выставляем карточку. С MCP-серверами откладываем до settle
-        (см. _settle_mcp_row), где mcp_status уже осел."""
-        if self._has_mcp_servers():
-            return
-        self._refresh_notices_card(mcp_line=None)
-        self._maybe_toast_warnings()
-
-    def _refresh_notices_card(self, *, mcp_line: Optional[str] = None) -> None:
-        """Обновить правую колонку карточки: MCP + счётчик уведомлений + готовность."""
-        if self._mcp_status_row is None:
-            return
-        if mcp_line is not None:
-            self._last_mcp_card_line = mcp_line
-        self._mcp_status_row.update(
-            self._compose_card_lines(self._last_mcp_card_line)
-        )
-        # Строки статусов только что могли стать длиннее (осели MCP, пришли
-        # уведомления) — раскладку пересчитываем по НИМ, иначе колонка осталась бы
-        # сбоку и рвала бы свежий текст по буквам.
-        try:
-            self._apply_brand_layout(
-                self._brand_fits_beside(self.app.size.width)
-            )
-        except Exception:
-            pass
-
-    # Шапка трейса: переживает пересборку (#brand-block — бренд,
-    # MCP-статус живёт внутри карточки как #brand-mcp).
+    # Шапка трейса: переживает пересборку (#brand-block — бренд и статус).
     _TRACE_HEADER_IDS = frozenset({"brand-block"})
 
     def _clear_trace(self) -> None:
@@ -6992,6 +7510,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             [c for c in trace.children if c.id not in self._TRACE_HEADER_IDS]
         )
         self._show_brand()  # defensive: монтирует, только если шапки ещё нет
+        # Снятая строка итога не должна держаться ссылкой до следующего хода.
+        self._fresh_line = None
         # Лента рисуется заново — с действующим флагом мыслей.
         self._thoughts_shown = self._thoughts_on()
 
@@ -7606,6 +8126,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
+        self.app.refresh_plugin_set()
         self.spend_help_hint()
         palette = CommandPalette(
             self._registry,
@@ -7930,14 +8451,55 @@ class TraceScreen(TraceFollowMixin, Screen):
         asking = self.app.tui_state.ask_human_state is not None
         if text.startswith("/"):
             name = (text[1:].split(None, 1) or [""])[0]
+            if self._is_plugin_command(name):
+                return False
             return not asking or self._is_known_command(name)
         return text.startswith("!") and not asking
 
+    def _slash_resolution(self, name: str) -> Resolution:
+        """`/имя` по командам плагинов снимка и прогретому кэшу скиллов —
+        функцией ядра, той же, что в цикле агента (§4.2)."""
+        commands = runtime_of(self.app.base_settings()).plugins.commands
+        skill_ids = listed_skill_ids(self._skills_cache or [])
+        return resolve_slash_name(name, commands, skill_ids)
+
+    def _has_plugin_command(self, slash: Resolution) -> bool:
+        """Среди вариантов есть команда плагина; неоднозначность только
+        скиллов решает разбор скиллов (у него есть bootstrap пакетов)."""
+        commands = runtime_of(self.app.base_settings()).plugins.commands
+        ids = {f"{plugin}:{cmd.name}" for plugin, cmd in commands}
+        return not ids.isdisjoint(slash.candidates)
+
+    def _is_plugin_command(self, name: str) -> bool:
+        """`/имя` — команда плагина (не перекрыта командой TUI): строка
+        уходит ядру обычным запросом, подстановку делает ядро."""
+        return self._plugin_command_name(name) is not None
+
+    def _plugin_command_name(self, name: str) -> str | None:
+        """Имя команды плагина, набранной как есть или в другой раскладке
+        (не перекрытой командой TUI); иначе None."""
+        known = self._known_name(name)
+        if known is None or self._registry.lookup(known) is not None:
+            return None
+        return known if self._is_plugin_word(known) else None
+
+    def _is_plugin_word(self, name: str) -> bool:
+        return self._slash_resolution(name).kind == "command"
+
+    def _plugin_command_text(self, text: str) -> str:
+        """Запрос `/команда …` плагина — с именем в нужной раскладке
+        (как в `_word_on_space`); прочее — как набрано."""
+        name = (text[1:].split(None, 1) or [""])[0]
+        if not text.startswith("/" + name):
+            return text
+        known = self._plugin_command_name(name)
+        return text if known is None else f"/{known}{text[1 + len(name) :]}"
+
     def _is_known_command(self, name: str) -> bool:
-        """`/имя` запустит команду (или алиас) или скилл — точный разбор
-        по прогретому кэшу, как при запуске. Набранное как есть важнее
-        перевода раскладки; среди набранного как есть команда сильнее
-        скилла с тем же именем."""
+        """`/имя` запустит команду (или алиас), скилл или команду плагина —
+        точный разбор по прогретому кэшу, как при запуске. Набранное как
+        есть важнее перевода раскладки; среди набранного как есть команда
+        сильнее скилла с тем же именем."""
         return self._known_name(name) is not None
 
     async def on_command_text_area_submitted(
@@ -7948,6 +8510,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._voice is not None and self._voice.state == "recording":
             self._voice.stop_and_transcribe()
             return
+        # Команды плагинов и скиллы — по набору на диске, до разбора ввода;
+        # сменился набор — скиллы нужны сейчас, не после фонового прогрева.
+        if self.app.refresh_plugin_set():
+            self._skills_cache = await self._load_skills_safe()
 
         # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
         # картинки; текст остаётся в поле (контракт §2).
@@ -8091,6 +8657,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                     client_id = self._track_pending(
                         display_text=text, wire_content=text, images=images
                     )
+                    self._track_answer(client_id)
                     self._mount_user_reply(
                         text,
                         state="pending",
@@ -8125,6 +8692,9 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._stop_and_replace_runner()
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
+        # Новый запрос (не ответ живому вопросу) — команда плагина в нужной
+        # раскладке; ответ агенту уходит как набран.
+        text = self._plugin_command_text(text)
         if is_command and text.startswith("!"):
             self._handle_bang_shell(text)
             return
@@ -8563,12 +9133,20 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _cmd_mcp(self) -> None:
         from gc_tui.screens.mcp import McpScreen
 
+        # Экран читает снимок окна: перед открытием — по статусам сервиса.
+        self.app.refresh_mcp_snapshot()
         self.app.push_screen(
             McpScreen(
                 settings=self.app.base_settings(),
                 tools_snapshot=self._mcp_screen_snapshot(),
             )
         )
+
+    def _cmd_plugins(self) -> None:
+        from gc_tui.screens.plugins import PluginsScreen
+
+        self.app.refresh_plugin_set()
+        self.app.push_screen(PluginsScreen(settings=self.app.base_settings()))
 
     def _cmd_diff(self, *, source: Optional[str] = None) -> None:
         """Экран изменений. `source` задан — открыть сразу в нём (клик по сводке)."""
@@ -8707,18 +9285,69 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._settle_ended_run()
         self._open_thread(target)
 
+    def confirm_switch(self, target: str, proceed: Callable[[], None]) -> None:
+        """Вопрос «остановить ход и перейти?» — сразу, поверх экрана, где
+        нажали (§3.3): ответ получает он же. Хода нет или «да» —
+        `proceed()`; сам ход остановится только в момент перехода
+        (`switch_to_history`)."""
+        if not self._switch_stops_run(target):
+            proceed()
+            return
+        from gc_tui.screens.confirm import ConfirmScreen
+
+        def _on_result(confirmed: bool) -> None:
+            if confirmed:
+                proceed()
+
+        self.app.push_screen(
+            ConfirmScreen(
+                title=RUN_SWITCH_TITLE,
+                message=RUN_SWITCH_MESSAGE,
+                hint=RUN_SWITCH_HINT,
+            ),
+            _on_result,
+        )
+
+    def claim_session(self, task_id: str) -> bool:
+        """Замок сессии до стопа хода и закрытия списка (§5.7): за время
+        загрузки её мог занять другой TUI. False — «занято» уже сказано."""
+        return self._session_lock_acquire(task_id)
+
+    def switch_to_history(
+        self, target: str, history: HistoryModel, cursor: TaskCursor
+    ) -> None:
+        """Переход в сессию с готовой моделью (§3.3, §5.7): ход, на стоп
+        которого согласились при открытии, останавливается сейчас — сессия
+        уже готова; дальше открытие одним синхронным шагом."""
+        if target != self._active_task_id:
+            if self._switch_stops_run(target):
+                self._stop_run_for_switch()
+            self._settle_ended_run()
+        self.open_thread_with_history(target, history, cursor, is_resume=True)
+
+    def _switch_stops_run(self, target: str) -> bool:
+        """Переход в `target` останавливает идущий ход открытой сессии."""
+        if target == self._active_task_id:
+            return False
+        runner = getattr(self.app, "active_runner", None)
+        return runner is not None and runner.is_running()
+
     def _stop_run_then_switch(self, target: str | None) -> None:
+        """Стоп хода, затем переход."""
+        self._stop_run_for_switch()
+        self._settle_ended_run()
+        self._open_thread(target)
+
+    def _stop_run_for_switch(self) -> None:
         """Обычный стоп (очередь — назад в поле), вопросы хода сняты, исход
-        «stopped» — в тред хода сразу; затем переход. Поток хода
-        дорабатывает в фоне, отвязанный от окна, как после обычного стопа:
-        всё, что он ещё пишет, идёт в его тред."""
+        «stopped» — в тред хода сразу. Поток хода дорабатывает в фоне,
+        отвязанный от окна, как после обычного стопа: всё, что он ещё
+        пишет, идёт в его тред."""
         if self._confirm_active:
             self._hide_confirm_banner()
         if self.app.tui_state.ask_human_state is not None:
             self._unmount_ask_human_banner()
         self._stop_and_replace_runner()
-        self._settle_ended_run()
-        self._open_thread(target)
 
     def _open_thread(self, target: str | None) -> None:
         """Сменить открытый тред; ход не идёт (проверил вход)."""
@@ -8870,6 +9499,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             if callable(release):
                 release()
         self.app.active_runner = None
+        self.app.drop_carried_plan_decisions()
         self.app.detach_run_sinks()
         self._return_queue_to_input(withdrawn)
 
@@ -8974,15 +9604,25 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._was_running = False
         self._watched_runner = None
         self._watched_run_seq = None
-        self._outcome_superseded = False
+        self._feed_history.restore_outcome()
         # Строка снятой реплики снята в этом же обработчике и ещё в `query`.
         lines = [
             w
             for w in self.query(TurnLine)
             if w.opened_by != msg_id and not textual_compat.is_being_removed(w)
         ]
-        if lines:
-            lines[-1].freshen(lines[-1].summary, lines[-1].error)
+        # Строка последней записи итога снята с ленты, а смонтированной
+        # осталась строка более старого хода (в фокусе) — её не трогаем:
+        # прошлый ход снова последний в модели (`restore_outcome`), его
+        # строку свежей поставит отрисовка из модели.
+        outcome = self._feed_history.last_turn_outcome
+        if lines and not (
+            outcome is not None
+            and lines[-1].recorded
+            and lines[-1].opened_by != outcome.opened_by
+        ):
+            line = lines[-1]
+            self._freshen_turn_line(line, line.summary, line.error)
         snapshot, self._pre_run_tui_meta = self._pre_run_tui_meta, None
         if snapshot is not None and snapshot[0] == self._active_task_id:
             self._write_tui_meta(*snapshot)
@@ -9166,10 +9806,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self, name: str, knows: Callable[[str], bool] | None = None
     ) -> str | None:
         """`name`, если оно распознаётся (`knows`, по умолчанию — команда,
-        алиас или скилл); иначе то же слово в другой раскладке, если так
-        оно распознаётся (`ьщвуд` → `model`); иначе None. Набранное как
-        есть важнее перевода. Единственное место, где ввод переводится
-        между раскладками."""
+        алиас, скилл или команда плагина); иначе то же слово в другой
+        раскладке, если так оно распознаётся (`ьщвуд` → `model`); иначе
+        None. Набранное как есть важнее перевода. Единственное место, где
+        ввод переводится между раскладками."""
         knows = knows or self._knows
         if knows(name):
             return name
@@ -9177,7 +9817,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         return swapped if knows(swapped) else None
 
     def _knows(self, name: str) -> bool:
-        return self._registry.lookup(name) is not None or self._is_skill(name)
+        return (
+            self._registry.lookup(name) is not None
+            or self._is_skill(name)
+            or self._is_plugin_word(name)
+        )
 
     def _is_skill(self, name: str) -> bool:
         return isinstance(self._resolve_cached_skill(name), Resolved)
@@ -9218,20 +9862,29 @@ class TraceScreen(TraceFollowMixin, Screen):
         return True
 
     def _palette_skills(self) -> list[dict]:
-        """Скиллы для палитры: запись + запускаемое имя (`input_name`) —
-        то же, что вставит Enter."""
-        return [
+        """Скиллы и команды плагинов для палитры: запись + запускаемое имя
+        (`input_name`) — то же, что вставит Enter."""
+        skills = [
             {**s, "input_name": self._skill_input_name(s)}
             for s in self._skills_cache or []
         ]
+        return skills + plugin_command_rows(
+            runtime_of(self.app.base_settings()).plugins.commands,
+            listed_skill_ids(self._skills_cache or []),
+            is_command=self._is_tui_command,
+        )
+
+    def _is_tui_command(self, name: str) -> bool:
+        return self._registry.lookup(name) is not None
 
     def _skill_input_name(self, skill: dict) -> str:
-        """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу
-        и реестру команд."""
+        """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу,
+        реестру команд и командам плагинов снимка."""
         return skill_input_name(
             str(skill.get("id", "")),
             self._skill_catalog(),
-            is_command=lambda name: self._registry.lookup(name) is not None,
+            is_command=self._is_tui_command,
+            commands=runtime_of(self.app.base_settings()).plugins.commands,
         )
 
     async def _cmd_skill(self, arg: str) -> None:
@@ -9255,7 +9908,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
         точном совпадении по прогретому кэшу. Опечатка скилл не запускает:
         «неизвестная команда» с кандидатами — команда, затем скиллы.
-        Холодный кэш — «неизвестная команда» (без ожидания прогрева)."""
+        Холодный кэш — «неизвестная команда» (без ожидания прогрева).
+        Короткое имя у команды плагина и скилла — неоднозначно."""
+        slash = self._slash_resolution(name)
+        if slash.kind == "ambiguous" and self._has_plugin_command(slash):
+            self._render_command_error(
+                name,
+                list(slash.candidates),
+                title="несколько команд и скиллов с именем",
+            )
+            return
         res = self._resolve_cached_skill(name)
         if isinstance(res, Resolved):
             await self._cmd_use_skill(res.canonical_id, prompt=arg)
@@ -9571,6 +10233,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             return False
         if self._run_pending or self._stopping_alive():
             return True
+        if self._rebuild_label is not None:
+            return True
         runner = getattr(self.app, "active_runner", None)
         if runner is None or not runner.is_running():
             return False
@@ -9717,14 +10381,11 @@ class TraceScreen(TraceFollowMixin, Screen):
             kind_class=kind_class,
             focusable=False,
         )
-        if self._bang_open_block is None:
-            self._bang_open_block = []
-            self._bang_blocks.append(self._bang_open_block)
-        self._bang_open_block.append(row)
+        self._ephemera.bang_row(row)
         return row
 
     def _close_bang_block(self) -> None:
-        self._bang_open_block = None
+        self._ephemera.bang_close()
 
     def _clear_bang_blocks(self, count: Optional[int]) -> None:
         """Удалить bang-блоки из трейса. count=None — все; иначе последние N."""
@@ -9736,21 +10397,12 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
             self._close_bang_block()
             return
-        if not self._bang_blocks:
-            return
-        if count is None or count >= len(self._bang_blocks):
-            to_remove = self._bang_blocks[:]
-            self._bang_blocks.clear()
-        else:
-            to_remove = self._bang_blocks[-count:]
-            del self._bang_blocks[-count:]
-        self._bang_open_block = None
-        for block in to_remove:
-            for row in block:
-                try:
-                    row.remove()
-                except Exception:
-                    pass
+        # Блоки снятых ходов — тоже: из памяти, чтобы не вернулись.
+        for row in self._ephemera.bang_clear(count):
+            try:
+                row.remove()
+            except Exception:
+                pass
 
     def _on_bang_done(self, result) -> None:
         """Смонтировать результат bang-shell в трейс (UI-поток)."""
@@ -9805,10 +10457,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         её результат показываем безусловно, даже если юзер отскроллен вверх
         (в отличие от агентских событий). Команды, открывающие экран, трейс не
         растят → счётчик не меняется → позиция чтения истории не сбивается."""
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        before = len(trace.children)
+        before = self._feed_appended
         await self._dispatch_command(raw)
-        if len(trace.children) > before:
+        if self._feed_appended > before:
             self._stick_bottom = True  # команда юзера = re-engage
             self._scroll_trace_end()
 
@@ -9860,6 +10511,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         if name == "mcp":
             self._cmd_mcp()
+            return
+        if name == "plugins":
+            self._cmd_plugins()
             return
         if name == "buffer":
             self.app.action_buffer()
@@ -9982,31 +10636,29 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _open_event_by_no(self, no: int) -> None:
         """Открыть полный payload события №no в Viewer.
         Триггер — двойной клик по строке tool-вызова / агентской реплики."""
-        for ev in self._task_events:
-            if ev.no == no:
-                from gc_tui.screens.viewer import ViewerScreen
+        ev = self._feed_history.event_by_no(no)
+        if ev is None:
+            self._mount_trace_row(
+                prefix="[!] ",
+                content=f"нет события {no}",
+                kind_class="line-error",
+            )
+            return
+        from gc_tui.screens.viewer import ViewerScreen
 
-                # ViewerScreen сам делает render_payload — pretty-print JSON
-                # с подсветкой темой кода ленты для dict/list или plain Static
-                # для остального. Передаём raw payload без предварительного dumps.
-                # summary: в segments-пути full_payload пуст ({}); показываем
-                # синтез сводки (summary_content заполнен в обоих путях).
-                content = (
-                    ev.summary_content
-                    if ev.kind == "summary"
-                    else ev.full_payload
-                )
-                self.app.push_screen(
-                    ViewerScreen(
-                        title=f"event {no} · {ev.tool_name or ev.kind}",
-                        content=content,
-                    )
-                )
-                return
-        self._mount_trace_row(
-            prefix="[!] ",
-            content=f"нет события {no}",
-            kind_class="line-error",
+        # ViewerScreen сам делает render_payload — pretty-print JSON
+        # с подсветкой темой кода ленты для dict/list или plain Static
+        # для остального. Передаём raw payload без предварительного dumps.
+        # summary: в segments-пути full_payload пуст ({}); показываем
+        # синтез сводки (summary_content заполнен в обоих путях).
+        content = (
+            ev.summary_content if ev.kind == "summary" else ev.full_payload
+        )
+        self.app.push_screen(
+            ViewerScreen(
+                title=f"event {no} · {ev.tool_name or ev.kind}",
+                content=content,
+            )
         )
 
     def on_open_event_request(self, message) -> None:
@@ -10051,12 +10703,12 @@ class TraceScreen(TraceFollowMixin, Screen):
     def on_open_tool_call_detail_request(self, message) -> None:
         """Ctrl+click / Enter по row → детальный экран call + output.
 
-        Parent-тулы — из ``_task_events`` (data_*). Nested child — из
+        Parent-тулы — из модели истории ленты (data_*). Nested child — из
         sidecar ``data_subagents_*``.
         """
         call_ev = None
         result_ev = None
-        for ev in self._task_events:
+        for ev in self._feed_history.events():
             if ev.call_id != message.call_id:
                 continue
             if ev.kind == "call":
@@ -10106,7 +10758,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._store is not None and self._active_task_id:
             records = self._store.read_subagent_trace(self._active_task_id)
         parent = nested_call_parent_id(records or [], call_id)
-        if parent and parent_outside_retention(self._task_events, parent):
+        if parent and parent_outside_retention(
+            self._feed_history.subagent_calls(), parent
+        ):
             return None, None
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
         if not detail or not isinstance(detail.get("call"), dict):
@@ -10141,15 +10795,21 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         inp.refresh_command_highlight()
 
+    def drop_skills_cache(self) -> None:
+        """Забыть скиллы и прогреть заново: агент создал скилл или окно
+        сменило набор плагинов (`TuiApp.refresh_plugin_set`)."""
+        self._skills_cache = None
+        self._warm_skills_cache()
+
     def _warm_skills_cache(self) -> None:
         """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре
         скиллы нужны с первой буквы, без I/O на нажатие. Ошибка — только в
         лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам.
         `exclusive` отменяет прежний прогрев: его устаревший снимок в кэш не
-        попадёт; воркер экрана отменяется и при его снятии."""
-        self.run_worker(
-            self._warm_skills(), group="skills-warm", exclusive=True
-        )
+        попадёт; воркер экрана отменяется и при его снятии. Воркеру
+        отдаётся функция, а не корутина: прогрев, отменённый до старта
+        (сброс кеша сразу за прогревом), не оставляет неожиданной корутины."""
+        self.run_worker(self._warm_skills, group="skills-warm", exclusive=True)
 
     async def _warm_skills(self) -> None:
         try:
@@ -10538,3 +11198,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._trace_mount(row)
         return row
+
+
+def trace_screen_of(app) -> TraceScreen | None:
+    """Экран сессии — низ стека экранов; None — хост без него."""
+    base = app.screen_stack[0] if app.screen_stack else None
+    return base if isinstance(base, TraceScreen) else None

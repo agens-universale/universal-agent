@@ -387,6 +387,13 @@ def arguments_without_service_fields(raw: Any, entry: Dict[str, Any]) -> Any:
     return json.dumps(args, ensure_ascii=False)
 
 
+def _arguments_text(arguments: Any) -> str:
+    """Аргументы для ответа модели: словарь — JSON, нет аргументов — пусто."""
+    if isinstance(arguments, dict):
+        return json.dumps(arguments, ensure_ascii=False)
+    return "" if arguments is None else str(arguments)
+
+
 def parse_and_validate_tool_arguments(
     *,
     tool_name: str,
@@ -407,7 +414,7 @@ def parse_and_validate_tool_arguments(
 
     reject = functools.partial(
         _raise_wrong_function_arguments,
-        received_args=str(arguments),
+        received_args=_arguments_text(arguments),
         expected_schema=tool_spec,
         tool_name=tool_name,
         tool_fabric=tool_fabric,
@@ -425,7 +432,7 @@ def parse_and_validate_tool_arguments(
     if not isinstance(parsed_args, dict):
         _raise_wrong_function_arguments(
             message="аргументы инструмента должны быть JSON-объектом",
-            received_args=str(arguments),
+            received_args=_arguments_text(arguments),
             expected_schema=tool_spec,
             tool_name=tool_name,
             tool_fabric=tool_fabric,
@@ -451,7 +458,7 @@ def parse_and_validate_tool_arguments(
             _raise_wrong_function_arguments(
                 message=str(e),
                 received_args=(
-                    str(arguments)
+                    _arguments_text(arguments)
                     if prepared is not None
                     else json.dumps(parsed_args, ensure_ascii=False)
                 ),

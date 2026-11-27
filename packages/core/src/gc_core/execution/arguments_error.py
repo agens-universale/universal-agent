@@ -1,4 +1,6 @@
 import json
+import re
+from itertools import pairwise
 from typing import Any, Dict
 
 from gc_core.execution.tool_schema import resolve_optional_property_keys
@@ -89,6 +91,62 @@ def _correct_call_format_body(expected_schema: Any) -> "str | None":
     return _join_field_lines(all_field_lines)
 
 
+#: Фрагмент битых аргументов в ответе: начало, место ошибки и конец
+#: (у оборванной строки парсер указывает на её начало, обрыв — в конце).
+_PREVIEW_EDGE = 300
+_PREVIEW_AROUND = 150
+
+
+def _preview_spans(size: int, error_at: int) -> list[list[int]]:
+    """Отрезки [начало, конец) для показа; пересекающиеся склеены."""
+    spans = sorted(
+        [
+            [0, _PREVIEW_EDGE],
+            [error_at - _PREVIEW_AROUND, error_at + _PREVIEW_AROUND],
+            [size - _PREVIEW_EDGE, size],
+        ]
+    )
+    merged: list[list[int]] = []
+    for start, end in spans:
+        start, end = max(0, start), min(size, end)
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return merged
+
+
+def _broken_arguments_preview(raw: Any) -> "str | None":
+    """Фрагмент аргументов, которые не JSON-объект; иначе None.
+
+    Такие аргументы уходят на бэкенд как ``{}`` — что модель отправила и где
+    сломалось, видно только отсюда. Объект модель видит в самом вызове.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed, error_at = json.loads(raw), len(raw)
+    except (ValueError, RecursionError) as e:
+        # Глубокая вложенность (модель зациклилась на «[») — RecursionError.
+        parsed, error_at = None, getattr(e, "pos", len(raw))
+    if isinstance(parsed, dict):
+        return None
+    spans = _preview_spans(len(raw), error_at)
+    parts = [raw[spans[0][0] : spans[0][1]]]
+    for (_, prev_end), (start, end) in pairwise(spans):
+        parts.append(f"… [{start - prev_end} chars omitted] …")
+        parts.append(raw[start:end])
+    body = "\n".join(parts)
+    # Ограда длиннее любой серии обратных кавычек внутри — не закроется.
+    longest = max((len(run) for run in re.findall("`+", body)), default=0)
+    fence = "`" * max(3, longest + 1)
+    omitted = ", middle omitted" if len(spans) > 1 else ""
+    return (
+        f"Received arguments ({len(raw)} chars{omitted}):\n"
+        f"{fence}\n{body}\n{fence}\n\n"
+    )
+
+
 class WrongFunctionArgumentsException(Exception):
     def __init__(
         self,
@@ -131,8 +189,9 @@ class WrongFunctionArgumentsException(Exception):
         tool_label = f"`{self.tool_name}`" if self.tool_name else "tool"
         feedback = f"❌ Wrong arguments for {tool_label}: {self.message}\n\n"
 
-        # Исходные аргументы уже находятся в парном function_call и связаны с
-        # этим output через call_id. Не дублируем проблемный payload в контекст.
+        preview = _broken_arguments_preview(self.received_args)
+        if preview is not None:
+            feedback += preview
 
         if self.extra_hint:
             hint = str(self.extra_hint).strip()

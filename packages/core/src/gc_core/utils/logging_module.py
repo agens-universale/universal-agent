@@ -168,6 +168,25 @@ class RedactingTextFormatter(logging.Formatter):
         return text
 
 
+#: Логгеры HTTP-клиента, которые хост держит не ниже WARNING: на INFO
+#: ``httpx`` пишет адрес каждого запроса вместе со строкой запроса, а в
+#: ней бывают секреты (``?apikey=…``).
+_HTTP_CLIENT_LOGGERS = ("httpx",)
+
+
+def configure_host_logging(level: int, fmt: Optional[str] = None) -> None:
+    """Корневое логирование хоста (``logging.basicConfig``); логгеры
+    HTTP-клиента — не ниже WARNING."""
+    options: Dict[str, Any] = {"level": level}
+    if fmt is not None:
+        options["format"] = fmt
+    logging.basicConfig(**options)
+    for name in _HTTP_CLIENT_LOGGERS:
+        client_logger = logging.getLogger(name)
+        if client_logger.level < logging.WARNING:
+            client_logger.setLevel(logging.WARNING)
+
+
 def generate_run_id() -> str:
     """Generate unique run identifier for log isolation."""
     return f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
@@ -445,6 +464,7 @@ __all__ = [
     "RedactingTextFormatter",
     "RunContextFilter",
     "build_run_log_paths",
+    "configure_host_logging",
     "create_run_logger",
     "generate_run_id",
     "human_console_enabled",

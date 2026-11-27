@@ -122,7 +122,13 @@ async def test_aux_outcome_retains_finish_reason_and_usage(
 
 
 @pytest.mark.parametrize("with_port", [False, True])
-async def test_text_wrapper_uses_the_same_outcome_path(monkeypatch, with_port):
+@pytest.mark.parametrize(
+    ("strip_outer_whitespace", "expected"),
+    [(True, "result"), (False, " result ")],
+)
+async def test_text_wrapper_uses_the_same_outcome_path(
+    monkeypatch, with_port, strip_outer_whitespace, expected
+):
     policy = AsyncMock(
         return_value=(
             {"choices": [{"message": {"content": " result "}}]},
@@ -137,8 +143,9 @@ async def test_text_wrapper_uses_the_same_outcome_path(monkeypatch, with_port):
         messages=state.messages,
         max_tokens=42,
         consumer="summary",
+        strip_outer_whitespace=strip_outer_whitespace,
     )
-    assert result == "result"
+    assert result == expected
     assert policy.await_count == 1
 
 
@@ -501,7 +508,7 @@ async def test_billed_retry_exhaustion_keeps_usage_with_and_without_port(
         return {"choices": [{"error": {"code": 503, "message": "failed"}}]}
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", transport)
-    monkeypatch.setattr(policy.asyncio, "sleep", AsyncMock())
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
     accounts = []
     for with_port in (False, True):
         state = _state()

@@ -11,6 +11,7 @@ from gc_core.execution.finish_reason import (
     nonempty_reasoning_text,
     normalize_finish_reason,
 )
+from gc_core.utils.log_text import clip_middle
 
 _MAX_BACKEND_LOG_CHARS = 8000
 
@@ -24,27 +25,27 @@ def _safe_json_for_log(payload, *, max_chars=_MAX_BACKEND_LOG_CHARS):
         raw = json.dumps(payload, ensure_ascii=False, default=str)
     except Exception:
         raw = str(payload)
-    if len(raw) <= max_chars:
-        return raw
-    return f"{raw[:max_chars]}... [truncated, total_chars={len(raw)}]"
+    # Начало и конец: при упоре в лимит длины важен хвост ответа.
+    return clip_middle(raw, max_chars)
 
 
-def sanitize_messages_for_chat_completions(
+def sanitize_invalid_tool_calls(
     messages: List[Dict],
     *,
     invalid_tool_call_factory: Optional[Callable[[Dict], Dict]] = None,
+    require_object: bool = False,
 ) -> List[Dict]:
     """
-    Техническая нормализация истории перед chat/completions:
-    function_call с невалидным JSON в arguments заменяется фабрикой,
-    либо пропускается, если фабрика не передана.
+    Техническая нормализация истории: function_call с невалидным JSON в
+    arguments заменяется фабрикой, либо пропускается без фабрики.
+    ``require_object`` — валидными считаются только JSON-объекты.
     """
     sanitized: List[Dict] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
         if message.get("type") != "function_call" or _has_valid_json_arguments(
-            message
+            message, require_object=require_object
         ):
             sanitized.append(message)
             continue
@@ -56,15 +57,17 @@ def sanitize_messages_for_chat_completions(
     return sanitized
 
 
-def _has_valid_json_arguments(message: Dict) -> bool:
+def _has_valid_json_arguments(
+    message: Dict, *, require_object: bool = False
+) -> bool:
     raw_args = message.get("arguments")
     if not isinstance(raw_args, str) or not raw_args.strip():
         return False
     try:
-        json.loads(raw_args)
+        parsed = json.loads(raw_args)
     except Exception:
         return False
-    return True
+    return isinstance(parsed, dict) or not require_object
 
 
 def get_md5_hash(obj):
@@ -193,6 +196,11 @@ def get_output_list(
         tool_calls = msg_obj.get("tool_calls")
         if tool_calls is not None:
             for tool_call_dict in tool_calls:
+                _warn_unparsable_arguments(
+                    tool_call_dict,
+                    dct_choice.get("finish_reason"),
+                    logger_override,
+                )
                 output_list.append(
                     _function_call_item(
                         tool_call_dict, recover_invalid_tool_calls
@@ -200,6 +208,42 @@ def get_output_list(
                 )
 
     return output_list
+
+
+def _warn_unparsable_arguments(tool_call, finish_reason, logger) -> None:
+    """Аргументы вызова — не JSON: предупреждение с метаданными. Сборка не
+    меняется, модель и так получит ошибку разбора; лог нужен, чтобы отличить
+    обрыв у бэкенда (вызов закрыт как готовый) от потери на нашей стороне.
+    Текст обрывка не пишется ни на каком уровне: format text пишет в файл и
+    debug, а ответ, отброшенный автороутингом, в журнал диалога не попадёт."""
+    if logger is None or not isinstance(tool_call, dict):
+        return
+    # Мусорный вызов (функция не словарь) — не обрыв аргументов: его
+    # нормализует режим восстановления, падать здесь нельзя.
+    fn = tool_call.get("function")
+    if not isinstance(fn, dict):
+        return
+    arguments = fn.get("arguments")
+    # Пустые аргументы — вызов без параметров, не обрывок.
+    if not isinstance(arguments, str) or not arguments.strip():
+        return
+    if _has_valid_json_arguments(fn):
+        return
+    logger.warning(
+        "chat/completions tool call arguments are not valid JSON "
+        "(finish_reason=%r, tool=%s, call_id=%s, chars=%d)",
+        finish_reason,
+        fn.get("name"),
+        tool_call.get("id"),
+        len(arguments),
+    )
+
+
+def _log_raw_payload(logger, dct) -> None:
+    """Сырой ответ модели — только на debug. В сообщение лога он попадает
+    строкой, а маскировка секретов узнаёт их по имени ключа лишь в словаре:
+    поле ``password`` в аргументах вызова иначе ушло бы в лог как есть."""
+    logger.debug("chat/completions payload=%s", _safe_json_for_log(dct))
 
 
 def _accept_choice_finish_reason(
@@ -229,25 +273,32 @@ def _accept_choice_finish_reason(
         # ValueError: пустой батч, цикл сам bounce. Choice error уже выше.
         if logger_override is not None:
             logger_override.error(
-                "Empty choice discarded (unknown/empty finish_reason=%r): payload=%s",
+                "Empty choice discarded (unknown/empty finish_reason=%r): "
+                "id=%s model=%s",
                 fr,
-                _safe_json_for_log(dct),
+                dct.get("id"),
+                dct.get("model"),
             )
+            _log_raw_payload(logger_override, dct)
         return False
     if logger_override is None:
         return True
     if _decision.unknown:
         logger_override.warning(
-            "Unknown finish_reason=%r accepted permissively (content/tool_calls/reasoning present): payload=%s",
+            "Unknown finish_reason=%r accepted permissively (content/tool_calls/reasoning present): id=%s model=%s",
             fr,
-            _safe_json_for_log(dct),
+            dct.get("id"),
+            dct.get("model"),
         )
     if _decision.kind == FINISH_KIND_LENGTH:
         logger_override.warning(
             "chat/completions choice finished with length (output may be truncated; "
-            "tool JSON may be incomplete). payload=%s",
-            _safe_json_for_log(dct),
+            "tool JSON may be incomplete). id=%s model=%s",
+            dct.get("id"),
+            dct.get("model"),
         )
+    if _decision.unknown or _decision.kind == FINISH_KIND_LENGTH:
+        _log_raw_payload(logger_override, dct)
     return True
 
 
@@ -377,11 +428,14 @@ def output_chat_completion_to_response(
     except Exception as exc:
         if logger_override is not None:
             logger_override.error(
-                "Failed to convert chat/completions payload. context=%s payload=%s",
+                "Failed to convert chat/completions payload. context=%s "
+                "id=%s model=%s",
                 _safe_json_for_log(log_context or {}),
-                _safe_json_for_log(dct),
+                dct.get("id"),
+                dct.get("model"),
                 exc_info=True,
             )
+            _log_raw_payload(logger_override, dct)
         if recover_invalid_tool_calls and isinstance(
             exc, (AttributeError, KeyError, TypeError)
         ):

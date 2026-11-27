@@ -1,18 +1,20 @@
-"""TUI: runtime LLM error → счётчик в карточке, футере и /notices."""
+"""TUI: runtime LLM error → счётчик в футере и /notices (шапку не трогает)."""
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
+import threading
+
 import pytest
 from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
 from gc_core.startup_notices import Notice
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.notices_ui import (
     WARN_GLYPH,
 )  # в значке вариационный селектор
 
 
 @pytest.mark.asyncio
-async def test_runtime_notice_appears_in_card(tmp_path):
+async def test_runtime_notice_appears_in_footer_not_header(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -20,11 +22,16 @@ async def test_runtime_notice_appears_in_card(tmp_path):
     cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
+    ).run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
         await pilot.pause()
-        assert "/notices" not in str(scr._mcp_status_row.render())
+        header = scr.query_one("#brand-block")
 
+        def header_text() -> str:
+            width = header.content_region.width
+            return header.render().laid_out(width).plain
+
+        before = header_text()
         push_runtime_notice(
             Notice(
                 "warning",
@@ -33,9 +40,9 @@ async def test_runtime_notice_appears_in_card(tmp_path):
             )
         )
         pilot.app.refresh_notices_indicators()
-        card = str(scr._mcp_status_row.render())
-        assert f"{WARN_GLYPH} 1" in card
-        assert "F4/notices" in card
+        await pilot.pause()
+        assert header_text() == before  # шапка уведомлений не показывает
+        assert "/notices" not in before
         footer = str(scr.query_one("#footer-slot").render())
         assert f"{WARN_GLYPH} 1" in footer
         assert "F4/notices" in footer
@@ -86,3 +93,31 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(
             pilot.app.screen.query_one("#sessions-footer-right").render()
         )
         assert f"{WARN_GLYPH} 1" in footer_right
+
+
+@pytest.mark.asyncio
+async def test_runtime_notice_from_thread_does_not_wait_ui(
+    tmp_path, monkeypatch
+):
+    """Уведомление с потока агента не ждёт отрисовки UI: вызов
+    возвращается сразу, счётчики обновляет цикл UI позже."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    ).run_test() as pilot:
+        await pilot.pause()
+        calls = []
+        monkeypatch.setattr(
+            pilot.app, "refresh_notices_indicators", lambda: calls.append(1)
+        )
+        thread = threading.Thread(
+            target=pilot.app._on_runtime_notice, daemon=True
+        )
+        thread.start()
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        await pilot.pause()
+        assert calls == [1]

@@ -1,5 +1,7 @@
+import logging
 import time
 
+import pytest
 from gc_core.tools.connect_mcp import registry as reg
 
 
@@ -88,3 +90,50 @@ def test_humanize_unwraps_exception_group():
     assert "нет соединения" in reason
     assert "localhost:8931" in reason
     assert "TaskGroup" not in reason
+
+
+_HEADER_SECRET = "Bearer hdr-s3cret-value"
+_URL_SECRET_URL = "http://127.0.0.1:9/mcp?apikey=qry-s3cret-value"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError(f"отказ: {_HEADER_SECRET} для {_URL_SECRET_URL}"),
+        ConnectionRefusedError("refused"),
+        ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [RuntimeError(f"отказ: {_HEADER_SECRET} для {_URL_SECRET_URL}")],
+        ),
+    ],
+    ids=["текст-исключения", "шаблон-с-адресом", "группа-задач"],
+)
+async def test_failure_reason_has_no_secrets(
+    monkeypatch, capsys, caplog, error
+):
+    """Отказ прежнего обнаружения: значения секретов определения
+    (заголовок, строка запроса адреса) не попадают ни в строку ``[MCP]``,
+    ни в лог, ни в статус."""
+
+    class _Client:
+        async def alist_tools(self, *, timeout):
+            raise error
+
+    monkeypatch.setattr(reg, "resolve_mcp_client", lambda *a, **k: _Client())
+    cfg = {
+        "transport": "stream_http",
+        "url": _URL_SECRET_URL,
+        "headers": {"Authorization": _HEADER_SECRET},
+    }
+
+    with caplog.at_level(logging.WARNING, logger=reg.logger.name):
+        _, status = await reg._adiscover_one("srv", cfg, timeout=5)
+
+    printed = capsys.readouterr().out
+    assert status["status"] == "failed"
+    assert "[MCP] srv: недоступен" in printed
+    assert "MCP discovery failed for srv" in caplog.text
+    for text in (printed, caplog.text, status["reason"]):
+        assert "s3cret" not in text
+    # В журнал — развёрнутая причина, а не обёртка группы задач.
+    assert "TaskGroup" not in caplog.text

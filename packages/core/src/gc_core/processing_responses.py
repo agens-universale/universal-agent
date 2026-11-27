@@ -149,6 +149,9 @@ from gc_core.message_policy.attachments_outbound import (
     request_carries_images,
 )
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.invalid_tool_calls import (
+    outbound_invalid_tool_call,
+)
 from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
@@ -170,6 +173,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     build_invalid_tool_call_feedback_message,
     extract_real_user_message_text,
+    last_real_user_text,
     wrap_technical_user_content,
 )
 from gc_core.message_policy.user_stop import (
@@ -181,6 +185,12 @@ from gc_core.model_router import (
     breaker_reason,
     failure_text,
 )
+from gc_core.plugins.commands import (
+    command_messages,
+    listed_skill_ids,
+    user_intent_text,
+)
+from gc_core.plugins.hooks import acontext_hook_messages
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -196,7 +206,7 @@ from gc_core.security.permission_mode import (
     resolve_mode,
     tools_for_mode,
 )
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, runtime_of, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.summarize.summary_validation import SummaryRejectedError
@@ -249,7 +259,7 @@ from gc_core.utils.convertations import (
     UnparseableModelResponse,
     get_md5_hash,
     output_chat_completion_to_response,
-    sanitize_messages_for_chat_completions,
+    sanitize_invalid_tool_calls,
 )
 from gc_core.utils.format_messages import format_message_responses
 from gc_core.utils.generate_message_id import (
@@ -1006,7 +1016,12 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     Падение `begin_turn` часы не отменяет — ход начат."""
     if not getattr(state, "parent_state_id", None):
         mono, wall = turn_clock_sources(ctx)
-        bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
+        bind_turn_clock(
+            ctx,
+            TurnClock.start(
+                mono=mono, wall=wall, lock_factory=port(ctx, "lock_factory")
+            ),
+        )
         _allow_breaker_probe(ctx)
     try:
         begin_turn(state, ctx)
@@ -1597,39 +1612,6 @@ def _no_probe_right() -> bool:
     return False
 
 
-def _function_call_output_id(message) -> str:
-    if not isinstance(message, dict):
-        return ""
-    if message.get("type") != "function_call_output":
-        return ""
-    call_id = message.get("call_id")
-    if isinstance(call_id, str):
-        return call_id
-    return ""
-
-
-def _answered_call_ids(history) -> set[str]:
-    answered: set[str] = set()
-    for batch in history:
-        for message in batch or []:
-            call_id = _function_call_output_id(message)
-            if call_id:
-                answered.add(call_id)
-    return answered
-
-
-def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
-    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
-    answered = _answered_call_ids(history)
-
-    def factory(message: Dict) -> Dict:
-        if message.get("call_id") in answered:
-            return message
-        return build_invalid_tool_call_feedback_message(message)
-
-    return factory
-
-
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1671,6 +1653,14 @@ async def _arequest_backend_canonical_once(
         retry_embedded_choice_errors,
     ) = resolve_network_params(settings, resolved_for_network)
 
+    # Битые вызовы — одним правилом в обоих режимах: responses после промаха
+    # кэша тоже шлёт полную историю, иначе 400 на каждом следующем ходе.
+    state_messages = getattr(state, "messages", []) or []
+    invalid_call = outbound_invalid_tool_call((state_messages, messages))
+    messages = sanitize_invalid_tool_calls(
+        messages, invalid_tool_call_factory=invalid_call, require_object=True
+    )
+
     if backend_mode == "responses":
         return await _arequest_responses_once(
             messages,
@@ -1702,17 +1692,10 @@ async def _arequest_backend_canonical_once(
         if resolved is not None
         else settings.backend.completions_url
     )
-    state_messages = getattr(state, "messages", []) or []
-    keep_answered = _keep_answered_invalid_tool_call(
-        (state_messages, messages)
-    )
-    sanitized_messages = sanitize_messages_for_chat_completions(
-        messages,
-        invalid_tool_call_factory=keep_answered,
-    )
-    sanitized_state_messages = sanitize_messages_for_chat_completions(
+    sanitized_state_messages = sanitize_invalid_tool_calls(
         state_messages,
-        invalid_tool_call_factory=keep_answered,
+        invalid_tool_call_factory=invalid_call,
+        require_object=True,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
@@ -1729,11 +1712,14 @@ async def _arequest_backend_canonical_once(
         mute_answer=mute_answer,
     )
     prompt_message_count = len(getattr(state, "messages", []) or [])
+    # Один логгер на весь вызов: транспорт пишет отброшенные чанки, конвертер
+    # — аргументы-не-JSON, и разбор обрыва нужен по обеим записям.
+    _run_log = getattr(ctx, "logger", None) or _fallback_logger
 
     send = functools.partial(
         _asend_chat_completions,
         state,
-        sanitized_messages=sanitized_messages,
+        sanitized_messages=messages,
         sanitized_state_messages=sanitized_state_messages,
         read_bytes=_image_bytes_reader(ctx),
         ctx=ctx,
@@ -1750,7 +1736,7 @@ async def _arequest_backend_canonical_once(
             "adaptive_retry": not probe,
             "retry_embedded_choice_errors": retry_embedded_choice_errors,
             "salvage_reasoning": True,
-            "logger": getattr(ctx, "logger", None),
+            "logger": _run_log,
             "on_delta": _on_delta,
             "request_label": "main_agent",
             "runtime_notices_enabled": bool(getattr(ctx, "is_tui", False)),
@@ -1769,7 +1755,7 @@ async def _arequest_backend_canonical_once(
         # дедупликацией по id (`create_call_data_completions`). Живость считается по
         # слитой последовательности (повтор по id считается один раз), проекция
         # ложится на оба списка и сохраняет id — дедупликация видит те же ключи.
-        merged_messages=[*sanitized_state_messages, *sanitized_messages],
+        merged_messages=[*sanitized_state_messages, *messages],
         images_config=read_images_config(settings),
         route_key=route_key,
     )
@@ -1779,7 +1765,6 @@ async def _arequest_backend_canonical_once(
                 "Chat completion payload is not an object"
             )
         raise ValueError("chat/completions backend response must be an object")
-    _run_log = getattr(ctx, "logger", None) or _fallback_logger
     _finish = _first_choice_finish_reason(res)
     # Сохраняем finish_reason на state — catch-блок WrongFunctionArgumentsException
     # использует его, чтобы отличить усечённый JSON (length) от обычной невалидности.
@@ -1798,7 +1783,7 @@ async def _arequest_backend_canonical_once(
     persist_reasoning = persist_reasoning_content_for_model(resolved, settings)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
-        logger_override=getattr(ctx, "logger", _fallback_logger),
+        logger_override=_run_log,
         log_context={
             "url": url,
             "request_summary": _summarize_call_data_for_log(call_data),
@@ -2852,8 +2837,8 @@ async def _afinalize_tool_batch(
         )
 
     # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
-    # мусор между шагами. Default on для CLI/TUI, off для server; явный
-    # gc.force_collect в конфиге перекрывает default.
+    # мусор между шагами. Только CLI: в TUI полная сборка стопает UI-цикл,
+    # в server gc.collect глобален для процесса.
     if gc_force_collect_enabled(
         ctx,
         is_tui=bool(getattr(ctx, "is_tui", False)),
@@ -3317,6 +3302,9 @@ class _AgentLoop:
 
         self.tool_error_cnt = 0
         self.context_overflow_retries = 0
+        # Повтор запроса после переполнения: хуки запроса и команда плагина
+        # уже в messages, второй раз не запускаются.
+        self._repeat_request = False
         self.run_logger = getattr(ctx, "logger", None) or _fallback_logger
         agent_cfg = settings_of(ctx).agent
         self.stop_on_no_tool_response = agent_cfg.stop_on_no_tool_response
@@ -3448,9 +3436,11 @@ class _AgentLoop:
             return _Outcome(result=early)
         # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
         # ретраев исключение уходит наверх как есть.
+        repeat, self._repeat_request = self._repeat_request, False
+        prepared = None
         try:
             prepared = await self._aprepare_main_request(
-                messages, mode, backend_mode
+                messages, mode, backend_mode, repeat=repeat
             )
             if prepared is None:
                 return _Outcome(result=None)
@@ -3479,6 +3469,7 @@ class _AgentLoop:
             ):
                 raise
             # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
+            self._repeat_request = repeat or prepared is not None
             return self._overflow_resume(messages, mode)
         outcome.mode = mode
         self._nudges.notices_sent = False
@@ -3502,12 +3493,16 @@ class _AgentLoop:
         return outcome
 
     async def _aprepare_main_request(
-        self, messages, mode, backend_mode: str
+        self, messages, mode, backend_mode: str, *, repeat: bool = False
     ) -> Optional[List[Dict]]:
-        """Перед запросом к модели: судья/сжатие, затем один flush буфера."""
+        """Перед запросом к модели: судья/сжатие, затем один flush буфера,
+        затем хуки и команда плагинов. None — стоп до запроса. ``repeat`` —
+        повтор того же запроса после переполнения контекста: хуки запроса и
+        команда плагина уже в ``messages``."""
         if not _mode_requires_backend_call(mode):
             return messages
-        if backend_mode == "chat_completions":
+        chat = backend_mode == "chat_completions"
+        if chat:
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
                 await self._apublish_held_on_stop(messages)
@@ -3517,7 +3512,11 @@ class _AgentLoop:
             if self._stopped_before_call():
                 await self._apublish_held_on_stop(messages)
                 return None
-        return await self._aflush_nudges(messages, backend_mode)
+        request = messages
+        messages = await self._aflush_nudges(messages, backend_mode)
+        return await self._aapply_plugin_messages(
+            messages, request, mode, chat=chat, repeat=repeat
+        )
 
     async def _apublish_held_on_stop(self, messages: List[Dict]) -> None:
         """Стоп после prepare: обычная запись вывода отбрасывается, закрытие — нет."""
@@ -3608,6 +3607,9 @@ class _AgentLoop:
         pending = await self.get_pending_messages()
         if not pending:
             return messages
+        # Реплика из очереди — новый запрос, не повтор после переполнения:
+        # хуки запроса и команда плагина для неё запускаются.
+        self._repeat_request = False
         if first_poll or _is_tool_outputs_with_technical_tail(messages):
             return [*messages, *pending]
         return pending
@@ -3771,7 +3773,7 @@ class _AgentLoop:
                 return message
             return build_invalid_tool_call_feedback_message(message)
 
-        messages = sanitize_messages_for_chat_completions(
+        messages = sanitize_invalid_tool_calls(
             messages,
             invalid_tool_call_factory=rejected_tool_call,
         )
@@ -3781,7 +3783,7 @@ class _AgentLoop:
         if _post_sanitize_digest != _pre_sanitize_digest:
             self.run_logger.info(
                 "\n<message_batch_committed>\n"
-                "Санитайз для chat/completions изменил батч относительно сырого "
+                "Санитайз битых вызовов изменил батч относительно сырого "
                 "ответа выше (например, невалидный JSON вызова тула заменён на "
                 "техническое user-сообщение — то же, что уходит в persist треда).\n"
                 "</message_batch_committed>\n"
@@ -3912,6 +3914,7 @@ class _AgentLoop:
             state.current_user_intent,
             self._nudges.followers,
             user_turn_seq=state.user_turn_seq,
+            text_of=lambda m: user_intent_text(self.ctx, state, m),
         )
         self._nudges.carrier = None
         self._nudges.followers = []
@@ -3985,6 +3988,79 @@ class _AgentLoop:
         state.messages += notices
         await _maybe_persist(self.persist_messages_callback, notices, state)
         return [*messages, *notices]
+
+    async def _aapply_plugin_messages(
+        self, messages, request, mode, *, chat: bool, repeat: bool
+    ) -> Optional[List[Dict]]:
+        """Контекстные хуки и команда плагинов — в любом api_mode, после
+        flush: отложенный вывод инструмента уже записан, сообщения плагинов
+        встают за ним и в истории, и на диске. UserPromptSubmit и подстановка
+        команды смотрят на запрос человека в ``request`` (до служебных
+        добавок flush). SessionStart — перед каждым запросом: после сжатия
+        посреди хода он срабатывает снова."""
+        if mode == "user_ask" and not repeat:
+            messages = await self._aapply_context_hooks(
+                messages, request, user_prompt=True
+            )
+            messages = await self._aapply_plugin_command(messages, request)
+        messages = await self._aapply_context_hooks(
+            messages, messages, user_prompt=False
+        )
+        if chat and self._stopped_before_call():
+            return None
+        return messages
+
+    async def _aapply_context_hooks(
+        self, messages, seen, *, user_prompt: bool
+    ) -> List[Dict]:
+        """Контекстные хуки плагинов: UserPromptSubmit на запросе в ``seen``
+        (``user_prompt``) или SessionStart перед запросом к модели."""
+        return await self._aadd_plugin_messages(
+            messages,
+            acontext_hook_messages(
+                self.state, self.ctx, seen, user_prompt=user_prompt
+            ),
+        )
+
+    async def _aapply_plugin_command(self, messages, request) -> List[Dict]:
+        """Команда плагина: раскрытый текст к запросу ``/плагин:команда``
+        (реплика человека в хвосте ``request``)."""
+
+        async def _pending() -> List[Dict]:
+            skills = getattr(self.state, "skills_list", None) or []
+            return command_messages(
+                runtime_of(self.ctx).plugins,
+                listed_skill_ids(skills),
+                last_real_user_text(request),
+            )
+
+        return await self._aadd_plugin_messages(messages, _pending())
+
+    async def _aadd_plugin_messages(self, messages, pending) -> List[Dict]:
+        state = self.state
+        try:
+            plugin_messages = await pending
+            if not plugin_messages:
+                return messages
+            messages = list(messages) + plugin_messages
+            to_append = filter_messages_not_in_state(
+                list(getattr(state, "messages", []) or []),
+                list(plugin_messages),
+            )
+            if to_append:
+                state.messages += to_append
+            await _maybe_persist(
+                self.persist_messages_callback, plugin_messages, state
+            )
+        except ExecutionFailure:
+            raise
+        except Exception as plugin_exc:
+            self.run_logger.warning(
+                "Plugin messages warning: %s",
+                plugin_exc,
+                exc_info=True,
+            )
+        return messages
 
     # ------------------------------------------------------------ dispatch
     async def _adispatch(self, mode, messages, backend_mode: str) -> _Outcome:

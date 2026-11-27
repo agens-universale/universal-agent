@@ -1,16 +1,20 @@
-"""Резолвер флага ``gc.force_collect`` — управляет точкой C3 (collect после батча тулов).
+"""Режимные резолверы явных ``gc.collect()``: C1/C2 и C3.
 
-C1 (после компакции) и C2 (после close_all в finally) — всегда включены и от флага
-не зависят. C3 — условная точка: один ``gc.collect()`` на границе «батч тулов → LLM-шаг».
+C1 (после компакции) и C2 (после close_all в finally) — везде, кроме TUI
+(``gc_run_collect_enabled``). C3 — один ``gc.collect()`` на границе
+«батч тулов → LLM-шаг» (``gc_force_collect_enabled``).
 
-Значение режимное: ``True`` для CLI и TUI (долгоживущий / бенчмарк-режим),
-``False`` для server (``gc.collect()`` глобален для процесса и стопает все треды).
-Ключа ``gc.force_collect`` в схеме нет (строгая валидация его не пропустит),
-поэтому прежнее чтение секции ``gc`` плоского конфига было мёртвым и снято.
+Оба значения режимные. C3: ``True`` только для CLI
+(бенчмарк-режим); ``False`` для TUI (полная сборка на большой куче стопает
+UI-цикл процесса интерфейса) и server (``gc.collect()`` глобален для
+процесса и стопает все треды). Ключа ``gc.force_collect`` в схеме нет
+(строгая валидация его не пропустит), поэтому прежнее чтение секции ``gc``
+плоского конфига было мёртвым и снято.
 
 См. ``docs_md/actual/2026-07-29-gc-collect-placement-spec.md``.
 """
 
+import gc
 from typing import Any
 
 
@@ -22,9 +26,31 @@ def gc_force_collect_enabled(
 ) -> bool:
     """Включена ли точка C3 (collect после батча тулов).
 
-    Секции ``gc`` в схеме нет — значение всегда режимное: CLI и TUI — да,
-    server — нет. ``settings`` (контекст/настройки) не читается и оставлен
-    ради сигнатуры.
+    Секции ``gc`` в схеме нет — значение всегда режимное: только CLI.
+    TUI стартует с ``system="cli"``, поэтому у него истинны оба флага
+    (субагенты TUI наследуют оба) — отсюда ``and not is_tui``.
+    ``settings`` (контекст/настройки) не читается и оставлен ради сигнатуры.
     """
     del settings
-    return is_cli_mode or is_tui
+    return is_cli_mode and not is_tui
+
+
+def gc_run_collect_enabled(*, is_tui: bool) -> bool:
+    """Включены ли точки C1 (после компакции) и C2 (конец прогона).
+
+    В TUI выключены: полная сборка в потоке агента держит GIL, и UI-цикл
+    стоит (замер на окне ленты — медиана 180–280 мс, порог 100 мс).
+    CLI и сервер собирают, как раньше. TUI стартует с ``system="cli"``,
+    поэтому решает только ``is_tui``.
+    """
+    return not is_tui
+
+
+def collect_run_garbage(ctx: Any) -> None:
+    """Точки C1 и C2 — одно правило: по режиму (`gc_run_collect_enabled`)
+    сборкой рантайма из контекста ``ctx.collect_garbage`` (Temporal
+    подменяет её: общий worker не останавливается ради одного workflow),
+    без неё — ``gc.collect``. Контекста нет — режим не TUI."""
+    if not gc_run_collect_enabled(is_tui=bool(getattr(ctx, "is_tui", False))):
+        return
+    (getattr(ctx, "collect_garbage", None) or gc.collect)()

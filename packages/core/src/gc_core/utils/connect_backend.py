@@ -4,11 +4,10 @@ import asyncio
 import json
 import logging
 import os
-import re
 from copy import deepcopy
 from datetime import datetime
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
 
 import httpx
@@ -41,6 +40,7 @@ from gc_core.user_stop import (
 )
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
+    BackendBadResponseError,
     embedded_choice_error,
     http_status_code,
     is_auth_error,
@@ -59,6 +59,7 @@ from gc_core.utils.http_auth import (
     server_authorization_attempts,
 )
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.log_text import clip_middle
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.ssl_config import get_backend_client_cert
@@ -72,6 +73,8 @@ _MODEL_REQUEST_STOPPED = "Ход остановлен"
 # Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
 # ResolvedModel.backend_overrides (см. backend_override_value).
 NO_BACKEND_OVERRIDE = object()
+# Последний чанк responses — весь ответ: потолок как у сырого ответа.
+_MAX_LAST_CHUNK_LOG_CHARS = 8000
 
 
 def get_async_client(*args, **kwargs):
@@ -235,10 +238,15 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
     картинку 404-м, SSE-ошибкой — vLLM в стриме. Отказ авторизации (401, в том
     числе событием стрима) тоже: его лечит другая форма токена или перевыпуск.
+    Пустое или не-JSON тело HTTP-200 — тоже: оно воспроизводимое, и паузы
+    10/20/40/80 с только отнимали бы у хода две с половиной минуты. Его один
+    раз и сразу повторяет `_arequest_once_more_on_bad_response`.
 
     Обрыв стопом — не транспорт и не повод для backoff.
     """
-    if isinstance(exc, (ModelRequestStopped, UserStopInterrupt)):
+    if isinstance(
+        exc, (BackendBadResponseError, ModelRequestStopped, UserStopInterrupt)
+    ):
         return False
     if is_image_request_error(exc) or is_auth_error(exc):
         return False
@@ -282,6 +290,47 @@ def _log_backend_request(
             "payload": logged,
         },
     )
+
+
+def _log_dropped_chunks(logger, assembler: StreamAssembler) -> None:
+    """Чанки, не разобранные как JSON: сколько и каких размеров — по ним
+    видно, что потеря у нас, а не обрыв у бэкенда. Текст чанка не пишется
+    ни на каком уровне: это сырой вывод модели строкой (маскировка по имени
+    ключа его не видит), а format text пишет в файл и debug."""
+    if logger is None or not assembler.dropped_count:
+        return
+    logger.warning(
+        "chat/completions stream: %d chunks dropped (not a JSON object), "
+        "sizes of the first %d: %s",
+        assembler.dropped_count,
+        len(assembler.dropped_payloads),
+        [len(p) for p in assembler.dropped_payloads],
+    )
+
+
+def _log_last_chunk(logger, last_chunk: str) -> None:
+    """Последний чанк незавершённого потока responses — на debug. Это сырой
+    вывод модели, но новой утечки нет: на develop он был в тексте исключения,
+    которое политика ретраев пишет на error. В сообщении, а не в поле:
+    format text полей события не выводит."""
+    logger.debug(
+        "backend_responses_last_chunk: %s",
+        clip_middle(last_chunk, _MAX_LAST_CHUNK_LOG_CHARS),
+        extra={"event": "backend_responses_last_chunk"},
+    )
+
+
+def _stream_finish_reason(result: dict) -> Any:
+    """Причина незавершённого потока от провайдера — код, сообщение, причина
+    остановки; вывода модели в ней нет. Ищется в ответе (response.failed,
+    response.incomplete) и в событии error верхнего уровня потока."""
+    response = result.get("response")
+    if isinstance(response, dict):
+        reason = response.get("error") or response.get("incomplete_details")
+        if reason:
+            return reason
+    top = {k: result[k] for k in ("error", "code", "message") if k in result}
+    return top or None
 
 
 def _record_backend_response(
@@ -431,8 +480,11 @@ async def _aread_model_response(response: Any, read):
         raise
 
 
-async def _aguard_model_call(factory):
-    """Стоп отменяет запрос к модели. Отмена — не повод его повторять."""
+async def _aguard_model_call(
+    factory, kind: Literal["model", "retry"] = "model"
+):
+    """Стоп отменяет запрос к модели. Отмена — не повод его повторять.
+    ``kind`` — что снято, для лога стопа (запрос или пауза между попытками)."""
     stop = current_user_stop()
     if stop is None:
         return await factory()
@@ -445,7 +497,7 @@ async def _aguard_model_call(factory):
             task.cancel()
 
     try:
-        async with stop.arm(kind="model", release=_release):
+        async with stop.arm(kind=kind, release=_release):
             return await task
     except UserStopInterrupt as exc:
         if not exc.started:
@@ -461,6 +513,12 @@ async def _aguard_model_call(factory):
         if stop.requested:
             raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
         raise
+
+
+async def apause_model_retry(seconds: float) -> None:
+    """Пауза между попытками запроса к модели. Стоп хода обрывает её, как и
+    сам запрос: иначе остановленный ход досиживал бы паузу, держа тред."""
+    await _aguard_model_call(lambda: asyncio.sleep(seconds), kind="retry")
 
 
 async def _aopen_model_stream(client, *args, read, **kwargs):
@@ -484,6 +542,130 @@ async def _aread_error_text(response: httpx.Response) -> Optional[str]:
         return response.text
     except Exception:
         return None
+
+
+#: Сколько символов тела плохого ответа идёт в лог: заглушку прокси или
+#: обрывок SSE по ним узнать хватает, а лог не раздувается чужим HTML.
+_BAD_BODY_LOG_CHARS = 200
+
+#: Префикс строки данных SSE.
+_SSE_DATA = "data:"
+
+
+def _looks_like_sse(text: str) -> bool:
+    """Тело — SSE: есть строка ``data:`` или комментарий ``:``.
+
+    Ложных срабатываний на JSON нет: строка JSON не начинается ни с того, ни
+    с другого, а перевод строки внутри строкового литерала JSON запрещён.
+    """
+    return any(
+        line.lstrip().startswith((_SSE_DATA, ":"))
+        for line in text.splitlines()
+    )
+
+
+def _assemble_sse_completion(lines: List[str]) -> Optional[Dict]:
+    """SSE chat/completions, пришедший на нестримовый запрос, — тем же
+    сборщиком, что стрим. ``None`` — собирать нечего."""
+    assembler = StreamAssembler()
+    for line in lines:
+        assembler.feed_line(line)
+    assembler.flush()
+    assembled = assembler.result()
+    return None if is_empty_completion(assembled) else assembled
+
+
+def _last_sse_event(lines: List[str]) -> Optional[Dict]:
+    """Последнее событие SSE режима responses (в нём ``response.completed``).
+
+    Комментарии (``: ping`` — keep-alive прокси) и строки ``event:``
+    пропускаются: раньше «последней строкой» оказывался пинг, и разбор
+    падал на нём. ``None`` — событий нет или последнее не JSON."""
+    payloads = [
+        line.strip()[len(_SSE_DATA) :].strip()
+        for line in lines
+        if line.strip().startswith(_SSE_DATA)
+    ]
+    if not payloads:
+        return None
+    try:
+        return json.loads(payloads[-1])
+    except ValueError:
+        return None
+
+
+def _bad_response(
+    body: bytes, response: httpx.Response, *, api_mode: str, run_logger
+) -> BackendBadResponseError:
+    """Исключение о неразборном теле и запись о нём в лог. Начало тела —
+    только в лог: пользователю оно не нужно, а диагносту без него не
+    понять, что вернул прокси. Текст responses/SSE не пишем: в оборванном
+    выводе модели могут быть секреты, которые нельзя маскировать по ключу."""
+    exc = BackendBadResponseError(
+        status_code=response.status_code,
+        content_type=response.headers.get("content-type", ""),
+        length=len(body),
+        api_mode=api_mode,
+    )
+    head = body[: _BAD_BODY_LOG_CHARS * 4].decode("utf-8", errors="replace")
+    head = head[:_BAD_BODY_LOG_CHARS]
+    if api_mode == "responses" or _looks_like_sse(head):
+        head = "<response body omitted>"
+    (run_logger or logger).error(
+        "Backend %s bad response status=%s content_type=%r length=%s "
+        "body_head=%r",
+        api_mode,
+        exc.status_code,
+        exc.content_type,
+        exc.length,
+        head,
+        extra={
+            "event": "backend_bad_response",
+            "api_mode": api_mode,
+            "status_code": exc.status_code,
+            "content_type": exc.content_type,
+            "length": exc.length,
+            "body_head": head,
+        },
+    )
+    return exc
+
+
+def _decode_backend_body(
+    body: bytes,
+    response: httpx.Response,
+    *,
+    api_mode: str,
+    logger,
+    assemble_sse,
+) -> Any:
+    """Тело успешного ответа модели → объект ответа.
+
+    Общий разбор нестримового chat/completions и режима responses. SSE-тело
+    (прокси проигнорировал ``stream:false``) собирается ``assemble_sse``;
+    пустое или не-JSON — ``BackendBadResponseError`` вместо голого
+    ``JSONDecodeError``. Ошибка провайдера внутри SSE (``BackendStreamError``)
+    летит как есть: по её коду работают ретраи и смена формы авторизации.
+
+    Тело — байты, и декодируется оно как UTF-8 независимо от charset в
+    заголовке, как у стрима (`_aiter_utf8_lines`) и как делал `r.json()`:
+    прокси, объявивший ``charset=iso-8859-1`` (дефолт сервлетов), иначе
+    молча портил бы кириллицу в ответе модели.
+    """
+    text = body.decode("utf-8", errors="replace")
+    if _looks_like_sse(text):
+        payload = assemble_sse(text.splitlines())
+    else:
+        try:
+            # json.loads от байтов — ровно `r.json()`: UTF-8/16/32 по BOM.
+            payload = json.loads(body)
+        except ValueError:
+            payload = None
+    if payload is None:
+        raise _bad_response(
+            body, response, api_mode=api_mode, run_logger=logger
+        )
+    return payload
 
 
 async def arequest_backend_responses(
@@ -582,9 +764,19 @@ async def _arequest_backend_responses_once(
     chunks: List[str] = []
 
     async def _read_responses(r):
-        return await _aread_responses_body(r, url, logger, chunks)
+        r_headers = await _aread_responses_body(r, url, logger, chunks)
+        # Строки уже декодированы как UTF-8; длина в ошибке — по непустым
+        # строкам (сырые байты стрима здесь не копятся).
+        result = _decode_backend_body(
+            "\n".join(chunks).encode("utf-8"),
+            r,
+            api_mode="responses",
+            logger=logger,
+            assemble_sse=_last_sse_event,
+        )
+        return result, r_headers
 
-    r_headers = await _aopen_model_stream(
+    result, r_headers = await _aopen_model_stream(
         client,
         "POST",
         url,
@@ -595,22 +787,16 @@ async def _arequest_backend_responses_once(
     )
 
     last_chunk = chunks[-1] if chunks else ""
-    try:
-        result = json.loads(re.sub("^data: +", "", last_chunk))
-    except Exception as e:
-        print(f"Error read json from backend. Last chunk: {last_chunk}")
-        if logger is not None:
-            logger.error(
-                "backend_responses_json_error",
-                extra={
-                    "event": "backend_responses_json_error",
-                    "last_chunk": last_chunk,
-                },
-            )
-        raise e
-
     if result.get("type") != "response.completed":
-        raise ValueError(f"wrong stream finish: {last_chunk}")
+        if logger is not None:
+            _log_last_chunk(logger, last_chunk)
+        # Последний чанк — весь ответ с аргументами вызовов: в текст
+        # исключения (его пишет и политика ретраев) — тип события и причина
+        # от провайдера. По ней восстановление узнаёт переполнение контекста.
+        raise ValueError(
+            f"wrong stream finish: {result.get('type')!r} "
+            f"{_stream_finish_reason(result)!r}"
+        )
 
     response_obj = result["response"]
     _record_backend_response(
@@ -622,6 +808,22 @@ async def _arequest_backend_responses_once(
         started_at=started_at,
     )
     return response_obj, r_headers
+
+
+async def _afeed_sse(r, assembler: StreamAssembler) -> None:
+    """Скормить сборщику строки SSE до `[DONE]` или конца тела."""
+    async for line in _aiter_utf8_lines(r):
+        _raise_if_model_stopped()
+        assembler.feed_line(line)
+        if assembler.done:
+            # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
+            # нельзя: закрывает его сервер, а корп-прокси вправе держать
+            # соединение сколько угодно. Ход ждал бы read-timeout (600 с
+            # по умолчанию), а тот считается поводом повторить ВЕСЬ
+            # запрос: показанный ответ стирается и генерируется заново.
+            # Синхронный путь до переезда выходил здесь же —
+            # `iter_sse_data_lines` делала на маркере `return`.
+            break
 
 
 async def _astream_chat_completions(
@@ -665,18 +867,12 @@ async def _astream_chat_completions(
         on_delta("reset", "")
 
         assembler = StreamAssembler(on_delta=on_delta)
-        async for line in _aiter_utf8_lines(r):
-            _raise_if_model_stopped()
-            assembler.feed_line(line)
-            if assembler.done:
-                # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
-                # нельзя: закрывает его сервер, а корп-прокси вправе держать
-                # соединение сколько угодно. Ход ждал бы read-timeout (600 с
-                # по умолчанию), а тот считается поводом повторить ВЕСЬ
-                # запрос: показанный ответ стирается и генерируется заново.
-                # Синхронный путь до переезда выходил здесь же —
-                # `iter_sse_data_lines` делала на маркере `return`.
-                break
+        try:
+            await _afeed_sse(r, assembler)
+        finally:
+            # Обрыв, стоп или ошибка в потоке — как раз тогда важно видеть,
+            # что из пришедшего мы не разобрали.
+            _log_dropped_chunks(logger, assembler)
         _raise_if_model_stopped()
         assembler.flush()
         assembled = assembler.result()
@@ -745,11 +941,56 @@ async def arequest_backend_chat_completions(
     retry_log_level=logging.ERROR,
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend request",
+    interrupt_on_user_stop=True,
 )
-async def _arequest_with_backoff(request, headers: Dict, logger=None):
+async def _arequest_with_retries(request, headers: Dict, logger=None):
     # `logger` и `use_retry` читает декоратор ретраев; телу они не нужны.
     del logger
     return await request(headers=headers)
+
+
+async def _arequest_with_backoff(request, headers: Dict, **retry_kwargs):
+    """Стоп в паузе между ретраями — остановка запроса к модели."""
+    try:
+        return await _arequest_with_retries(
+            request, headers=headers, **retry_kwargs
+        )
+    except UserStopInterrupt:
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
+
+
+#: Пауза перед единственным повтором плохого ответа: короткая, чтобы не
+#: задерживать ход, но не ноль — прокси, отдавший заглушку, успевает
+#: перестроить маршрут.
+_BAD_RESPONSE_RETRY_DELAY_SEC = 1.0
+
+
+async def _arequest_once_more_on_bad_response(
+    request, headers: Dict, *, use_retry: bool, run_logger
+):
+    """Запрос с ретраями транспорта и одним быстрым повтором плохого ответа.
+
+    Пустое или не-JSON тело HTTP-200 декоратор не повторяет (см.
+    `_default_should_retry_backend_exception`): ошибка воспроизводимая, и
+    пять попыток с паузами до 80 с давали тот же исход через 150 с. Один
+    повтор оставлен — разовый сбой прокси он лечит.
+    """
+    try:
+        return await _arequest_with_backoff(
+            request, headers=headers, use_retry=use_retry, logger=run_logger
+        )
+    except BackendBadResponseError as exc:
+        if not use_retry:
+            raise
+        (run_logger or logger).warning(
+            "Backend bad response, retrying once in %.1f sec: %s",
+            _BAD_RESPONSE_RETRY_DELAY_SEC,
+            exc,
+        )
+    await apause_model_retry(_BAD_RESPONSE_RETRY_DELAY_SEC)
+    return await _arequest_with_backoff(
+        request, headers=headers, use_retry=use_retry, logger=run_logger
+    )
 
 
 async def _arequest_authorized(
@@ -775,11 +1016,11 @@ async def _arequest_authorized(
     attempts = candidates or [None]
     for index, authorization in enumerate(attempts):
         try:
-            response = await _arequest_with_backoff(
+            response = await _arequest_once_more_on_bad_response(
                 request,
-                headers=_with_authorization(headers, auth_key, authorization),
+                _with_authorization(headers, auth_key, authorization),
                 use_retry=use_retry,
-                logger=logger,
+                run_logger=logger,
             )
         except (httpx.HTTPStatusError, BackendStreamError) as exc:
             if not is_auth_error(exc) or index + 1 == len(attempts):
@@ -857,7 +1098,13 @@ async def _arequest_backend_chat_completions_once(
         )
         raise
 
-    payload = r.json()
+    payload = _decode_backend_body(
+        r.content,
+        r,
+        api_mode="chat_completions",
+        logger=logger,
+        assemble_sse=_assemble_sse_completion,
+    )
     _record_backend_response(
         logger,
         "chat_completions",
@@ -1099,6 +1346,32 @@ def build_call_headers(
     return call_headers
 
 
+def connection_probe_headers(
+    settings: Any, resolved: Optional[ResolvedModel] = None
+) -> Dict[str, str]:
+    """Дополнительные заголовки агента для пробы соединения (/settings).
+
+    Та же сборка, что у :func:`build_call_headers`: ``x_cl_id`` и оверлей
+    ``backend.chat_completion_headers`` (per-model приоритетнее общих, только в
+    chat_completions). Без них шлюз, требующий свой заголовок, отвечал пробе
+    401 — «токен отклонён» при рабочем агенте. Authorization не входит: форму
+    токена перебирает сама проба (вместе с канарейкой). Свойства вызова в
+    сессии (``x-session-id``, ``x_rq_id``, ``x-target``, trace) пробе взять
+    неоткуда, и к серверу она ходит не от имени сессии."""
+    settings = settings_of(settings)
+    headers: Dict[str, str] = {"x_cl_id": str(settings.agent.x_cl_id)}
+    backend_mode = str(settings.backend.api_mode).strip().lower()
+    if backend_mode == "chat_completions":
+        _apply_chat_completion_headers(
+            headers, settings.backend.chat_completion_headers, resolved, None
+        )
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() != "authorization"
+    }
+
+
 def _responses_input_without_message_call_id(messages):
     """call_id на role-based message-элементах (напр. technical-feedback user) —
     только для TUI/persist; в responses input не отправляем. На function_call/
@@ -1169,16 +1442,19 @@ def project_tool_specs(
 ) -> List:
     """Копия спек под флаги этого запроса. Исходный список не меняется.
 
-    ``openai_strict`` разворачивает ``required`` на каждом object и вешает
-    подсказку пустой строки. Иначе остаётся семантический ``required`` и
-    подсказка «пропусти поле». ``send_tool_strict: false`` снимает ``strict``.
-    Инструмент со свободным объектом (``dict`` в сигнатуре) уходит со
-    ``strict: false``: strict требует закрыть каждый объект, а закрытый
-    свободный объект не примет ни одного ключа.
+    Сначала решается, может ли инструмент быть strict. Инструмент со
+    свободным узлом не может: strict требует ``type`` на каждом узле и
+    закрыть каждый объект, а узел без типа — любое значение, закрытый же
+    свободный объект (``dict`` в сигнатуре) не примет ни одного ключа. Такой
+    инструмент уходит со ``strict: false`` и без strict-развёртки.
+    Остальным ``openai_strict`` разворачивает ``required`` на каждом object
+    и вешает подсказку пустой строки. Иначе остаётся семантический
+    ``required`` и подсказка «пропусти поле». ``send_tool_strict: false``
+    снимает ``strict``.
     """
     from gc_core.execution.tool_schema import (
         augment_optional_property_descriptions,
-        has_open_object,
+        has_free_node,
     )
 
     projected = deepcopy(tools) if isinstance(tools, list) else []
@@ -1186,12 +1462,12 @@ def project_tool_specs(
         if not isinstance(tool, dict):
             continue
         body = _tool_spec_body(tool)
-        if openai_strict:
+        free = has_free_node(body.get("parameters"))
+        strict = openai_strict and not free
+        if strict:
             _apply_openai_strict_body(body)
-        augment_optional_property_descriptions(
-            body, openai_strict=openai_strict
-        )
-        if body.get("strict") and has_open_object(body.get("parameters")):
+        augment_optional_property_descriptions(body, openai_strict=strict)
+        if free and body.get("strict"):
             body["strict"] = False
         if not send_tool_strict:
             body.pop("strict", None)

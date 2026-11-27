@@ -55,13 +55,21 @@ def validate_summary_text(
     return True, "ok"
 
 
-def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
+def merge_repaired_summary(
+    *, invalid_text: str, repaired_text: str, allow_unclosed: bool = True
+) -> str:
     """Склеивает теги из repair поверх сохранённых из невалидного черновика.
 
     Ожидает already-projected тексты (aux LLM choke в ``request_summary_text``).
     """
-    preserved = extract_summary_bodies(invalid_text)
-    repaired = extract_summary_bodies(repaired_text)
+    preserved = extract_summary_bodies(
+        invalid_text, allow_unclosed=allow_unclosed
+    )
+    repaired = extract_summary_bodies(
+        repaired_text, allow_unclosed=allow_unclosed
+    )
+    if not allow_unclosed:
+        return assemble_summary_xml(preserved | repaired, only_present=True)
     return assemble_summary_xml(
         merge_summary_bodies(preserved=preserved, repaired=repaired)
     )

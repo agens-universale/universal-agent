@@ -236,18 +236,21 @@ class ChatCompletionText(NamedTuple):
     finish_reason: str | None
 
 
-def _completion_text_and_finish(res: Any) -> ChatCompletionText:
+def _completion_text_and_finish(
+    res: Any, *, strip_outer_whitespace: bool = True
+) -> ChatCompletionText:
     """Текст и ``finish_reason`` первого choice. Пустой ответ — пустая строка."""
     text = ""
     finish_reason = None
     if isinstance(res, dict):
         choice = res.get("choices", [{}])[0]
-        text = choice.get("message", {}).get("content")
+        text = choice.get("message", {}).get("content") or ""
         finish = choice.get("finish_reason")
         if isinstance(finish, str):
             finish_reason = finish
     return ChatCompletionText(
-        text=(text or "").strip(), finish_reason=finish_reason
+        text=text.strip() if strip_outer_whitespace else text,
+        finish_reason=finish_reason,
     )
 
 
@@ -396,6 +399,7 @@ async def _asend_chat_completion_text(
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
     isolated_timeout_sec: Optional[float] = None,
+    strip_outer_whitespace: bool = True,
 ) -> ChatCompletionText:
     settings = settings_of(ctx)
     full_log_backend = bool(settings.logging.full_log_backend)
@@ -503,7 +507,9 @@ async def _asend_chat_completion_text(
         _log_completion_response_meta(
             logger=logger, label=request_label, res=res
         )
-    return _completion_text_and_finish(res)
+    return _completion_text_and_finish(
+        res, strip_outer_whitespace=strip_outer_whitespace
+    )
 
 
 async def _arequest_admitted_chat_completion(
@@ -558,6 +564,7 @@ async def arequest_chat_completion_outcome(
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
     isolated_timeout_sec: Optional[float] = None,
+    strip_outer_whitespace: bool = True,
 ) -> ChatCompletionText:
     """Request text and finish reason through the configured model boundary.
 
@@ -583,6 +590,7 @@ async def arequest_chat_completion_outcome(
             allow_images=allow_images,
             before_send=before_send,
             isolated_timeout_sec=isolated_timeout_sec,
+            strip_outer_whitespace=strip_outer_whitespace,
         )
     if allow_images or before_send is not None:
         # Картинки и проверка маршрута до отправки — только там, где есть
@@ -601,6 +609,7 @@ async def arequest_chat_completion_outcome(
         request_label=request_label,
         payload_overrides=payload_overrides,
         isolated_timeout_sec=isolated_timeout_sec,
+        strip_outer_whitespace=strip_outer_whitespace,
     )
     return ChatCompletionText(result.text or "", result.finish_reason)
 
@@ -618,6 +627,7 @@ async def _arequest_chat_completion_outcome_local(
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
     isolated_timeout_sec: Optional[float] = None,
+    strip_outer_whitespace: bool = True,
 ) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
@@ -656,6 +666,7 @@ async def _arequest_chat_completion_outcome_local(
         payload_overrides=payload_overrides,
         before_send=before_send,
         isolated_timeout_sec=isolated_timeout_sec,
+        strip_outer_whitespace=strip_outer_whitespace,
     )
     if router is None:
         return await send(resolved=None)
@@ -726,6 +737,7 @@ async def arequest_chat_completion_text(
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
     isolated_timeout_sec: Optional[float] = None,
+    strip_outer_whitespace: bool = True,
 ) -> str:
     """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
     outcome = await arequest_chat_completion_outcome(
@@ -739,6 +751,7 @@ async def arequest_chat_completion_text(
         allow_images=allow_images,
         before_send=before_send,
         isolated_timeout_sec=isolated_timeout_sec,
+        strip_outer_whitespace=strip_outer_whitespace,
     )
     return outcome.text
 

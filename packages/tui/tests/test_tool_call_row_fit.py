@@ -159,7 +159,7 @@ async def test_resize_refits_target():
 @pytest.mark.parametrize("width", _WIDTHS)
 async def test_preview_row_fits_one_line(width):
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     segments = [
@@ -189,7 +189,7 @@ async def test_preview_row_fits_one_line(width):
             "compacted_by": None,
         }
     ]
-    async with _app(lambda t: render_segments_readonly(t, segments)).run_test(
+    async with _app(lambda t: render_segments_history(t, segments)).run_test(
         size=(width, 20)
     ) as pilot:
         await pilot.pause()

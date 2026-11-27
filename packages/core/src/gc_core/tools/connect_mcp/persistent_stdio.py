@@ -1,5 +1,5 @@
 """
-Долгоживущая stdio MCP-сессия на весь цикл работы агента.
+Долгоживущая stdio MCP-сессия: один процесс сервера на много вызовов.
 
 Стандартный stdio-транспорт спавнит отдельный процесс MCP-сервера на каждый
 вызов tools/list и tools/call. Для серверов, которые внутри себя держат тяжёлый
@@ -10,15 +10,21 @@
 
 Активируется per-server флагом в config.yml:
 
-    mcp-servers:
-      browser:
-        transport: stdio
-        command: ...
-        persistent_session: true
+    mcp:
+      servers:
+        browser:
+          transport: stdio
+          command: ...
+          persistent_session: true
 
-Жизненный цикл сессий привязан к AgentExecutor.run(): в finally вызывается
-PersistentStdioRegistry.instance().aclose_all(), чтобы не оставлять висящие
-Chromium между запусками агента.
+У хоста с сервисом MCP флаг без значения у stdio тоже значит «постоянная»:
+умолчание подставляет сервис (``server_identity.with_service_defaults``).
+
+Время жизни сессий: без потребителя сервиса их закрывает уборка конца хода
+(``PersistentStdioRegistry.instance().aclose_all()`` в
+``agent_executor._aclose_mcp_and_release``), чтобы не оставлять висящие
+Chromium между запусками агента; с потребителем — закрытие потребителя
+(окно TUI, сессия ACP, прогон), конец хода их не трогает.
 
 Почему здесь ``subprocess.Popen``, а не ``asyncio.create_subprocess_exec``
 =========================================================================
@@ -31,12 +37,13 @@ Asyncio-подпроцесс ПРИВЯЗАН к тому event loop, на ко�
 №2 недоступен, тогда как ``Popen`` работает и из основного потока, и из-под
 любого loop.
 
-Сессия здесь ДОЛГОЖИВУЩАЯ и общая: её создаёт дискавери (в потоке из
-abandonable-пула), зовут вызовы тулов (loop приложения),
-а закрывает ``AgentExecutor.arun`` в своём finally. Привязка к одному loop
-сломала бы её ровно так же, как ломались httpx-клиенты и MCP-сессии, пока их
-не начали ключевать по ``id(loop)``. Для разделяемого между loop процесса
-блокирующий ``Popen`` — правильный инструмент.
+Сессия здесь ДОЛГОЖИВУЩАЯ и общая: её создаёт дискавери или подключение
+потребителя (в потоке из abandonable-пула), зовут вызовы тулов (loop
+приложения), а закрывает без потребителя ``AgentExecutor.arun`` в своём
+finally, с потребителем — его закрытие через много ходов. Привязка к одному
+loop сломала бы её ровно так же, как ломались httpx-клиенты и MCP-сессии,
+пока их не начали ключевать по ``id(loop)``. Для разделяемого между loop
+процесса блокирующий ``Popen`` — правильный инструмент.
 
 Одноразовый обмен — другое дело: он целиком укладывается в один вызов, и там
 asyncio уместен и применён (``transport._astdio_exchange``), что заодно убрало
@@ -53,17 +60,32 @@ import signal
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
+from gc_core.tools.connect_mcp.call_errors import (
+    McpCallTimedOut,
+    McpServerGone,
+)
+from gc_core.tools.connect_mcp.durable_scope import (
+    McpSessionLostError,
+    durable_calls_enabled,
+    require_no_reconnect,
+)
 from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
     _areadline_with_timeout,
     _cancelled_notification,
     _readline_with_timeout,
-    _resolve_command,
+    _stderr_log,
+    _stdio_command,
+    _wait_startup_exit_error,
     forget_stdio_reader,
+    stdio_stream_ended,
 )
 from gc_core.user_stop import UserStopInterrupt, current_user_stop
 from gc_core.utils.aio_compat import run_coro_blocking
@@ -77,6 +99,7 @@ _CANCEL_DRAIN_BUDGET_SEC = 3.0
 
 def _spawn_detached_stdio_process(
     server_cfg: Dict[str, Any],
+    stderr: Any = subprocess.DEVNULL,
 ) -> subprocess.Popen:
     """
     Запуск stdio MCP-сервера как лидера собственной сессии/process group.
@@ -87,27 +110,16 @@ def _spawn_detached_stdio_process(
     и продолжают жить после завершения агента. Вывод целиком (parent + все
     дети) лечится только групповым сигналом, для которого нужен отдельный
     process group — его и создаём здесь.
-    """
-    command = server_cfg.get("command")
-    if not command:
-        raise ValueError("stdio MCP server config must have 'command'")
-    command = _resolve_command(str(command))
-    args = server_cfg.get("args") or []
-    if not isinstance(args, list):
-        args = [args]
-    cmd = [command] + [str(a) for a in args]
-    cwd = server_cfg.get("cwd")
-    env_extra = server_cfg.get("env") or {}
-    from gc_core.mcp_runtime.env import augment_process_env
 
-    env = augment_process_env()
-    for k, v in env_extra.items():
-        env[str(k)] = str(v)
+    ``stderr`` сессия передаёт из ``_stderr_log`` — лог сервера в каталоге
+    состояния gc; ``DEVNULL`` по умолчанию остался для прямых вызовов.
+    """
+    cmd, cwd, env = _stdio_command(server_cfg)
 
     popen_kwargs: Dict[str, Any] = dict(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr,
         cwd=cwd,
         env=env,
         text=True,
@@ -277,11 +289,28 @@ async def _aterminate_process_tree(
 
 
 _NOT_RUNNING_MSG = "persistent stdio MCP process is not running"
+_CLOSED_MSG = "сессия stdio MCP закрыта"
+_ABANDONED_MSG = "вызов брошен: новая сессия stdio MCP не заводится"
 
 
 def _user_stop_requested() -> bool:
     stop = current_user_stop()
     return stop is not None and stop.requested
+
+
+#: Часы срока чтения ответа; тесты подменяют их подставными.
+_clock = time.monotonic
+
+
+def _line_budgets(timeout: float) -> Iterator[float]:
+    """Остаток общего срока перед каждой строкой; срок вышел — конец.
+
+    Срок считается один раз от начала чтения: уведомления сервера, сколько
+    бы их ни было, его не продлевают и ответ не вытесняют.
+    """
+    deadline = _clock() + timeout
+    while (left := deadline - _clock()) > 0:
+        yield left
 
 
 class PersistentStdioSession:
@@ -294,9 +323,16 @@ class PersistentStdioSession:
     пока ``call`` ждёт ответ.
     """
 
-    def __init__(self, server_cfg: Dict[str, Any]) -> None:
+    def __init__(
+        self, server_cfg: Dict[str, Any], server_name: Optional[str] = None
+    ) -> None:
         self._server_cfg = server_cfg
+        # Только для имени лога stderr (``transport._stderr_log_path``).
+        self._server_name = server_name
         self._proc: Optional[subprocess.Popen] = None
+        # Закрытую сессию не запускаем: закрытие могло прийти, пока поток
+        # обмена ещё поднимает процесс, и такой процесс остался бы ничьим.
+        self._closed = False
         self._lock = threading.Lock()
         # Запись в stdin отдельно от ``_lock``: отмена приходит с loop, пока
         # ``call`` держит ``_lock`` и сидит в чтении. Вставать в тот же лок
@@ -318,10 +354,6 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
-            from gc_core.tools.connect_mcp.durable_scope import (
-                require_no_reconnect,
-            )
-
             require_no_reconnect()
             dead = self._proc
             self._proc = None
@@ -343,17 +375,65 @@ class PersistentStdioSession:
             except Exception:
                 pass
 
-        self._proc = _spawn_detached_stdio_process(self._server_cfg)
+        log_path = self._start_process()
         self._next_id = 2
         with self._inflight_guard:
             self._inflight_id = None
             self._ignored_ids.clear()
             self._notified_ids.clear()
             self._sending_ids.clear()
-        self._write_line(_INIT_PAYLOAD)
-        # Ответ на initialize читаем, но его содержимое нам не нужно.
-        self._read_matching(_INIT_PAYLOAD["id"], timeout)
+        self._handshake(timeout, log_path)
+
+    def _handshake(self, timeout: float, log_path: Optional[Path]) -> None:
+        """initialize + initialized; умерший при старте сервер — с причиной.
+
+        Без ответа на initialize от мёртвого процесса раньше было «нет
+        соединения» (обрыв трубы на следующей записи) — без причины. Теперь
+        последняя строка его stderr: «сервер завершился при старте: …».
+        """
+        proc = self._proc
+        try:
+            self._write_line(_INIT_PAYLOAD)
+            # Содержимое ответа на initialize нам не нужно — только факт.
+            answered = self._read_matching(_INIT_PAYLOAD["id"], timeout)
+        except OSError as exc:
+            exited = _wait_startup_exit_error(proc, log_path)
+            if exited is not None:
+                raise exited from exc
+            raise
+        if not answered:
+            exited = _wait_startup_exit_error(proc, log_path)
+            if exited is not None:
+                raise exited
         self._write_line(_INITIALIZED_PAYLOAD)
+
+    def _start_process(self) -> Optional[Path]:
+        """Поднять процесс сессии; закрытой сессии — ``ConnectionError``.
+
+        Флаг смотрится и после запуска: закрытие, пришедшее посреди
+        запуска, процесса ещё не видело (``_detach_nowait`` нашёл пустое
+        место), поэтому его гасим здесь. Запрос при этом не ушёл.
+        Возвращает путь лога stderr запуска (``None`` — лог не открылся).
+        """
+        if self._closed:
+            raise ConnectionError(_CLOSED_MSG)
+        with _stderr_log(self._server_cfg, self._server_name) as (
+            stderr,
+            log_path,
+        ):
+            proc = _spawn_detached_stdio_process(self._server_cfg, stderr)
+        self._proc = proc
+        if not self._closed:
+            return log_path
+        self._proc = None
+        try:
+            run_coro_blocking(
+                _aterminate_process_tree(proc, graceful_timeout=5.0)
+            )
+        except Exception:
+            pass
+        forget_stdio_reader(proc.stdout)
+        raise ConnectionError(_CLOSED_MSG)
 
     def call(
         self,
@@ -363,6 +443,12 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_started(timeout)
+            # Свой процесс вызова: закрытие посреди обмена снимает
+            # ``self._proc``, а писать, читать и решать об исходе надо по
+            # этому процессу.
+            proc = self._proc
+            if proc is None:  # закрыли до запроса: он не ушёл, повтор можно
+                raise RuntimeError(_NOT_RUNNING_MSG)
             if _user_stop_requested():
                 raise UserStopInterrupt(kind="mcp", started=True)
             req_id = self._next_id
@@ -373,10 +459,13 @@ class PersistentStdioSession:
                 "method": method,
                 "params": params or {},
             }
-            self._write_line(payload)
+            self._write_line_on(proc, payload)
             self._set_inflight(req_id)
             try:
-                return self._read_matching(req_id, timeout)
+                response = self._read_matching_on(proc, req_id, timeout)
+                if not response:  # ответ JSON-RPC пустым не бывает
+                    raise self._unanswered(proc, timeout)
+                return response
             except UserStopInterrupt:
                 # Запрос уже ушёл. Снимаем его по спеке и не отдаём поздний
                 # результат ни этому чтению, ни следующему ходу.
@@ -384,6 +473,32 @@ class PersistentStdioSession:
                 raise
             finally:
                 self._clear_inflight(req_id)
+
+    def _unanswered(
+        self, proc: "subprocess.Popen", timeout: float
+    ) -> Exception:
+        """Ошибка запроса, ответ на который не пришёл.
+
+        Сессию закрыли, читатель увидел конец вывода или процесс вышел —
+        сервер умер. Конец вывода ловит смерть сразу, когда ``poll()`` ещё
+        видит процесс живым; ``poll()`` ловит смерть, когда вывод держит
+        унаследовавший его потомок. После полного срока он надёжен в
+        сторону «мёртв». Иначе истёк срок: запрос снимается, поздний ответ
+        его id не примется, сессия остаётся. Durable-хост вместо обеих
+        получает «исход неизвестен» и решает о восстановлении сам.
+        """
+        if (
+            self._proc is not proc
+            or stdio_stream_ended(proc.stdout)
+            or proc.poll() is not None
+        ):
+            error: Exception = McpServerGone()
+        else:
+            self.cancel_inflight()
+            error = McpCallTimedOut(timeout)
+        if durable_calls_enabled():
+            return McpSessionLostError(str(error))
+        return error
 
     def _detach_nowait(self) -> "tuple[Optional[subprocess.Popen], bool]":
         """Снять процесс, НЕ вставая в очередь за локом.
@@ -394,10 +509,12 @@ class PersistentStdioSession:
         Асинхронное закрытие нельзя пускать через блокирующий ``acquire``.
         Лок держит ``call()`` на весь обмен, и обмен идёт в
         abandonable-потоке, который переживает отмену вызывающего: сняли ход
-        по дедлайну — поток остался в ``readline`` под локом, а ``arun`` в
-        своём ``finally`` зовёт ``aclose_all`` и встаёт на ``with self._lock``
-        прямо на loop. Замерено: закрытие 3.57 с, соседний хартбит успел один
-        тик; в пределе это ``request_timeout_sec``, по умолчанию 600 с.
+        по дедлайну — поток остался в ``readline`` под локом, а закрытие
+        (без потребителя — ``aclose_all`` из ``finally`` хода, с
+        потребителем — его сверка или закрытие) встаёт на
+        ``with self._lock`` прямо на loop. Замерено: закрытие 3.57 с,
+        соседний хартбит успел один тик; в пределе это
+        ``request_timeout_sec``, по умолчанию 600 с.
 
         Не смогли взять лок — забираем процесс без него. Гонка здесь
         безобиднее заморозки: держатель лока читает уже ничейный процесс и
@@ -428,6 +545,7 @@ class PersistentStdioSession:
         и `atexit` ждал бы его до ``request_timeout_sec`` (по умолчанию 600 с).
         До появления atexit-хука процесс просто выходил.
         """
+        self._closed = True
         proc, had_lock = self._detach_nowait()
         if proc is not None:
             if had_lock:
@@ -460,6 +578,7 @@ class PersistentStdioSession:
         Процесс берётся из отцепления, до первого ``await``: прервать нас
         между ними нечему, а ``self._proc`` после отцепления уже пуст.
         """
+        self._closed = True
         proc, had_lock = self._detach_nowait()
         if proc is None:
             return
@@ -681,9 +800,9 @@ class PersistentStdioSession:
         """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
-        for _ in range(32):
+        for left in _line_budgets(timeout):
             done, obj = self._match_response(
-                await _areadline_with_timeout(proc.stdout, timeout), req_id
+                await _areadline_with_timeout(proc.stdout, left), req_id
             )
             if done:
                 return obj
@@ -695,9 +814,9 @@ class PersistentStdioSession:
         """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
-        for _ in range(32):
+        for left in _line_budgets(timeout):
             done, obj = self._match_response(
-                _readline_with_timeout(proc.stdout, timeout), req_id
+                _readline_with_timeout(proc.stdout, left), req_id
             )
             if done:
                 return obj
@@ -705,16 +824,16 @@ class PersistentStdioSession:
 
     def _read_matching(self, req_id: Any, timeout: float) -> Dict[str, Any]:
         """
-        Прочитать JSON-RPC ответ с нужным id.
-        Неcовпадающие/невалидные строки (например, уведомления сервера) пропускаем,
-        но не больше небольшого числа итераций на один вызов, чтобы не зависнуть.
+        Прочитать JSON-RPC ответ с нужным id за общий срок ``timeout``.
+        Несовпадающие и невалидные строки (например, уведомления сервера)
+        пропускаем без ограничения числа: зависнуть не даёт срок.
         """
         proc = self._proc
         if proc is None or proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
-        for _ in range(32):
+        for left in _line_budgets(timeout):
             done, obj = self._match_response(
-                _readline_with_timeout(proc.stdout, timeout), req_id
+                _readline_with_timeout(proc.stdout, left), req_id
             )
             if done:
                 return obj
@@ -764,7 +883,14 @@ class PersistentStdioRegistry:
         self,
         server_key: str,
         server_cfg: Dict[str, Any],
+        server_name: Optional[str] = None,
     ) -> PersistentStdioSession:
+        """Сессия ``server_key`` текущего владельца; нет — новая.
+
+        ``server_name`` — имя сервера для лога stderr новой сессии; без
+        него — ``server_key`` (у потребителя сервиса ключ сессии несёт ещё
+        отпечаток определения).
+        """
         owner = current_owner()
         key = (owner, server_key)
         # Хук на выход ставим ВСЕГДА. Раньше — только для безвладельческих
@@ -772,16 +898,26 @@ class PersistentStdioRegistry:
         # заводил (прямой `apply_tool`, `gc-mcp`), а обещанного докстрокой
         # `mcp_session_owner` явного `close_everything()` не было НИ В ОДНОМ
         # пакете. Но владельческой сессии подстраховка нужна ровно так же: её
-        # закрывает `aclose_all` из `finally` прогона, и если этот `finally`
-        # сняли, остаток не увидит никто — снос фильтрует по владельцу, а
-        # следующий прогон приходит с новым. Хук стоит один `atexit.register`
+        # закрывает `aclose_all` — из `finally` прогона без потребителя, из
+        # закрытия потребителя с ним, — и если это закрытие сняли, остаток не
+        # увидит никто: снос фильтрует по владельцу, а следующий прогон или
+        # потребитель приходит с новым. Хук стоит один `atexit.register`
         # на процесс; при SIGKILL не отработает, но это разница между «обычно
         # закрываем» и «не закрываем никогда».
         self._arm_exit_hook()
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
-                session = PersistentStdioSession(server_cfg)
+                # Брошенный вызов новую сессию не заводит. Проверка под
+                # замком реестра: вызывающий бросает вызов раньше, чем
+                # закрывает сессии владельца (а закрытие берёт этот же
+                # замок), поэтому сессия либо попадёт под закрытие, либо
+                # не появится вовсе — ничьей она не останется.
+                if current_call_abandoned():
+                    raise ConnectionError(_ABANDONED_MSG)
+                session = PersistentStdioSession(
+                    server_cfg, server_name or server_key
+                )
                 self._sessions[key] = session
             return session
 
@@ -840,7 +976,8 @@ class PersistentStdioRegistry:
     async def aclose_all(self) -> None:
         """То же, не занимая поток из пула.
 
-        Цикл агента гасит сессии в своём ``finally``, и это до 7 с на сессию
+        Без потребителя сессии гасит ``finally`` цикла агента, с
+        потребителем — его закрытие, и это до 7 с на сессию
         (SIGTERM → таймаут → SIGKILL) плюс до 10 с на ответ close-тула. Раньше
         всё это уезжало в ``asyncio.to_thread``; теперь ожидание — опрос, и
         поток не нужен.
@@ -860,8 +997,9 @@ class PersistentStdioRegistry:
 
         Почему остаток нельзя просто оставить в реестре «до следующего
         сноса», как здесь было написано раньше: снос фильтрует по владельцу, а
-        следующий владелец другой. У сервера контекст новый на каждый вебхук,
-        у CLI прогон один; переиспользует владельца только TUI. Последняя
+        следующий владелец другой. Без потребителя у сервера контекст новый на
+        каждый вебхук, у CLI прогон один; с потребителем владелец — его, и
+        после закрытия потребителя он больше не приходит. Последняя
         сетка — ``atexit``, и ради неё же хук теперь ставится всегда, а не
         только на безвладельческом пути. Для playwright цена прежняя: Chromium
         переживает агента.
@@ -875,8 +1013,9 @@ class PersistentStdioRegistry:
                 break
             try:
                 # `shield`: закрытие сессии обязано ДОЙТИ до конца, даже если
-                # вызывающего сняли прямо сейчас. Это `finally` цикла агента,
-                # и оборванный на середине teardown оставляет чужой процесс
+                # вызывающего сняли прямо сейчас. Это `finally` цикла агента
+                # (без потребителя) или закрытие потребителя (с ним), и
+                # оборванный на середине teardown оставляет чужой процесс
                 # (браузер) жить дальше. Доигрывает оно в фоне, и это
                 # безопасно: снимут фон (выход `asyncio.run` отменяет всё
                 # оставшееся) — `aclose` на прерывании добьёт группу SIGKILL'ом.
@@ -899,6 +1038,22 @@ class PersistentStdioRegistry:
                 pass
         if cancelled is not None:
             raise cancelled
+
+    async def aclose_one(self, server_key: str) -> bool:
+        """Закрыть сессию ``server_key`` текущего владельца.
+
+        ``False`` — такой сессии нет. Закрытие под ``shield``, как в
+        ``aclose_all``: отмена вызывающего не обрывает его на середине,
+        иначе сервер получил бы SIGKILL без штатного закрытия. Исключения
+        закрытия пробрасываются (``aclose_all`` их глотает) — вызывающий
+        обрабатывает их сам.
+        """
+        with self._lock:
+            session = self._sessions.pop((current_owner(), server_key), None)
+        if session is None:
+            return False
+        await asyncio.shield(session.aclose())
+        return True
 
     def close_everything(self) -> None:
         """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.

@@ -144,7 +144,7 @@ async def test_open_summary_event_shows_synthesis_not_empty(tmp_path):
             summary_content="User did X. Agent did Y.",
             full_payload={},  # segments-путь оставляет payload пустым
         )
-        screen._task_events.append(ev)
+        screen._feed_history.append_event(ev)
         screen._open_event_by_no(97)
         await pilot.pause()
         vs = pilot.app.screen

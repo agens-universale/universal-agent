@@ -628,10 +628,7 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread)
     sample = await backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
-    assert any(
-        c.startswith("head -c 3 ") and c.endswith("| base64")
-        for c in env.calls
-    )
+    assert any("head -c 3 " in c and "| base64" in c for c in env.calls)
 
 
 async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
@@ -1056,3 +1053,17 @@ def test_env_prefix_rejects_non_identifier_names():
     with pytest.raises(ValueError, match="invalid environment variable name"):
         _env_assignment_prefix({"X=1; touch /tmp/pwned; Y": "v"})
     assert _env_assignment_prefix({"OK": "v"}) == "env OK=v "
+
+
+async def test_merged_docker_output_reaches_failure_message(loop_in_thread):
+    # Docker-окружение Harbor сливает stderr в stdout: причина отказа — там.
+    env = FakeEnv()
+    env.exec = _make_exec_returning(
+        env, "find: unrecognized: -printf\n", return_code=1
+    )
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(OSError) as ei:
+        await backend.listdir("/work")
+    assert str(ei.value) == (
+        "find failed (exit 1): /work: find: unrecognized: -printf"
+    )

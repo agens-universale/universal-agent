@@ -5,7 +5,7 @@ C1 — 4 метода RunSummaryCoordinator (run_summary_coordinator.py) пос�
       компакции; на no-op (early-return без компакции) collect не вызывается.
 C2 — AgentExecutor.run finally после close_all (agent_executor.py).
 C3 — processing_responses.aprocess_tool_calls перед return tools_outputs;
-      условный по флагу gc.force_collect (default on CLI/TUI, off server).
+      условный по режиму (on только CLI, off TUI и server).
 """
 
 import importlib
@@ -13,6 +13,7 @@ import types
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit.mcp.fixtures import mcp_home, mcp_reaper
 from gc_testkit.settings import fake_ctx, make_settings
 
 # ---------------------------------------------------------------------------
@@ -27,6 +28,7 @@ def _coord(
     backend="chat_completions",
     turn_end_trigger_chars=10_000,
     threshold_exceeded=True,
+    is_tui=False,
 ):
     """Собирает coordinator с замоканными compaction и gc.collect.
 
@@ -40,7 +42,7 @@ def _coord(
         messages=[{"role": "user", "content": "x" * 20_000}],
     )
     coord = rsc.RunSummaryCoordinator(
-        ctx=fake_ctx(),
+        ctx=fake_ctx(is_tui=is_tui),
         state=state,
         thread_session=None,
         summary_trigger_chars=10_000,
@@ -58,7 +60,9 @@ def _coord(
         rsc, "exceeded_summary_triggers", lambda **kw: threshold_exceeded
     )
     monkeypatch.setattr(
-        rsc, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+        importlib.import_module("gc_core.config_modules.gc"),
+        "gc",
+        types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
     )
     return coord
 
@@ -85,6 +89,15 @@ class TestC1PreRunCompact:
         coord = _coord(monkeypatch, calls, gc_calls, backend="responses")
         run_coro(coord.apre_run_compact_if_needed())
         assert calls == []
+        assert gc_calls == []
+
+
+class TestC1NotInTui:
+    def test_no_collect_after_compaction_in_tui(self, monkeypatch):
+        calls, gc_calls = [], []
+        coord = _coord(monkeypatch, calls, gc_calls, is_tui=True)
+        run_coro(coord.aforce_compact_once())
+        assert len(calls) == 1
         assert gc_calls == []
 
 
@@ -189,7 +202,9 @@ class TestC2AgentExecutorFinally:
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(
-            ae, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+            importlib.import_module("gc_core.config_modules.gc"),
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
         )
 
         # run_agent — немедленный выход без HTTP/MCP.
@@ -220,7 +235,9 @@ class TestC2AgentExecutorFinally:
         ae = importlib.import_module("gc_core.agent_executor")
         gc_calls = []
         monkeypatch.setattr(
-            ae, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1))
+            importlib.import_module("gc_core.config_modules.gc"),
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
         )
 
         async def _arun_agent_boom(*a, **kw):
@@ -241,6 +258,141 @@ class TestC2AgentExecutorFinally:
         assert len(gc_calls) == 1, (
             "finally должен вызвать gc.collect даже при исключении"
         )
+
+    async def test_no_collect_in_tui(self, monkeypatch, tmp_path):
+        """TUI (system="cli" и is_tui) прогон без C2."""
+        from gc_core.run_context import acreate_run_context
+
+        ae = importlib.import_module("gc_core.agent_executor")
+        gc_calls = []
+        monkeypatch.setattr(
+            importlib.import_module("gc_core.config_modules.gc"),
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
+        )
+
+        async def _arun_agent_stub(*_a, **_kw):
+            return {"finished": True}
+
+        monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
+        ctx = await acreate_run_context(
+            self._make_cfg(tmp_path), auth_connector=None, is_tui=True
+        )
+        ex = ae.AgentExecutor(ctx)
+        await ex.arun(
+            [{"role": "user", "content": "x"}],
+            thread_id="t",
+            start_new_thread=True,
+            system="cli",
+        )
+        assert gc_calls == []
+
+    @pytest.mark.parametrize(
+        ("is_tui", "fails", "collects"),
+        [(True, False, 0), (False, False, 1), (False, True, 1)],
+    )
+    async def test_mcp_consumer_turn_end_follows_mode(
+        self,
+        monkeypatch,
+        tmp_path,
+        mcp_home,
+        mcp_reaper,
+        is_tui,
+        fails,
+        collects,
+    ):
+        """С потребителем сервиса MCP (окно TUI открывает его всегда)
+        уборка хода идёт портом ``mcp_cleanup``; C2 и там по режиму — и
+        когда уборка потребителя упала."""
+        import gc
+
+        from gc_core.run_context import acreate_run_context
+        from gc_core.tools.connect_mcp.consumer import McpConsumer
+        from gc_core.tools.connect_mcp.service import McpService
+
+        ae = importlib.import_module("gc_core.agent_executor")
+        gc_calls = []
+        # Сам `gc.collect`: сборка не должна идти ни из какого модуля хода.
+        monkeypatch.setattr(gc, "collect", lambda: gc_calls.append(1))
+
+        async def _arun_agent_stub(*_a, **_kw):
+            return {"finished": True}
+
+        async def _failing_end_turn(_self):
+            raise RuntimeError("уборка MCP упала")
+
+        monkeypatch.setattr(ae, "arun_agent", _arun_agent_stub)
+        if fails:
+            monkeypatch.setattr(McpConsumer, "aend_turn", _failing_end_turn)
+        service = mcp_reaper.track(McpService(connect_on_start=True))
+        ctx = await acreate_run_context(
+            self._make_cfg(tmp_path),
+            auth_connector=None,
+            mcp_consumer=service.open_consumer("window"),
+            is_tui=is_tui,
+        )
+        await ae.AgentExecutor(ctx).arun(
+            [{"role": "user", "content": "x"}],
+            thread_id="t",
+            start_new_thread=True,
+            system="cli",
+        )
+        assert len(gc_calls) == collects
+
+
+# ---------------------------------------------------------------------------
+# Один помощник C1/C2: режим и сборка рантайма
+# ---------------------------------------------------------------------------
+
+
+class TestRunCollectHelper:
+    def test_helper_follows_mode_and_runtime_collector(self, monkeypatch):
+        """``collect_run_garbage`` — одно правило C1/C2: в TUI ничего,
+        иначе сборка рантайма (Temporal подменяет её), без неё —
+        ``gc.collect``."""
+        from gc_core.config_modules import gc as gcmod
+
+        gc_calls, rt_calls = [], []
+        monkeypatch.setattr(
+            gcmod,
+            "gc",
+            types.SimpleNamespace(collect=lambda: gc_calls.append(1)),
+        )
+        runtime = types.SimpleNamespace(
+            is_tui=False, collect_garbage=lambda: rt_calls.append(1)
+        )
+        gcmod.collect_run_garbage(runtime)
+        gcmod.collect_run_garbage(types.SimpleNamespace(is_tui=False))
+        gcmod.collect_run_garbage(types.SimpleNamespace(is_tui=True))
+        assert (rt_calls, gc_calls) == ([1], [1])
+
+    def test_failed_collect_still_releases_ownership(self):
+        """Сбой сборки не оставляет владение MCP-сессиями занятым и не
+        выходит наружу: снятие владения — последним при любом исходе."""
+        from gc_core.mcp_session_owner import current_owner, set_owner
+
+        ae = importlib.import_module("gc_core.agent_executor")
+
+        def _boom():
+            raise RuntimeError("сборка упала")
+
+        ctx = types.SimpleNamespace(is_tui=False, collect_garbage=_boom)
+        before = current_owner()
+        ae._collect_and_release(set_owner("gc-test"), ctx)
+        assert current_owner() == before
+
+    async def test_portless_teardown_uses_runtime_collector(self):
+        """Уборка без порта ``mcp_cleanup`` собирает мусор сборкой
+        рантайма из контекста, а не голым ``gc.collect``."""
+        from gc_core.mcp_session_owner import set_owner
+
+        ae = importlib.import_module("gc_core.agent_executor")
+        rt_calls = []
+        ctx = types.SimpleNamespace(
+            is_tui=False, collect_garbage=lambda: rt_calls.append(1)
+        )
+        await ae._aclose_mcp_and_release(set_owner("gc-test"), ctx=ctx)
+        assert rt_calls == [1]
 
 
 # ---------------------------------------------------------------------------
@@ -307,11 +459,21 @@ class TestC3ProcessingResponses:
         )
         assert len(gc_calls) == 1, "default on для CLI"
 
-    def test_collect_default_on_for_tui(self, monkeypatch):
+    def test_collect_for_cli_explicit_not_tui(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(
-            monkeypatch, config={}, is_tui=True
+            monkeypatch, config={}, is_cli_mode=True, is_tui=False
         )
-        assert len(gc_calls) == 1, "default on для TUI"
+        assert len(gc_calls) == 1
+
+    def test_no_collect_for_tui(self, monkeypatch):
+        for kwargs in (
+            {"is_tui": True},
+            {"is_tui": True, "is_cli_mode": True},
+        ):
+            gc_calls = self._run_process_tool_calls(
+                monkeypatch, config={}, **kwargs
+            )
+            assert gc_calls == [], kwargs
 
     def test_no_collect_default_off_for_server(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(monkeypatch, config={})

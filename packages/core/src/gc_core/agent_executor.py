@@ -8,7 +8,6 @@ State создаётся заново при каждом run(). Возвращ�
 
 import asyncio
 import contextlib
-import gc
 import logging
 import threading
 from copy import copy as _shallow_copy_msg
@@ -22,6 +21,7 @@ from gc_core.attachments.store import (
     awith_committed_attachments,
 )
 from gc_core.auto_routing import state_ops
+from gc_core.config_modules.gc import collect_run_garbage
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
@@ -67,12 +67,13 @@ from gc_core.plan_store import (
     normalize_plan_block,
     now_stamp,
 )
+from gc_core.plugins.commands import user_intent_text
 from gc_core.processing_responses import (
     _acall_blocking_hook,
     arun_agent,
     begin_turn_main_trace,
 )
-from gc_core.run_context import RunContext
+from gc_core.run_context import RunContext, arefresh_context_tools
 from gc_core.run_summary_coordinator import (
     RunSummaryCoordinator,
     areset_run_flags,
@@ -99,6 +100,7 @@ from gc_core.thread_store import (
 )
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.session_writer import LEASE_TTL
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
     _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
@@ -178,8 +180,14 @@ async def _aappend_trace_id_to_meta(
                 pass
 
 
-async def _aclose_mcp_and_release(owner_reset: Any) -> None:
+async def _aclose_mcp_and_release(
+    owner_reset: Any, *, ctx: Any = None
+) -> None:
     """Уборка после прогона: stdio-сессии, stream-сессии, владение.
+
+    Только для контекста без порта `mcp_cleanup`. С потребителем сервиса MCP
+    порт задан (уборка хода потребителя): сессии остаются у потребителя, а
+    закрываются вместе с ним.
 
     Отмену КОПИМ, а не пробрасываем сразу. Раньше `CancelledError` из первого
     шага уносил управление мимо всего остального: не закрывались
@@ -209,13 +217,24 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
         cancelled = cancelled or exc
     except Exception:
         pass
-    # C2: после закрытия MCP/stdio — подбираем циклический мусор
-    # (pipes, ClientSession, loop buffers).
-    gc.collect()
-    # Владение снимаем последним: всё выше его требует.
-    reset_owner(owner_reset)
+    _collect_and_release(owner_reset, ctx)
     if cancelled is not None:
         raise cancelled
+
+
+def _collect_and_release(owner_reset: Any, ctx: Any) -> None:
+    """Конец уборки хода — одно правило для обеих уборок (локальной и
+    потребителя MCP): C2 по режиму контекста (pipes, ClientSession, loop
+    buffers), затем снятие владения — последним и при сбое сборки: сбой
+    сборки не отменяет ни готовый ответ хода, ни отмену."""
+    try:
+        collect_run_garbage(ctx)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "run_garbage_collect_failed", exc_info=True
+        )
+    finally:
+        reset_owner(owner_reset)
 
 
 def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
@@ -312,6 +331,12 @@ async def _stop_lease_keeper(keeper: asyncio.Task | None) -> None:
         return
     keeper.cancel()
     await asyncio.gather(keeper, return_exceptions=True)
+
+
+def _cancel_tasks(*tasks: asyncio.Task | None) -> None:
+    for task in tasks:
+        if task is not None:
+            task.cancel()
 
 
 async def _arelease_lease(thread_session: Any, logger: Any) -> None:
@@ -601,6 +626,10 @@ class AgentExecutor:
         lock_factory = getattr(ctx, "lock_factory", None) or threading.Lock
         self._lock = lock_factory()
         self._pending_messages: list[dict] = []
+        # Остаток очереди завершившегося субагента возвращается сюда же, в
+        # очередь родителя (`activate_child_input`): иначе он пропадал вместе
+        # со скоупом.
+        ctx.parent_input_sink = self._enqueue_parent
         #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
         #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
         #: ответили «принято», и молча терять их нельзя. Забирает владелец —
@@ -846,11 +875,35 @@ class AgentExecutor:
                 "on_thread_claimed hook failed", exc_info=True
             )
 
+    async def _arefresh_mcp_tools(self) -> None:
+        """Вход в ход у источника тулов с «началом хода» (спека §5.6).
+
+        Источник назначает фоновую работу и сообщает, изменился ли срез;
+        изменился — набор тулов контекста пересобирается до хода. Без
+        такого источника ход прежний; отказ не роняет ход: он идёт на
+        прежнем наборе, а закрепление сбрасывается — следующий вход в ход
+        пересоберёт набор снова.
+        """
+        source = getattr(self._ctx, "tools_cache", None)
+        start_turn = getattr(source, "astart_turn", None)
+        if start_turn is None:
+            return
+        try:
+            if await start_turn():
+                await arefresh_context_tools(self._ctx)
+        except Exception:
+            reset_pin = getattr(source, "reset_pin", None)
+            if reset_pin is not None:
+                reset_pin()
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("mcp_tools_refresh_failed", exc_info=True)
+
     async def _amcp_snapshot(
         self, thread_session, thread_id, system_id: str
     ) -> None:
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
-        if thread_id is None or not settings_of(self._ctx).mcp.servers:
+        if thread_id is None or not effective_mcp_servers(self._ctx):
             return
         try:
             from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
@@ -1200,14 +1253,13 @@ class AgentExecutor:
         shared.plan_removed_notice = False
         return [PLAN_REMOVED_MESSAGE]
 
-    @staticmethod
-    def _seed_current_user_intent(state, new_user_messages) -> None:
+    def _seed_current_user_intent(self, state, new_user_messages) -> None:
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
         # user_intent_log — только после flush при accept turn_finish.
         for new_user_message in new_user_messages:
             state.finish_gate_rejection_count = 0
-            text = extract_real_user_message_text(new_user_message)
+            text = user_intent_text(self._ctx, state, new_user_message)
             if text:
                 state.current_user_intent = append_user_ask_deduped(
                     state.current_user_intent,
@@ -1236,6 +1288,7 @@ class AgentExecutor:
                 state.current_user_intent,
                 step_messages_for_user_scope,
                 user_turn_seq=state.user_turn_seq,
+                text_of=lambda m: user_intent_text(self._ctx, state, m),
             )
             await _apersist_state(
                 thread_session,
@@ -1305,6 +1358,7 @@ class AgentExecutor:
                     state.current_user_intent,
                     step_messages,
                     user_turn_seq=state.user_turn_seq,
+                    text_of=lambda m: user_intent_text(self._ctx, state, m),
                 )
 
             return messages, _persist_runtime_batch, None
@@ -1476,7 +1530,7 @@ class AgentExecutor:
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
             if cleanup is None:
-                await _aclose_mcp_and_release(owner_reset)
+                await _aclose_mcp_and_release(owner_reset, ctx=self._ctx)
             else:
                 try:
                     await cleanup()
@@ -1487,7 +1541,9 @@ class AgentExecutor:
                     if logger is not None:
                         logger.warning("mcp_cleanup_failed", exc_info=True)
                 finally:
-                    reset_owner(owner_reset)
+                    # C2 и снятие владения — как у локальной уборки, и при
+                    # сбое или отмене уборки потребителя.
+                    _collect_and_release(owner_reset, self._ctx)
         except asyncio.CancelledError as exc:
             # arun persists accounting for a completed loop before re-raising.
             return exc
@@ -1536,8 +1592,8 @@ class AgentExecutor:
         плашками ``[Изображение #N]``.
 
         Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
-        ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
-        harbor-адаптер.
+        ведут своим ``asyncio.run`` в рабочем потоке — так делает
+        harbor-адаптер; TUI отдаёт корутину циклу окна.
 
         ``answer`` — ответ на вопрос, на котором тред приостановлен
         (``ask_human_suspends``): ложится выводом того вызова, ход идёт
@@ -1682,6 +1738,7 @@ class AgentExecutor:
         # Снять протухшие runtime-индикаторы одним атомарным store batch,
         # сохраняя прежний путь у пользовательских хранилищ без capability.
         await areset_run_flags(thread_session)
+        await self._arefresh_mcp_tools()
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
         # Начальные значения для координатора; проверка истории перечитывает
@@ -1828,25 +1885,28 @@ class AgentExecutor:
         run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
         state.run_start_usage_meta = run_start_usage.to_meta()
         # Входим во владение MCP-сессиями этого контекста. Всё, что поднимут
-        # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
-        # ровно своё, не тронув сессии параллельных агентов на том же loop.
+        # тулы внутри прогона, ляжет под этот токен — и на выходе без
+        # потребителя мы закроем ровно своё, не тронув сессии параллельных
+        # агентов на том же loop. С потребителем сервиса MCP токен — его, и
+        # уборка хода закрывает только сессии серверов с trace.
         _owner_reset = set_owner(
             getattr(self._ctx, "mcp_session_owner", "") or None
         )
         loop_finished = False
         teardown_cancel: BaseException | None = None
         run_error: BaseException | None = None
-        keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
-        poller = self._start_inbox_poller(thread_session)
-        # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
-        # сообщений прогона: клиент, которому ответили `queued`, должен попасть
-        # к модели в том же запросе, а не ждать следующего хода.
-        queued_before_loop = await self._atake_pending_messages()
-        if queued_before_loop:
-            messages = [*messages, *queued_before_loop]
-        _stop_bound = self._user_stop_scope()
-        _stop_bound.__enter__()
+        keeper = poller = None
+        stop_scope = contextlib.ExitStack()
         try:
+            keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
+            poller = self._start_inbox_poller(thread_session)
+            # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
+            # сообщений прогона: клиент, которому ответили `queued`, должен
+            # попасть к модели в том же запросе, а не ждать следующего хода.
+            queued_before_loop = await self._atake_pending_messages()
+            if queued_before_loop:
+                messages = [*messages, *queued_before_loop]
+            stop_scope.enter_context(self._user_stop_scope())
             response = await arun_agent(
                 messages,
                 state,
@@ -1891,9 +1951,10 @@ class AgentExecutor:
             run_error = exc
             raise
         finally:
-            _stop_bound.__exit__(None, None, None)
-            await _stop_lease_keeper(poller)
-            await _stop_lease_keeper(keeper)
+            # Синхронное — до первого await: отмена на ожидании ниже не
+            # оставит ни фоновых задач, ни неубранного хода.
+            stop_scope.close()
+            _cancel_tasks(poller, keeper)
             # Смена, остановленная до запроса, и выбор, так и не дошедший
             # до вызова; записи смены пишут после итога хода — так их
             # строки показывает лента.
@@ -1904,6 +1965,8 @@ class AgentExecutor:
             state_ops.leave(state)
             state.turn_level = None
             try:
+                await _stop_lease_keeper(poller)
+                await _stop_lease_keeper(keeper)
                 # Ход, уже записанный из цикла, — no-op. Под отменой
                 # счётчик задачи не трогаем: отмена уже доставлена, запись
                 # доходит, а `asyncio.timeout` и TaskGroup вызывающего
@@ -2090,6 +2153,10 @@ class AgentExecutor:
         # уехать субагенту чужой сессии — до её контекста отсюда нет ссылки.
         if try_enqueue_user_message(self._ctx, message):
             return
+        self._enqueue_parent(message)
+
+    def _enqueue_parent(self, message: dict) -> None:
+        """Положить сообщение в очередь родителя (потокобезопасно)."""
         with self._lock:
             self._pending_messages.append(message)
 

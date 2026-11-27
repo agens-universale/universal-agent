@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("color_trace")
+
 pytest.importorskip("textual")
 
 from gc_core.execution.progress import (
@@ -712,11 +714,15 @@ async def test_parallel_subagents_each_own_block(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_outside_retention_agent_without_nested(tmp_path):
-    """Вне окна retention вложенные не монтируются — `Agent` без них."""
+async def test_outside_retention_agent_without_nested(tmp_path, monkeypatch):
+    """Вне окна retention вложенные не монтируются — `Agent` без них:
+    ни живым путём, ни узлом вложенного трейса (родители окна)."""
     from gc_tui.screens import main as main_module
 
     _write_reopen(tmp_path, [_read(0)], calls={})
+    monkeypatch.setattr(
+        main_module, "subagent_parent_ids_from_events", lambda _ev: set()
+    )
     original = main_module.parent_outside_retention
     try:
         main_module.parent_outside_retention = lambda *_a: True

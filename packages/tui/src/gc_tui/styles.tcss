@@ -15,6 +15,7 @@ Screen {
 #header { height: 2; background: $bg; color: $deep-dim;
           padding: 0 1; border-bottom: solid $deep-dim; }
 #header-left  { width: 1fr; color: $deep-dim; }
+#header-left.welcome { color: $ink; }
 #header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 /* Высота подвала — auto с полом в две строки: пока подсказки влезают в строку,
    под ними остаётся привычный воздух, а на узком окне полоса растёт и переносит
@@ -82,14 +83,14 @@ TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
 #indicator-bar { display: none; height: 2; padding: 0 1; background: $bg; }
 #indicator-bar.-turn { display: block; }
 
-/* Brand-блок — постоянная шапка трейса (Claude-style: стартовый экран = начало
- * трейса; ниже flow'ом индикатор загрузки MCP и далее диалог; не скрывается). */
+/* Стартовая шапка — первая запись трейса: знак, версия, статус MCP. Без
+ * рамки; сверху пустая строка под чертой хедера, снизу две до первой
+ * реплики. Соседние margin по вертикали схлопываются в больший, поэтому
+ * нижний — 2, а не 1 плюс margin-top реплики. */
 #brand-block {
     width: 1fr;
     height: auto;
-    margin: 0;
-    padding: 1 2;
-    border: round $accent;
+    margin: 1 0 2 0;
 }
 
 /* Поле ввода — Claude-style: две тонкие линии ─ над и под input.
@@ -371,26 +372,13 @@ UserReplyContainer:focus > .user-band { background: $highlight-bg; }
 .queue-hint { display: none; height: auto; padding-left: 2; color: $muted; }
 UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 
-/* Бренд-блок пустого состояния (§2.8) */
-.brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }
-.brand-tagline { color: $dim; width: auto; height: auto; margin-top: 1; }
-/* Версия — своей строкой под тэглайном, через отступ: вплотную она читалась
-   как часть тэглайна. Тише его: это справка, а не часть бренда. */
-.brand-version { color: $deep-dim; width: auto; height: auto; margin-top: 1; }
-#brand-left { width: auto; height: auto; }
-#brand-row { width: 1fr; height: auto; }
-#brand-mcp  { width: 1fr; color: $deep-dim; padding-left: 6; height: auto; content-align: left top; }
-/* Тот же блок, когда он под брендом (узкое окно): воздух сверху и левый край без
-   отступа — под логотипом колонке не от чего отступать, отступ там читался как
-   случайный сдвиг. Отдельным правилом, а не в шортхенде выше: per-side margin из
-   разных правил Textual перетирает целиком. */
-#brand-mcp.brand-mcp-stacked { margin-top: 1; padding-left: 0; }
-
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
 /* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
 .thinking-indicator { color: $deep-dim; padding: 0 1 0 0; height: 1; }
 .thinking-indicator.hidden { display: none; }
+/* «• обновляю ленту» — неподвижная надпись перед пересборкой ленты. */
+#rebuild-label { padding: 0 1 0 0; height: 1; }
 /* Строка итога хода (P1b, S10): уровень 0, глиф в колонке ●, пустая
    строка сверху, тусклая. Свежая (-latest) — со сводкой правок; у ошибки —
    хвост причины. */
@@ -731,9 +719,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
               margin: 1 1 0 1; background: $bg; }
 #onb-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
 #onb-frame { height: auto; width: 1fr; padding: 0 2; margin: 1 0; background: $bg; }
-#onb-logo { height: auto; padding: 0; }
-#onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
-#onb-stepper { height: auto; padding: 2 0; }
+#onb-brand { height: auto; padding: 0; }
+#onb-stepper { height: auto; padding: 2 0; }   /* две пустые строки под знаком бренда, как в макете */
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
 /* Плашка о деградации загрузки: абзац в 2-3 строки, и под ним обязан быть воздух —
    иначе она сливается со следующей за ней плашкой о перекрывающем слое (тоже

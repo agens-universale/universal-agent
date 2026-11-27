@@ -39,7 +39,7 @@ def _write_meta(
     meta_path.write_text(json.dumps(obj))
 
 
-def test_read_all_events_returns_records_and_cursor(tmp_path):
+def test_read_history_returns_records_and_cursor(tmp_path):
     data = tmp_path / "data_cli_t1.jsonl"
     meta = tmp_path / "meta_cli_t1.json"
     _append_record(data, 1, "user", "привет")
@@ -47,7 +47,8 @@ def test_read_all_events_returns_records_and_cursor(tmp_path):
     _write_meta(meta, msgs=2)
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    records, cursor = store.read_all_events("t1")
+    segments, cursor = store.read_history("t1")
+    records = segments[-1]["messages"]
     assert len(records) == 2
     assert records[0]["payload"]["content"] == "привет"
     assert cursor.ordering_key == 2
@@ -61,7 +62,7 @@ def test_tail_events_returns_only_new_after_cursor(tmp_path):
     _write_meta(meta, msgs=1)
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
 
     _append_record(data, 2, "assistant", "ответ")
     _write_meta(meta, msgs=2)
@@ -76,7 +77,7 @@ def test_tail_events_returns_only_new_after_cursor(tmp_path):
 def test_tail_events_stream_reset_after_compaction(tmp_path):
     store = FileTaskStore(str(tmp_path), system="cli")
     store.append_messages("t1", [{"id": "m1", "role": "user", "content": "x"}])
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
 
     summary = {"id": "s", "role": "user", "content": "сводка"}
     asyncio.run(
@@ -90,14 +91,15 @@ def test_tail_events_stream_reset_after_compaction(tmp_path):
     tail = store.tail_events("t1", cur)
     assert tail.stream_reset is True
     assert tail.new_records == []
-    records, _cur = store.read_all_events("t1")
+    segments, _cur = store.read_history("t1")
+    records = segments[-1]["messages"]
     assert [r["payload"]["id"] for r in records] == ["s"]
 
 
 def test_tail_events_stream_reset_when_thread_is_recreated(tmp_path):
     store = FileTaskStore(str(tmp_path), system="cli")
     store.append_messages("t1", [{"id": "m1", "role": "user", "content": "a"}])
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
     store.delete_task("t1")
     store.append_messages("t1", [{"id": "n1", "role": "user", "content": "b"}])
 
@@ -110,7 +112,8 @@ def test_thread_created_after_attach_is_read_from_the_start(tmp_path):
     """Треда при attach ещё нет (новая сессия): появился — его записи
     приходят хвостом, без сброса показа."""
     store = FileTaskStore(str(tmp_path), system="cli")
-    records, cur = store.read_all_events("t1")
+    segments, cur = store.read_history("t1")
+    records = segments[-1]["messages"]
     assert records == []
     assert store.tail_events("t1", cur).new_records == []
 
@@ -129,7 +132,7 @@ def test_tail_events_resilient_to_bad_record(tmp_path):
     _write_meta(meta, msgs=1)
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
 
     with open(data, "a", encoding="utf-8") as f:
         f.write("not-a-json\n")
@@ -148,7 +151,7 @@ def test_tail_events_idempotent_with_same_cursor(tmp_path):
     _write_meta(meta, msgs=1)
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
 
     t1 = store.tail_events("t1", cur)
     t2 = store.tail_events("t1", cur)
@@ -165,7 +168,7 @@ def test_tail_tick_survives_a_lock_timeout(tmp_path, monkeypatch):
     _append_record(data, 1, "user", "первое")
     _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
     _append_record(data, 2, "assistant", "ответ")
 
     def locked(*_args, **_kwargs):
@@ -178,7 +181,7 @@ def test_tail_tick_survives_a_lock_timeout(tmp_path, monkeypatch):
     assert len(store.tail_events("t1", cur).new_records) == 1
 
 
-def test_read_all_events_cursor_counts_archives(tmp_path):
+def test_read_history_cursor_counts_archives(tmp_path):
     _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
     for suffix in ("A", "B"):
         arch = tmp_path / f"data_cli_t1__pre_summary__{suffix}.jsonl"
@@ -186,21 +189,21 @@ def test_read_all_events_cursor_counts_archives(tmp_path):
     _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
     assert cur.archives == 2
     assert cur.wait_ticks == 0
 
 
-def test_read_all_events_no_archives_zero(tmp_path):
+def test_read_history_no_archives_zero(tmp_path):
     _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
     _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
     assert cur.archives == 0
 
 
-def test_read_all_events_stops_before_partial_line(tmp_path):
+def test_read_history_stops_before_partial_line(tmp_path):
     """Недописанная последняя строка не уходит за курсор: дописанная, она
     придёт следующим тиком."""
     data = tmp_path / "data_cli_t1.jsonl"
@@ -217,7 +220,8 @@ def test_read_all_events_stops_before_partial_line(tmp_path):
         f.write(line[:10])
 
     store = FileTaskStore(str(tmp_path), system="cli")
-    records, cur = store.read_all_events("t1")
+    segments, cur = store.read_history("t1")
+    records = segments[-1]["messages"]
     with open(data, "a", encoding="utf-8") as f:
         f.write(line[10:] + "\n")
     tail = store.tail_events("t1", cur)
@@ -234,7 +238,7 @@ def test_tail_events_waits_for_partial_line(tmp_path):
     _append_record(data, 1, "user", "целая")
     _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
     store = FileTaskStore(str(tmp_path), system="cli")
-    _, cur = store.read_all_events("t1")
+    _, cur = store.read_history("t1")
     line = json.dumps(
         {
             "type": "message",

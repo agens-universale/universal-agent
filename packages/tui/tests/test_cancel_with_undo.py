@@ -239,7 +239,7 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
         )
 
         # Курсор указывает на конец файла С осиротевшей записью.
-        _records, cur = scr._store.read_all_events(tid)
+        _records, cur = scr._store.read_history(tid)
         scr._cursor = cur
 
         app.active_runner = _FakeRunner()

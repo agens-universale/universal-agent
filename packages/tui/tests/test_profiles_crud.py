@@ -394,8 +394,9 @@ async def test_rename_to_the_same_name_is_a_quiet_cancel(
     assert (tmp_path / "base" / "profiles" / "home.yml").is_file()
 
 
+@pytest.mark.parametrize("key", ["delete", "backspace"])
 async def test_rename_and_delete_are_noop_on_service_rows(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, key
 ):
     """`r`/`Del` работают по объекту под курсором: на «— без профиля» объекта нет —
     клавиши молчат (ввод имени не поднимается).
@@ -418,17 +419,48 @@ async def test_rename_and_delete_are_noop_on_service_rows(
             await pilot.press("r")
             await pilot.pause()
             assert not scr.query("#set-profile-name")
-            await pilot.press("delete")
+            await pilot.press(key)
             await pilot.pause()
             assert not scr.query(".set-confirm")
     assert (tmp_path / "base" / "profiles" / "home.yml").is_file()
 
 
+async def test_backspace_in_the_name_field_erases_text_not_the_profile(
+    tmp_path, monkeypatch
+):
+    """⌫ в поле имени профиля стирает символ и не поднимает confirm удаления."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    profile = _write(
+        tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
+    )
+
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg)
+        await _put_cursor(pilot, scr, "profile", "home")
+        await pilot.press("r")
+        await pilot.pause()
+        field = scr.query_one("#set-profile-name", Input)
+        assert field.value == "home"
+        field.cursor_position = 4  # префилл выделен целиком — снимаем
+        await pilot.press("backspace")
+        await pilot.pause()
+        assert field.value == "hom"
+        assert not scr.query(".set-confirm")
+    assert profile.is_file()
+
+
 # --- удаление: подтверждение + бэкап (В2) ------------------------------------------
 
 
+@pytest.mark.parametrize("key", ["delete", "backspace"])
 async def test_delete_asks_before_removing_and_esc_cancels(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, key
 ):
     """Del поднимает confirm-баннер (канон MCP) — файл ещё на месте; Esc снимает
     баннер и НЕ выходит из секции."""
@@ -446,7 +478,7 @@ async def test_delete_asks_before_removing_and_esc_cancels(
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
-        await pilot.press("delete")
+        await pilot.press(key)
         await pilot.pause()
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
         assert (
@@ -839,7 +871,7 @@ async def test_footer_names_the_v1_keys_on_a_profile_row(
     assert footer == s._FOOTERS[s._PROFILES]
     assert footer == (
         "↑/↓ · Enter — открыть · Space — активировать · n — создать · "
-        "r — переименовать · Del — удалить"
+        "r — переименовать · Del/⌫ — удалить"
     )
 
 

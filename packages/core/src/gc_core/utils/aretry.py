@@ -53,23 +53,29 @@ async def _wait_before_retry(delay: float) -> None:
         await asyncio.sleep(delay)
         return
     task = asyncio.current_task()
-    cancelled_by_stop = False
+    outer_cancels = task.cancelling()
+    pause: Optional[asyncio.Future] = None
 
     async def release():
-        nonlocal cancelled_by_stop
-        cancelled_by_stop = task.cancel()
+        # Стоп отменяет только саму паузу, не задачу хода.
+        if pause is not None:
+            pause.cancel()
 
     try:
         async with stop.arm(kind="retry", release=release):
-            await asyncio.sleep(delay)
+            pause = asyncio.ensure_future(asyncio.sleep(delay))
+            await pause
     except UserStopInterrupt:
         # Остановлена пауза после уже начатой попытки, а не новый инструмент.
         raise UserStopInterrupt(kind="retry", started=True) from None
     except asyncio.CancelledError:
-        if not cancelled_by_stop:
+        if task.cancelling() > outer_cancels:
             raise
-        task.uncancel()
         raise UserStopInterrupt(kind="retry", started=True) from None
+    if stop.requested:
+        # Стоп нажат в паузе, а снятие не успело до её конца: новую попытку
+        # не начинаем.
+        raise UserStopInterrupt(kind="retry", started=True)
 
 
 async def _run_with_retries_async(
@@ -115,6 +121,7 @@ def retry_with_backoff_async(
     no_more_retries_log_level: int = logging.ERROR,
     operation_name: str = "Operation",
     interrupt_on_user_stop: bool = False,
+    describe_error: Optional[Callable[[Exception], str]] = None,
 ) -> Callable[[Callable[..., Awaitable[_T]]], Callable[..., Awaitable[_T]]]:
     """Ретраи с экспоненциальным backoff для корутинных функций.
 
@@ -124,6 +131,9 @@ def retry_with_backoff_async(
     ``interrupt_on_user_stop=True`` прерывает паузу пользовательским стопом
     и не повторяет ``UserStopInterrupt`` из тела вызова. Включать только
     для отменяемой работы, не для записи истории и завершающей уборки.
+
+    ``describe_error`` — описание ошибки в логах повторов (по умолчанию
+    ``repr``): вызывающий маскирует им секреты в тексте ошибки.
     """
 
     policy = _RetryPolicy(
@@ -134,6 +144,7 @@ def retry_with_backoff_async(
         retry_log_level=retry_log_level,
         no_more_retries_log_level=no_more_retries_log_level,
         operation_name=operation_name,
+        describe_error=describe_error,
     )
     return _retry_decorator(
         policy,

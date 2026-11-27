@@ -3,6 +3,12 @@
 import pytest
 
 
+def _hook_resume(scr, result):
+    """Enter доходит до «продолжить сессию» (сам переход — фоновой
+    загрузкой, тесты test_preview_open_session)."""
+    scr.action_resume = lambda: result.update(v="resume")
+
+
 def _rec(payload):
     return {
         "type": "message",
@@ -54,9 +60,10 @@ async def test_preview_renders_trace_widgets_and_header():
         assert "foo" in str(scr.query_one("#header-right", Static).render())
         # футер — только подсказки, без правого блока
         assert len(scr.query("#preview-footer-right")) == 0
+        _hook_resume(pilot.app.screen, result)
         await pilot.press("enter")
         await pilot.pause()
-    assert result["v"] is True
+    assert result["v"] == "resume"
 
 
 def _sum(text):
@@ -67,9 +74,9 @@ def _sum(text):
 async def test_preview_summary_marker_collapsed_then_toggles():
     """Маркер сжатия в превью свёрнут по умолчанию; клик раскрывает тело."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.trace_row import SummaryMarker
-    from gc_testkit.tui_support import wait_until
     from textual.app import App
 
     # seg0 [вопрос] сжат → СИНТЕЗ; seg1 (live) [ответ]
@@ -103,6 +110,8 @@ async def test_preview_summary_marker_collapsed_then_toggles():
             )
 
     async with _A().run_test() as pilot:
+        # Метка строит подпись по ширине после первой раскладки экрана.
+        await pilot.pause()
         scr = pilot.app.screen
         body = next(
             w for w in scr.query(SummaryMarker) if w.has_class("summary-body")
@@ -174,9 +183,10 @@ async def test_preview_enter_resumes_even_with_summary():
             )
 
     async with _A().run_test() as pilot:
+        _hook_resume(pilot.app.screen, result)
         await pilot.press("enter")
         await pilot.pause()
-    assert result["v"] is True
+    assert result["v"] == "resume"
 
 
 @pytest.mark.asyncio
@@ -222,9 +232,10 @@ async def test_preview_enter_resumes_when_row_focused():
         row.focus()
         await pilot.pause()
         assert scr.focused is row
+        _hook_resume(pilot.app.screen, result)
         await pilot.press("enter")
         await pilot.pause()
-    assert result["v"] is True
+    assert result["v"] == "resume"
 
 
 @pytest.mark.asyncio
@@ -339,7 +350,7 @@ async def test_preview_without_records_unchanged():
 
 
 @pytest.mark.asyncio
-async def test_preview_escape_false():
+async def test_preview_escape_none():
     pytest.importorskip("textual")
     from gc_tui.screens.preview import PreviewScreen
     from textual.app import App
@@ -356,4 +367,27 @@ async def test_preview_escape_false():
     async with _A().run_test() as pilot:
         await pilot.press("escape")
         await pilot.pause()
-    assert result["v"] is False
+    assert result["v"] is None
+
+
+@pytest.mark.asyncio
+async def test_preview_resume_without_session_screen_stays():
+    """Хост без экрана сессии: Enter в превью ничего не делает — не
+    падает на отсутствующем экране."""
+    from gc_tui.screens.preview import PreviewScreen
+    from textual.app import App
+
+    records = [_rec({"role": "user", "content": "вопрос", "id": "m1"})]
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(
+                PreviewScreen(segments=_segs(records), thread_id="abc12345")
+            )
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        await pilot.press("enter")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+        assert not scr._loader.busy

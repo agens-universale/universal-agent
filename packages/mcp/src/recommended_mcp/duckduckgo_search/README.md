@@ -31,7 +31,7 @@ pip install external/vendor/ddgs-mcp
 
 ## Подключение к агенту
 
-Скопируй содержимое `agent_config.snippet.yml` в секцию `mcp-servers:` твоего
+Скопируй содержимое `agent_config.snippet.yml` в секцию `mcp:` → `servers:` твоего
 `config.yml` агента.
 
 ## Запуск

@@ -56,7 +56,7 @@ def test_stream_block_hides_echo_keeps_mention():
 
 @pytest.mark.asyncio
 async def test_preview_and_rebuild_mount_no_row_for_echo():
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.trace_row import TraceRow
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -78,7 +78,7 @@ async def test_preview_and_rebuild_mount_no_row_for_echo():
             yield VerticalScroll(id="v")
 
         def on_mount(self):
-            render_segments_readonly(self.query_one("#v"), segments)
+            render_segments_history(self.query_one("#v"), segments)
 
     async with _App().run_test() as pilot:
         await pilot.pause()

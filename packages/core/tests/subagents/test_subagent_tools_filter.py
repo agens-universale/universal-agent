@@ -13,7 +13,6 @@ REQUIRED = (
     "turn_finish",
     "session_read_stored_tool_output",
     "session_memory",
-    "session_todo",
 )
 
 
@@ -30,6 +29,7 @@ BASE = _tools_data(
     "exec_python",
     "mcp_jira_search_issues",
     "mcp_jira_create_issue",
+    "session_todo",
     *REQUIRED,
 )
 
@@ -101,15 +101,25 @@ class TestCore:
         out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert set(out) == {"fs_read_file", *REQUIRED}
 
-    def test_memory_and_todo_survive_a_narrow_allowlist(self):
-        """Регрессия: харнес шлёт ребёнку подсказки про session_memory/session_todo
-        (bootstrap памяти в runner, tool_usage_notice, todo_reminder), и все три
-        текста рождаются из ГЛОБАЛЬНОГО конфига — про `tools` файла они не знают.
-        Убрав тулы из ядра, мы вернём «велят вызвать то, чего у тебя нет»."""
+    def test_memory_survives_a_narrow_allowlist_todo_does_not(self):
+        """Память — контракт с оркестратором (общий ``shared``), она в ядре.
+        Чек-лист личный: файл без ``session_todo`` в ``tools`` его не получает,
+        подсказки про него гейтятся набором рана."""
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
         out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert "session_memory" in out
-        assert "session_todo" in out
+        assert "session_todo" not in out
+
+    def test_todo_can_be_listed_in_allowlist(self):
+        cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", "session_todo")}
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
+        assert set(out) == {"fs_read_file", "session_todo", *REQUIRED}
+
+    def test_stop_list_takes_todo_but_not_memory(self):
+        cfg = {SUBAGENT_TOOLS_STOP_KEY: ("session_todo", "session_memory")}
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
+        assert "session_todo" not in out
+        assert "session_memory" in out
 
     def test_absent_core_is_not_invented(self):
         # Если ядра нет в исходном наборе (глобальный stop_tools, harbor) —

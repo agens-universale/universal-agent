@@ -34,5 +34,5 @@ async def test_event_ts_populated_from_record_ts(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         await pilot.pause(0.2)
-        ev = scr._task_events[0]
+        ev = scr._feed_history.events()[0]
         assert ev.event_ts_utc_iso == "2026-06-04T10:00:00Z"  # не ""

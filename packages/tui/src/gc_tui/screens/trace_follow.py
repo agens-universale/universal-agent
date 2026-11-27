@@ -8,11 +8,14 @@
 блока (спека P4 §9.3) — `_toggle_trace_block`. Экран ставит миксин перед
 `Screen`, монтирует `#trace` как `AnchoredScroll`, накладки —
 `trace_overlays()`, и после монтирования зовёт `_watch_trace_follow()`.
-Подпись и ряд плашки экран может переопределить."""
+Подпись и ряд плашки экран может переопределить. Виджеты, пропустившие
+кадр за экраном, экран ведёт слабым множеством и после раскладки
+предлагает им освежиться (П6): вернувшийся на экран сразу показывает
+текущее состояние."""
 
 from __future__ import annotations
 
-from typing import Optional
+import weakref
 
 from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
@@ -26,6 +29,7 @@ from gc_tui.widgets.trace_overlays import (
     StickyReply,
     pill_label,
 )
+from gc_tui.widgets.user_reply import UserReplyContainer
 
 _SEL_TRACE = "#trace"
 _SEL_STICKY = "#trace-sticky-reply"
@@ -40,6 +44,10 @@ def trace_overlays(trace: Widget) -> tuple[StickyReply, ScrollEndPill]:
     )
 
 
+def _is_top_reply(widget: Widget) -> bool:
+    return isinstance(widget, UserReplyContainer)
+
+
 class TraceFollowMixin:
     """Лента у низа, детект ухода вверх и накладки «не внизу»."""
 
@@ -49,9 +57,9 @@ class TraceFollowMixin:
         super().__init__(*args, **kwargs)
         self._stick = True  # намерение «липнуть к низу» (_stick_bottom)
         self._last_auto_y = 0  # куда в прошлый раз программно прижали ленту
-        # Кэш реплик ленты для липкой реплики (_trace_replies).
-        self._trace_replies_key: Optional[tuple] = None
-        self._trace_replies_cache: list = []
+        # Пропустившие кадр за экраном (`note_missed_frame`); снятые
+        # уходят сами.
+        self._missed_frames: weakref.WeakSet[Widget] = weakref.WeakSet()
 
     def _watch_trace_follow(self) -> None:
         """Отклик на прокрутку ленты и на выделение — по событию."""
@@ -62,6 +70,27 @@ class TraceFollowMixin:
             init=False,
         )
         textual_compat.watch_selecting(self, self._on_select_freeze)
+        self.screen_layout_refresh_signal.subscribe(
+            self, self._on_layout_refreshed
+        )
+
+    def note_missed_frame(self, widget: Widget) -> None:
+        """`widget` пропустил кадр за экраном: освежить, когда станет
+        виден (`redraw_if_missed`)."""
+        self._missed_frames.add(widget)
+
+    def _on_layout_refreshed(self, _screen) -> None:
+        """После раскладки (в том числе кадра прокрутки) карта видимых
+        свежая: пропустившие кадр и ставшие видимыми перерисовываются и
+        выходят из множества, снятые — тоже. Петли нет: перерисовка
+        того же размера раскладку не запускает, а после перекладки
+        строки в множестве уже нет. Во время выделения (F2) — ничего:
+        лента под ним может ехать, догонит конец выделения."""
+        if self._ui_frozen_for_select():
+            return
+        for widget in list(self._missed_frames):
+            if not widget.is_attached or widget.redraw_if_missed():
+                self._missed_frames.discard(widget)
 
     def _ui_frozen_for_select(self) -> bool:
         """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""
@@ -113,13 +142,18 @@ class TraceFollowMixin:
     def _refresh_trace_overlays(self) -> None:
         """Накладки над лентой (спека P3 §2.6): «не внизу» — липкая реплика
         (ближайшая выше края) и плашка «в конец»; внизу — обе скрыты.
-        Зовётся на каждый шаг прокрутки: реплики ищутся по кэшу верхних
-        реплик (`_trace_replies`), без обхода ленты."""
+        Зовётся на каждый шаг прокрутки и в тике опроса. Реплика ищется по
+        раскладке самой ленты (П5): координаты содержимого из её кэша, без
+        геометрии экрана — чтение невидимых строк пересобрало бы полную
+        карту виджетов. Геометрия читается, только когда накладки
+        показывают или прячут."""
         try:
             trace = self.query_one(_SEL_TRACE, VerticalScroll)
             sticky = self.query_one(_SEL_STICKY, StickyReply)
             pill = self.query_one(_SEL_PILL, ScrollEndPill)
         except NoMatches:
+            return
+        if self._stick_bottom and not (sticky.display or pill.display):
             return
         # Коробка накладок — ширина подложки реплики в ленте: без колонки
         # скроллбара (решение 27). Плашка центруется по ней же.
@@ -128,12 +162,19 @@ class TraceFollowMixin:
             sticky.show(None, box)
             pill.show(None, box)
             return
-        replies = self._trace_replies(trace)
-        reply = reply_above(
-            replies, round(trace.scroll_y), lambda r: r.virtual_region.y
-        )
+        # Размер — ровно тот, что ленте передаёт компоновщик: попадание в
+        # кэш раскладки. Иной размер пересчитал бы её и сбил якорь
+        # (`AnchoredScroll.arrange`).
+        placements = trace.arrange(box.size).placements
+        reply = self._sticky_reply(placements, round(trace.scroll_y))
         sticky.show(reply, box)
         pill.show(self._end_pill_label(), box, self._pill_row(trace))
+
+    def _sticky_reply(self, placements, scroll_y: int) -> Widget | None:
+        """Реплика липкой строки: ближайшая смонтированная выше края
+        (`placements` — раскладка ленты). Окно ленты достаёт реплику хода
+        из модели, когда её шаг снят (`TraceWindowMixin`)."""
+        return reply_above(placements, scroll_y, _is_top_reply)
 
     def _pill_row(self, trace: VerticalScroll) -> int:
         """Ряд плашки «в конец» — последний ряд ленты."""
@@ -142,25 +183,6 @@ class TraceFollowMixin:
     def _end_pill_label(self) -> str:
         """Подпись плашки: без счётчика новых реплик и без Enter."""
         return pill_label(0, enter=False)
-
-    def _trace_replies(self, trace: VerticalScroll) -> list:
-        """Реплики верхнего уровня ленты по порядку. Кэшируется только
-        состав; верх каждой читается живым при поиске, поэтому сдвиг
-        реплик кэш не портит. Ключ — число детей и первый с последним:
-        точный ключ (все дети) стоил бы столько же, сколько пересборка;
-        этот ловит и снятие с монтированием в конец за один такт."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
-        children = trace.children
-        key = (len(children), children[0], children[-1]) if children else ()
-        if key != self._trace_replies_key:
-            self._trace_replies_key = key
-            self._trace_replies_cache = [
-                child
-                for child in trace.children
-                if isinstance(child, UserReplyContainer)
-            ]
-        return self._trace_replies_cache
 
     def _toggle_trace_block(self, views, message: BlockToggle) -> None:
         """Раскрыть / свернуть блок ленты моделями `views` (§9.3): внизу —
@@ -206,9 +228,12 @@ class TraceFollowMixin:
 
     def _on_select_freeze(self, selecting: bool) -> None:
         """Выделение (F2) снимает якорь; по его концу ушедшую вверх ленту
-        к низу не тянем — сначала детект, потом якорь."""
+        к низу не тянем — сначала детект, потом якорь. Пропустившие кадр
+        и ставшие видимыми за время выделения освежаются сразу: конец
+        выделения раскладки не запускает."""
         if not selecting:
             self._update_stick_state()
+            self._on_layout_refreshed(self)
         self._sync_trace_anchor()
 
     def _sync_trace_anchor(self) -> None:

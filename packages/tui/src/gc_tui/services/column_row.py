@@ -18,7 +18,12 @@ from rich.text import Text
 _MIN_COLUMN = 12
 
 
-class ColumnRow:
+class WidthAware:
+    """Маркер: раскладка рендерабла зависит от ширины, `ColumnStatic`
+    раскладывает такой объект под фактическую ширину виджета."""
+
+
+class ColumnRow(WidthAware):
     def __init__(self, head: Text, atoms: Sequence[Text]) -> None:
         self.head = head
         self.atoms = list(atoms)
@@ -73,7 +78,7 @@ class ColumnRow:
         return Measurement.get(console, options, self._plain_text())
 
 
-class ColumnRows:
+class ColumnRows(WidthAware):
     """Блок строк одной ``Static`` — пути `/config`, тулы карточки MCP:
     каждая ``ColumnRow`` переносится в своей колонке, ``Text`` — как есть."""
 

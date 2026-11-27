@@ -74,7 +74,10 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] = Field(
         default_factory=dict, json_schema_extra=gc_meta(secret=True)
     )
-    persistent_session: bool = False
+    # None = не задано: хост сервиса MCP раскрывает умолчание по транспорту
+    # (постоянная сессия у процессных, разовая у сетевых); читатели без
+    # сервиса видят None как False — прежнее умолчание.
+    persistent_session: bool | None = None
     persistent_session_close_tool: str | None = None
     # Whitelist тулов сервера. Нет блока / enabled=False → все тулы доступны;
     # enabled=True → строго tools (пустой список = ноль тулов). Имена базовые,

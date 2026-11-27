@@ -73,7 +73,8 @@ class _Thread:
         return self
 
     def outcome(self) -> _Thread:
-        last = self.store.read_all_events(_TID)[0][-1]["payload"]["id"]
+        segments, _cursor = self.store.read_history(_TID)
+        last = segments[-1]["messages"][-1]["payload"]["id"]
         outcome = TurnOutcome(
             status="done",
             reason=None,
@@ -108,7 +109,7 @@ class _Thread:
         return FileTaskStore(self.dir, system=_SYS)
 
     def records(self) -> list[dict]:
-        return self.store.read_all_events(_TID)[0]
+        return self.store.read_history(_TID)[0][-1]["messages"]
 
     def segments(self) -> list[dict]:
         return self.store.read_segments(_TID)
@@ -225,16 +226,16 @@ async def test_restore_hides_record_whose_message_is_gone(tmp_path):
 
 
 async def _previewed(segments: list[dict]):
-    from gc_tui.services.trace_render import render_segments_readonly
     from textual.app import App
     from textual.containers import VerticalScroll
+    from trace_readonly import render_segments_history
 
     class _A(App):
         def compose(self):
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t"), segments, model_slots=_SLOTS
             )
 

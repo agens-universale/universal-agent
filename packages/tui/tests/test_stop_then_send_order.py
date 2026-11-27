@@ -41,7 +41,7 @@ def _write_meta(tmp_path, tid):
 def _records(tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
 
-    return FileTaskStore(str(tmp_path)).read_all_events(TID)[0]
+    return FileTaskStore(str(tmp_path)).read_history(TID)[0][-1]["messages"]
 
 
 def _order(tmp_path) -> list[str]:
@@ -206,8 +206,8 @@ async def test_new_turn_after_stop_waits_for_stopped_record(tmp_path):
         await wait_until(
             pilot,
             lambda: (
-                scr._last_turn_outcome is not None
-                and scr._last_turn_outcome.opened_by == new
+                scr._feed_history.last_turn_outcome is not None
+                and scr._feed_history.last_turn_outcome.opened_by == new
             ),
             "итог нового хода прочитан",
         )
@@ -221,9 +221,241 @@ async def test_new_turn_after_stop_waits_for_stopped_record(tmp_path):
         ]
         expected = [f"› {OLD_TEXT}", f"line:{old}", f"› {NEW_TEXT}"]
         assert _trace(scr) == expected
-        assert scr._last_turn_outcome.status == "done"
+        assert scr._feed_history.last_turn_outcome.status == "done"
         scr.attach_active_task(OTHER, is_resume=True)
         scr.attach_active_task(TID, is_resume=True)
         await pilot.pause()
         assert _trace(scr) == expected
-        assert scr._last_turn_outcome.opened_by == new
+        assert scr._feed_history.last_turn_outcome.opened_by == new
+
+
+@pytest.mark.asyncio
+async def test_record_read_after_send_goes_above_sent_reply(tmp_path):
+    """Запись треда, дочитанная после отправки новой реплики (ответ
+    старого хода, вызов и его вывод), встаёт над отправленной, ещё не
+    записанной репликой: в файле она раньше реплики — как строка итога и
+    как после переоткрытия."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_steps import _giant_turn
+
+    records = _giant_turn(0, 1, outcome=False)
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(scr, records[:1], splits=())
+        sent = scr._mount_user_reply("новая", state="pending", client_id="c")
+        feed_live(scr, records[1:], splits=())
+        await pilot.pause()
+        children = list(scr.query_one("#trace").children)
+        assert children[-1] is sent
+        assert isinstance(sent, UserReplyContainer)
+        assert sent.state == "pending"
+
+
+def _index_of(scr, text: str) -> int:
+    """Место в ленте первой строки с текстом ``text``."""
+    from feed_dump import feed_dump
+
+    rows = feed_dump(scr.query_one("#trace"))
+    return next(i for i, row in enumerate(rows) if text in row[1])
+
+
+@pytest.mark.asyncio
+async def test_record_goes_above_sent_reply_past_unpinned_row(tmp_path):
+    """Под отправленной репликой встала строка не из модели (вывод «!»,
+    служебная строка) — запись, дочитанная после отправки, всё равно
+    встаёт над репликой: правило не обрывается на первой незакреплённой
+    строке с конца."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_steps import _giant_turn
+
+    records = _giant_turn(0, 1, outcome=False)
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(scr, records[:1], splits=())
+        scr._mount_user_reply("новая", state="pending", client_id="c")
+        scr._mount_trace_row(
+            prefix="", content="служебная строка", kind_class="line-meta"
+        )
+        feed_live(scr, records[1:], splits=())
+        await pilot.pause()
+        sent, note = _index_of(scr, "новая"), _index_of(scr, "служебная")
+        assert _index_of(scr, "Ход 0: смотрю шаг 1.") < sent < note
+
+
+@pytest.mark.asyncio
+async def test_unmatched_user_record_releases_sent_reply(tmp_path):
+    """Реплика пользователя дочитана, но ни с одной отправленной не
+    сверилась (wire другой): отправленная реплика больше не держит
+    отрисовку модели над собой — иначе она навсегда последняя в ленте, а
+    все следующие ходы встают над ней."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_steps import _giant_turn
+
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        sent = scr._mount_user_reply("новая", state="pending", client_id="c")
+        feed_live(scr, _giant_turn(0, 1), splits=())
+        feed_live(scr, _giant_turn(1, 1, outcome=False), splits=())
+        await pilot.pause()
+        assert sent.state == "pending"
+        assert _index_of(scr, "новая") < _index_of(scr, "Ход 1: смотрю шаг 1.")
+
+
+@pytest.mark.asyncio
+async def test_ask_human_answer_does_not_release_sent_reply(tmp_path):
+    """Ответ на вопрос агента — тоже запись `user`, но не реплика хода: не
+    сверившись с отправленной (wire другой — плашки картинок), он её не
+    отпускает. Запись модели после ответа — над отправленной репликой."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_far_edge import _message
+    from test_trace_window_steps import _giant_turn, _prose
+
+    question = [
+        _message(
+            {
+                "type": "function_call",
+                "name": "ask_human",
+                "call_id": "q1",
+                "id": "fc_q1",
+                "status": "completed",
+                "arguments": json.dumps({"question": "какой файл?"}),
+            }
+        ),
+    ]
+    answer = _message(
+        {
+            "type": "function_call_output",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fco_q1",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "response": "этот"}
+            ),
+        }
+    )
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(
+            scr, [*_giant_turn(0, 1, outcome=False)[:1], *question], splits=()
+        )
+        scr._mount_user_reply("новая", state="pending", client_id="c")
+        feed_live(scr, [answer, _prose(0, 7)], splits=())
+        await pilot.pause()
+        assert _index_of(scr, "Ход 0: смотрю шаг 7.") < _index_of(scr, "новая")
+
+
+@pytest.mark.asyncio
+async def test_unmatched_answer_reconciles_by_question(tmp_path):
+    """Ответ на вопрос агента, отправленный этим экраном, не сверился по
+    wire (ядро дописало плашку картинки): он сверяется по вопросу
+    (call_id) — отправленная реплика ответа становится записанной, второй
+    реплики нет (R48 M5)."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from gc_tui.widgets.user_reply import UserReplyContainer
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_far_edge import _message
+    from test_trace_window_steps import _giant_turn
+
+    question = _message(
+        {
+            "type": "function_call",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fc_q1",
+            "status": "completed",
+            "arguments": json.dumps({"question": "какой файл?"}),
+        }
+    )
+    answer = _message(
+        {
+            "type": "function_call_output",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fco_q1",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "response": "[#1] этот"}
+            ),
+        }
+    )
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(
+            scr, [*_giant_turn(0, 1, outcome=False)[:1], question], splits=()
+        )
+        scr._ask_human_call_id = "q1"
+        cid = scr._track_pending(display_text="этот", wire_content="этот")
+        scr._track_answer(cid)
+        sent = scr._mount_user_reply("этот", state="pending", client_id=cid)
+        feed_live(scr, [answer], splits=())
+        await pilot.pause()
+        replies = list(scr.query_one("#trace").query(UserReplyContainer))
+        assert sent.state == "normal"
+        assert [r.plain_text for r in replies].count("этот") == 1
+        assert not any("[#1] этот" in r.plain_text for r in replies)
+
+
+@pytest.mark.asyncio
+async def test_answer_reconciles_before_same_text_queued_reply(tmp_path):
+    """Раньше отправлена реплика «да», и ответ на вопрос — тоже «да»:
+    запись ответа сверяется с отправленным ответом (по вопросу), а не с
+    первой по порядку отправленной, хотя wire совпал у обеих (R49 m3)."""
+    from feed_dump import HISTORY_THREAD, feed_live
+    from test_trace_ephemera import _SIZE
+    from test_trace_ephemera import _app as _ephemera_app
+    from test_trace_window_far_edge import _message
+    from test_trace_window_steps import _giant_turn
+
+    question = _message(
+        {
+            "type": "function_call",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fc_q1",
+            "status": "completed",
+            "arguments": json.dumps({"question": "продолжать?"}),
+        }
+    )
+    answer = _message(
+        {
+            "type": "function_call_output",
+            "name": "ask_human",
+            "call_id": "q1",
+            "id": "fco_q1",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "response": "да"}
+            ),
+        }
+    )
+    async with _ephemera_app(tmp_path / "t").run_test(size=_SIZE) as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(HISTORY_THREAD)
+        feed_live(
+            scr, [*_giant_turn(0, 1, outcome=False)[:1], question], splits=()
+        )
+        queued_cid = scr._track_pending(display_text="да", wire_content="да")
+        queued = scr._mount_user_reply(
+            "да", state="pending", client_id=queued_cid
+        )
+        scr._ask_human_call_id = "q1"
+        cid = scr._track_pending(display_text="да", wire_content="да")
+        scr._track_answer(cid)
+        sent = scr._mount_user_reply("да", state="pending", client_id=cid)
+        feed_live(scr, [answer], splits=())
+        await pilot.pause()
+        assert sent.state == "normal"
+        assert queued.state == "pending"

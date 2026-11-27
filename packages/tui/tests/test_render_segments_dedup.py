@@ -71,7 +71,7 @@ async def test_main_render_segments_dedupes_preserved_reply(tmp_path):
         # реплика "A" (один id) отрисована один раз, не две
         assert len(scr.query(UserReplyContainer)) == 1
         # маркер сжатия на месте
-        assert any(e.kind == "summary" for e in scr._task_events)
+        assert any(e.kind == "summary" for e in scr._feed_history.events())
 
 
 def _seg_user(idx, content, mid, n_compacted):
@@ -120,13 +120,16 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
         # ВСЕ три реплики отрисованы (старый сегмент не потерян)
         assert len(scr.query(UserReplyContainer)) == 3
         # маркеры компакции тоже на месте (2 штуки)
-        assert sum(1 for e in scr._task_events if e.kind == "summary") == 2
+        assert (
+            sum(1 for e in scr._feed_history.events() if e.kind == "summary")
+            == 2
+        )
 
 
 @pytest.mark.asyncio
 async def test_readonly_render_segments_dedupes_preserved_reply():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_segments_readonly
+    from trace_readonly import render_segments_history
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -136,7 +139,7 @@ async def test_readonly_render_segments_dedupes_preserved_reply():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
+            render_segments_history(
                 self.query_one("#t", VerticalScroll),
                 [_seg_archived(), _seg_live()],
             )

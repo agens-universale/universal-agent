@@ -7,13 +7,14 @@ import logging
 import time
 import uuid
 from collections import OrderedDict
+from dataclasses import replace
 from typing import Any
 
 from gc_core.settings import LoadedSettings
 from gc_core.thread_paths import resolve_threads_dir
 from gc_core.thread_store import validate_thread_id
 
-from gc_server.chat.agent_config import prepare_agent_settings
+from gc_server.chat.agent_config import agent_io, prepare_agent_settings
 from gc_server.chat.cwd import cwd_for_new
 from gc_server.chat.errors import ApiError
 from gc_server.chat.responses.admission import Admission
@@ -32,6 +33,7 @@ from gc_server.chat.responses.input_text import (
 from gc_server.chat.responses.prompt_assets import (
     responses_special_instructions_path,
 )
+from gc_server.chat.responses.recovery import ResponsesRecovery
 from gc_server.chat.responses.stream_map import StreamMap
 from gc_server.chat.responses.turn import TurnRun
 from gc_server.chat.tool_flow import ToolFlow
@@ -56,7 +58,7 @@ class ResponsesFacade:
         settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
-        tools_cache: Any = None,
+        mcp_service: Any = None,
         os_backend: Any = None,
         index: ResponseIndex | None = None,
         section: ChatConfig | None = None,
@@ -65,7 +67,7 @@ class ResponsesFacade:
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
-        self._tools_cache = tools_cache
+        self._mcp_service = mcp_service
         self._os_backend = os_backend
         self._index = index or ResponseIndex.for_threads_dir(
             resolve_threads_dir(settings)
@@ -74,13 +76,14 @@ class ResponsesFacade:
         self.cors_origins = _cors_origins(section.cors_origins)
         self.bind_host = section.host or LOOPBACK
         self.max_body_bytes = section.max_body_bytes or DEFAULT_MAX_BODY_BYTES
-        self._launch_root = section.launch_root
+        self._launch_root = cwd_for_new(None, section.launch_root)
         self.model_id = str(settings.settings.agent.model or "")
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._busy: set[str] = set()
         self._live: dict[str, TurnRun] = {}
         self._create_lock = asyncio.Lock()
         self._admissions: dict[str, Admission] = {}
+        self.recovery = ResponsesRecovery(self, section.recovery)
 
     async def open(self, body: Any) -> TurnRun:
         incoming = parse_turn(body)
@@ -128,12 +131,25 @@ class ResponsesFacade:
     def turn_busy(self, thread_id: str) -> bool:
         return thread_id in self._busy
 
-    async def shutdown(self) -> None:
+    async def stop_turns(self) -> None:
+        """Снять идущие ходы и дождаться их конца; повтор безвреден."""
+        await self.recovery.stop()
         runs = list(self._live.values())
         for run in runs:
             await run.request_stop()
         for run in runs:
             await run.done.wait()
+        for run in runs:
+            if run.persistence_failed:
+                try:
+                    await run.retry_finalization()
+                except Exception:
+                    logger.exception(
+                        "responses shutdown finalization %s", run.response_id
+                    )
+
+    async def shutdown(self) -> None:
+        await self.stop_turns()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
@@ -151,8 +167,14 @@ class ResponsesFacade:
             record = await self._index.load(incoming.previous_response_id)
             if record is None:
                 raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
+            if record.status == _IN_PROGRESS:
+                raise ApiError(
+                    409, _CONFLICT, "previous response is still running"
+                )
             thread_id = record.thread_id
-            cwd = cwd_for_continue(incoming.cwd_sent, record.cwd)
+            cwd = self.new_dialog_cwd(
+                cwd_for_continue(incoming.cwd_sent, record.cwd)
+            )
         if thread_id in self._busy:
             raise ApiError(409, _CONFLICT, "turn already running")
         self._busy.add(thread_id)
@@ -204,11 +226,12 @@ class ResponsesFacade:
                 cwd=cwd,
                 instructions_path=responses_special_instructions_path(),
             )
+            backend = agent_io(settings, cwd, self._os_backend)
             agent = await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
-                tools_cache=self._tools_cache,
-                os_backend=self._os_backend,
+                mcp_service=self._mcp_service,
+                os_backend=backend,
             )
             try:
                 bind_ask_human(agent)
@@ -247,27 +270,49 @@ class ResponsesFacade:
             _IN_PROGRESS,
             mapper.snapshot(),
             reservation=self._admissions[thread_id].token,
+            # Пока подготовка не закончена, recovery не должен исполнять
+            # запрос, на открытие которого клиент получил ошибку.
+            request_text=None,
         )
         try:
-            await self._admissions[thread_id].validate()
-            await self._index.save(record)
-            flow = await ToolFlow.start(
-                self._index.threads, thread_key(thread_id), root=cwd
-            )
+            return await self._launch(record, agent, incoming.text)
         except BaseException:
             await self._release(thread_id, "")
             raise
+
+    async def _launch(
+        self, record: ResponseRecord, agent: Any, prompt: str
+    ) -> TurnRun:
+        mapper = StreamMap(
+            response_id=record.response_id,
+            model=record.response.get("model", "GC-UA"),
+            previous_response_id=record.previous_response_id,
+            metadata=record.response.get("metadata", {}),
+            created_at=record.created_at,
+        )
+        flow = await ToolFlow.start(
+            self._index.threads, thread_key(record.thread_id), root=record.cwd
+        )
+        await self._admissions[record.thread_id].validate()
+        # После этой записи автоматический повтор запрещён: даже если
+        # процесс погибнет до stream(), отсутствие эффектов уже недоказуемо.
+        record = replace(
+            record,
+            request_text=record.request_text or prompt,
+            execution_started=True,
+        )
+        await self._index.save(record)
         run = TurnRun(
             agent=agent,
             mapper=mapper,
             flow=flow,
             index=self._index,
             record=record,
-            prompt=incoming.text,
-            thread_id=thread_id,
+            prompt=prompt,
+            thread_id=record.thread_id,
             release_busy=self._release,
         )
-        self._live[response_id] = run
+        self._live[record.response_id] = run
         run.start()
         return run
 
